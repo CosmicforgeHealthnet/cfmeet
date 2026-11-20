@@ -1550,7 +1550,8 @@
           "recipient_digest",
           "channel",
           "reason",
-          "created_at"
+          "created_at",
+          "version"
         ],
         "properties": {
           "recipient_digest": {
@@ -1570,6 +1571,11 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "notifications.suppression.remove's expected_version."
           }
         }
       },
@@ -4332,6 +4338,7 @@
           "reporter_cfmeet_id",
           "target_cfmeet_id",
           "target_report_count",
+          "version",
           "review",
           "created_at"
         ],
@@ -4365,6 +4372,11 @@
           "target_report_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1 while open, 2 once reviewed: communications.report.review's expected_version."
           },
           "review": {
             "anyOf": [
@@ -8019,6 +8031,1539 @@
               "null"
             ],
             "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CommunicationsProfileSuspendRequest": {
+        "description": "Request of communications.profile.suspend (POST /internal/v1/communications/operator/profiles/{cfmeet_id}/suspend).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "reason"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "reason": {
+            "enum": [
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
+          }
+        }
+      },
+      "CommunicationsProfileCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cfmeet_id",
+              "activation_state",
+              "held",
+              "hold",
+              "version",
+              "updated_at"
+            ],
+            "properties": {
+              "cfmeet_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "activation_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "held": {
+                "type": "boolean"
+              },
+              "hold": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "reason",
+                  "active",
+                  "updated_at"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "version": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after communications.profile.restore; status: RESTORED, SUSPENDED."
+          }
+        }
+      },
+      "CommunicationsProfileRestoreRequest": {
+        "description": "Request of communications.profile.restore (POST /internal/v1/communications/operator/profiles/{cfmeet_id}/restore).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "CommunicationsReportReviewRequest": {
+        "description": "Request of communications.report.review (POST /internal/v1/communications/operator/reports/{report_id}/review).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "decision",
+          "reason"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "decision": {
+            "enum": [
+              "DISMISSED",
+              "ACTIONED"
+            ]
+          },
+          "reason": {
+            "enum": [
+              "NO_VIOLATION",
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
+          },
+          "hold_target": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CommunicationsReportReviewResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "report_id",
+              "target_cfmeet_id",
+              "decision",
+              "reason",
+              "held",
+              "reviewed_at",
+              "version"
+            ],
+            "properties": {
+              "report_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "target_cfmeet_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "decision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "held": {
+                "type": "boolean"
+              },
+              "reviewed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after communications.report.review; status: DISMISSED, ACTIONED."
+          }
+        }
+      },
+      "CommunicationsBackfillRequest": {
+        "description": "Request of communications.backfill.run (POST /internal/v1/communications/operator/backfill).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "limit"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "CommunicationsBackfillResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environment_id",
+              "created",
+              "next_cursor"
+            ],
+            "properties": {
+              "environment_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "created": {
+                "type": "integer"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              }
+            },
+            "description": "The resource after communications.backfill.run; status: COMPLETED."
+          }
+        }
+      },
+      "CommunicationsEventReplayRequest": {
+        "description": "Request of communications.events.replay (POST /internal/v1/communications/operator/replay).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "event_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CommunicationsEventReplayResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "event_id",
+              "requeued"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "requeued": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after communications.events.replay; status: REQUEUED."
+          }
+        }
+      },
+      "NotificationsDeliveryRetryRequest": {
+        "description": "Request of notifications.delivery.retry (POST /internal/v1/operator/deliveries/{delivery_id}/retry).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "NotificationsDeliveryRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delivery_id",
+              "notification_id",
+              "channel",
+              "lane",
+              "delivery_state",
+              "attempts",
+              "last_error_class",
+              "next_attempt_at"
+            ],
+            "properties": {
+              "delivery_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "notification_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "lane": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "attempts": {
+                "type": "integer"
+              },
+              "last_error_class": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "next_attempt_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after notifications.delivery.retry; status: RETRIED."
+          }
+        }
+      },
+      "NotificationsSuppressionRemoveRequest": {
+        "description": "Request of notifications.suppression.remove (POST /internal/v1/operator/email-suppressions/{suppression_id}/remove).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "NotificationsSuppressionRemoveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "suppression_id",
+              "suppressed"
+            ],
+            "properties": {
+              "suppression_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "suppressed": {
+                "type": "boolean"
+              }
+            },
+            "description": "The resource after notifications.suppression.remove; status: REMOVED."
+          }
+        }
+      },
+      "NotificationsRoutingChangeRequest": {
+        "description": "Request of notifications.routing.change (POST /internal/v1/operator/routing/{category}/{channel}/mode).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "category",
+          "channel",
+          "mode"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "channel": {
+            "enum": [
+              "EMAIL",
+              "PUSH",
+              "IN_APP",
+              "OPERATOR"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "OFF",
+              "SHADOW",
+              "ACTIVE"
+            ]
+          }
+        }
+      },
+      "NotificationsRoutingChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "category",
+              "channel",
+              "mode",
+              "version",
+              "canary_percent",
+              "fence_at",
+              "changed_at"
+            ],
+            "properties": {
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "mode": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "canary_percent": {
+                "type": "integer"
+              },
+              "fence_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "changed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after notifications.routing.change; status: OFF, SHADOW, ACTIVE."
+          }
+        }
+      },
+      "NotificationsRerouteCancelRequest": {
+        "description": "Request of notifications.reroute.cancel (POST /internal/v1/operator/reroute/{reroute_id}/cancel).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "NotificationsRerouteCancelResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision_id",
+              "category",
+              "event_state",
+              "reject_reason",
+              "processed_at"
+            ],
+            "properties": {
+              "decision_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "event_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "reject_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "processed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after notifications.reroute.cancel; status: CANCELLED."
+          }
+        }
+      },
+      "OrganizationCreateRequest": {
+        "description": "Request of organizations.organization.create (POST /internal/v1/admin/organizations).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OrganizationCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "lifecycle_state",
+              "lifecycle_reason",
+              "provisioning_state",
+              "version",
+              "created_at",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lifecycle_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "lifecycle_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500
+              },
+              "provisioning_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.organization.reactivate; status: ACTIVE."
+          }
+        }
+      },
+      "OrganizationSuspendRequest": {
+        "description": "Request of organizations.organization.suspend (POST /internal/v1/organizations/{organization_id}/suspend).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "OrganizationArchiveRequest": {
+        "description": "Request of organizations.organization.archive (POST /internal/v1/organizations/{organization_id}/archive).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "OrganizationReactivateRequest": {
+        "description": "Request of organizations.organization.reactivate (POST /internal/v1/organizations/{organization_id}/reactivate).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "OrganizationOwnershipRecoverRequest": {
+        "description": "Request of organizations.ownership.recover (POST /internal/v1/admin/organizations/{organization_id}/owners).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "user_id",
+          "reason"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "OrganizationMemberCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "membership_id",
+              "user_id",
+              "role",
+              "membership_state",
+              "version",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "membership_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "user_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "membership_state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.member.change; status: ACTIVE, SUSPENDED, REMOVED."
+          }
+        }
+      },
+      "OrganizationBindingChangeRequest": {
+        "description": "Request of organizations.binding.change (POST /internal/v1/admin/organizations/{organization_id}/scopes/primary/service-bindings/{service}/change).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "action"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "action": {
+            "enum": [
+              "SET",
+              "CLEAR"
+            ]
+          },
+          "service_account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credential_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OrganizationBindingChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "service",
+              "capability",
+              "source",
+              "version",
+              "verified_at",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "capability": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "verified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.binding.change; status: BOUND, REMOVED, REVOKED."
+          }
+        }
+      },
+      "OrganizationProvisioningRetryRequest": {
+        "description": "Request of organizations.provisioning.retry (POST /internal/v1/admin/organizations/{organization_id}/provisioning/retry).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "OrganizationProvisioningRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "provisioning_state",
+              "lifecycle_state",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "provisioning_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "lifecycle_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.provisioning.retry; status: any state code."
+          }
+        }
+      },
+      "OrganizationMemberChangeRequest": {
+        "description": "Request of organizations.member.change (POST /internal/v1/admin/organizations/{organization_id}/members/{member_id}/change).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "role": {
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MANAGER",
+              "MEMBER",
+              "GUEST"
+            ]
+          },
+          "membership_state": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REMOVED"
+            ]
+          }
+        }
+      },
+      "OrganizationTeamChangeRequest": {
+        "description": "Request of organizations.team.change (POST /internal/v1/admin/organizations/{organization_id}/teams/{team_id}/change).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "team_state": {
+            "enum": [
+              "ARCHIVED"
+            ]
+          }
+        }
+      },
+      "OrganizationTeamChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "team_id",
+              "team_state",
+              "version",
+              "parent_team_id",
+              "member_count",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "team_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "team_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "parent_team_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "member_count": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.team.change; status: ACTIVE, ARCHIVED."
+          }
+        }
+      },
+      "OrganizationPoliciesChangeRequest": {
+        "description": "Request of organizations.policies.change (POST /internal/v1/admin/organizations/{organization_id}/policies/change).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "policy"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "policy": {
+            "type": "object",
+            "description": "Validated by the owning service."
+          }
+        }
+      },
+      "OrganizationPoliciesChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "revision",
+              "changed_keys",
+              "updated_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "changed_keys": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+                }
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.policies.change; status: UPDATED, UNCHANGED."
+          }
+        }
+      },
+      "OrganizationEventsReplayRequest": {
+        "description": "Request of organizations.events.replay (POST /internal/v1/admin/event-delivery/replay).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "event_ids": {
+            "type": "array",
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "OrganizationEventsReplayResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "destination",
+              "requested_event_count",
+              "replayed_count"
+            ],
+            "properties": {
+              "destination": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "requested_event_count": {
+                "type": "integer"
+              },
+              "replayed_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "description": "The resource after organizations.events.replay; status: REPLAYED."
           }
         }
       },

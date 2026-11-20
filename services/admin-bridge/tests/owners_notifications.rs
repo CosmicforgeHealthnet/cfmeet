@@ -62,7 +62,7 @@ impl OwnerPort for FakeNotifications {
                 json!({"items": [delivery("FAILED")], "nextCursor": null})
             }
             "/internal/v1/operator/email-suppressions" => {
-                json!({"items": [{"digest": DIGEST, "reason": "COMPLAINED", "createdAt": "2026-11-18T09:00:00Z"}], "nextCursor": null})
+                json!({"items": [{"digest": DIGEST, "reason": "COMPLAINED", "createdAt": "2026-11-18T09:00:00Z", "version": 1}], "nextCursor": null})
             }
             "/internal/v1/admin/routing" => json!({
                 "routingProtocol": [1],

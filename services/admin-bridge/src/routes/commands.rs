@@ -86,6 +86,16 @@ fn reason_ok(v: &str) -> bool {
 /// Parses a command body: a JSON object with exactly the base fields plus `extra` (the
 /// family's own fields). Unknown fields are refused.
 pub fn parse_body(raw: &[u8], extra: &[&str]) -> Result<(BaseBody, Value), ErrorCode> {
+    parse_command_body(raw, extra, true)
+}
+
+/// [`parse_body`]; for an unversioned resource (`versioned == false`) the body carries no
+/// `expected_version` and [`BaseBody::expected_version`] is `"0"`.
+pub fn parse_command_body(
+    raw: &[u8],
+    extra: &[&str],
+    versioned: bool,
+) -> Result<(BaseBody, Value), ErrorCode> {
     let bad = ErrorCode::CommandBodyInvalid;
     let v: Value = serde_json::from_slice(raw).map_err(|_| bad)?;
     let obj = v.as_object().ok_or(bad)?;
@@ -103,9 +113,11 @@ pub fn parse_body(raw: &[u8], extra: &[&str]) -> Result<(BaseBody, Value), Error
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or(bad)?;
     // A string, or the owner's integer row version (HQ sends `case.version` as is).
-    let expected_version = match obj.get("expected_version") {
-        Some(Value::String(s)) if version_ok(s) => s.clone(),
-        Some(Value::Number(n)) if n.as_u64().is_some() => n.to_string(),
+    let expected_version = match (versioned, obj.get("expected_version")) {
+        (false, None) => "0".to_string(),
+        (false, Some(_)) => return Err(bad),
+        (true, Some(Value::String(s))) if version_ok(s) => s.clone(),
+        (true, Some(Value::Number(n))) if n.as_u64().is_some() => n.to_string(),
         _ => return Err(bad),
     };
     let reason_code = match obj.get("reason_code") {
@@ -278,7 +290,7 @@ pub async fn execute(
     bridge: &Bridge,
     auth: &Authorized,
     spec: CommandSpec,
-    applied: fn(&Value) -> Option<Applied>,
+    applied: impl Fn(&Value) -> Option<Applied>,
 ) -> Result<Answer, ErrorCode> {
     let key = auth
         .idempotency_key

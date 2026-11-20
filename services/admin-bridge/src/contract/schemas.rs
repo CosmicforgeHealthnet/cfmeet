@@ -584,12 +584,13 @@ pub fn components() -> Map<String, Value> {
             "description": "The effective suppression of one recipient, by the Notification Service's keyed digest only. The address is never relayed.",
             "type": "object",
             "additionalProperties": false,
-            "required": ["recipient_digest", "channel", "reason", "created_at"],
+            "required": ["recipient_digest", "channel", "reason", "created_at", "version"],
             "properties": {
                 "recipient_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "channel": {"const": "EMAIL"},
                 "reason": {"enum": ["COMPLAINED", "HARD_BOUNCE", "MANUAL"]},
-                "created_at": n_dt
+                "created_at": n_dt,
+                "version": {"type": "integer", "minimum": 1, "description": "notifications.suppression.remove's expected_version."}
             }
         }),
     );
@@ -669,6 +670,7 @@ pub fn components() -> Map<String, Value> {
     super::schemas_meetings::insert(&mut m);
     super::schemas_messaging::insert(&mut m);
     super::schemas_calling::insert(&mut m);
+    super::schemas_commands::insert(&mut m);
     super::schemas_verification::insert(&mut m);
 
     m.insert(

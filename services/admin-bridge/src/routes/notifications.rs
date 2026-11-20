@@ -62,6 +62,7 @@ pub fn suppression_item(s: &Value) -> T<Value> {
         ("channel", json!("EMAIL")),
         ("reason", t::string(s, "reason")?),
         ("created_at", t::time(s, "createdAt")?),
+        ("version", t::int(s, "version")?),
     ]))
 }
 
