@@ -1,4 +1,4 @@
-//! Migration history owned by the admin bridge (`services/admin-bridge/`, ADR 0067).
+//! Migration history owned by the admin bridge (`services/admin-bridge/`, ADR 0068).
 //!
 //! Independent of every other service; recorded in its own `admin_bridge_seaql_migrations`
 //! table. Every table is `admin_`-prefixed. The bridge stores no business data, no

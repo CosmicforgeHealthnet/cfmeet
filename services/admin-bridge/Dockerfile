@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge (ADR 0067, docs/admin/cfmeet-admin-bridge.md). Build context: the
+# CF Meet Admin Bridge (ADR 0068, docs/admin/cfmeet-admin-bridge.md). Build context: the
 # REPOSITORY ROOT (the bridge depends on the shared packages/service-auth crate):
 #
 #   docker build -f services/admin-bridge/Dockerfile -t cfmeet-admin-bridge .

@@ -1,4 +1,4 @@
-//! Admin bridge foundation (ADR 0067, design §13, phase A1).
+//! Admin bridge foundation (ADR 0068, design §13, phase A1).
 //!
 //! * `admin_remote_principals` — enrolled HQ credentials: client-certificate fingerprints,
 //!   HMAC key DIGESTS (the key lives only in a file), staff-token public keys. Never

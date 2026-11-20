@@ -1,4 +1,4 @@
--- Admin bridge least-privilege database roles (ADR 0067, design §2 / §13).
+-- Admin bridge least-privilege database roles (ADR 0068, design §2 / §13).
 --
 -- Database cfmeet_admin_bridge with two roles:
 --   admin_bridge_migrator  owns the database, schema objects, trigger functions and the
