@@ -531,3 +531,84 @@ fn read_type_posts_are_exactly_the_ones_hq_reviewed() {
         .collect();
     assert_eq!(posts, ["hq.events.ack", "pricing.charges.simulate"]);
 }
+
+/// HQ's read path refuses any result whose object KEY matches its personal-data list
+/// (case-insensitive, exact match), whatever the value, even masked or hashed. No
+/// published schema may use one of these names as a property anywhere (agreed with HQ
+/// Track B): name masked values after what they are (`address_masked`, `recipient_hash`).
+const HQ_BANNED_KEYS: &[&str] = &[
+    "nin",
+    "bvn",
+    "ssn",
+    "national_id",
+    "passport",
+    "passport_number",
+    "document_number",
+    "id_number",
+    "password",
+    "passcode",
+    "pin",
+    "otp",
+    "secret",
+    "token",
+    "api_key",
+    "private_key",
+    "phone",
+    "phone_number",
+    "msisdn",
+    "email",
+    "email_address",
+    "latitude",
+    "longitude",
+    "lat",
+    "lng",
+    "lon",
+    "gps",
+    "coordinates",
+    "location_trail",
+    "account_number",
+    "iban",
+    "card_number",
+    "pan",
+    "cvv",
+    "message_body",
+    "body_text",
+    "raw_payload",
+];
+
+fn collect_property_names(v: &Value, path: &str, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            if let Some(Value::Object(props)) = m.get("properties") {
+                for (k, sub) in props {
+                    out.push(format!("{path}.{k}"));
+                    collect_property_names(sub, &format!("{path}.{k}"), out);
+                }
+            }
+            for (k, sub) in m {
+                if k != "properties" {
+                    collect_property_names(sub, path, out);
+                }
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|x| collect_property_names(x, path, out)),
+        _ => {}
+    }
+}
+
+#[test]
+fn no_schema_uses_a_key_hq_treats_as_personal_data() {
+    let schemas = rendered("bridge-schemas.v1.json");
+    let mut names = Vec::new();
+    for (name, schema) in schemas["components"]["schemas"].as_object().unwrap() {
+        collect_property_names(schema, name, &mut names);
+    }
+    assert!(!names.is_empty());
+    let banned: Vec<&String> = names
+        .iter()
+        .filter(|p| {
+            HQ_BANNED_KEYS.contains(&p.rsplit('.').next().unwrap().to_ascii_lowercase().as_str())
+        })
+        .collect();
+    assert!(banned.is_empty(), "properties HQ would refuse: {banned:?}");
+}
