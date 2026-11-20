@@ -279,7 +279,7 @@ pub struct OperatorActivityFilter {
     pub operator: Option<String>,
     /// Exact action or a family prefix ending in `.`.
     pub action: Option<String>,
-    /// ADR 0067: `occurred_at >= since` / `occurred_at < until`.
+    /// ADR 0068: `occurred_at >= since` / `occurred_at < until`.
     pub since: Option<chrono::DateTime<Utc>>,
     pub until: Option<chrono::DateTime<Utc>>,
 }

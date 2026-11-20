@@ -8,7 +8,7 @@
 //!   cause. There is no customer (`Authorization`) authentication here: customers reach
 //!   the Developer Platform only through the API Gateway.
 //!
-//! Operator attribution (ADR 0067): `X-CF-Operator` / `X-CF-Approver` /
+//! Operator attribution (ADR 0068): `X-CF-Operator` / `X-CF-Approver` /
 //! `X-CF-Approval-Ref` / `X-CF-Intent-Digest` are parsed once here.
 //! * from `cfmeet.admin-bridge`: strict `hq:<staff>` attribution
 //!   (`cf_service_auth::OperatorAttribution`), required on every bridge request;

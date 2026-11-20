@@ -1,4 +1,4 @@
-//! The admin bridge's operator reads of partner resources (ADR 0067, design §6.7 / §6.9):
+//! The admin bridge's operator reads of partner resources (ADR 0068, design §6.7 / §6.9):
 //! `/internal/v1/operator/*`, permission `developer-platform.administer` AND a named
 //! operator (the bridge's `hq:<staff>` attribution, or the operator console's operator).
 //!
