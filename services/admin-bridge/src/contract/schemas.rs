@@ -8,7 +8,7 @@
 use serde_json::{json, Map, Value};
 
 use super::datasets::DATASETS;
-use super::model::{Owner, Purpose, State, CURSOR_PATTERN, DATASET_ID_PATTERN};
+use super::model::{Purpose, State, CURSOR_PATTERN, DATASET_ID_PATTERN};
 
 pub const FRESHNESS: &[&str] = &[
     "LIVE",
@@ -77,24 +77,24 @@ pub fn components() -> Map<String, Value> {
     m.insert(
         "Health".into(),
         json!({
-            "description": "Aggregate health of the bridge and every CF Meet service it calls. A component the bridge could not check is UNKNOWN with null fields, never OK.",
+            "description": "Aggregate health (HQ shape). services lists the bridge and every owner it is configured to probe; an owner without a probe is omitted (never shown as OK). Overall: DOWN when the bridge's own database is down, DEGRADED when a listed service is not OK, UNKNOWN when no owner probe is configured, otherwise OK.",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "components"],
+            "required": ["as_of", "status", "services"],
             "properties": {
-                "status": {"enum": ["OK", "DEGRADED", "UNAVAILABLE"]},
-                "components": {
+                "as_of": {"type": "string", "format": "date-time"},
+                "status": {"enum": ["OK", "DEGRADED", "DOWN", "UNKNOWN"]},
+                "services": {
                     "type": "array",
-                    "maxItems": 32,
+                    "maxItems": 64,
                     "items": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["service", "status", "checked_at", "latency_ms"],
+                        "required": ["service", "status", "checked_at"],
                         "properties": {
-                            "service": {"enum": names(Owner::ALL, Owner::as_str)},
-                            "status": {"enum": ["OK", "DEGRADED", "UNAVAILABLE", "UNKNOWN", "NOT_CONFIGURED"]},
-                            "checked_at": nullable_date_time,
-                            "latency_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 60000}
+                            "service": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$", "maxLength": 128},
+                            "status": {"enum": ["OK", "DEGRADED", "DOWN", "UNKNOWN"]},
+                            "checked_at": {"type": "string", "format": "date-time"}
                         }
                     }
                 }
