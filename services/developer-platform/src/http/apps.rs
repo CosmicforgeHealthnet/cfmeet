@@ -245,19 +245,25 @@ async fn operator_decide(
         decision.expected_version,
         command.two_person(),
     )?;
-    Ok(Json(
-        review::operator_decide(
-            &s,
-            &operator,
-            user,
-            &ctx,
-            id,
-            command,
-            decision,
-            bridge.as_ref(),
-        )
-        .await?,
-    ))
+    let v = review::operator_decide(
+        &s,
+        &operator,
+        user,
+        &ctx,
+        id,
+        command,
+        decision,
+        bridge.as_ref(),
+    )
+    .await?;
+    // The admin bridge gets the case as HQ sees it (state and version included).
+    if bridge.is_some() {
+        use crate::control::verification;
+        return Ok(Json(
+            verification::read(&s.db, &verification::case_id(verification::APP_REVIEW, id)).await?,
+        ));
+    }
+    Ok(Json(v))
 }
 
 // ---------------------------------------------------------------------------------------

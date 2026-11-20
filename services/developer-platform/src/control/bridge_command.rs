@@ -13,7 +13,8 @@
 //!   HQ: two people decide every R4 action);
 //! * the applied command is recorded in `devplat_admin_operations` in the SAME transaction
 //!   as the change, so the bridge can settle an unknown outcome from it, and a repeated key
-//!   never applies twice.
+//!   never applies twice; the bridge's answer is the case in HQ's shape
+//!   ([`super::verification`]), and the record reports the same state.
 
 use axum::http::HeaderMap;
 use chrono::Utc;
@@ -212,19 +213,28 @@ pub async fn record<C: ConnectionTrait>(
 pub async fn operation_record(db: &DatabaseConnection, key: Uuid) -> Result<Value, ApiError> {
     let row = db
         .query_one(stmt(
-            "SELECT resulting_state, resulting_version FROM devplat_admin_operations WHERE idempotency_key = $1",
+            "SELECT subject_kind, resulting_state, resulting_version FROM devplat_admin_operations              WHERE idempotency_key = $1",
             vec![key.into()],
         ))
         .await?
         .ok_or(ApiError(ErrorCode::NotFound))?;
-    let (state, version): (String, i64) = (
+    let (subject, state, version): (String, String, i64) = (
+        row.try_get("", "subject_kind")?,
         row.try_get("", "resulting_state")?,
         row.try_get("", "resulting_version")?,
     );
+    // The case state as HQ sees it, as in the command's own answer.
+    let kind = if subject == Subject::ProductionAccess.as_str() {
+        super::verification::PARTNER_GO_LIVE
+    } else {
+        super::verification::APP_REVIEW
+    };
+    let hq =
+        super::verification::hq_state(kind, &state).ok_or(ApiError(ErrorCode::InternalError))?;
     Ok(json!({
         "idempotency_key": key,
         "outcome": "APPLIED",
-        "source_status": state,
+        "source_status": hq,
         "source_version": version.to_string(),
     }))
 }
