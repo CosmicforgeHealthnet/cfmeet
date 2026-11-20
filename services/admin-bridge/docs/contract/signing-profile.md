@@ -148,6 +148,18 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 | `UNKNOWN_OUTCOME` | 502 | a command was sent and no clear answer came back; settle by reading back, never resend |
 | `INTERNAL` | 500 | unexpected bridge failure |
 
+## Command outcomes
+
+For a command, these codes guarantee the owning service was never called (nothing was done): every 4xx code, and these 5xx codes, which the bridge raises before any owner call:
+
+- `BRIDGE_DISABLED`
+- `BRIDGE_UNAVAILABLE`
+- `POLICY_UNAVAILABLE`
+- `CAPABILITY_DISABLED`
+- `AUDIT_UNAVAILABLE`
+
+Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UNAVAILABLE`) is an unknown outcome: settle it by reading back, never resend.
+
 ## Served in this contract version
 
 - `bridge.capabilities.read`

@@ -468,6 +468,25 @@ On error `result` is absent. Missing data is `null` or `UNAVAILABLE`, never zero
             e.meaning()
         ));
     }
+    s.push_str("
+## Command outcomes
+
+For a command, these codes guarantee the owning service was never called (nothing was done): every 4xx code, and these 5xx codes, which the bridge raises before any owner call:
+
+");
+    for e in ErrorCode::ALL
+        .iter()
+        .filter(|e| e.status() >= 500 && e.nothing_done())
+    {
+        s.push_str(&format!(
+            "- `{}`
+",
+            e.code()
+        ));
+    }
+    s.push_str("
+Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UNAVAILABLE`) is an unknown outcome: settle it by reading back, never resend.
+");
     let served: Vec<&str> = caps.iter().filter(|c| c.served).map(|c| c.id).collect();
     s.push_str(&format!(
         "\n## Served in this contract version\n\n{}\n",
