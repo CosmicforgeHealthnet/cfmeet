@@ -1,0 +1,64 @@
+{
+  "description": "One team. Its free-text description is not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "team_id",
+    "name",
+    "parent_team_id",
+    "status",
+    "member_count",
+    "created_at",
+    "updated_at",
+    "archived_at",
+    "version"
+  ],
+  "properties": {
+    "team_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "parent_team_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "member_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

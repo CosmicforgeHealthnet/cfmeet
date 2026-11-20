@@ -11,6 +11,7 @@ pub mod config;
 pub mod contract;
 pub mod errors;
 pub mod metrics;
+pub mod owners;
 pub mod policy;
 pub mod routes;
 pub mod server;

@@ -25,6 +25,10 @@
 //! | `ADMIN_BRIDGE_ENROLLED_TENANTS` | when enabled | comma list of tenants HQ may act in |
 //! | `ADMIN_BRIDGE_RATE_LIMIT_PER_MINUTE` | no | per staff member, permission and scope (1–10000, default 120) |
 //! | `ADMIN_BRIDGE_HEALTH_<SERVICE>_URL` | no | owner health URL probed by `bridge.health.read` (`MEETING_SERVICE`, `MESSAGING`, …); unset: NOT_CONFIGURED |
+//! | `CF_<OWNER>_BASE_URL` | no | internal base URL of an owning service the bridge reads from (`CF_ORGANIZATIONS_BASE_URL`, `CF_MEETING_SERVICE_BASE_URL`, …); unset: its capabilities answer `OWNER_UNAVAILABLE` |
+//! | `CF_SERVICE_AUTH_KEY_ID` / `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when any owner URL is set | the bridge's own `cf-service+jwt` signing key (PKCS#8 PEM file; inline keys are refused) |
+//! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
+//! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | owner call timeout (100–30000, default 5000) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 
 use std::{
@@ -91,6 +95,16 @@ impl Switches {
     }
 }
 
+/// Outbound calls to owning services (design §4).
+#[derive(Debug, Clone)]
+pub struct OutboundSettings {
+    pub key_id: String,
+    pub private_key_file: PathBuf,
+    pub token_ttl_seconds: u64,
+    pub timeout_ms: u64,
+    pub base_urls: BTreeMap<Owner, String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub runtime_environment: RuntimeEnvironment,
@@ -103,6 +117,7 @@ pub struct Config {
     pub tls: Option<TlsFiles>,
     pub security: Option<SecurityConfig>,
     pub health_urls: BTreeMap<Owner, String>,
+    pub outbound: Option<OutboundSettings>,
     pub json_logs: bool,
 }
 
@@ -246,6 +261,34 @@ impl Config {
                 health_urls.insert(*owner, url);
             }
         }
+        let mut base_urls = BTreeMap::new();
+        for owner in Owner::ALL {
+            if crate::owners::service_id(*owner).is_none() {
+                continue;
+            }
+            let var: &'static str = Box::leak(crate::owners::base_url_var(*owner).into_boxed_str());
+            if let Some(url) = env.get(var) {
+                base_urls.insert(*owner, url);
+            }
+        }
+        let outbound = if base_urls.is_empty() {
+            None
+        } else {
+            let key_id = required(env, "CF_SERVICE_AUTH_KEY_ID")?;
+            if env.get("CF_SERVICE_AUTH_PRIVATE_KEY").is_some() {
+                return Err(invalid(
+                    "CF_SERVICE_AUTH_PRIVATE_KEY",
+                    "inline keys are refused; use CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+                ));
+            }
+            Some(OutboundSettings {
+                key_id,
+                private_key_file: PathBuf::from(required(env, "CF_SERVICE_AUTH_PRIVATE_KEY_FILE")?),
+                token_ttl_seconds: number(env, "CF_SERVICE_TOKEN_TTL_SECONDS", 120, 10, 300)?,
+                timeout_ms: number(env, "CF_INTERNAL_HTTP_TIMEOUT_MS", 5000, 100, 30_000)?,
+                base_urls,
+            })
+        };
         let database_max_connections =
             number(env, "ADMIN_BRIDGE_DATABASE_MAX_CONNECTIONS", 5, 1, 50)?;
         let json_logs = env.get("LOG_FORMAT").as_deref() == Some("json");
@@ -262,6 +305,7 @@ impl Config {
                 tls: None,
                 security: None,
                 health_urls,
+                outbound,
                 json_logs,
             });
         }
@@ -344,6 +388,7 @@ impl Config {
             tls: Some(tls),
             security: Some(security),
             health_urls,
+            outbound,
             json_logs,
         })
     }
@@ -453,6 +498,32 @@ mod tests {
         assert!(Config::from_env(&V(enabled(&[("CF_SERVICE_ID", "cfmeet.calling")]))).is_err());
         assert!(Config::from_env(&V(enabled(&[("ADMIN_BRIDGE_ENABLED", "yes")]))).is_err());
         assert!(Config::from_env(&V(enabled(&[("ADMIN_BRIDGE_MODULE_ACCOUNTS", "1")]))).is_err());
+    }
+
+    #[test]
+    fn owner_urls_need_a_signing_key_file() {
+        let e = Config::from_env(&V(enabled(&[(
+            "CF_ORGANIZATIONS_BASE_URL",
+            "http://orgs.internal:8101",
+        )])))
+        .unwrap_err();
+        assert_eq!(e, ConfigError::Missing("CF_SERVICE_AUTH_KEY_ID"));
+        let c = Config::from_env(&V(enabled(&[
+            ("CF_ORGANIZATIONS_BASE_URL", "http://orgs.internal:8101"),
+            ("CF_SERVICE_AUTH_KEY_ID", "admin-bridge-test-1"),
+            ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", "/k.pem"),
+        ])))
+        .unwrap();
+        let o = c.outbound.unwrap();
+        assert_eq!(
+            o.base_urls.get(&Owner::Organizations).map(String::as_str),
+            Some("http://orgs.internal:8101")
+        );
+        assert_eq!((o.token_ttl_seconds, o.timeout_ms), (120, 5000));
+        assert!(Config::from_env(&V(enabled(&[])))
+            .unwrap()
+            .outbound
+            .is_none());
     }
 
     #[test]

@@ -2048,7 +2048,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.organizations.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2057,8 +2057,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_search_translates_and_minimizes"
+    ]
   },
   {
     "id": "organizations.organizations.read",
@@ -2067,7 +2069,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.organizations.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2076,8 +2078,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_detail_never_relays_contact_details"
+    ]
   },
   {
     "id": "organizations.organization.create",
@@ -2181,7 +2185,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}/bindings",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.bindings.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2190,8 +2194,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_bindings_treat_absent_as_unbound"
+    ]
   },
   {
     "id": "organizations.binding.change",
@@ -2238,7 +2244,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -2247,8 +2253,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_audit_maps_the_window_and_cursor"
+    ]
   },
   {
     "id": "organizations.global-audit.list",
@@ -2257,7 +2265,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.global-audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -2266,8 +2274,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: new organizations operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_global_audit_is_served"
+    ]
   },
   {
     "id": "organizations.provisioning.retry",
@@ -2314,7 +2324,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}/members",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.members.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -2323,8 +2333,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: new organizations operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_members_are_opaque_user_ids"
+    ]
   },
   {
     "id": "organizations.teams.list",
@@ -2333,7 +2345,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}/teams",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.teams.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2342,8 +2354,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: new organizations operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_teams_drop_free_text"
+    ]
   },
   {
     "id": "organizations.policies.read",

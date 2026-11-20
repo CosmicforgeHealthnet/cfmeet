@@ -1,5 +1,8 @@
-//! Routes served in phase A1: discovery, aggregate health, datasets and projection
-//! status. Every other capability is refused before it gets here (`served == false`).
+//! Routes: discovery, aggregate health, datasets and projection status (A1), and the
+//! owner reads by module (`organizations`, A2). Every other capability is refused before it gets here (`served == false`).
+
+pub mod organizations;
+pub mod translate;
 
 use std::collections::BTreeMap;
 
@@ -12,6 +15,9 @@ use crate::contract::model::{Kind, Owner, State};
 use crate::errors::ErrorCode;
 
 pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, ErrorCode> {
+    if let Some(answer) = organizations::dispatch(bridge, auth).await {
+        return answer;
+    }
     match auth.capability.id {
         "bridge.capabilities.read" => Ok(discovery(bridge)),
         "bridge.health.read" => Ok(health(bridge).await),

@@ -448,3 +448,19 @@ mod tests {
         assert!(!err.to_string().contains("secret"));
     }
 }
+
+#[cfg(all(test, feature = "client"))]
+mod forwarding_tests {
+    use super::ALL_HEADERS;
+
+    /// The bridge forwards the attribution headers through the shared client.
+    #[test]
+    fn attribution_headers_are_forwardable() {
+        for h in ALL_HEADERS.iter() {
+            assert!(
+                crate::client::FORWARDABLE_REQUEST_HEADERS.contains(&h.as_str()),
+                "{h}"
+            );
+        }
+    }
+}

@@ -40,6 +40,7 @@ async fn main() {
                 "opsBindAddress": config.ops_bind.to_string(),
                 "policyRevision": config.security.as_ref().map(|s| s.policy_revision),
                 "healthProbes": config.health_urls.keys().map(|o| o.as_str()).collect::<Vec<_>>(),
+                "owners": config.outbound.as_ref().map(|o| o.base_urls.keys().map(|k| k.as_str()).collect::<Vec<_>>()).unwrap_or_default(),
             })
         );
         return;
@@ -72,6 +73,11 @@ async fn main() {
         HealthProbe::new(config.health_urls.clone()),
     );
     bridge.database_configured = config.database_url.is_some();
+    if let Some(outbound) = &config.outbound {
+        let owners = admin_bridge::owners::http_owners(outbound, config.runtime_environment)
+            .unwrap_or_else(|e| fatal("owner client configuration error", e));
+        bridge = bridge.with_owners(Arc::new(owners));
+    }
     let bridge = Arc::new(bridge);
     tracing::info!(
         runtime_environment = %config.runtime_environment,

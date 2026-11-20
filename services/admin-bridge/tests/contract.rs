@@ -114,7 +114,7 @@ fn risky_commands_need_two_people_versions_and_idempotency() {
 }
 
 #[test]
-fn a1_serves_exactly_the_platform_reads() {
+fn served_capabilities_are_exactly_the_ones_built() {
     let served: Vec<&str> = catalog()
         .iter()
         .filter(|c| c.served)
@@ -126,7 +126,14 @@ fn a1_serves_exactly_the_platform_reads() {
             "bridge.capabilities.read",
             "bridge.health.read",
             "bridge.datasets.read",
-            "hq.projections.status"
+            "hq.projections.status",
+            "organizations.organizations.search",
+            "organizations.organizations.read",
+            "organizations.bindings.list",
+            "organizations.audit.list",
+            "organizations.global-audit.list",
+            "organizations.members.list",
+            "organizations.teams.list"
         ]
     );
     for c in catalog() {

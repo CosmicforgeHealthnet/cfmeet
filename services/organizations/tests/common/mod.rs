@@ -210,6 +210,8 @@ pub struct Peers {
     pub rogue_meeting: Arc<ServiceTokenSigner>,
     /// The Notification Service: `organization-invitations.read` only (X5).
     pub notifications: Arc<ServiceTokenSigner>,
+    /// The HQ admin bridge (ADR 0067): `organization.operator-read` only.
+    pub bridge: Arc<ServiceTokenSigner>,
 }
 
 pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
@@ -218,6 +220,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
     let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
     let notifications = key("notifications-test-1");
+    let bridge = key("admin-bridge-test-1");
     let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
         json!({
             "issuer": id,
@@ -244,6 +247,9 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(cf_service_auth::services::NOTIFICATIONS, &notifications, &[
                 "organization-invitations.read",
             ]),
+            issuer(cf_service_auth::services::ADMIN_BRIDGE, &bridge, &[
+                "organization.operator-read",
+            ]),
         ],
     })
     .to_string();
@@ -257,6 +263,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             operator: signer(ServiceId::operator_console(), operator),
             rogue_meeting: signer(ServiceId::meeting_service(), key("meeting-test-1")),
             notifications: signer(ServiceId::notifications(), notifications),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
     )
 }
@@ -325,6 +332,19 @@ impl<'a> Call<'a> {
             HeaderValue::from_str(email).unwrap(),
         );
         self
+    }
+
+    /// Any extra request header (e.g. the admin bridge's `X-CF-Operator`).
+    pub fn header(mut self, name: &'static str, value: &str) -> Self {
+        self.headers
+            .insert(name, HeaderValue::from_str(value).unwrap());
+        self
+    }
+
+    /// The admin bridge reading for HQ staff member `staff` (`X-CF-Operator: hq:<staff>`).
+    pub fn operator(self, staff: &str) -> Self {
+        let value = format!("hq:{staff}");
+        self.header("x-cf-operator", &value)
     }
 
     pub fn idem(mut self, key: &str) -> Self {
