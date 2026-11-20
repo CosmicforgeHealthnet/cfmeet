@@ -444,26 +444,21 @@ async fn apps_search_and_detail() {
 #[tokio::test]
 async fn blocked_partner_reads_stay_refused() {
     let (h, fake) = harness().await;
-    for (path, perm) in [
+    // Keys, service accounts, websites and users moved to the Platform Access slice (A2.3).
+    let window = "&start=2026-11-01T00:00:00Z&end=2026-11-10T00:00:00Z";
+    for (path, query, perm) in [
         (
-            format!("/partners/workspaces/{WS}/keys"),
-            "partners.keys.read",
+            format!("/partners/workspaces/{WS}/usage"),
+            format!("{}{window}", scoped("support-review")),
+            "partners.usage.read",
         ),
         (
-            format!("/partners/workspaces/{WS}/service-accounts"),
-            "partners.service-accounts.read",
-        ),
-        (
-            format!("/partners/workspaces/{WS}/websites"),
-            "partners.websites.read",
+            "/partners/incidents".to_string(),
+            format!("{}{window}", scoped("ops-incident")),
+            "partners.incidents.read",
         ),
     ] {
-        let c = call(
-            &path,
-            &scoped("support-review"),
-            perm,
-            &["cfmeet.partner_ops"],
-        );
+        let c = call(&path, &query, perm, &["cfmeet.partner_ops"]);
         assert_eq!(code(&send(&h, &c).await.1), "CAPABILITY_DISABLED", "{path}");
     }
     assert!(

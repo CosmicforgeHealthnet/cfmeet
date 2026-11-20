@@ -2625,11 +2625,11 @@
   {
     "id": "partners.keys.list",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/keys",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.keys.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2638,8 +2638,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_identity_reads_use_the_workspace_tenant"
+    ]
   },
   {
     "id": "partners.key.revoke",
@@ -2663,11 +2665,11 @@
   {
     "id": "partners.service-accounts.list",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/service-accounts",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.service-accounts.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2676,8 +2678,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_identity_reads_use_the_workspace_tenant"
+    ]
   },
   {
     "id": "partners.service-account.suspend",
@@ -2701,11 +2705,11 @@
   {
     "id": "partners.websites.list",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/websites",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.websites.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2714,8 +2718,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_identity_reads_use_the_workspace_tenant"
+    ]
   },
   {
     "id": "partners.website.remove",
@@ -2779,11 +2785,11 @@
   {
     "id": "partners.users.list",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/users",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.users.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -2792,8 +2798,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_identity_reads_use_the_workspace_tenant"
+    ]
   },
   {
     "id": "partners.user.sign-out",
@@ -2977,7 +2985,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.tenants.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2986,8 +2994,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_tenants_search_translates"
+    ]
   },
   {
     "id": "identity.applications.list",
@@ -2996,7 +3006,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/applications",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.applications.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3005,8 +3015,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_tenant_lists_translate_strictly"
+    ]
   },
   {
     "id": "identity.environments.list",
@@ -3015,7 +3027,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/environments",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.environments.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3024,8 +3036,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_tenant_lists_translate_strictly"
+    ]
   },
   {
     "id": "identity.service-accounts.list",
@@ -3034,7 +3048,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/service-accounts",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.service-accounts.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3043,8 +3057,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_tenant_lists_translate_strictly"
+    ]
   },
   {
     "id": "identity.status.change",
@@ -3072,7 +3088,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/scope-grants",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.scope-grants.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3081,8 +3097,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_scope_grants_check_the_cursor"
+    ]
   },
   {
     "id": "identity.scope-grant.change",
@@ -3129,7 +3147,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/keys",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.keys.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3138,8 +3156,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_keys_never_carry_secret_material"
+    ]
   },
   {
     "id": "identity.key.issue",
@@ -3243,7 +3263,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/records",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.records.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3252,8 +3272,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_records_never_echo_the_reference"
+    ]
   },
   {
     "id": "identity.record.register",
@@ -3319,7 +3341,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/oauth-apps",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.oauth-apps.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3328,8 +3350,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: new platform-access operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_oauth_apps_and_grants_translate"
+    ]
   },
   {
     "id": "identity.app-grants.list",
@@ -3338,7 +3362,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/oauth-apps/{app_id}/grants",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.app-grants.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -3347,8 +3371,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: new platform-access operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_oauth_apps_and_grants_translate"
+    ]
   },
   {
     "id": "identity.app-grant.revoke",
@@ -3376,7 +3402,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/partner-users",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.partner-users.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -3385,8 +3411,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: new platform-access operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_partner_users_filter_the_kind"
+    ]
   },
   {
     "id": "identity.audit.list",
@@ -3395,7 +3423,7 @@
     "method": "GET",
     "bridge_endpoint": "/identity/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "identity.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -3404,8 +3432,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-    "blocker": "Phase A2: platform-access endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "identity_audit_maps_the_window"
+    ]
   },
   {
     "id": "apps.apps.search",

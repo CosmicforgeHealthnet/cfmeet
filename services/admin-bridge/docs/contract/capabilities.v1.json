@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.5.0",
+  "contract_version": "1.6.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "9bb20eaebf8dda2b60d0f96e3f5b69c2ef8e7047bdce40111437e0480e52ec0f",
-    "capability_matrix_sha256": "2b141c99e5f8d24cf50c1f011a2af09fae64455d4f9e166823f47aee94e993d2"
+    "openapi_sha256": "3a198a6682a9eb985b2fc3fdf70a8ffc9125293ae3486f0416f654a4d3fa908e",
+    "capability_matrix_sha256": "4271efa9ce60fc08cce51fb659a97c786ad9bd5b70b8886febc45f5283a9476d"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 31,
+      "READ_ONLY": 46,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 101
+      "BLOCKED_DEPENDENCY": 86
     }
   },
   "capabilities": [
@@ -7184,7 +7184,7 @@
       "version": "1.0",
       "module": "partners",
       "kind": "READ",
-      "owner": "developer-platform",
+      "owner": "platform-access",
       "owner_status": "NEW",
       "phase": "A2",
       "method": "GET",
@@ -7218,9 +7218,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.keys.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7229,8 +7229,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_identity_reads_use_the_workspace_tenant"
+      ],
       "contact_search": false
     },
     {
@@ -7298,7 +7300,7 @@
       "version": "1.0",
       "module": "partners",
       "kind": "READ",
-      "owner": "developer-platform",
+      "owner": "platform-access",
       "owner_status": "NEW",
       "phase": "A2",
       "method": "GET",
@@ -7332,9 +7334,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityServiceAccountPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.service-accounts.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7343,8 +7345,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_identity_reads_use_the_workspace_tenant"
+      ],
       "contact_search": false
     },
     {
@@ -7412,7 +7416,7 @@
       "version": "1.0",
       "module": "partners",
       "kind": "READ",
-      "owner": "developer-platform",
+      "owner": "platform-access",
       "owner_status": "NEW",
       "phase": "A2",
       "method": "GET",
@@ -7446,9 +7450,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebsitesPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.websites.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7457,8 +7461,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_identity_reads_use_the_workspace_tenant"
+      ],
       "contact_search": false
     },
     {
@@ -7642,7 +7648,7 @@
       "version": "1.0",
       "module": "partners",
       "kind": "READ",
-      "owner": "developer-platform",
+      "owner": "platform-access",
       "owner_status": "NEW",
       "phase": "A2",
       "method": "GET",
@@ -7677,9 +7683,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityPrincipalPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.users.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -7688,8 +7694,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_identity_reads_use_the_workspace_tenant"
+      ],
       "contact_search": true
     },
     {
@@ -8216,9 +8224,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityTenantPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.tenants.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8227,8 +8235,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_tenants_search_translates"
+      ],
       "contact_search": false
     },
     {
@@ -8270,9 +8280,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityApplicationPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.applications.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8281,8 +8291,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_tenant_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -8324,9 +8336,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityEnvironmentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.environments.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8335,8 +8347,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_tenant_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -8378,9 +8392,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityServiceAccountPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.service-accounts.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8389,8 +8403,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_tenant_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -8492,9 +8508,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityScopeGrantPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.scope-grants.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8503,8 +8519,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_scope_grants_check_the_cursor"
+      ],
       "contact_search": false
     },
     {
@@ -8656,9 +8674,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.keys.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -8667,8 +8685,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_keys_never_carry_secret_material"
+      ],
       "contact_search": false
     },
     {
@@ -9000,9 +9020,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityPrincipalPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.records.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9011,9 +9031,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": [],
-      "contact_search": false
+      "blocker": null,
+      "source_tests": [
+        "identity_records_never_echo_the_reference"
+      ],
+      "contact_search": true
     },
     {
       "id": "identity.record.register",
@@ -9208,9 +9230,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityOAuthAppPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.oauth-apps.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9219,8 +9241,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_oauth_apps_and_grants_translate"
+      ],
       "contact_search": false
     },
     {
@@ -9262,9 +9286,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityAppGrantPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.app-grants.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -9273,8 +9297,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_oauth_apps_and_grants_translate"
+      ],
       "contact_search": false
     },
     {
@@ -9377,9 +9403,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityPrincipalPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.partner-users.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -9388,8 +9414,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_partner_users_filter_the_kind"
+      ],
       "contact_search": true
     },
     {
@@ -9427,9 +9455,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityAuditEntryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "identity.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -9438,8 +9466,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
-      "blocker": "Phase A2: platform-access endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "identity_audit_maps_the_window"
+      ],
       "contact_search": false
     },
     {
