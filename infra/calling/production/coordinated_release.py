@@ -116,7 +116,7 @@ NOTIFICATIONS_DARK_ENV = {
     'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
 }
 
-# CF Meet Admin Bridge (ADR 0067, docs/admin/cfmeet-admin-bridge.md): the only doorway from
+# CF Meet Admin Bridge (ADR 0068, docs/admin/cfmeet-admin-bridge.md): the only doorway from
 # the CosmicForge central admin (HQ). Deployed dark: ADMIN_BRIDGE_ENABLED, _WRITES_ENABLED and
 # every module switch off, no owner base URL. Only the loopback ops listener answers (the
 # release health probe runs inside the container's network namespace); the HQ mTLS listener
@@ -246,7 +246,7 @@ SERVICES = {
              'DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WEBHOOKS_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WORKER_INSTANCE_ID': 'worker-production-1'}),
-    # HQ admin bridge (ADR 0067): dark (see ADMIN_BRIDGE_DARK_ENV); /ready on the loopback ops
+    # HQ admin bridge (ADR 0068): dark (see ADMIN_BRIDGE_DARK_ENV); /ready on the loopback ops
     # port; no private TLS route (no CF Meet service calls it until owner events, phase A7).
     'admin-bridge': _service('cfmeet-admin-bridge', 8190, '/ready', db='cfmeet_admin_bridge',
         role='admin_bridge', migrations=['admin-bridge-migration'], history=['admin_bridge_seaql_migrations'],
@@ -2006,7 +2006,7 @@ def activate_meeting_notice_preferences(sha, run_id, confirm):
 
 
 def activate_admin_bridge(sha, run_id, confirm):
-    """ADR 0067, phase A2.0: grant the admin bridge the Organizations operator reads in the
+    """ADR 0068, phase A2.0: grant the admin bridge the Organizations operator reads in the
     Organizations trust bundle (merged; nothing dropped), point the bridge at Organizations and
     switch its Organizations module on. The bridge stays disabled (ADMIN_BRIDGE_ENABLED=false)
     until HQ is enrolled (docs/operations/admin-bridge-runbook.md); a failure restores both."""
@@ -3140,7 +3140,7 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
     'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
-    # HQ admin bridge (ADR 0067): owner grants for the served reads, bridge still disabled.
+    # HQ admin bridge (ADR 0068): owner grants for the served reads, bridge still disabled.
     'activate-admin-bridge': ((), activate_admin_bridge),
     # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),

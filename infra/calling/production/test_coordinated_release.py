@@ -683,7 +683,7 @@ class SafeDefaultsAndRouting(unittest.TestCase):
 
 
 class AdminBridge(unittest.TestCase):
-    """HQ admin bridge (ADR 0067): dark deployment, least privilege, grants, HQ port."""
+    """HQ admin bridge (ADR 0068): dark deployment, least privilege, grants, HQ port."""
 
     def test_it_is_released_dark_with_no_owner_url(self):
         with patch.object(cr, 'runtime_url', lambda name: 'postgres://r@db/' + name):
