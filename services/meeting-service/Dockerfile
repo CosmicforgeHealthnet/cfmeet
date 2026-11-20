@@ -30,7 +30,7 @@ COPY packages/notification-client/ /app/packages/notification-client/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration --bin gap-closure-migration --bin platform-build-migration --bin meeting-audit-migration --bin account-privacy-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration --bin gap-closure-migration --bin platform-build-migration --bin meeting-audit-migration --bin account-privacy-migration --bin admin-operations-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
@@ -61,6 +61,7 @@ COPY --from=builder /app/services/meeting-service/target/release/gap-closure-mig
 COPY --from=builder /app/services/meeting-service/target/release/platform-build-migration ./platform-build-migration
 COPY --from=builder /app/services/meeting-service/target/release/meeting-audit-migration ./meeting-audit-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-privacy-migration ./account-privacy-migration
+COPY --from=builder /app/services/meeting-service/target/release/admin-operations-migration ./admin-operations-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
 

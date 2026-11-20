@@ -32,6 +32,7 @@ use crate::{
     models::{conference_sessions, meeting_spaces},
     services::{
         actor::ActorContext,
+        admin_operations::{self, BridgeCommand},
         meeting_core::{
             actor_space_role, conference_authority, find_conference, find_space,
             is_unique_violation, lock_conference, permission_denied, state_conflict,
@@ -740,6 +741,58 @@ impl ConferenceService {
             Enforcement::Pending
         };
         Ok(ConferenceOutcome::changed(current, enforcement))
+    }
+
+    /// ADR 0068 `meetings.meeting.end`: an HQ staff member ends a LIVE conference for
+    /// everyone through the admin bridge (R3, approved by a second person). LIVE → ENDING at
+    /// HQ's expected version, exactly as a host's end (recordings stopped, the provider room
+    /// terminated, `conference.ending`), audited as the operator with termination reason
+    /// `ADMIN` and recorded in the same transaction (`meeting_admin_operations`, `ENDING`).
+    /// A conference that is not LIVE is refused (`CONFERENCE_NOT_LIVE` /
+    /// `CONFERENCE_STATE_CONFLICT`). ENDED follows once the provider confirms termination
+    /// (driven after commit; a failure there leaves it ENDING and the relay retries).
+    pub async fn end_by_operator(
+        &self,
+        cmd: &BridgeCommand,
+        id: Uuid,
+    ) -> ApiResult<conference_sessions::Model> {
+        let txn = self.core.db.begin().await?;
+        admin_operations::claim(&txn, cmd).await?;
+        let conference = lock_conference(&txn, id).await?;
+        Self::legacy_guard(&conference)?;
+        admin_operations::check_version(cmd, conference.version as i64)?;
+        let next = next_status(conference.status, Transition::End).map_err(|m| {
+            if conference.status.is_terminal_or_closing() {
+                state_conflict(m)
+            } else {
+                ApiError::domain(ErrorCode::ConferenceNotLive, m)
+            }
+        })?;
+        if next.is_none() {
+            return Err(state_conflict("The conference is already ending or ended"));
+        }
+        let actor = crate::services::meeting_space::operator_actor(cmd);
+        let updated = self
+            .request_end_locked(
+                &txn,
+                conference,
+                &actor,
+                TerminationReason::Admin,
+                Some("operator"),
+            )
+            .await?;
+        admin_operations::record(
+            &txn,
+            cmd,
+            admin_operations::subject::CONFERENCE,
+            id,
+            updated.status.as_str(),
+            Some(updated.version as i64),
+        )
+        .await?;
+        txn.commit().await?;
+        self.complete_ending(&[id]).await;
+        Ok(updated)
     }
 
     /// LIVE → ENDING on a row the caller holds `FOR UPDATE` (shared by host end, space
