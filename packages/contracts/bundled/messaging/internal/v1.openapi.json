@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.2.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN)."
+    "version": "1.3.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references."
   },
   "tags": [
     {
@@ -29,6 +29,10 @@
     {
       "name": "Internal — SMS Bridge",
       "description": "Internal — SMS Bridge operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — HQ Admin Bridge",
+      "description": "The admin bridge's operator reads of CF Meet chats (ADR 0068): ids, categories, states, counts and times only; never content, ciphertext, keys, evidence or payloads. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) plus X-CF-Operator."
     }
   ],
   "paths": {
@@ -784,6 +788,727 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/reports": {
+      "get": {
+        "operationId": "operatorListReports",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List reports (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Reports, newest first, optionally by status; keyset-paged. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "OPEN",
+                "ACTIONED",
+                "DISMISSED"
+              ]
+            },
+            "description": "Report status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/reports/{reportId}": {
+      "get": {
+        "operationId": "operatorGetReport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a report (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "One report and its moderation actions; 404 NOT_FOUND when absent. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReportDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/holds": {
+      "get": {
+        "operationId": "operatorListHolds",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List legal holds (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Legal holds by status (ACTIVE by default), newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ACTIVE",
+                "RELEASED"
+              ]
+            },
+            "description": "Hold status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorHoldPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/exports": {
+      "get": {
+        "operationId": "operatorListExports",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List exports (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "MANAGED conversation exports, newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/deletion-requests": {
+      "get": {
+        "operationId": "operatorListDeletionRequests",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List deletion requests (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Principal erasure and conversation purge requests, newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDeletionRequestPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/audit": {
+      "get": {
+        "operationId": "operatorListAudit",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List audit entries (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Tenant audit entries in an optional window, newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window start (inclusive)."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window end (exclusive); at most 31 days after since."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorAuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/switches": {
+      "get": {
+        "operationId": "operatorListSwitches",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List off-switches (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Every emergency off-switch row; nextCursor is always null. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSwitchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/incidents": {
+      "get": {
+        "operationId": "operatorListIncidents",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List incidents (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Operational incidents by last occurrence in an optional window, newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window start (inclusive)."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window end (exclusive); at most 31 days after since."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorIncidentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/failed-messages": {
+      "get": {
+        "operationId": "operatorListFailedMessages",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List failed messages (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Outbox events in DEAD_LETTER in an optional window, newest first. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window start (inclusive)."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window end (exclusive); at most 31 days after since."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorFailedMessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/key-transparency": {
+      "get": {
+        "operationId": "operatorGetKeyTransparency",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get key transparency (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The tree head (null before the first leaf) and each witness state. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorKeyTransparency"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -808,6 +1533,1096 @@
       }
     },
     "schemas": {
+      "OperatorAuditEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "occurredAt",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "credentialId",
+          "principalId",
+          "action",
+          "targetKind",
+          "targetId",
+          "correlationId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credentialId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,47}$"
+          },
+          "targetKind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,31}$"
+          },
+          "targetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+          }
+        },
+        "description": "One tenant audit entry. The detail object is not included."
+      },
+      "OperatorAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorAuditEntry"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorDeletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "kind",
+          "principalId",
+          "conversationId",
+          "status",
+          "messagesPurged",
+          "attachmentsDeleted",
+          "heldItems",
+          "createdAt",
+          "completedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "PRINCIPAL_ERASURE",
+              "CONVERSATION_PURGE"
+            ]
+          },
+          "principalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "COMPLETED",
+              "PARTIALLY_HELD"
+            ]
+          },
+          "messagesPurged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attachmentsDeleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "heldItems": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorDeletionRequestPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorDeletionRequest"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "conversationId",
+          "status",
+          "size",
+          "messageCount",
+          "failure",
+          "attempts",
+          "createdAt",
+          "completedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED",
+              "EXPIRED"
+            ]
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "messageCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "One MANAGED conversation export. The object key and digest are not included."
+      },
+      "OperatorExportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorExport"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorFailedMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sequence",
+          "eventType",
+          "aggregateType",
+          "aggregateId",
+          "tenantId",
+          "environmentId",
+          "attempts",
+          "occurredAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "eventType": {
+            "type": "string",
+            "pattern": "^messaging(\\.[a-z][a-z0-9-]*){2,}$",
+            "maxLength": 80
+          },
+          "aggregateType": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,39}$"
+          },
+          "aggregateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "One outbox event in DEAD_LETTER. Its payload and error string are not included."
+      },
+      "OperatorFailedMessagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorFailedMessage"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorHold": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "scopeKind",
+          "conversationId",
+          "principalId",
+          "reasonCategory",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "releasedAt",
+          "releaseReason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scopeKind": {
+            "enum": [
+              "CONVERSATION",
+              "PRINCIPAL",
+              "ENVIRONMENT"
+            ]
+          },
+          "conversationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reasonCategory": {
+            "enum": [
+              "LITIGATION",
+              "REGULATORY",
+              "INVESTIGATION",
+              "INTERNAL_POLICY"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "RELEASED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "releasedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "releaseReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        },
+        "description": "One legal hold. The case reference is not included."
+      },
+      "OperatorHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorHold"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorIncident": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "severity",
+          "status",
+          "occurrences",
+          "firstSeenAt",
+          "lastSeenAt",
+          "resolvedAt",
+          "resolvedBy"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "severity": {
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RESOLVED"
+            ]
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "firstSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolvedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        },
+        "description": "One operational incident. Its summary text is not included."
+      },
+      "OperatorIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorIncident"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorKeyTransparency": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "head",
+          "witnesses"
+        ],
+        "properties": {
+          "head": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "treeSize",
+                  "rootHash",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "treeSize": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rootHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "witnesses": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "witnessId",
+                "treeSize",
+                "rootHash",
+                "updatedAt",
+                "lastCosignedSize"
+              ],
+              "properties": {
+                "witnessId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9.:-]{2,63}$"
+                },
+                "treeSize": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "rootHash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastCosignedSize": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "description": "The key-transparency tree head and each witness state. No key material."
+      },
+      "OperatorReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "conversationId",
+          "securityProfile",
+          "reporterPrincipalId",
+          "reportedPrincipalId",
+          "messageIds",
+          "category",
+          "evidenceKind",
+          "status",
+          "resolution",
+          "resolvedAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "securityProfile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporterPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportedPrincipalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "messageIds": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidenceKind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "One report: ids, category, states and times. The evidence (a sealed reporter disclosure or a MANAGED message reference) is never included; evidenceKind only says which kind was given."
+      },
+      "OperatorReportDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "conversationId",
+          "securityProfile",
+          "reporterPrincipalId",
+          "reportedPrincipalId",
+          "messageIds",
+          "category",
+          "evidenceKind",
+          "status",
+          "resolution",
+          "resolvedAt",
+          "createdAt",
+          "actions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "securityProfile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporterPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportedPrincipalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "messageIds": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidenceKind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "kind",
+                "reason",
+                "conversationId",
+                "messageId",
+                "principalId",
+                "effectiveUntil",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "enum": [
+                    "REMOVE_MESSAGE",
+                    "MUTE_MEMBER",
+                    "UNMUTE_MEMBER",
+                    "REMOVE_MEMBER",
+                    "RESTRICT_PRINCIPAL",
+                    "LIFT_RESTRICTION",
+                    "DISMISS_REPORT"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "conversationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "principalId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "effectiveUntil": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "description": "One report and its moderation actions (no evidence)."
+      },
+      "OperatorReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorReport"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorSwitch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "switchName",
+          "scopeKey",
+          "engaged",
+          "reason",
+          "changedBy",
+          "changedAt",
+          "version"
+        ],
+        "properties": {
+          "switchName": {
+            "enum": [
+              "MESSAGE_SEND",
+              "CONVERSATION_CREATE",
+              "E2EE_ONBOARDING",
+              "ATTACHMENT_UPLOAD",
+              "SMS_BRIDGE",
+              "WEBHOOK_RELAY"
+            ]
+          },
+          "scopeKey": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "engaged": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changedBy": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "description": "One emergency off-switch row (global or per environment)."
+      },
+      "OperatorSwitchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorSwitch"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
       "messaging.common.v1.Ciphersuite": {
         "type": "string",
         "enum": [
@@ -2520,6 +4335,18 @@
         "description": "Lower-case hyphenated UUID.",
         "type": "string",
         "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    },
+    "parameters": {
+      "Operator": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": true,
+        "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
       }
     }
   }
