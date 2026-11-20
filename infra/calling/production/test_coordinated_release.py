@@ -286,6 +286,20 @@ class ImageVerification(unittest.TestCase):
                 cr.verify_running('cfmeet-calling', 'sha256:new', SHA)
 
 
+class ProductionBrowserOrigins(unittest.TestCase):
+    def test_meeting_service_release_pins_the_production_web_origins(self):
+        self.assertEqual(cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'],
+                         'https://cfmeet.com,https://www.cfmeet.com')
+        self.assertNotIn('localhost', cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'])
+
+    def test_verify_fails_while_the_audited_list_is_running(self):
+        audited = 'http://localhost:3000,http://localhost:3001,https://17730sdl-3000.uks1.devtunnels.ms'
+        self.assertEqual(cr.pinned_env_checks({'meeting-service': {'FRONTEND_URLS': audited}}),
+                         {'pinned meeting-service FRONTEND_URLS': 'FAIL'})
+        pinned = {'meeting-service': {'FRONTEND_URLS': 'https://cfmeet.com,https://www.cfmeet.com'}}
+        self.assertEqual(cr.pinned_env_checks(pinned), {'pinned meeting-service FRONTEND_URLS': 'PASS'})
+
+
 class RollbackOnFailedHealth(unittest.TestCase):
     def test_existing_service_is_restored_exactly_when_the_new_image_is_unhealthy(self):
         docker = FakeDocker(['cfmeet-numbering', 'cosmicforge-db'])
@@ -444,6 +458,19 @@ class SecretsAreNeverPrinted(unittest.TestCase):
 
 
 class SafeDefaultsAndRouting(unittest.TestCase):
+    def test_a_release_gives_calling_its_private_metrics_listener_once(self):
+        # C4: call counters for cfmeet-prometheus; an operator's own value is kept.
+        self.assertEqual(cr.release_env_defaults('calling', {}), {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': ' '}),
+                         {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': '0.0.0.0:9500'}), {})
+        self.assertEqual(cr.release_env_defaults('messaging', {}), {})
+        import monitoring_stack
+        target = monitoring_stack.listener_target(cr.SERVICES['calling']['container'],
+                                                  cr.RELEASE_ENV_DEFAULTS['calling']['CALLING_METRICS_ADDRESS'])
+        self.assertEqual(target, 'cfmeet-calling:9464')
+        self.assertNotEqual(9464, cr.SERVICES['calling']['port'])
+
     def test_provider_dependent_features_must_stay_off(self):
         envs = {name: dict(cr.SERVICES[name]['env']) for name in cr.ORDER if not cr.SERVICES[name]['existing']}
         envs['messaging'] = {'MESSAGING_E2EE_DEVICES_ENABLED': 'false'}
@@ -591,7 +618,11 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         manifest = json.loads((REPO / 'infra/api-gateway/route-manifest.json').read_text())
         families = {'/'.join(r['pattern'].split('/')[:3]) for r in manifest['routes']
                     if r['upstream'] == 'cfmeet.developer-platform'}
-        self.assertEqual(set(cr.GATEWAY_PREFIXES), families)
+        # The Developer Platform families the CF Meet Platform activations add to the edge
+        # (/v1/users; /v1/oauth and /v1/app-directory) are routed only by those operations.
+        later = set(cr.platform_ops.USERS_EDGE) | set(cr.integrate_ops.OAUTH_EDGE + cr.integrate_ops.DIRECTORY_EDGE)
+        self.assertEqual(set(cr.GATEWAY_PREFIXES), families - later)
+        self.assertFalse(set(cr.GATEWAY_PREFIXES) & later)
         others = [r for r in manifest['routes'] if r['upstream'] != 'cfmeet.developer-platform'
                   and any(r['pattern'] == x or r['pattern'].startswith(x + '/') for x in cr.GATEWAY_PREFIXES)]
         self.assertEqual(others, [])
@@ -637,8 +668,18 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         except ImportError:
             self.skipTest('PyYAML unavailable')
         workflow = yaml.safe_load((REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text())
-        options = (workflow.get('on') or workflow[True])['workflow_dispatch']['inputs']['operation']['options']
-        self.assertEqual(tuple(options), cr.OPERATIONS)
+        options = tuple((workflow.get('on') or workflow[True])['workflow_dispatch']['inputs']['operation']['options'])
+        # The workflow is integrator-owned (docs/platform/build-internal-contracts.md §10): the CF Meet
+        # Platform "Build" operations are either all offered, in this order, or (until the
+        # integrator adds them) all absent. Every other operation must match exactly.
+        platform = cr.platform_ops.OPERATIONS + (cr.platform_ops.ACCEPTANCE,)
+        pending = tuple(op for op in platform if op not in options)
+        self.assertIn(pending, ((), platform))
+        # The CF Meet Apps operations (integrate_operations.py) likewise: all offered or all absent.
+        integrate = cr.integrate_ops.OPERATIONS
+        later = tuple(op for op in integrate if op not in options)
+        self.assertIn(later, ((), integrate))
+        self.assertEqual(options, tuple(op for op in cr.OPERATIONS if op not in pending + later))
 
 
 class PublicInternalDenial(unittest.TestCase):

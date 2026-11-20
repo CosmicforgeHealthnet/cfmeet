@@ -147,9 +147,10 @@
       "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "RecipientRef": {
+      "description": "A recipient reference. 1.3.0 (ADR 0063 N-P4): also platform-principal:<environmentId>:<principalId>, a partner's end user reached only through the partner's own push credentials, for the metadata-only partner event types (messaging.message.created).",
       "type": "string",
-      "maxLength": 80,
-      "pattern": "^(cfmeet-user|meeting-email-principal|platform-principal):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^operator-group:[a-z][a-z-]{0,39}$"
+      "maxLength": 96,
+      "pattern": "^(cfmeet-user|meeting-email-principal|platform-principal):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^operator-group:[a-z][a-z-]{0,39}$|^platform-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "Uuid": {
       "type": "string",

@@ -464,6 +464,15 @@ async fn a_to_d_foundation_certification_across_real_services() {
     messaging_migration::GapClosureMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let (mut messaging, url) = world.start_messaging(&db.url).await;
     let m = Client {
         http: &world.http,
@@ -1079,6 +1088,15 @@ async fn external_developer_journey_with_attachments_search_and_webhooks() {
         .unwrap();
     // The gap-closure history this image requires (gap audit).
     messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let (_messaging, url) = world.start_messaging(&db.url).await;
@@ -1712,6 +1730,15 @@ async fn hosted_staging_kit_rehearsal_against_real_services() {
         .unwrap();
     // The gap-closure history this image requires (gap audit).
     messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let (_messaging, url) = world.start_messaging(&db.url).await;

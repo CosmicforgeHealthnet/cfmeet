@@ -51,10 +51,20 @@ pub struct AppState {
     /// N9 push-registration facade towards the Notification Service (`None`: off, the
     /// default — Messaging behaves exactly as before).
     pub push_mirror: Option<Arc<crate::push_mirror::PushMirror>>,
+    /// ADR 0062 / 0063 partner devices and push (every flag off by default: nothing
+    /// partner-specific is reachable).
+    pub partner: Arc<crate::partner::Partner>,
+    /// ADR 0064 CF Meet Apps (`MESSAGING_APPS_ENABLED`, default off: OAuth credentials
+    /// are refused and nothing app-specific happens).
+    pub apps: crate::apps::AppsSettings,
     /// Gap audit S1 (`MESSAGING_ORGANIZATION_WAKEUPS=on`, default off): message wake-ups of
     /// conversations in an organization's own first-party scope go to the Notification
     /// Service (route `NEW`), addressed to the members' CF Meet accounts.
     pub organization_wakeups: bool,
+    /// "Added to a group" notices (`messaging_member_notifications`) are written for the
+    /// Notification Service: set when `CF_NOTIFICATIONS_BASE_URL` is configured (default
+    /// off: nothing is written).
+    pub member_notices: bool,
 }
 
 impl AppState {
@@ -90,7 +100,10 @@ impl AppState {
             attachments: AttachmentSettings::default(),
             sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
             push_mirror: None,
+            partner: Arc::new(crate::partner::Partner::disabled()),
+            apps: crate::apps::AppsSettings::default(),
             organization_wakeups: false,
+            member_notices: false,
         }
     }
 

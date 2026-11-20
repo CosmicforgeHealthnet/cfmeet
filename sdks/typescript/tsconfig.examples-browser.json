@@ -5,7 +5,14 @@
     "noEmit": true,
     "rootDir": ".",
     "baseUrl": ".",
-    "paths": { "@cfmeet/platform-sdk": ["./src/index.ts"] }
+    "paths": {
+      "@cfmeet/platform-sdk": [
+        "./src/index.ts"
+      ]
+    }
   },
-  "files": ["examples/browser-session.ts"]
+  "files": [
+    "examples/browser-session.ts",
+    "examples/device-web.ts"
+  ]
 }

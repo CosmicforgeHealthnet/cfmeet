@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.6.0",
-    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.8.0",
+    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back."
   },
   "tags": [
     {
@@ -1260,6 +1260,242 @@
           }
         }
       }
+    },
+    "/internal/v1/communications/account-erasure": {
+      "post": {
+        "operationId": "eraseCommunicationsAccount",
+        "summary": "Erase a deleted account's Hub data",
+        "description": "S2: in one transaction the account's CF Meet IDs (current and retired), contacts, contact lists, saved messages, conversation preferences, clear-for-me marks, timeline entries and change feed are deleted; its open invites are revoked, pending contact requests cancelled and connections ended (REVOKED; BLOCKED stays). The profile row stays as the anchor of other people's records with a neutral display name, no avatar, DEACTIVATED and credentials revoked (fanned out to Calling and Messaging). Audited ACCOUNT_ERASED with counts only. Idempotent; an account without a Hub profile answers profile false. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.apply is granted only by the receiving service trust policy (Meeting Service).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-account.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountErasureResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountReferenceRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/account-export": {
+      "post": {
+        "operationId": "exportCommunicationsAccount",
+        "summary": "Export an account's Hub data",
+        "description": "S2: the account's own Hub data for its data download: profile, CF Meet IDs, privacy and notification settings, contacts, contact lists, saved messages, conversation preferences, devices and contact requests (at most 1000 per list). Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.apply is granted only by the receiving service trust policy (Meeting Service).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-account.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountReferenceRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1739,7 +1975,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "purpose": {
             "type": "string",
@@ -1973,6 +2209,76 @@
                 }
               }
             }
+          }
+        }
+      },
+      "AccountReferenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountReference"
+        ],
+        "properties": {
+          "accountReference": {
+            "type": "string",
+            "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "AccountErasureResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "profile",
+          "erased"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "profile": {
+            "type": "boolean"
+          },
+          "erased": {
+            "type": "object",
+            "description": "Rows removed or changed per kind (counts only).",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "AccountExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "profile"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "profile": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "null: the account never opened the Hub."
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array"
+            }
+          },
+          "limitPerList": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       }

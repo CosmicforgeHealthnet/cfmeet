@@ -16,7 +16,9 @@ use crate::{
     dto::v2::*,
     error::{ApiError, ApiResult, ErrorCode},
     services::{
-        actor::ActorContext, admission::RtcOutcome, conference::ConferenceOutcome,
+        actor::{ActorContext, JoinActor},
+        admission::RtcOutcome,
+        conference::ConferenceOutcome,
         idempotency::IdempotencyRequest,
     },
     state::AppState,
@@ -331,10 +333,51 @@ pub async fn reschedule_conference(
     Ok(action_response(o))
 }
 
+/// Extend a live conference (MF1).
+///
+/// Adds `minutes` (1 to 240) to the scheduled end of a LIVE conference, counted from now when the
+/// scheduled end has already passed (the grace period before the automatic end). Requires a role
+/// holding `conference.end` (host or co-host). Everyone in the conference receives
+/// `conference.extended` with the new `scheduledEndAt` and `autoEndAt`; a new `conference.ending_soon`
+/// warning is sent 5 minutes before the new automatic end. A conference that is not live returns
+/// CONFERENCE_NOT_LIVE; one without a scheduled end (never ended automatically) returns
+/// CONFERENCE_STATE_CONFLICT; the conference may run at most 24 hours.
+#[utoipa::path(
+    post, path = "/api/v2/conferences/{id}/extend", tag = "Conferences (v2)", operation_id = "v2_extend_conference",
+    params(("id" = Uuid, Path, description = "Conference id")),
+    request_body = ExtendConferenceRequest,
+    responses(
+        (status = 200, description = "Extended", body = ConferenceActionResponse),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_NOT_LIVE / CONFERENCE_STATE_CONFLICT", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn extend_conference(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<ExtendConferenceRequest>,
+) -> ApiResult<Json<ConferenceActionResponse>> {
+    let o = state.meeting.conferences.extend(&actor, id, req).await?;
+    Ok(action_response(o))
+}
+
 /// Join (or reconnect to) a conference.
 ///
 /// Identity, role and admission are resolved server-side. A WAITING participant never receives
 /// an RTC credential.
+///
+/// Partner users (CF Meet Platform, `userToken`) present their CF Meet user token as
+/// `Authorization: Bearer cfut_…` (accepted only here, while the deployment enables it). They join
+/// only conferences of meetings owned by the token's application environment (any other conference
+/// is CONFERENCE_NOT_FOUND) whose id the token's effective meeting grants name
+/// (MEETING_ACCESS_DENIED otherwise). The role comes from the grant, limited to what the meeting's
+/// owner may grant; the display name comes from the user profile (a `displayName` in the body is
+/// ignored); invitation tokens and passcodes do not apply. A re-join keeps the same participant and
+/// returns a fresh `participantToken`, which the device uses for every other participant
+/// operation. A refused, expired or revoked user token is AUTHENTICATION_REQUIRED.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/join", tag = "Conferences (v2)", operation_id = "v2_join_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -343,19 +386,40 @@ pub async fn reschedule_conference(
         (status = 200, description = "Joined or waiting", body = JoinConferenceResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED / MEETING_PASSCODE_REQUIRED / MEETING_PASSCODE_INVALID", body = ErrorEnvelope),
         (status = 403, description = "MEETING_ACCESS_DENIED / CONFERENCE_LOCKED / PARTICIPANT_BANNED", body = ErrorEnvelope),
+        (status = 404, description = "CONFERENCE_NOT_FOUND", body = ErrorEnvelope),
         (status = 409, description = "CONFERENCE_NOT_LIVE / MEETING_CAPACITY_REACHED", body = ErrorEnvelope),
         (status = 410, description = "INVITATION_INVALID / INVITATION_EXPIRED", body = ErrorEnvelope),
-        (status = 503, description = "RTC_PROVIDER_UNAVAILABLE", body = ErrorEnvelope),
+        (status = 503, description = "RTC_PROVIDER_UNAVAILABLE / SERVICE_UNAVAILABLE", body = ErrorEnvelope),
     ),
-    security((), ("bearer_auth" = []), ("participant_token" = []))
+    security((), ("bearer_auth" = []), ("participant_token" = []), ("userToken" = []))
 )]
 pub async fn join_conference(
     State(state): State<AppState>,
-    actor: ActorContext,
+    JoinActor(actor): JoinActor,
     V2Path(id): V2Path<Uuid>,
     V2OptionalJson(req): V2OptionalJson<JoinConferenceRequest>,
 ) -> ApiResult<Json<JoinConferenceResponse>> {
     let o = state.meeting.admission.join(&actor, id, req).await?;
+    // ADR 0062: partner meeting chat — link the conversation and admit the partner user
+    // (best effort: chat never fails a join; the background pass catches up).
+    if let (Some(user), Some(chat)) = (
+        actor.platform_user(),
+        state.platform_users.as_ref().and_then(|u| u.chat.as_ref()),
+    ) {
+        let kind =
+            crate::services::platform::partner_chat::environment_kind(&user.token.environment_kind);
+        if let (Some(kind), crate::domain::AdmissionState::Admitted) =
+            (kind, o.participant.admission_state)
+        {
+            if let Err(e) = chat
+                .after_join(o.conference.id, o.participant.id, kind)
+                .await
+            {
+                tracing::warn!(error = %e, conference_id = %o.conference.id,
+                    "partner meeting chat sync deferred after join");
+            }
+        }
+    }
     let (rtc, rtc_status) = match o.rtc {
         RtcOutcome::Issued(c) => (
             Some(RtcCredentialResponse {

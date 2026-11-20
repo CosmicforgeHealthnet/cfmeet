@@ -24,6 +24,9 @@ pub struct Profile {
     pub version: i64,
     pub account_version: i64,
     pub credentials_not_before: Option<DateTime<Utc>>,
+    /// KF2: the short "About" line contacts see (absent before the contacts-audit history).
+    #[serde(default)]
+    pub about: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -41,6 +44,14 @@ impl Profile {
 pub enum Audience {
     Connections,
     Nobody,
+}
+/// Who decides on a new contact: AUTOMATIC (default) connects anyone who has the person's
+/// CF Meet ID straight away (they gave their consent by sharing it); MANUAL keeps requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContactApproval {
+    Automatic,
+    Manual,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -76,6 +87,15 @@ pub struct Privacy {
     /// on update (absent: unchanged); always present when read.
     #[serde(default)]
     pub group_invitation_policy: Option<Audience>,
+    /// Direct contact by CF Meet ID. Optional on update (absent: unchanged); always present
+    /// when read.
+    #[serde(default)]
+    pub contact_approval: Option<ContactApproval>,
+    /// KF1: whether people who know this person's verified email address can find them
+    /// (opt-in, default false). Optional on update (absent: unchanged); always present when
+    /// read.
+    #[serde(default)]
+    pub email_discoverable: Option<bool>,
 }
 impl Default for Privacy {
     fn default() -> Self {
@@ -88,6 +108,8 @@ impl Default for Privacy {
             public_profile_visibility: Visibility::Public,
             presence_visibility: Audience::Connections,
             group_invitation_policy: Some(Audience::Connections),
+            contact_approval: Some(ContactApproval::Automatic),
+            email_discoverable: Some(false),
         }
     }
 }
@@ -103,6 +125,10 @@ pub struct PrivacyRow {
     pub presence_visibility: Audience,
     #[serde(default)]
     pub group_invitation_policy: Option<Audience>,
+    #[serde(default)]
+    pub contact_approval: Option<ContactApproval>,
+    #[serde(default)]
+    pub email_discoverable: Option<bool>,
 }
 impl PrivacyRow {
     pub fn settings(&self) -> Privacy {
@@ -118,6 +144,8 @@ impl PrivacyRow {
                 self.group_invitation_policy
                     .unwrap_or(Audience::Connections),
             ),
+            contact_approval: Some(self.contact_approval.unwrap_or(ContactApproval::Automatic)),
+            email_discoverable: Some(self.email_discoverable.unwrap_or(false)),
         }
     }
 }
@@ -128,6 +156,9 @@ pub struct Connection {
     pub right_profile_id: Uuid,
     pub state: String,
     pub version: i64,
+    /// K5: the pair was CONNECTED when it was blocked (unblocking restores the contact).
+    #[serde(default)]
+    pub connected_before_block: bool,
 }
 impl Connection {
     pub fn other(&self, owner: Uuid) -> Option<Uuid> {

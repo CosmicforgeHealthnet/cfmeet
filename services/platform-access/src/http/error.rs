@@ -56,6 +56,34 @@ error_codes! {
     InvalidState = "INVALID_STATE" => CONFLICT, "The resource is not in a state that allows the operation.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";
+    // ADR 0062 (CF Meet Platform "Build"): partner users, user tokens.
+    ScopeRequired = "SCOPE_REQUIRED" => FORBIDDEN, "The credential lacks a scope the operation requires.";
+    LimitExceeded = "LIMIT_EXCEEDED" => CONFLICT, "An environment limit has been reached.";
+    RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests; retry later.";
+    UserTokenInvalid = "USER_TOKEN_INVALID" => UNAUTHORIZED, "The user token is invalid.";
+    UserTokenExpired = "USER_TOKEN_EXPIRED" => UNAUTHORIZED, "The user token has expired.";
+    UserTokenRevoked = "USER_TOKEN_REVOKED" => UNAUTHORIZED, "The user token is no longer valid.";
+    // ADR 0064 (CF Meet Apps): authorization-request validation.
+    InvalidClient = "INVALID_CLIENT" => BAD_REQUEST, "The client is unknown.";
+    InvalidRedirectUri = "INVALID_REDIRECT_URI" => BAD_REQUEST, "The redirect URI is not registered for the client.";
+    InvalidScope = "INVALID_SCOPE" => BAD_REQUEST, "The requested scope is invalid for the client.";
+    PkceRequired = "PKCE_REQUIRED" => BAD_REQUEST, "A PKCE S256 code challenge is required.";
+    AppNotAvailable = "APP_NOT_AVAILABLE" => BAD_REQUEST, "The app is not available to this account.";
+    // ADR 0064: the token endpoint backend answers RFC 6749 error codes.
+    OauthInvalidGrant = "invalid_grant" => BAD_REQUEST, "The authorization grant is invalid, expired or revoked.";
+    OauthInvalidClient = "invalid_client" => UNAUTHORIZED, "Client authentication failed.";
+    OauthUnsupportedGrantType = "unsupported_grant_type" => BAD_REQUEST, "The grant type is not supported.";
+    OauthInvalidRequest = "invalid_request" => BAD_REQUEST, "The request is missing a required parameter.";
+}
+
+impl ErrorCode {
+    /// The RFC 6749 token-endpoint codes (lower snake case on the wire, by the RFC).
+    pub const OAUTH_RFC: &'static [ErrorCode] = &[
+        ErrorCode::OauthInvalidGrant,
+        ErrorCode::OauthInvalidClient,
+        ErrorCode::OauthUnsupportedGrantType,
+        ErrorCode::OauthInvalidRequest,
+    ];
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -154,6 +182,13 @@ mod tests {
     #[test]
     fn codes_are_stable_upper_snake_case() {
         for code in ErrorCode::ALL {
+            if ErrorCode::OAUTH_RFC.contains(code) {
+                assert!(code
+                    .as_str()
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b == b'_'));
+                continue;
+            }
             assert!(code
                 .as_str()
                 .bytes()

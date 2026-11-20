@@ -16,6 +16,7 @@
 
 pub mod access;
 pub mod http;
+pub mod inbox_settings;
 pub mod policy;
 pub mod sequence;
 pub mod service;

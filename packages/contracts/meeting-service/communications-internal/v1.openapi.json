@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet meeting-service private Communications integration",
-    "version": "1.1.0",
-    "description": "Private backend interfaces for Sections 4\u20137 and the Sections 9\u201323 meeting facade (MT-1, MT-2). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.2.0",
+    "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 meeting facade (MT-1, MT-2). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
     {
@@ -242,6 +242,124 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Backfill"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/accounts/communications/email-lookup": {
+      "post": {
+        "operationId": "lookupCommunicationsAccountByEmail",
+        "summary": "Find the account with a verified email address",
+        "description": "Find the account whose VERIFIED email address is exactly the given one (case-insensitive), for the Hub's find-people-by-email (contacts audit KF1). Only active, non-guest accounts with a verified address match; anything else is found:false, the same as no account. The Hub applies the person's emailDiscoverable setting, its rate limit and the block and visibility rules, and never relays the account reference to clients. The address is never logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-account.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailLookupResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailLookup"
               }
             }
           }
@@ -864,6 +982,44 @@
           "role",
           "latestConference"
         ]
+      },
+      "EmailLookup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "EmailLookupResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "accountReference": {
+            "type": "string",
+            "pattern": "^cfmeet-user:[0-9a-f-]{36}$"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "found"
+        ],
+        "description": "found:false carries nothing else; found:true carries accountReference."
       }
     }
   }

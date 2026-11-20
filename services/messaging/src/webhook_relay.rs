@@ -22,6 +22,9 @@
 //! receiver that has not settled: the row is RELAYED once every receiver accepted it and
 //! DEAD_LETTER once every receiver settled with a refusal (or the attempts are exhausted).
 //! Failure codes of the Developer Platform are prefixed `DEVELOPER_PLATFORM_`.
+//!
+//! ADR 0064: bot events (`messaging.bot.*`, queued by [`crate::apps`]) are relayed to the
+//! Developer Platform only; Calling is never asked about them.
 
 use std::{sync::Arc, time::Duration as StdDuration};
 
@@ -338,10 +341,36 @@ pub async fn relay_due_to(
         } = settled.unwrap_or_default();
         let attempts = event.attempts + 1;
         let body = envelope(&event, &state.runtime_environment().to_string());
+        // ADR 0064: bot events go to the Developer Platform only (never to Calling).
+        let developer_platform_only = crate::apps::developer_platform_only(&event.event_type);
+        let applicable = |d: &EventDestination| {
+            !developer_platform_only || *d == EventDestination::DeveloperPlatform
+        };
+        if !sinks.iter().any(|(d, _)| applicable(d)) {
+            // No receiver for this event in this deployment (the Developer Platform was
+            // removed as a receiver after it was recorded): visible, not retried.
+            db::exec(
+                &txn,
+                "UPDATE messaging_webhook_relay SET status = 'DEAD_LETTER', attempts = $2, \
+                   last_error = 'DEVELOPER_PLATFORM_NOT_CONFIGURED' WHERE event_id = $1",
+                vec![event.id.into(), attempts.into()],
+            )
+            .await?;
+            txn.commit().await?;
+            report.dead_lettered += 1;
+            crate::metrics::inc(
+                "messaging_webhook_relay_total",
+                &[("outcome", "dead_letter")],
+            );
+            continue;
+        }
         // The first transient / unconfigured failure and the first refusal of this pass.
         let mut failure: Option<(RelayFailure, &'static str)> = None;
         let mut refusal: Option<&'static str> = None;
         for (destination, sink) in sinks {
+            if !applicable(destination) {
+                continue;
+            }
             let slot = match destination {
                 EventDestination::Calling => &mut calling,
                 EventDestination::DeveloperPlatform => &mut developer_platform,
@@ -372,9 +401,13 @@ pub async fn relay_due_to(
             EventDestination::Calling => calling.as_deref(),
             EventDestination::DeveloperPlatform => developer_platform.as_deref(),
         };
-        let all_settled = sinks.iter().all(|(d, _)| outcome_of(d).is_some());
+        let all_settled = sinks
+            .iter()
+            .filter(|(d, _)| applicable(d))
+            .all(|(d, _)| outcome_of(d).is_some());
         let any_refused = sinks
             .iter()
+            .filter(|(d, _)| applicable(d))
             .any(|(d, _)| outcome_of(d) == Some(OUTCOME_REJECTED));
         // (status, attempts, last error, next attempt) of the row.
         let (status, counted, code, next): (&str, i32, Option<&str>, _) =

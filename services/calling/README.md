@@ -513,6 +513,33 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
 
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
+### CF Meet Platform devices and partner call push (ADR 0062 / 0063)
+
+`CALLING_USER_TOKEN_EXCHANGE_ENABLED` (`true` / `false`, **default `false`**). When on,
+`POST /v1/calling/user-sessions` is mounted (contract `userToken`, `Authorization: Bearer
+cfut_…`, body `{installationId, kind: WEB|MOBILE}`). The token is verified live with
+Platform Access (`POST /internal/v1/user-tokens/verify`, `platform-user-token.verify`; a
+success is reused ≤ 30 s), must hold the effective grant `call:receive`, and its minting
+credential (`crd` / `sva`) is re-verified live like a gateway forward (fully ACTIVE chain,
+EXTERNAL tenant, `calls.write`; the minting credential's rate limit applies). The user must
+be an ACTIVE `EXTERNAL_APPLICATION_PRINCIPAL` of that environment. The endpoint keyed
+`inst:<installationId>` is created (201) or reused (200) for the user (another user signing
+in on the same installation gets it after the previous endpoint is revoked); the answer is
+`{principalId, endpointId, signalingCredential, signalingCredentialExpiresAt}`, the `cfsig_`
+credential recording the token's `crd` / `sva` and expiring no later than the token
+(`src/endpoints/user_sessions.rs`, `src/platform/user_tokens.rs`). Refusals: 401 (token,
+user, minting credential, non-EXTERNAL tenant), 403 (`call:receive` / `calls.write`), 503
+(authority unreachable). Off: the path does not exist (404).
+
+`CALLING_PARTNER_PUSH_ENABLED` (`true` / `false`, **default `false`**). When on (and
+`CALLING_PUSH_TRANSPORT=notifications`), a ring offer to an ACTIVE
+`EXTERNAL_APPLICATION_PRINCIPAL` of an EXTERNAL tenant is also sent to the Notification
+Service I3 (`/internal/v1/push/call-invitations`) with the recipient
+`{kind: "platform-principal", tenantId, applicationId, environmentId, principalId}` (contract
+§6 N-P3) instead of push target references; one alert per (call, principal), background,
+bounded by `CALLING_PUSH_TIMEOUT_MS`, never retried (signaling and invitation recovery stay
+authoritative). The first-party `cfmeet-user:` path is unchanged.
+
 ### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
 
 `CALLING_ORGANIZATION_FORWARDING_ENABLED` (`true` / `false`, **default `false`**). When
@@ -662,6 +689,7 @@ consult a switch (`tests/feature_rollback.rs`).
 | `CALLING_NEW_CALLS_ENABLED` | `true` | Master switch: every new call — application, app-to-phone, callback relay, enterprise, inbound public and enterprise SIP offers |
 | `CALLING_APP_CALLING_ENABLED` | `true` | New application (app-to-app RTC) calls |
 | `CALLING_SCREEN_SHARE_ENABLED` | `true` | New screen-share presentations in live application calls (C6; stopping always works) |
+| `CALLING_BUSY_ON_ANOTHER_CALL` | `true` | CF1 "on another call": a target already in a live call is not rung (a missed call for it); a call whose every target is busy ends `BUSY` at once |
 | `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
 | `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
 | `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |
@@ -768,13 +796,16 @@ curl http://127.0.0.1:8090/health
 
 From the repository root: `make calling-migrate`, `make calling`.
 
-`calling-migration up` applies two histories: the main one (`calling_seaql_migrations`,
-fail-closed on versions it does not know) and then the additive gap-closure history
-(`calling_gap_closure_seaql_migrations`, `migration/src/gap/`). New additive changes go
-to the gap-closure history so the previous image still starts against a database that
-has them; this image refuses to start until both are applied
-(`calling_migration::pending_migrations`). `reset` rolls the gap-closure history back
-first; other subcommands concern the main history.
+`calling-migration up` applies the main history (`calling_seaql_migrations`, fail-closed
+on versions it does not know), the notification-publications history, the additive
+gap-closure history (`calling_gap_closure_seaql_migrations`, `migration/src/gap/`) and the
+call-kind-offer history (`calling_call_kind_offer_seaql_migrations`,
+`migration/src/kind_offer/`: CF2, a voice call switched to video while it rings). The
+gap-closure history is fail-closed too in every image that reads it, so a change that must
+stay rollback-safe gets a history of its own that the previous image never reads; this
+image refuses to start until all of them are applied
+(`calling_migration::pending_migrations`). `reset` rolls the call-kind-offer and
+gap-closure histories back first; other subcommands concern the main history.
 
 ## Administration
 

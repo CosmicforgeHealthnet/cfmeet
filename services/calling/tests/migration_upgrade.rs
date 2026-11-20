@@ -26,7 +26,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::http::{Method, StatusCode};
 use calling::platform::scopes::names;
 use calling_migration::{
-    GapClosureMigrator, Migrator, MigratorTrait, GAP_CLOSURE_MIGRATION_TABLE, MIGRATION_TABLE,
+    CallKindOfferMigrator, GapClosureMigrator, Migrator, MigratorTrait,
+    GAP_CLOSURE_MIGRATION_TABLE, MIGRATION_TABLE,
 };
 use common::{
     deployment::{Deployment, Receiver},
@@ -217,7 +218,10 @@ async fn fingerprint(
 ) -> BTreeMap<String, (i64, String)> {
     let mut out = BTreeMap::new();
     for (table, columns) in cols {
-        if table == MIGRATION_TABLE || table == GAP_CLOSURE_MIGRATION_TABLE {
+        if table == MIGRATION_TABLE
+            || table == GAP_CLOSURE_MIGRATION_TABLE
+            || table == calling_migration::CALL_KIND_OFFER_MIGRATION_TABLE
+        {
             continue;
         }
         let row = columns
@@ -267,7 +271,10 @@ async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> u
         .await
         .unwrap();
     for table in tables(target).await {
-        if table == MIGRATION_TABLE || table == GAP_CLOSURE_MIGRATION_TABLE {
+        if table == MIGRATION_TABLE
+            || table == GAP_CLOSURE_MIGRATION_TABLE
+            || table == calling_migration::CALL_KIND_OFFER_MIGRATION_TABLE
+        {
             continue;
         }
         let rows = strings(donor, &donor_rows(&table)).await.pop().unwrap();
@@ -510,15 +517,30 @@ async fn seed(d: &Deployment) {
     .unwrap();
 }
 
-/// The newest migration lives in the gap-closure history when it has any (applied after
-/// the main history), else in the main history.
+/// The newest migration lives in the call-kind-offer history when it has any (applied
+/// last by `up_all`), else in the gap-closure history when it has any (applied after the
+/// main history), else in the main history.
+fn kind_offer_newest() -> bool {
+    !CallKindOfferMigrator::migrations().is_empty()
+}
+
 fn gap_closure_newest() -> bool {
     !GapClosureMigrator::migrations().is_empty()
 }
 
 /// Every migration but the newest.
 async fn up_previous(conn: &DatabaseConnection) {
-    if gap_closure_newest() {
+    if kind_offer_newest() {
+        let k = CallKindOfferMigrator::migrations().len();
+        Migrator::up(conn, None).await.unwrap();
+        calling_migration::NotificationPublicationsMigrator::up(conn, None)
+            .await
+            .unwrap();
+        GapClosureMigrator::up(conn, None).await.unwrap();
+        CallKindOfferMigrator::up(conn, Some((k - 1) as u32))
+            .await
+            .unwrap();
+    } else if gap_closure_newest() {
         let g = GapClosureMigrator::migrations().len();
         Migrator::up(conn, None).await.unwrap();
         // The notification-publications history sits between the two (see `up_all`).
@@ -539,7 +561,9 @@ async fn up_head(conn: &DatabaseConnection) {
 }
 
 async fn down_one(conn: &DatabaseConnection) {
-    if gap_closure_newest() {
+    if kind_offer_newest() {
+        CallKindOfferMigrator::down(conn, Some(1)).await.unwrap();
+    } else if gap_closure_newest() {
         GapClosureMigrator::down(conn, Some(1)).await.unwrap();
     } else {
         Migrator::down(conn, Some(1)).await.unwrap();
@@ -560,6 +584,13 @@ async fn pending(conn: &DatabaseConnection) -> Vec<String> {
             .iter()
             .map(|m| m.name().to_string()),
     );
+    out.extend(
+        CallKindOfferMigrator::get_pending_migrations(conn)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.name().to_string()),
+    );
     out
 }
 
@@ -572,7 +603,9 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     let donor = d.h().conn();
     let head_schema = schema(donor).await;
 
-    let all: Vec<String> = if gap_closure_newest() {
+    let all: Vec<String> = if kind_offer_newest() {
+        <CallKindOfferMigrator as MigratorTrait>::migrations()
+    } else if gap_closure_newest() {
         <GapClosureMigrator as MigratorTrait>::migrations()
     } else {
         <Migrator as MigratorTrait>::migrations()

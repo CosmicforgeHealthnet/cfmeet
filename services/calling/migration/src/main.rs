@@ -26,7 +26,7 @@ async fn main() {
         calling_migration::up_all(&db)
             .await
             .expect("Calling migrations failed");
-        println!("Calling migrations applied (main, notification-publications and gap-closure histories)");
+        println!("Calling migrations applied (main, notification-publications, gap-closure and call-kind-offer histories)");
         return;
     }
     // The destructive subcommands roll back the main history, whose tables the
@@ -40,7 +40,11 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Calling migration database connection failed");
-        // The gap-closure history depends on the main one too: rolled back first.
+        // The call-kind-offer and gap-closure histories depend on the main one too:
+        // rolled back first.
+        calling_migration::CallKindOfferMigrator::reset(&db)
+            .await
+            .expect("Calling call-kind-offer rollback failed");
         calling_migration::GapClosureMigrator::reset(&db)
             .await
             .expect("Calling gap-closure rollback failed");

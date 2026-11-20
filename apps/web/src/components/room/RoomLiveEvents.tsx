@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, DoorOpen, Megaphone, X } from "lucide-react";
+import { BarChart3, Clock, DoorOpen, Megaphone, X } from "lucide-react";
 import { useParticipantsV2 } from "@/hooks/v2";
 import type { SidebarPanel } from "./sidebar";
 
 /** In-call banners (Meet / Teams pattern): announcements, new polls, breakout timing. */
 export interface RoomNotice {
   id: string;
-  kind: "announcement" | "poll" | "breakout";
+  kind: "announcement" | "poll" | "breakout" | "ending";
   title: string;
   body?: string;
   panel?: SidebarPanel;
   action?: string;
+  /** The meeting is about to end automatically: hosts may extend it. */
+  extendable?: boolean;
 }
 
 export const NOTICE_EVENT = "cfmeet:notice";
@@ -22,16 +24,18 @@ export const MEDIA_MOVE_EVENT = "cfmeet:media-move";
 
 export const emitNotice = (notice: RoomNotice) => window.dispatchEvent(new CustomEvent(NOTICE_EVENT, { detail: notice }));
 
-const ICONS = { announcement: Megaphone, poll: BarChart3, breakout: DoorOpen };
+const ICONS = { announcement: Megaphone, poll: BarChart3, breakout: DoorOpen, ending: Clock };
+const EXTEND_MINUTES = 15;
 
-export function RoomNotices({ onOpenPanel }: { onOpenPanel: (panel: SidebarPanel) => void }) {
+export function RoomNotices({ onOpenPanel, onExtend }: { onOpenPanel: (panel: SidebarPanel) => void; onExtend?: (minutes: number) => Promise<unknown> }) {
+  const [extending, setExtending] = useState(false);
   const [notices, setNotices] = useState<RoomNotice[]>([]);
   useEffect(() => {
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const receive = (event: Event) => {
       const notice = (event as CustomEvent<RoomNotice>).detail;
       setNotices((current) => [...current.filter((n) => n.id !== notice.id).slice(-2), notice]);
-      const timer = setTimeout(() => setNotices((current) => current.filter((n) => n.id !== notice.id)), notice.kind === "announcement" ? 15000 : 9000);
+      const timer = setTimeout(() => setNotices((current) => current.filter((n) => n.id !== notice.id)), notice.kind === "ending" ? (notice.extendable ? 300000 : 15000) : notice.kind === "announcement" ? 15000 : 9000);
       timers.add(timer);
     };
     window.addEventListener(NOTICE_EVENT, receive);
@@ -51,6 +55,7 @@ export function RoomNotices({ onOpenPanel }: { onOpenPanel: (panel: SidebarPanel
               <p className="text-sm font-semibold">{notice.title}</p>
               {notice.body && <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-white/80">{notice.body}</p>}
               {notice.panel && <button type="button" onClick={() => { onOpenPanel(notice.panel!); dismiss(notice.id); }} className="mt-2 h-8 rounded-full bg-primary px-4 text-sm font-semibold hover:bg-primary/90">{notice.action ?? "Open"}</button>}
+              {notice.extendable && onExtend && <button type="button" disabled={extending} onClick={() => { setExtending(true); void onExtend(EXTEND_MINUTES).then(() => dismiss(notice.id), () => undefined).finally(() => setExtending(false)); }} className="mt-2 h-8 rounded-full bg-primary px-4 text-sm font-semibold hover:bg-primary/90 disabled:opacity-70">{`Extend ${EXTEND_MINUTES} min`}</button>}
             </div>
             <button type="button" aria-label="Dismiss" onClick={() => dismiss(notice.id)} className="flex size-8 shrink-0 items-center justify-center rounded-full text-white/60 hover:bg-white/10 hover:text-white"><X className="size-4" /></button>
           </div>

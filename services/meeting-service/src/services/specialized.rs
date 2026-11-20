@@ -25,6 +25,8 @@ use serde_json::{json, Value};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::services::notifications::EmailDelivery;
+
 use crate::{
     domain::{AccessPolicy, AdmissionState, ConferenceStatus, InvitationStatus, Role, SpaceStatus},
     error::{ApiError, ApiResult, ErrorCode},
@@ -362,11 +364,47 @@ pub struct RegistrationCreated {
     pub registration_id: Uuid,
     pub meeting_space_id: Uuid,
     pub conference_id: Option<Uuid>,
-    /// Opaque admission token (shown once; only its hash is stored). Absent for an
-    /// idempotent repeat.
+    /// Opaque admission token (only its hash is stored). An idempotent repeat (same
+    /// `idempotencyKey` and request) returns the same token while the registration is
+    /// active (audit M10); absent once it was cancelled or revoked.
     pub admission_token: Option<String>,
     pub expires_at: chrono::DateTime<Utc>,
     pub created: bool,
+    /// Audit M10: the join link emailed to the registrant (only when an email was given):
+    /// `ACCEPTED`, `FAILED`, or `DISABLED` when this deployment sends no meeting email.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_delivery: Option<EmailDelivery>,
+}
+
+/// Audit M10: the admission token of a registration, derived from its invitation id with
+/// HMAC-SHA256 under the deployment's signing secret (`JWT_SECRET`), so an idempotent
+/// repeat can return the same token without storing it (only its SHA-256 is stored, as
+/// before). `None` without a secret (then the token is random and a repeat cannot return it).
+pub fn registration_token(invitation_id: Uuid) -> Option<String> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use hmac::{Hmac, Mac};
+    let key = std::env::var("JWT_SECRET").ok().filter(|k| !k.is_empty())?;
+    let mut mac = <Hmac<sha2::Sha256> as Mac>::new_from_slice(key.as_bytes()).ok()?;
+    mac.update(b"cfmeet-webinar-registration-token-v1");
+    mac.update(invitation_id.as_bytes());
+    Some(format!(
+        "reg_{}",
+        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    ))
+}
+
+/// What an idempotent repeat must match (occurrence, name and address).
+fn registration_request_digest(
+    conference_id: Option<Uuid>,
+    display_name: &str,
+    email: Option<&str>,
+) -> String {
+    secrets::hash_secret(&format!(
+        "registration-v1\n{}\n{}\n{}",
+        conference_id.map(|c| c.to_string()).unwrap_or_default(),
+        display_name,
+        email.unwrap_or_default()
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -567,6 +605,11 @@ impl RegistrationService {
             Some(k) => Some(secrets::hash_secret(&format!("{}:{k}", space.id))),
             None => None,
         };
+        let request_digest = registration_request_digest(
+            conference.as_ref().map(|c| c.id),
+            &display_name,
+            email.as_deref(),
+        );
         if let Some(d) = &idem {
             if let Some(existing) = webinar_registrations::Entity::find()
                 .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
@@ -574,17 +617,7 @@ impl RegistrationService {
                 .one(&self.core.db)
                 .await?
             {
-                let inv = meeting_invitations::Entity::find_by_id(existing.invitation_id)
-                    .one(&self.core.db)
-                    .await?;
-                return Ok(RegistrationCreated {
-                    registration_id: existing.id,
-                    meeting_space_id: existing.meeting_space_id,
-                    conference_id: existing.conference_id,
-                    admission_token: None,
-                    expires_at: inv.map(|i| i.expires_at).unwrap_or_else(Utc::now),
-                    created: false,
-                });
+                return self.repeat(existing, &request_digest).await;
             }
         }
         let now = Utc::now();
@@ -594,8 +627,9 @@ impl RegistrationService {
                 .min(end + Duration::hours(2))
                 .max(now + Duration::minutes(5));
         }
-        let token = secrets::generate_bearer_secret("reg_");
         let invitation_id = Uuid::new_v4();
+        let token = registration_token(invitation_id)
+            .unwrap_or_else(|| secrets::generate_bearer_secret("reg_"));
         let registration_id = Uuid::new_v4();
         let txn = self.core.db.begin().await?;
         // Gap audit M10: capacity, counted under a per-space lock so two requests never
@@ -698,7 +732,7 @@ impl RegistrationService {
             user_id: Set(ctx.user_id()),
             invitation_id: Set(invitation_id),
             idempotency_key_digest: Set(idem),
-            request_digest: Set(None),
+            request_digest: Set(Some(request_digest)),
             created_at: Set(now),
             updated_at: Set(now),
             cancelled_at: Set(None),
@@ -757,6 +791,50 @@ impl RegistrationService {
             admission_token: Some(token),
             expires_at: expires,
             created: true,
+            email_delivery: None,
+        })
+    }
+
+    /// Audit M10: an idempotent repeat. A different request under the same key is
+    /// `IDEMPOTENCY_CONFLICT`. An active registration returns the same admission token (no
+    /// new seat, no new invitation); a cancelled / revoked / expired one returns none.
+    async fn repeat(
+        &self,
+        existing: webinar_registrations::Model,
+        request_digest: &str,
+    ) -> ApiResult<RegistrationCreated> {
+        if existing
+            .request_digest
+            .as_deref()
+            .is_some_and(|d| d != request_digest)
+        {
+            return Err(ApiError::domain(
+                ErrorCode::IdempotencyConflict,
+                "This idempotencyKey was already used for a different registration",
+            ));
+        }
+        let inv = meeting_invitations::Entity::find_by_id(existing.invitation_id)
+            .one(&self.core.db)
+            .await?;
+        let token = inv
+            .as_ref()
+            .filter(|i| {
+                existing.status == "REGISTERED"
+                    && i.status == InvitationStatus::Active
+                    && i.expires_at > Utc::now()
+                    && i.use_limit.is_none_or(|l| i.usage_count < l)
+            })
+            .and_then(|i| {
+                registration_token(i.id).filter(|t| secrets::hash_secret(t) == i.token_hash)
+            });
+        Ok(RegistrationCreated {
+            registration_id: existing.id,
+            meeting_space_id: existing.meeting_space_id,
+            conference_id: existing.conference_id,
+            admission_token: token,
+            expires_at: inv.map(|i| i.expires_at).unwrap_or_else(Utc::now),
+            created: false,
+            email_delivery: None,
         })
     }
 

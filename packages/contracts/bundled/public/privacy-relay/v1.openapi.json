@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — privacy-relay",
+    "title": "CF Meet Platform API — privacy-relay",
     "version": "1.2.0",
     "description": "The CF Meet platform Privacy Relay API (Part D sections 26-36): Communication Contexts, Privacy Relay Sessions and the Contact Vault. One generic model for first-party and external applications alike; it never knows a consumer's business object. Privacy Relay (services/privacy-relay) is the business and data authority; the API is currently served by the authenticated platform ingress (services/calling), which authenticates the customer credential, checks the scope, validates referenced principals and forwards over authenticated internal service calls with a signed delegated platform context — the customer credential is never forwarded. Tenant, application and environment come only from the credential; a resource of another scope is answered exactly like a missing one (404). Every mutation requires expectedVersion where it changes an existing resource and an Idempotency-Key (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Lifecycle changes are explicit commands; there is no status patch. The Contact Vault routes (x-cfmeet-served-by: cfmeet.privacy-relay) are served by Privacy Relay itself and authenticated by a short-lived Contact Vault access token minted by Calling (POST /v1/privacy-relay/contact-access-grants), so a raw telephone number never transits Calling; they are the ONLY routes that accept a telephone number (telephoneNumber), and no route ever returns one. No provider id, carrier, Contact Vault ciphertext, fingerprint, key or credential is ever accepted or returned.",
     "x-cfmeet-source-contract": "cfmeet.privacy-relay.http-api",
@@ -10,7 +10,7 @@
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {

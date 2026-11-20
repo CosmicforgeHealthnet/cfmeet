@@ -39,9 +39,17 @@ impl State {
         if p.id == target.id {
             return Err(Error::Validation);
         }
-        let claim:Value=one(&self.store.db,"SELECT jsonb_build_object('valid',EXISTS(SELECT 1 FROM communication_invite_claims c JOIN communication_invites i ON i.id=c.invite_id WHERE c.requester_profile_id=$1 AND i.owner_profile_id=$2 AND i.revoked_at IS NULL AND i.expires_at>now())) doc",vec![p.id.into(),target.id.into()]).await?.ok_or(Error::Unavailable)?;
-        self.visible_profile(scope, p, &target, claim["valid"] == true)
-            .await?;
+        // K2: the other person already asked us. Adding them back accepts their request
+        // (both connected), so their discoverability does not stand in the way: we hold
+        // their request. The accept checks below apply.
+        let incoming: Value = one(&self.store.db,"SELECT jsonb_build_object('pending',EXISTS(SELECT 1 FROM communication_contact_requests WHERE sender_profile_id=$1 AND recipient_profile_id=$2 AND state='PENDING' AND expires_at>now())) doc",vec![target.id.into(),p.id.into()]).await?.ok_or(Error::Unavailable)?;
+        if incoming["pending"] != true {
+            let claim = self
+                .store
+                .invite_claim(&self.store.db, p.id, target.id)
+                .await?;
+            self.visible_profile(scope, p, &target, claim).await?;
+        }
         let txn = self.store.begin().await?;
         if let Some(v) = self
             .store
@@ -56,42 +64,108 @@ impl State {
             .lock_pair(&txn, p.scope(), p.id, target.id)
             .await?;
         // Recheck the policy while holding the same pair lock as blocking/removal.
-        if self.store.blocked(&txn, p.id, target.id).await?
-            || self
-                .store
-                .privacy(&txn, target.id)
-                .await?
-                .contact_request_permissions
-                != RequestPermission::Everyone
-        {
+        if self.store.blocked(&txn, p.id, target.id).await? {
             return Err(Error::NotFound);
         }
         if pair.state == "CONNECTED" {
             return Err(Error::Pending);
         }
         let old:Option<ContactRequest>=one(&txn,"SELECT to_jsonb(r) doc FROM communication_contact_requests r WHERE connection_id=$1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE",vec![pair.id.into()]).await?;
-        if let Some(old) = old {
-            if old.state == "PENDING" && old.expires_at > Utc::now() {
-                if old.sender_profile_id == p.id {
-                    let result =
-                        request_view(&old, self.store.current_public_id(&txn, target.id).await?);
-                    self.store
-                        .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
-                        .await?;
-                    txn.commit().await?;
-                    return Ok(result);
+        if let Some(old) = old
+            .as_ref()
+            .filter(|o| o.state == "PENDING" && o.expires_at > Utc::now())
+        {
+            let result = if old.sender_profile_id == p.id {
+                request_view(old, self.store.current_public_id(&txn, target.id).await?)
+            } else {
+                // K2: accept their request; the same checks as accepting it directly.
+                if target.activation_state != Activation::Active
+                    || !self.active_account(scope, &target).await?
+                    || self.domain_blocks(scope, p, &target).await?
+                {
+                    return Err(Error::NotFound);
                 }
-                return Err(Error::Pending);
-            }
+                self.accept_request(&txn, p, &target, &pair, old.id, old.version)
+                    .await?
+            };
+            self.store
+                .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
+        }
+        // K4: "who can send me requests: Nobody" still lets in someone holding a valid,
+        // unexpired invite (link or QR) from this person: they chose to share it.
+        if self
+            .store
+            .privacy(&txn, target.id)
+            .await?
+            .contact_request_permissions
+            != RequestPermission::Everyone
+            && !self.store.invite_claim(&txn, p.id, target.id).await?
+        {
+            return Err(Error::NotFound);
+        }
+        if let Some(old) = old {
             if old.state == "PENDING" {
                 execute(&txn,"UPDATE communication_contact_requests SET state='EXPIRED',version=version+1,updated_at=now() WHERE id=$1",vec![old.id.into()]).await?;
             }
-            let recent:Value=one(&txn,"SELECT jsonb_build_object('cooldown',EXISTS(SELECT 1 FROM communication_contact_requests WHERE connection_id=$1 AND state IN ('DECLINED','CANCELLED') AND updated_at>now()-interval '24 hours')) doc",vec![pair.id.into()]).await?.ok_or(Error::Unavailable)?;
+            // K3: the 24-hour wait applies only to the person whose own request was
+            // declined or cancelled, never to the person who declined it.
+            let recent:Value=one(&txn,"SELECT jsonb_build_object('cooldown',EXISTS(SELECT 1 FROM communication_contact_requests WHERE connection_id=$1 AND sender_profile_id=$2 AND state IN ('DECLINED','CANCELLED') AND updated_at>now()-interval '24 hours')) doc",vec![pair.id.into(),p.id.into()]).await?.ok_or(Error::Unavailable)?;
             if recent["cooldown"] == true {
                 return Err(Error::RateLimited);
             }
         }
         let id = Uuid::new_v4();
+        // Direct contact (owner decision 2026-11-19): a person whose contact approval is
+        // AUTOMATIC gave their consent by sharing their CF Meet ID, so adding them connects
+        // straight away, and chat and calls (CONNECTIONS policies) work at once. The same
+        // checks as accepting a request apply (active person and account, no domain block).
+        let automatic = self
+            .store
+            .privacy(&txn, target.id)
+            .await?
+            .contact_approval
+            .unwrap_or(ContactApproval::Automatic)
+            == ContactApproval::Automatic
+            && target.activation_state == Activation::Active
+            && self.active_account(scope, &target).await?
+            && !self.domain_blocks(scope, &target, p).await?;
+        if automatic {
+            execute(&txn,"INSERT INTO communication_contact_requests(id,connection_id,sender_profile_id,recipient_profile_id,state) VALUES($1,$2,$3,$4,'ACCEPTED')",vec![id.into(),pair.id.into(),p.id.into(),target.id.into()]).await?;
+            execute(&txn,"UPDATE communication_connections SET state='CONNECTED',connected_at=now(),connected_before_block=false,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
+            for owner in [p.id, target.id] {
+                execute(&txn,"INSERT INTO communication_contact_aliases(id,owner_profile_id,connection_id) VALUES($1,$2,$3) ON CONFLICT(owner_profile_id,connection_id) DO NOTHING",vec![Uuid::new_v4().into(),owner.into(),pair.id.into()]).await?;
+            }
+            self.store
+                .audit(&txn, p, "CONNECTION_ADDED_DIRECTLY", Some(id), json!({}))
+                .await?;
+            self.store.event(&txn,p,"communications.connection.connected",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"state":"CONNECTED"})).await?;
+            // The added person learns they have a new contact ("You are now connected").
+            notification_publications::enqueue(
+                self,
+                &txn,
+                Notice {
+                    notice: ConnectionNotice::Connected,
+                    request_id: id,
+                    connection_id: pair.id,
+                    connection_version: pair.version + 1,
+                    actor: p,
+                    recipient: &target,
+                },
+            )
+            .await?;
+            self.store
+                .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
+                .await?;
+            let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"state":"ACCEPTED","version":1,"relationship":"CONNECTED"});
+            self.store
+                .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
+        }
         execute(&txn,"INSERT INTO communication_contact_requests(id,connection_id,sender_profile_id,recipient_profile_id) VALUES($1,$2,$3,$4)",vec![id.into(),pair.id.into(),p.id.into(),target.id.into()]).await?;
         execute(&txn,"UPDATE communication_connections SET state='REQUEST_PENDING',version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
         self.store
@@ -116,7 +190,7 @@ impl State {
         self.store
             .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
             .await?;
-        let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":request.cf_meet_id,"state":"PENDING","version":1});
+        let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"state":"PENDING","version":1,"relationship":"REQUEST_PENDING"});
         self.store
             .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
             .await?;
@@ -203,18 +277,19 @@ impl State {
         {
             return Err(Error::NotFound);
         }
-        execute(&txn,"UPDATE communication_contact_requests SET state=$2,version=version+1,updated_at=now() WHERE id=$1",vec![id.into(),next.into()]).await?;
-        let relationship = if action == "accept" {
-            "CONNECTED"
-        } else {
-            "NONE"
-        };
-        execute(&txn,"UPDATE communication_connections SET state=$2,connected_at=CASE WHEN $2='CONNECTED' THEN now() ELSE connected_at END,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into(),relationship.into()]).await?;
         if action == "accept" {
-            for owner in [p.id, other.id] {
-                execute(&txn,"INSERT INTO communication_contact_aliases(id,owner_profile_id,connection_id) VALUES($1,$2,$3) ON CONFLICT(owner_profile_id,connection_id) DO NOTHING",vec![Uuid::new_v4().into(),owner.into(),pair.id.into()]).await?;
-            }
+            let result = self
+                .accept_request(&txn, p, &other, &pair, id, r.version)
+                .await?;
+            self.store
+                .finish_idempotency(&txn, p, &operation, key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
         }
+        execute(&txn,"UPDATE communication_contact_requests SET state=$2,version=version+1,updated_at=now() WHERE id=$1",vec![id.into(),next.into()]).await?;
+        let relationship = "NONE";
+        execute(&txn,"UPDATE communication_connections SET state=$2,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into(),relationship.into()]).await?;
         self.store
             .audit(
                 &txn,
@@ -225,23 +300,6 @@ impl State {
             )
             .await?;
         self.store.event(&txn,p,&format!("communications.connection.{}",relationship.to_lowercase()),pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":other.principal_id,"state":relationship})).await?;
-        if action == "accept" {
-            // Roadmap N7: the requester learns the addressee accepted (only with
-            // CF_NOTIFICATIONS_BASE_URL; a blocked pair was refused above).
-            notification_publications::enqueue(
-                self,
-                &txn,
-                Notice {
-                    notice: ConnectionNotice::Connected,
-                    request_id: id,
-                    connection_id: pair.id,
-                    connection_version: pair.version + 1,
-                    actor: p,
-                    recipient: &other,
-                },
-            )
-            .await?;
-        }
         self.store
             .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
             .await?;
@@ -251,6 +309,55 @@ impl State {
             .await?;
         txn.commit().await?;
         Ok(result)
+    }
+    /// Accept `request` (sent by `other` to `p`) under the pair lock the caller holds:
+    /// both people become connected. Used by accepting a request and by K2 (adding back
+    /// someone whose request to you is pending). The caller made the accept checks.
+    async fn accept_request(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        p: &Profile,
+        other: &Profile,
+        pair: &Connection,
+        request: Uuid,
+        request_version: i64,
+    ) -> Result<Value> {
+        execute(txn,"UPDATE communication_contact_requests SET state='ACCEPTED',version=version+1,updated_at=now() WHERE id=$1",vec![request.into()]).await?;
+        execute(txn,"UPDATE communication_connections SET state='CONNECTED',connected_at=now(),connected_before_block=false,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
+        for owner in [p.id, other.id] {
+            execute(txn,"INSERT INTO communication_contact_aliases(id,owner_profile_id,connection_id) VALUES($1,$2,$3) ON CONFLICT(owner_profile_id,connection_id) DO NOTHING",vec![Uuid::new_v4().into(),owner.into(),pair.id.into()]).await?;
+        }
+        self.store
+            .audit(
+                txn,
+                p,
+                "CONNECTION_REQUEST_ACCEPTED",
+                Some(request),
+                json!({}),
+            )
+            .await?;
+        self.store.event(txn,p,"communications.connection.connected",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":other.principal_id,"state":"CONNECTED"})).await?;
+        // Roadmap N7: the requester learns the addressee accepted (only with
+        // CF_NOTIFICATIONS_BASE_URL; a blocked pair was refused by the caller).
+        notification_publications::enqueue(
+            self,
+            txn,
+            Notice {
+                notice: ConnectionNotice::Connected,
+                request_id: request,
+                connection_id: pair.id,
+                connection_version: pair.version + 1,
+                actor: p,
+                recipient: other,
+            },
+        )
+        .await?;
+        self.store
+            .relationship_changed(txn, &[p.id, other.id], pair.id, pair.version + 1)
+            .await?;
+        Ok(
+            json!({"schemaVersion":1,"requestId":request,"cfMeetId":self.store.current_public_id(txn,other.id).await?,"state":"ACCEPTED","version":request_version+1,"relationship":"CONNECTED"}),
+        )
     }
     pub async fn list_requests(
         &self,
@@ -264,27 +371,27 @@ impl State {
         } else {
             "sender_profile_id"
         };
-        let requests:Vec<ContactRequest>=rows(&self.store.db,&format!("SELECT to_jsonb(r) doc FROM communication_contact_requests r WHERE {column}=$1 AND id>$2 ORDER BY id LIMIT $3"),vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
+        // One query for the page. Requests are already scoped by the owner's immutable
+        // profile; the other person's current CF Meet ID and a live block (either way,
+        // which hides the request immediately, even before event propagation) come joined.
+        let other = if incoming {
+            "r.sender_profile_id"
+        } else {
+            "r.recipient_profile_id"
+        };
+        let requests:Vec<Value>=rows(&self.store.db,&format!("SELECT jsonb_build_object('request',to_jsonb(r),'cfMeetId',i.public_id,'blocked',EXISTS(SELECT 1 FROM communication_block_bridge b WHERE b.active AND ((b.blocker_profile_id=$1 AND b.blocked_profile_id={other}) OR (b.blocker_profile_id={other} AND b.blocked_profile_id=$1)))) doc FROM communication_contact_requests r LEFT JOIN communication_public_ids i ON i.profile_id={other} AND i.current WHERE r.{column}=$1 AND r.id>$2 ORDER BY r.id LIMIT $3"),vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
         let more = requests.len() > limit as usize;
         let mut data = Vec::new();
         let mut next = None;
-        for request in requests.into_iter().take(limit as usize) {
+        for row in requests.into_iter().take(limit as usize) {
+            let request: ContactRequest =
+                serde_json::from_value(row["request"].clone()).map_err(|_| Error::Unavailable)?;
             next = Some(request.id);
-            let other = if incoming {
-                request.sender_profile_id
-            } else {
-                request.recipient_profile_id
-            };
-            // Requests are already scoped by the owner's immutable profile. A live
-            // block hides the request immediately, even before event propagation.
-            if self.store.blocked(&self.store.db, p.id, other).await? {
+            if row["blocked"] == true {
                 continue;
             }
-            data.push(request_view(
-                &request,
-                self.store.current_public_id(&self.store.db, other).await?,
-            ));
-            next = Some(request.id);
+            let cf_id = row["cfMeetId"].as_str().ok_or(Error::NotFound)?.to_owned();
+            data.push(request_view(&request, cf_id));
         }
         Ok(json!({"schemaVersion":1,"data":data,"nextCursor":if more {next} else {None}}))
     }
@@ -310,32 +417,70 @@ impl State {
         Ok((v, pair, other))
     }
     pub async fn contact_view(&self, p: &Profile, id: Uuid) -> Result<Value> {
-        let (alias, pair, other) = self.contact(p, id).await?;
-        let state = self.store.relationship(&self.store.db, p, &other).await?;
-        // The contact's calling principal, only while CONNECTED: lets a client match the
-        // contact to a call participant (for example to hide people already in a call
-        // from "Add people"). Never for blocked or ended relationships.
-        let principal = if state == "CONNECTED" {
-            json!(other.principal_id)
-        } else {
-            Value::Null
-        };
-        Ok(
-            json!({"schemaVersion":1,"contactId":id,"cfMeetId":self.store.current_public_id(&self.store.db,other.id).await?,"displayName":other.display_name,"avatarReference":other.avatar_reference,
-            "relationship":state,"relationshipVersion":pair.version,"alias":alias["alias"],"favorite":alias["favorite"],"notifications":alias["notifications"],"version":alias["version"],
-            "principalId":principal}),
-        )
+        self.contact_views(p, "a.id=$5", "", vec![id.into()], false)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(Error::NotFound)
+    }
+    /// K1: contact views of `p` in ONE joined query (alias, connection, the other person's
+    /// profile, their current CF Meet ID and a live block either way), never several reads
+    /// per contact. `filter` is ANDed to the owner condition and may use `$5`, `$6`…
+    /// (`extra`); `tail` is the ORDER BY / LIMIT. `$1` is the owner, `$2..$4` its scope.
+    /// `with_rank` adds `favoriteRank` (the favorites list).
+    pub(crate) async fn contact_views(
+        &self,
+        p: &Profile,
+        filter: &str,
+        tail: &str,
+        extra: Vec<sea_orm::Value>,
+        with_rank: bool,
+    ) -> Result<Vec<Value>> {
+        let mut values = vec![
+            p.id.into(),
+            p.tenant_id.into(),
+            p.application_id.into(),
+            p.environment_id.into(),
+        ];
+        values.extend(extra);
+        let sql = format!(
+            "SELECT jsonb_build_object('alias',to_jsonb(a),'state',c.state,'relationshipVersion',c.version,\
+             'cfMeetId',i.public_id,'displayName',o.display_name,'avatarReference',o.avatar_reference,\
+             'principalId',o.principal_id,'about',o.about,\
+             'blocked',EXISTS(SELECT 1 FROM communication_block_bridge b WHERE b.active \
+                AND ((b.blocker_profile_id=$1 AND b.blocked_profile_id=o.id) OR (b.blocker_profile_id=o.id AND b.blocked_profile_id=$1)))) doc \
+             FROM communication_contact_aliases a \
+             JOIN communication_connections c ON c.id=a.connection_id AND (c.left_profile_id=$1 OR c.right_profile_id=$1) \
+             JOIN communication_profiles o ON o.id=CASE WHEN c.left_profile_id=$1 THEN c.right_profile_id ELSE c.left_profile_id END \
+                AND o.tenant_id=$2 AND o.application_id=$3 AND o.environment_id=$4 \
+             JOIN communication_public_ids i ON i.profile_id=o.id AND i.current \
+             WHERE a.owner_profile_id=$1 AND {filter} {tail}"
+        );
+        let found: Vec<Value> = rows(&self.store.db, &sql, values).await?;
+        found
+            .iter()
+            .map(|r| {
+                let mut view = contact_row_view(r)?;
+                if with_rank {
+                    view["favoriteRank"] = r["alias"]["favorite_rank"].clone();
+                }
+                Ok(view)
+            })
+            .collect()
     }
     pub async fn list_contacts(&self, p: &Profile, limit: i64, cursor: Uuid) -> Result<Value> {
-        let values:Vec<Value>=rows(&self.store.db,"SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.owner_profile_id=$1 AND a.id>$2 AND c.state='CONNECTED' ORDER BY a.id LIMIT $3",vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
-        let more = values.len() > limit as usize;
-        let mut data = Vec::new();
-        let mut last = None;
-        for v in values.into_iter().take(limit as usize) {
-            let id = uuid_field(&v, "id")?;
-            data.push(self.contact_view(p, id).await?);
-            last = Some(id);
-        }
+        let mut data = self
+            .contact_views(
+                p,
+                "a.id>$5 AND c.state='CONNECTED'",
+                "ORDER BY a.id LIMIT $6",
+                vec![cursor.into(), (limit + 1).into()],
+                false,
+            )
+            .await?;
+        let more = data.len() > limit as usize;
+        data.truncate(limit as usize);
+        let last = data.last().map(|v| v["contactId"].clone());
         Ok(json!({"schemaVersion":1,"data":data,"nextCursor":if more {last} else {None}}))
     }
     pub async fn patch_contact(
@@ -358,10 +503,13 @@ impl State {
             .alias
             .as_ref()
             .is_some_and(|a| a.chars().count() > 160 || a.chars().any(char::is_control))
-            || update
-                .notifications
-                .as_ref()
-                .is_some_and(|n| !matches!(n.as_str(), "ALL" | "MUTED" | "MENTIONS"))
+            || update.notifications.as_ref().is_some_and(|n| {
+                !matches!(n.as_str(), "ALL" | "MUTED")
+                    // K11: a contact's level governs private (one-to-one, end-to-end
+                    // encrypted) chats, where mentions cannot be read; offered again once
+                    // they can (crate::policy::MENTIONS_IN_PRIVATE_CHATS).
+                    && !(n == "MENTIONS" && crate::policy::MENTIONS_IN_PRIVATE_CHATS)
+            })
         {
             return Err(Error::Validation);
         }
@@ -457,6 +605,22 @@ impl State {
             self.store
                 .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
                 .await?;
+        } else if pair.state == "BLOCKED" && pair.connected_before_block {
+            // K5: removed while blocked (by either person): unblocking no longer brings
+            // the contact back.
+            execute(&txn,"UPDATE communication_connections SET connected_before_block=false,revoked_at=now(),version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
+            self.store
+                .audit(
+                    &txn,
+                    p,
+                    "CONNECTION_REMOVED",
+                    Some(pair.id),
+                    json!({"blocked":true}),
+                )
+                .await?;
+            self.store
+                .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
+                .await?;
         }
         let result = json!({"schemaVersion":1,"contactId":id,"relationship":"REVOKED"});
         self.store
@@ -487,8 +651,26 @@ impl State {
             .lock_pair(&txn, p.scope(), p.id, target.id)
             .await?;
         execute(&txn,"INSERT INTO communication_block_bridge(blocker_profile_id,blocked_profile_id,source,active) VALUES($1,$2,'COMMUNICATIONS',$3) ON CONFLICT(blocker_profile_id,blocked_profile_id,source) DO UPDATE SET active=$3,source_version=communication_block_bridge.source_version+1,updated_at=now()",vec![p.id.into(),target.id.into(),active.into()]).await?;
-        let state = if active { "BLOCKED" } else { "REVOKED" };
-        execute(&txn,"UPDATE communication_connections SET state=$2,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into(),state.into()]).await?;
+        // K5: blocking remembers whether the pair was connected; unblocking (once no block
+        // is left either way) restores the contact, unless someone removed it meanwhile.
+        let (state, remembered) = if active {
+            let remembered = match pair.state.as_str() {
+                "CONNECTED" => true,
+                "BLOCKED" => pair.connected_before_block,
+                _ => false,
+            };
+            ("BLOCKED", remembered)
+        } else if self.store.blocked(&txn, p.id, target.id).await? {
+            ("BLOCKED", pair.connected_before_block)
+        } else if pair.state == "BLOCKED" && pair.connected_before_block {
+            ("CONNECTED", false)
+        } else if pair.state == "BLOCKED" {
+            ("REVOKED", false)
+        } else {
+            // Nothing of ours was blocking: the relationship stays as it is.
+            (pair.state.as_str(), pair.connected_before_block)
+        };
+        execute(&txn,"UPDATE communication_connections SET state=$2,connected_before_block=$3,version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into(),state.into(),remembered.into()]).await?;
         if active {
             execute(&txn,"UPDATE communication_contact_requests SET state='CANCELLED',version=version+1,updated_at=now() WHERE connection_id=$1 AND state='PENDING'",vec![pair.id.into()]).await?;
         }
@@ -507,19 +689,19 @@ impl State {
             .await?;
         self.store.event(&txn,p,"communications.block.changed",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"blocked":active})).await?;
         // The blocker's devices refresh their block list; the other person's devices
-        // refresh the relationship (no block state is disclosed to them).
-        self.store
-            .change(&txn, p.id, "BLOCK", Some(pair.id), Some(pair.version + 1))
-            .await?;
-        self.store
-            .change(
-                &txn,
-                target.id,
-                "CONTACT",
-                Some(pair.id),
-                Some(pair.version + 1),
-            )
-            .await?;
+        // refresh the relationship (no block state is disclosed to them). After an unblock
+        // the blocker's contact list may change too (K5). Entries are written in profile
+        // order (K8: feed counters are locked in insertion order at commit).
+        let mut entries = vec![(target.id, "CONTACT"), (p.id, "BLOCK")];
+        if !active {
+            entries.push((p.id, "CONTACT"));
+        }
+        entries.sort_by_key(|(profile, _)| *profile);
+        for (profile, domain) in entries {
+            self.store
+                .change(&txn, profile, domain, Some(pair.id), Some(pair.version + 1))
+                .await?;
+        }
         let result = json!({"schemaVersion":1,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"blocked":active,"relationship":state});
         self.store
             .finish_idempotency(&txn, p, "block.update", key, result.clone())
@@ -602,6 +784,26 @@ pub fn common_group_view(g: &Value) -> Result<Value> {
         json!({"conversationId":id,"contextClass":"GROUP","securityProfile":profile,
         "title":text("title", 120),"avatarRef":text("avatarRef", 256),
         "memberCount":g["memberCount"].as_i64().filter(|n| *n >= 0)}),
+    )
+}
+/// One contact view from a [`State::contact_views`] row.
+fn contact_row_view(r: &Value) -> Result<Value> {
+    let alias = &r["alias"];
+    let state = if r["blocked"] == true {
+        "BLOCKED"
+    } else {
+        r["state"].as_str().ok_or(Error::Unavailable)?
+    };
+    let connected = state == "CONNECTED";
+    // The contact's calling principal, only while CONNECTED: lets a client match the
+    // contact to a call participant (for example to hide people already in a call from
+    // "Add people"). Never for blocked or ended relationships. The same for the "About"
+    // line (KF2): contacts see it, nobody else.
+    let only_connected = |v: &Value| if connected { v.clone() } else { Value::Null };
+    Ok(
+        json!({"schemaVersion":1,"contactId":alias["id"],"cfMeetId":r["cfMeetId"],"displayName":r["displayName"],"avatarReference":r["avatarReference"],
+        "relationship":state,"relationshipVersion":r["relationshipVersion"],"alias":alias["alias"],"favorite":alias["favorite"],"notifications":alias["notifications"],"version":alias["version"],
+        "principalId":only_connected(&r["principalId"]),"about":only_connected(&r["about"])}),
     )
 }
 pub fn uuid_field(v: &Value, key: &str) -> Result<Uuid> {

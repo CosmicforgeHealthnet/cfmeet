@@ -154,6 +154,15 @@ fn action_name(action: Action) -> &'static str {
         Action::CredentialsRevoke => "credential.revoke",
         Action::ProductionAccessRead => "production_access.read",
         Action::SupportProfileManage => "support_profile.manage",
+        Action::EndUsersRead => "end_user.read",
+        Action::EndUsersManage => "end_user.manage",
+        Action::UserTokensIssue => "user_token.issue",
+        Action::AllowedOriginsRead => "allowed_origins.read",
+        Action::AllowedOriginsManage => "allowed_origins.manage",
+        Action::PushCredentialsRead => "push_credential.read",
+        Action::PushCredentialsManage => "push_credential.manage",
+        Action::AppsRead => "app.read",
+        Action::AppsManage => "app.manage",
     }
 }
 

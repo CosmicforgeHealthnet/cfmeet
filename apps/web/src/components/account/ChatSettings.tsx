@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, Database, ShieldCheck } from "lucide-react";
+import { BellRing, Database, ShieldCheck, UserPlus } from "lucide-react";
 import { communicationsService as hub, type NotificationPreferences } from "@/services/v2/communications.service";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,31 @@ const ROWS: { key: keyof Omit<NotificationPreferences, "version">; label: string
   { key: "groupInvitations", label: "Group invitations", hint: "You're added or invited to a group" },
   { key: "meetingInvitations", label: "Meeting invitations", hint: "You're invited to a meeting" },
 ];
+/** "Anyone with my CF Meet ID can add me" (privacy contactApproval: AUTOMATIC / MANUAL). */
+function DirectContact() {
+  const client = useQueryClient();
+  const privacy = useQuery({ queryKey: ["me", "privacy"], queryFn: () => hub.privacy(), retry: false });
+  const save = useMutation({
+    mutationFn: (automatic: boolean) => {
+      const v = privacy.data!;
+      return hub.updatePrivacy(v.version, { ...v.privacy, contactApproval: automatic ? "AUTOMATIC" : "MANUAL" });
+    },
+    onSuccess: (v) => client.setQueryData(["me", "privacy"], v),
+  });
+  if (!privacy.data) return privacy.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(privacy.error)}</p> : null;
+  const on = (privacy.data.privacy.contactApproval ?? "AUTOMATIC") === "AUTOMATIC";
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-5 sm:p-6">
+      <div className="flex items-center gap-2"><UserPlus className="size-4 text-muted-foreground" /><h2 className="text-base font-semibold">Contacts</h2></div>
+      <button type="button" role="switch" aria-checked={on} disabled={save.isPending} onClick={() => save.mutate(!on)} className="flex w-full items-center gap-3 text-left disabled:opacity-60">
+        <span className="min-w-0 flex-1"><span className="block text-sm font-medium">Anyone with my CF Meet ID can add me</span><span className="block text-xs text-muted-foreground">They can chat and call you straight away. Turn this off to approve contact requests first.</span></span>
+        <Switch on={on} />
+      </button>
+      {save.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(save.error)}</p> : null}
+    </section>
+  );
+}
+
 const bytes = (n: number | null | undefined) => n == null ? "—" : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(2)} GB`;
 
 function Switch({ on }: { on: boolean }) {
@@ -98,6 +123,8 @@ export default function ChatSettings() {
         {save.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(save.error)}</p> : null}
         <BrowserAlerts />
       </section>
+
+      <DirectContact />
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-5 sm:p-6">
         <div className="flex items-center gap-2"><Database className="size-4 text-muted-foreground" /><h2 className="text-base font-semibold">Storage</h2></div>

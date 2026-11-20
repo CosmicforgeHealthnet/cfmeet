@@ -61,6 +61,11 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/me/conferences"),
         ("get", "/api/v2/conferences/{id}/calendar.ics"),
         ("get", "/api/v2/meeting-spaces/{id}/calendar.ics"),
+        // Server audit MF2 — private calendar feed
+        ("get", "/api/v2/me/calendar-feed"),
+        ("post", "/api/v2/me/calendar-feed"),
+        ("delete", "/api/v2/me/calendar-feed"),
+        ("get", "/api/v2/calendar-feeds/{file}"),
         ("post", "/api/v2/instant-meetings"),
         ("get", "/api/v2/resolve/{identifier}"),
         ("get", "/api/v2/conferences/{id}"),
@@ -73,6 +78,8 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/conferences/{id}/unlock"),
         ("post", "/api/v2/conferences/{id}/cancel"),
         ("post", "/api/v2/conferences/{id}/reschedule"),
+        // Server audit MF1
+        ("post", "/api/v2/conferences/{id}/extend"),
         ("get", "/api/v2/conferences/{id}/participants"),
         ("get", "/api/v2/conferences/{id}/participants/me"),
         ("get", "/api/v2/conferences/{id}/waiting-room"),
@@ -494,6 +501,16 @@ fn every_v2_route_is_documented() {
         ),
         ("post", "/api/v2/admin/organizations/{id}/owners"),
         ("post", "/api/v2/registrations/cancel"),
+        // ADR 0064 / 0065 — CF Meet Apps
+        ("get", "/api/v2/oauth/authorize/context"),
+        ("post", "/api/v2/oauth/authorize/approve"),
+        ("get", "/api/v2/me/apps"),
+        ("delete", "/api/v2/me/apps/{grantId}"),
+        ("get", "/api/v2/organizations/{id}/apps"),
+        ("delete", "/api/v2/organizations/{id}/apps/{grantId}"),
+        ("get", "/api/v2/conferences/{id}/apps"),
+        ("post", "/api/v2/conferences/{id}/apps/{appId}/context"),
+        ("get", "/api/v2/app-context-keys"),
     ];
     for (method, path) in expected {
         assert!(
@@ -739,7 +756,9 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                 if let Some(content) = r.get("content").and_then(Value::as_object) {
                     let types: Vec<_> = content.keys().collect();
                     // Blueprint Section 10: RFC 5545 exports are the only non-JSON success.
-                    if path.ends_with("/calendar.ics") && status == "200" {
+                    if (path.ends_with("/calendar.ics") || path == "/api/v2/calendar-feeds/{file}")
+                        && status == "200"
+                    {
                         assert_eq!(types, ["text/calendar"], "{method} {path} {status}");
                         continue;
                     }

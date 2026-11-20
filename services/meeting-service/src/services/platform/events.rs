@@ -21,7 +21,10 @@
 //!
 //! Payload keys (the Developer Platform's meeting allow-list): `meeting_id` (the meeting
 //! space), `conference_id`, `participant_id`, `recording_id`, `artifact_id`,
-//! `artifact_kind`, `role`, `status`, `ended_reason`, `duration_ms`. Every value is an
+//! `artifact_kind`, `role`, `status`, `ended_reason`, `duration_ms`, and (ADR 0062) on
+//! `participant.joined` / `.left` of a partner user, `principal_id` — the partner user's
+//! Platform Access principal (the `id` of the partner's Users API), read from the
+//! participant's identity reference when the envelope is staged. Every value is an
 //! opaque UUID, a bounded upper-case code or a non-negative integer; anything else is
 //! dropped. Never: display names, emails, join links / codes, passcodes, invitation
 //! tokens, media credentials, provider (LiveKit) ids, storage keys or URLs.
@@ -209,6 +212,15 @@ pub async fn stage<C: ConnectionTrait>(conn: &C, record: &OutboxRecord<'_>) -> A
         .unwrap_or_else(CorrelationId::generate)
         .as_str()
         .to_string();
+    // ADR 0062: a partner user's participant events carry its principal id.
+    let participant: Option<Uuid> = match record.event_type {
+        "participant.joined" | "participant.left" => record
+            .payload
+            .get("participantId")
+            .and_then(Value::as_str)
+            .and_then(|v| Uuid::parse_str(v).ok()),
+        _ => None,
+    };
     conn.execute(Statement::from_sql_and_values(
         DbBackend::Postgres,
         r#"INSERT INTO outbox_events
@@ -218,7 +230,12 @@ pub async fn stage<C: ConnectionTrait>(conn: &C, record: &OutboxRecord<'_>) -> A
                   jsonb_build_object(
                       'event_type', $5::text,
                       'correlation_id', $6::text,
-                      'payload', $7::jsonb,
+                      'payload', $7::jsonb || COALESCE(
+                          (SELECT jsonb_build_object('principal_id', lower(substr(p.external_ref, 11)))
+                             FROM conference_participants p
+                            WHERE p.id = $11::uuid
+                              AND p.external_ref ~ '^principal:[0-9a-fA-F-]{36}$'),
+                          '{}'::jsonb),
                       'ownership', jsonb_build_object(
                           'tenant_id', s.platform_tenant_id,
                           'application_id', s.platform_application_id,
@@ -238,6 +255,7 @@ pub async fn stage<C: ConnectionTrait>(conn: &C, record: &OutboxRecord<'_>) -> A
             record.conference_id.into(),
             current_request_id().into(),
             space.into(),
+            participant.into(),
         ],
     ))
     .await?;

@@ -203,13 +203,19 @@ pub async fn across(
         ],
     )
     .await?;
-    let e2ee = db::scalar_i64(
-        &state.db,
-        "SELECT count(*) FROM messaging_conversation_members mb JOIN messaging_conversations c ON c.id = mb.conversation_id \
-          WHERE mb.environment_id = $1 AND mb.principal_id = $2 AND mb.state = 'ACTIVE' AND c.security_profile = 'PRIVATE_E2EE'",
-        vec![ctx.scope.environment_id.into(), acting.principal_id.into()],
-    )
-    .await?;
+    // ADR 0064: PRIVATE_E2EE conversations are invisible to a CF Meet App, not even
+    // counted.
+    let e2ee = if ctx.oauth.is_some() {
+        0
+    } else {
+        db::scalar_i64(
+            &state.db,
+            "SELECT count(*) FROM messaging_conversation_members mb JOIN messaging_conversations c ON c.id = mb.conversation_id \
+              WHERE mb.environment_id = $1 AND mb.principal_id = $2 AND mb.state = 'ACTIVE' AND c.security_profile = 'PRIVATE_E2EE'",
+            vec![ctx.scope.environment_id.into(), acting.principal_id.into()],
+        )
+        .await?
+    };
     crate::metrics::inc("messaging_searches_total", &[("scope", "principal")]);
     crate::usage::record_best_effort(
         &state.db,

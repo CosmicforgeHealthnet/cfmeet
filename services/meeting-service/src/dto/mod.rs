@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod api_keys;
+pub mod apps;
 pub mod auth;
 pub mod common;
 pub mod meetings;

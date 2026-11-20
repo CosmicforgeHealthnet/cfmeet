@@ -147,8 +147,9 @@ impl AppCallService {
         if let Some(queue) = queue {
             self.queue_position_signals(queue).await;
         }
-        // Provider teardown after commit; failures are retried by reconciliation.
-        self.teardown_media(call.id).await;
+        // Provider teardown after commit, in the background (C1: the caller gets its answer
+        // as soon as the transaction committed); failures are retried by reconciliation.
+        self.teardown_media_later(call.id);
         Ok(CommandOutcome {
             body,
             replayed: false,
@@ -212,9 +213,9 @@ impl AppCallService {
         let pending = self.end_signals_in(&txn, cmd, &call, &cancelled).await?;
         txn.commit().await?;
         self.publish(pending).await;
-        if let Err(error) = self.finish_ending(call.id).await {
-            tracing::warn!(call_id = %call.id, %error, "call cleanup pending; reconciliation will retry");
-        }
+        // Provider cleanup and ENDING -> ENDED in the background (C1): the answer is the
+        // committed ENDING Call; reconciliation retries a cleanup that fails.
+        self.finish_ending_later(call.id);
         Ok(CommandOutcome {
             body,
             replayed: false,
@@ -310,7 +311,7 @@ impl AppCallService {
         {
             return Ok(false);
         }
-        let failure = self.cleanup_media(&call).await?;
+        let failure = self.cleanup_media(&call, false).await?;
         let txn = self.db().begin().await?;
         let call = self
             .calls
@@ -399,9 +400,15 @@ impl AppCallService {
 
     /// Removes every media connection of the Call and terminates its resource. `None` on
     /// confirmed cleanup (including "already absent"), else the neutral failure.
+    ///
+    /// A binding already TERMINATED was cleaned up with provider evidence before: nothing
+    /// is sent again (C1: repeating RemoveParticipant / UpdateParticipant / DeleteRoom on a
+    /// room that is gone only produced provider `not_found` errors), unless `lingering`
+    /// (reconciliation saw the provider still holding the resource).
     pub(crate) async fn cleanup_media(
         &self,
         call: &calls::Model,
+        lingering: bool,
     ) -> CallResult<Option<crate::calls::kinds::MediaFailure>> {
         let Some(provider) = self.media.as_ref() else {
             return Ok(None);
@@ -412,7 +419,10 @@ impl AppCallService {
             txn.commit().await?;
             binding
         };
-        if binding.is_none() {
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        if binding.status == MediaSessionStatus::Terminated && !lingering {
             return Ok(None);
         }
         let session = MediaSessionRef {
@@ -447,9 +457,37 @@ impl AppCallService {
         }
     }
 
+    /// [`Self::teardown_media`] after the command answered (C1).
+    pub(crate) fn teardown_media_later(&self, call_id: Uuid) {
+        let this = self.clone();
+        self.background
+            .spawn(async move { this.teardown_media(call_id).await });
+    }
+
+    /// [`Self::finish_ending`] after the command answered (C1).
+    pub(crate) fn finish_ending_later(&self, call_id: Uuid) {
+        let this = self.clone();
+        self.background.spawn(async move {
+            if let Err(error) = this.finish_ending(call_id).await {
+                tracing::warn!(%call_id, %error, "call cleanup pending; reconciliation will retry");
+            }
+        });
+    }
+
     /// After a terminal transition: provider teardown, then the binding is TERMINATED
-    /// with evidence (or retried by reconciliation).
+    /// with evidence (or retried by reconciliation). A binding already TERMINATED (the
+    /// provider confirmed the teardown before) is not torn down again.
     pub(crate) async fn teardown_media(&self, call_id: Uuid) {
+        self.teardown_media_with(call_id, false).await
+    }
+
+    /// Reconciliation found the provider still holding a terminal Call's resource: tear
+    /// it down even though the binding already says TERMINATED.
+    pub(crate) async fn teardown_lingering_media(&self, call_id: Uuid) {
+        self.teardown_media_with(call_id, true).await
+    }
+
+    async fn teardown_media_with(&self, call_id: Uuid, lingering: bool) {
         if let Err(error) = self.release_public_legs(call_id).await {
             tracing::warn!(%call_id, %error, "public leg release pending; reconciliation retries");
         }
@@ -458,7 +496,7 @@ impl AppCallService {
                 .one(self.db())
                 .await?
                 .ok_or(CallError::NotFound)?;
-            let failure = self.cleanup_media(&call).await?;
+            let failure = self.cleanup_media(&call, lingering).await?;
             let txn = self.db().begin().await?;
             let call = calls::Entity::find_by_id(call_id)
                 .lock_exclusive()

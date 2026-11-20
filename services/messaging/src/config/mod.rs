@@ -4,7 +4,7 @@
 //! | Variable | Required | Meaning |
 //! |---|---|---|
 //! | `DATABASE_URL` | yes | Messaging's OWN PostgreSQL database (runtime role) |
-//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10) |
+//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10; production: `activate-database-pools`) |
 //! | `MESSAGING_BIND_ADDRESS` | no | default `127.0.0.1:8097` |
 //! | `MESSAGING_METRICS_ADDRESS` | no | separate `GET /metrics` listener (e.g. `127.0.0.1:9197`) |
 //! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); in `production`, `true` needs `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` (the owner's release decision) and is refused without a valid record |
@@ -34,6 +34,10 @@
 //! | `MESSAGING_CLIENT_TOKEN_TTL_SECONDS` / `MESSAGING_REALTIME_TICKET_TTL_SECONDS` | no | token lifetime (60–86400, default 900) / single-use ticket lifetime (5–300, default 30) |
 //! | `MESSAGING_SESSION_DEVICES_ENABLED` | no | `true` / `false`: first-party MANAGED-realtime session devices (Blueprint Section 13, ADR 0049 amendment A1). Default `true` only in `local` / `test`; permitted in `production` because a session device can never acquire E2EE privileges (it never enables `MESSAGING_E2EE_DEVICES_ENABLED`) |
 //! | `MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS` | no | session-device token lifetime (60–900, default 300); renewals go back through the first-party relay |
+//! | `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` | no | `true` / `false` (default `false`): ADR 0062 partner session devices (`POST /v1/messaging/user-sessions` with a CF Meet user token, the MANAGED-only REST allowlist, environment origins, the `CFMEET_PLATFORM_PARTNER` baseline, MESSAGE_SENT facts); parsed by `crate::partner::PartnerSettings` |
+//! | `MESSAGING_PARTNER_PUSH_ENABLED` | no | `true` / `false` (default `false`): ADR 0063 partner push registrations and wake-ups through the Notification Service (requires `CF_NOTIFICATIONS_BASE_URL`) |
+//! | `MESSAGING_APPS_ENABLED` | no | `true` / `false` (default `false`): ADR 0064 CF Meet Apps — OAuth access / bot credentials act only as their restricted principal on a closed MANAGED-only allowlist, record `viaApplicationId`; app bots are MANAGED-only; bot events (`bot.mentioned` / `bot.message_received`) are relayed to the Developer Platform when `MESSAGING_PUBLIC_EVENTS_DESTINATION` includes it; parsed by `crate::apps::AppsSettings` |
+//! | `MESSAGING_MESSAGE_SENT_EXPORT_ENABLED` | no | `true` / `false` (default `false`): export `MESSAGE_SENT` usage facts (with `CFMEET_USAGE_EXPORT_ENABLED`, and only once the usage catalogue knows the type) |
 //! | `MESSAGING_REALTIME_ALLOWED_ORIGINS` | no | comma-separated exact browser origins allowed to connect (default: none; native clients send no Origin) |
 //! | `MESSAGING_REALTIME_REQUIRE_TLS` | no | refuse handshakes not forwarded as `https` (default `true` outside local / test) |
 //! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |

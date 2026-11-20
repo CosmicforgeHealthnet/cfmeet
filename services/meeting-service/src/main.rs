@@ -16,6 +16,15 @@ use backend::{
     },
 };
 
+/// `DATABASE_MAX_CONNECTIONS` (2-200, default 10).
+fn database_max_connections() -> u32 {
+    std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(10)
+        .clamp(2, 200)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables
@@ -31,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Connecting to database...");
     let mut db_opts = ConnectOptions::new(&app_config.database_url);
     db_opts
-        .max_connections(10)
+        // B6: `DATABASE_MAX_CONNECTIONS` (2-200, default 10) sizes the pool per deployment;
+        // production raises it only through the release operation `activate-database-pools`,
+        // which checks the database's connection budget first.
+        .max_connections(database_max_connections())
         .min_connections(2)
         .connect_timeout(std::time::Duration::from_secs(30))
         .acquire_timeout(std::time::Duration::from_secs(30))
@@ -107,6 +119,26 @@ async fn main() -> anyhow::Result<()> {
             state = state.with_platform(receiver);
             tracing::info!("Part VI: platform credential access to /api/v2 enabled");
         }
+        // ADR 0062: partner users join with their CF Meet user token (and partner meeting
+        // chat). Their tables live in an additive history (`platform-build-migration up`);
+        // refuse to start without it rather than failing joins.
+        if let Some(users) = config.platform_users(&db, client.clone()) {
+            if !migration::platform_build_ready(&db)
+                .await
+                .expect("Platform-build migration readiness")
+            {
+                panic!("Platform-build migration is required while MEETING_PLATFORM_USER_JOIN_ENABLED is on (platform-build-migration up)");
+            }
+            if let Some(chat) = users.chat.clone() {
+                backend::services::platform::partner_chat::spawn_partner_chat_sync(
+                    chat,
+                    config.chat_sync_interval,
+                );
+                tracing::info!("ADR 0062: partner meeting chat enabled");
+            }
+            state = state.with_platform_users(users);
+            tracing::info!("ADR 0062: partner user join (CF Meet user tokens) enabled");
+        }
         // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
         if let Some(s) = config.usage_export.clone() {
             use backend::services::platform::usage_export;
@@ -136,6 +168,31 @@ async fn main() -> anyhow::Result<()> {
             ));
             tracing::info!("Part VI: environment-scoped meeting events -> Developer Platform");
         }
+    }
+    // ADR 0064 / 0065: CF Meet Apps (MEETING_OAUTH_AUTHORIZE_ENABLED,
+    // MEETING_DELEGATED_APPS_ENABLED, MEETING_IN_MEETING_APPS_ENABLED; all off by default).
+    // Enabled but misconfigured stops startup (fail closed). No migration of their own.
+    let apps_config = backend::services::apps::AppsConfig::from_env()
+        .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+    let mut userinfo_verifier = None;
+    if let Some(config) = apps_config {
+        if config.delegated_enabled && state.platform.is_none() {
+            panic!("apps configuration error: MEETING_DELEGATED_APPS_ENABLED requires the platform credential receiver (MEETING_PLATFORM_ACCESS_ENABLED)");
+        }
+        let apps = config
+            .build(state.meeting.core.organization_authority.clone())
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        userinfo_verifier = config
+            .userinfo_verifier()
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        tracing::info!(
+            authorize = config.authorize_enabled,
+            delegated = config.delegated_enabled,
+            in_meeting = config.in_meeting_enabled,
+            organization_installs = apps.organizations.is_some(),
+            "ADR 0064 / 0065: CF Meet Apps enabled"
+        );
+        state = state.with_apps(apps);
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
@@ -184,6 +241,16 @@ async fn main() -> anyhow::Result<()> {
     {
         panic!("Gap-closure migration is required (gap-closure-migration up)");
     }
+
+    // S2: account deletion queues durable erasure jobs for Messaging, the Hub and Calling
+    // (`account-privacy-migration up`); the privacy worker delivers and retries them.
+    if !migration::account_privacy_ready(&state.db)
+        .await
+        .expect("Account-privacy migration readiness")
+    {
+        panic!("Account-privacy migration is required (account-privacy-migration up)");
+    }
+    backend::services::account_privacy::spawn(state.db.clone(), std::time::Duration::from_secs(60));
 
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
@@ -497,6 +564,9 @@ async fn main() -> anyhow::Result<()> {
     if bridge_router.is_some() {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
+    // ADR 0064: the internal OAuth userinfo route (meeting-oauth-userinfo.read).
+    let userinfo_router = userinfo_verifier
+        .map(|verifier| backend::services::apps::userinfo::router(state.clone(), verifier));
 
     // Document 4 §3.1: Notification Service user relay (CF_NOTIFICATIONS_BASE_URL; unset:
     // the /api/v2/notifications routes answer 503 and nothing is forwarded).
@@ -575,13 +645,21 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build application with routes
-    let mut app = Router::new()
-        .merge(routes::create_routes(state))
-        .merge(swagger::swagger_router(&addr))
+    // D1: Swagger UI and the served OpenAPI documents only outside production
+    // (`API_DOCS_ENABLED`, see `swagger::docs_enabled`).
+    let docs = swagger::docs_enabled();
+    let mut app = Router::new().merge(routes::create_routes(state));
+    if docs {
+        app = app.merge(swagger::swagger_router(&addr));
+    }
+    let mut app = app
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
         app = app.merge(bridge);
+    }
+    if let Some(userinfo) = userinfo_router {
+        app = app.merge(userinfo);
     }
     if let Some(events) = events_router {
         app = app.merge(events);
@@ -592,8 +670,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("🚀 Server running on http://{}", addr);
-    tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
-    tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    if docs {
+        tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
+        tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    } else {
+        tracing::info!("API documentation is not served (production; see API_DOCS_ENABLED)");
+    }
 
     axum::serve(listener, app).await?;
 

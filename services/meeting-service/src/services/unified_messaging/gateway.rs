@@ -62,7 +62,7 @@ impl GatewayError {
         }
     }
 
-    fn from_response(status: u16, body: &Value) -> Self {
+    pub(crate) fn from_response(status: u16, body: &Value) -> Self {
         let code = body["error"]["code"]
             .as_str()
             .unwrap_or("UNKNOWN")

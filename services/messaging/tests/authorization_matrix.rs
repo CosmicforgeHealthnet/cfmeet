@@ -1054,6 +1054,10 @@ fn ops() -> Vec<Op> {
         Op { method: M::PUT, template: "/v1/conversations/{conversationId}/read-cursor", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/read-cursor", f.conv), Some(f.owner.principal), Some(json!({ "sequence": 1 }))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // F1: the member's own archive / pin of a chat.
+        Op { method: M::PUT, template: "/v1/conversations/{conversationId}/inbox-settings", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/inbox-settings", f.conv), Some(f.owner.principal), Some(json!({ "pinned": true }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/events", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/events", f.conv), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -1259,6 +1263,9 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("GET", "/v1/realtime", "WebSocket upgrade with a single-use ticket: `realtime_routes_refuse_customer_credentials_and_missing_tokens` below; tests/realtime.rs"),
     ("POST", "/v1/messaging/session-devices", "Section 13 first-party relay only (this matrix's customers are third-party and are refused): tests/realtime.rs `session_devices_*`"),
     ("POST", "/v1/messaging/session-devices/revoke", "Section 13 first-party relay only: tests/realtime.rs `session_devices_*`"),
+    ("POST", "/v1/messaging/user-sessions", "ADR 0062 partner user-token exchange (userToken, never a customer credential): tests/partner_session_devices.rs"),
+    ("PUT", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push registration (userToken): tests/partner_session_devices.rs"),
+    ("DELETE", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push removal (userToken): tests/partner_session_devices.rs"),
 ];
 
 // ---------------------------------------------------------------------- execution

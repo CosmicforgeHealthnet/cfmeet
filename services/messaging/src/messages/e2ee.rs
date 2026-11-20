@@ -87,7 +87,7 @@ pub fn check_framing(
     bytes: &[u8],
     expected: FramedContent,
     epoch: u64,
-) -> Result<()> {
+) -> Result<framing::Framing> {
     let f = framing::inspect(bytes)
         .map_err(|_| Error::reason(ErrorCode::ContentRejected, "NOT_AN_MLS_MESSAGE"))?;
     // OpenMLS parses PublicMessage application bodies as well as PrivateMessage.
@@ -118,7 +118,7 @@ pub fn check_framing(
             "EPOCH_FIELD_MISMATCH",
         ));
     }
-    Ok(())
+    Ok(f)
 }
 
 /// One E2EE row to insert.
@@ -270,6 +270,20 @@ pub async fn send(
     metadata
         .validate()
         .map_err(|_| Error::validation("invalid transport metadata"))?;
+    if kind == "EDIT" && !request.mentioned_principal_ids.is_empty() {
+        return Err(Error::validation(
+            "mentionedPrincipalIds apply to new messages, not edits",
+        ));
+    }
+    // B3: the members this message mentions (ids only, for the mention count and the
+    // "mentions only" notification preference); the mention text stays encrypted.
+    let mentions = super::mentions_of(
+        &state.db,
+        conversation,
+        acting.principal_id,
+        &request.mentioned_principal_ids,
+    )
+    .await?;
     require_own_device(&state.db, ctx, acting.principal_id, device_id).await?;
     check_framing(
         conversation,
@@ -368,6 +382,7 @@ pub async fn send(
                     }
                     None => row,
                 };
+                super::record_mentions(txn, &row, &mentions).await?;
                 super::record_created_notify(txn, &ctx, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })

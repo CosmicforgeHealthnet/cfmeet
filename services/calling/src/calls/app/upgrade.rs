@@ -3,9 +3,10 @@
 //! * Authority: the application backend (`calls.write`) in its own scope, like every
 //!   call-control command; the CF Meet web adapter additionally allows it only for an
 //!   active party of the Call (CAL-002 party rules).
-//! * Rules: VOICE → VIDEO exactly once (never back), only while the Call is ANSWERED,
-//!   CONNECTED or HELD (a pre-answer offer keeps the kind it was offered with; ENDING,
-//!   TRANSFERRING and terminal Calls are refused). Protected (Privacy Relay) calls and
+//! * Rules: VOICE → VIDEO exactly once (never back), while the Call is DIALING, RINGING,
+//!   ANSWERED, CONNECTED or HELD (CF2: switching to video while it still rings offers the
+//!   Call as a video call — the callee's offer reads the Call's kind; ENDING, TRANSFERRING
+//!   and terminal Calls, and the setup states before DIALING, are refused). Protected (Privacy Relay) calls and
 //!   calls with a public / private network leg stay VOICE (422). Upgrading a Call that is
 //!   already VIDEO is an idempotent no-op answering the current Call.
 //! * Effect (one transaction, Call row locked, `expectedVersion` checked): the kind
@@ -42,11 +43,16 @@ fn upgrade_body(call: &calls::Model) -> Value {
     json!({ "call": summary(call), "operation": CommandOperation::Upgrade.as_str() })
 }
 
-/// States in which a VOICE Call may become VIDEO (mirrors the database guard of 000049).
+/// States in which a VOICE Call may become VIDEO (mirrors the database guard of 000049,
+/// widened to DIALING and RINGING by the call-kind-offer history, CF2).
 pub(crate) fn upgradable_state(state: CallState) -> bool {
     matches!(
         state,
-        CallState::Answered | CallState::Connected | CallState::Held
+        CallState::Dialing
+            | CallState::Ringing
+            | CallState::Answered
+            | CallState::Connected
+            | CallState::Held
     )
 }
 

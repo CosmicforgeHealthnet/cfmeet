@@ -2,6 +2,8 @@
 
 The backend is live behind the Meeting Service at `https://api.cfmeet.com`. Decision: [ADR 0060](../decisions/0060-account-linked-devices-and-production-personal-e2ee.md). Gaps and evidence: [gap register](multi-device-gap-register.md). The OpenAPI contract is `packages/contracts/openapi/meeting-service.json` (tag **Account devices (v2)**). The generated types are `apps/web/src/types/generated/meeting-service.ts` and `apps/mobile/lib/api/generated/meeting-service.ts`.
 
+> **Update (ADR 0067, 2026-11-19):** signing in is enough for a browser. A WEB device declared from a fresh sign-in is `TRUSTED` at once (`trustedVia` `BOOTSTRAP`), and at `maxWebDevices` the least recently used browser is revoked instead of `409 WEB_DEVICE_LIMIT_REACHED`. The web client no longer shows a link code or "Email me a code" for itself; the link and email step-up below now apply to a new **mobile** (primary-mobile replacement) only. See [ADR 0067](../decisions/0067-signing-in-is-enough-for-a-browser.md).
+
 Nothing here requires a phone number, SMS or a phone scanning a QR code. Meetings and Calling never require device declaration or E2EE.
 
 ## 0. What the web client already does

@@ -30,6 +30,8 @@
 //! | `NOTIFICATIONS_PUSH_WEB_VAPID_KEY_FILE`, `_WEB_SUBJECT`, `_WEB_ALLOWED_HOSTS` | with live Web Push | VAPID key: P-256 PKCS#8 (or SEC1) PEM file — the SAME file Messaging's `activate-web-push` generated (`MESSAGING_PUSH_WEB_VAPID_KEY_FILE`), so existing browser subscriptions stay valid; subject `https://cfmeet.com`; hosts default to Messaging's allowlist |
 //! | `NOTIFICATIONS_PUSH_APNS_KEY_FILE`, `_APNS_KEY_ID`, `_APNS_TEAM_ID`, `_APNS_TOPIC`, `_APNS_BASE_URL` | with live APNs | |
 //! | `NOTIFICATIONS_PUSH_FCM_SERVICE_ACCOUNT_FILE`, `_FCM_BASE_URL` | with live FCM | |
+//! | `NOTIFICATIONS_PARTNER_PUSH_ENABLED` | no | `false` (default) / `true`: ADR 0063 partner push (provider vault, `platform-principal` registrations, call fast lane and recipients). Off: every partner route answers 404 and every partner shape is refused exactly as before |
+//! | `NOTIFICATIONS_PARTNER_PUSH_TRANSPORT` | no | `live` (default: the partner's own APNs / FCM keys through `cf-push-transport`) or `local-test` (local/test only: the deterministic recording transport) |
 //! | `NOTIFICATIONS_AUTHORITIES` | no | comma list of owner APIs to call: `account`, `meeting`, `messaging`, `communications`, `organizations` (default none) |
 //! | `CF_MEETING_SERVICE_BASE_URL`, `CF_MESSAGING_BASE_URL`, `CF_COMMUNICATIONS_BASE_URL`, `CF_ORGANIZATIONS_BASE_URL` | per authority | internal base URLs |
 //! | `CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | with authorities | outbound signing |
@@ -201,6 +203,15 @@ pub enum PushProviderKind {
     LocalTest,
 }
 
+/// The transport partner pushes use (ADR 0063).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartnerTransportKind {
+    /// The partner's own APNs / FCM credentials through the `cf-push-transport` adapters.
+    Live,
+    /// The deterministic recording transport (local / test only).
+    LocalTest,
+}
+
 #[derive(Debug, Clone)]
 pub struct OutboundSettings {
     pub key_id: KeyId,
@@ -264,6 +275,9 @@ pub struct NotificationsConfig {
     pub email: EmailConfig,
     pub push_provider: PushProviderKind,
     pub push: cf_push_transport::config::PushAdapterConfig,
+    /// `NOTIFICATIONS_PARTNER_PUSH_ENABLED` (default off).
+    pub partner_push_enabled: bool,
+    pub partner_push_transport: PartnerTransportKind,
     pub authorities: AuthorityTargets,
     pub outbound: Option<OutboundSettings>,
     pub operator_emails: Vec<String>,
@@ -282,6 +296,8 @@ impl fmt::Debug for NotificationsConfig {
             .field("hpke", &self.hpke.as_ref().map(|(k, _)| k))
             .field("email", &self.email)
             .field("push_provider", &self.push_provider)
+            .field("partner_push_enabled", &self.partner_push_enabled)
+            .field("partner_push_transport", &self.partner_push_transport)
             .field("authorities", &self.authorities.enabled())
             .finish_non_exhaustive()
     }
@@ -668,6 +684,25 @@ impl NotificationsConfig {
             }
         }
 
+        // --- partner push (ADR 0063) ---
+        let partner_push_enabled = flag(&get, "NOTIFICATIONS_PARTNER_PUSH_ENABLED", false)?;
+        let partner_push_transport = match get("NOTIFICATIONS_PARTNER_PUSH_TRANSPORT").as_deref() {
+            None | Some("live") => PartnerTransportKind::Live,
+            Some("local-test") if !production_like => PartnerTransportKind::LocalTest,
+            Some("local-test") => {
+                return Err(invalid(
+                    "NOTIFICATIONS_PARTNER_PUSH_TRANSPORT",
+                    "local-test is refused in staging and production",
+                ))
+            }
+            Some(_) => {
+                return Err(invalid(
+                    "NOTIFICATIONS_PARTNER_PUSH_TRANSPORT",
+                    "must be live or local-test",
+                ))
+            }
+        };
+
         // --- owner APIs X1–X5 ---
         let mut authorities = AuthorityTargets::default();
         for name in get("NOTIFICATIONS_AUTHORITIES")
@@ -780,6 +815,8 @@ impl NotificationsConfig {
             email,
             push_provider,
             push,
+            partner_push_enabled,
+            partner_push_transport,
             authorities,
             outbound,
             operator_emails,
@@ -906,6 +943,25 @@ mod tests {
         let d = tmp();
         let mut m = base(&d);
         m.insert("NOTIFICATIONS_PUSH_PROVIDER".into(), "local-test".into());
+        assert!(parse(m).is_err());
+    }
+
+    #[test]
+    fn partner_push_is_off_by_default_and_its_test_transport_is_refused_in_production() {
+        let d = tmp();
+        let c = parse(base(&d)).unwrap();
+        assert!(!c.partner_push_enabled);
+        assert_eq!(c.partner_push_transport, PartnerTransportKind::Live);
+        let mut m = base(&d);
+        m.insert("NOTIFICATIONS_PARTNER_PUSH_ENABLED".into(), "true".into());
+        assert!(parse(m.clone()).unwrap().partner_push_enabled);
+        m.insert("NOTIFICATIONS_PARTNER_PUSH_ENABLED".into(), "yes".into());
+        assert!(parse(m.clone()).is_err());
+        m.insert("NOTIFICATIONS_PARTNER_PUSH_ENABLED".into(), "true".into());
+        m.insert(
+            "NOTIFICATIONS_PARTNER_PUSH_TRANSPORT".into(),
+            "local-test".into(),
+        );
         assert!(parse(m).is_err());
     }
 

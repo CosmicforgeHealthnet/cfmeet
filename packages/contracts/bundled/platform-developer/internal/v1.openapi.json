@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.10.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited."
+    "version": "1.11.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED)."
   },
   "tags": [
     {
@@ -49,6 +49,10 @@
     {
       "name": "Operator: webhook migration",
       "description": "Section 53 webhook migration from Calling: status, inventory, import, reconcile, shadow report, cutover check, takeover and rollback."
+    },
+    {
+      "name": "Operator: apps",
+      "description": "ADR 0065: app review (named reviewers, no self-review), publication and suspension."
     }
   ],
   "paths": {
@@ -3899,6 +3903,200 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/apps": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List apps (optionally by review status)",
+        "operationId": "operatorListApps",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: apps by review status (at most 200). Permission `developer-platform.administer`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AppList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Read an app with the manifest under review and its review history",
+        "operationId": "operatorGetApp",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: the app, the submitted manifest, the developer workspace name and the audited review history. Permission `developer-platform.administer`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorApp"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Review, approve, reject, publish or suspend an app",
+        "operationId": "operatorDecideApp",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "review",
+                "approve",
+                "reject",
+                "publish",
+                "suspend"
+              ]
+            }
+          },
+          {
+            "name": "x-cf-operator-user-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "x-cf-operator",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.AppDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4003,6 +4201,8 @@
           "APPROVAL_EXPIRED",
           "SELF_APPROVAL_FORBIDDEN",
           "PRODUCTION_ACCESS_REQUIRED",
+          "LIMIT_EXCEEDED",
+          "RATE_LIMITED",
           "CAPABILITY_UNAVAILABLE",
           "SERVICE_UNAVAILABLE",
           "INTERNAL_ERROR"
@@ -4210,6 +4410,391 @@
       "platform-developer.control.v1.ActivityEvent.properties.targetType": {
         "type": "string",
         "maxLength": 32
+      },
+      "platform-developer.control.v1.App": {
+        "description": "ADR 0064 / 0065: the app registered on a project (clientId = projectId = the Platform Access application id). The live version is what Platform Access serves: the published version, else the approved one, else the current draft.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "clientId",
+          "projectId",
+          "organizationId",
+          "status",
+          "currentVersion",
+          "submittedVersion",
+          "reviewedVersion",
+          "publishedVersion",
+          "liveVersion",
+          "pendingChanges",
+          "manifest",
+          "testAccountIds",
+          "secretIssuedAt",
+          "review",
+          "listedInDirectory",
+          "publishedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "appId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "clientId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "projectId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+          },
+          "currentVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "submittedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publishedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liveVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pendingChanges": {
+            "type": "boolean"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppManifest"
+          },
+          "testAccountIds": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          "secretIssuedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reasonCode",
+                  "decidedAt"
+                ],
+                "properties": {
+                  "reasonCode": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listedInDirectory": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.AppDecisionRequest": {
+        "description": "ADR 0065: an operator app decision (reject / suspend: safe reason code).",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "platform-developer.control.v1.AppList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.App"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.AppManifest": {
+        "description": "ADR 0064: an app manifest (normalized; every change is a new immutable version).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "logoUrl",
+          "privacyUrl",
+          "termsUrl",
+          "redirectUris",
+          "userScopes",
+          "botScopes",
+          "eventTypes",
+          "meetingSurface",
+          "distribution"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logoUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacyUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "termsUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "redirectUris": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/|$))[^#*]*$",
+              "maxLength": 2048
+            }
+          },
+          "userScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "events:meetings"
+              ]
+            }
+          },
+          "botScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "chat:read:bot",
+                "chat:write:bot"
+              ]
+            }
+          },
+          "eventTypes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "app.grant_revoked",
+                "app.installed",
+                "app.uninstalled",
+                "artifact.deleted",
+                "artifact.ready",
+                "bot.mentioned",
+                "bot.message_received",
+                "conversation.created",
+                "conversation.member_added",
+                "conversation.member_removed",
+                "conversation.updated",
+                "meeting.created",
+                "meeting.ended",
+                "meeting.started",
+                "message.created",
+                "message.deleted",
+                "message.expired",
+                "message.moderated",
+                "participant.joined",
+                "participant.left"
+              ]
+            }
+          },
+          "meetingSurface": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "url",
+                  "origins"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "pattern": "^https://",
+                    "maxLength": 2048
+                  },
+                  "origins": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^https://[^/?#]+$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distribution": {
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.AppStatus": {
+        "enum": [
+          "DRAFT",
+          "SUBMITTED",
+          "IN_REVIEW",
+          "APPROVED",
+          "REJECTED",
+          "PUBLISHED",
+          "SUSPENDED"
+        ],
+        "description": "ADR 0065 review status."
       },
       "platform-developer.control.v1.AssignPlanRequest": {
         "type": "object",
@@ -5032,6 +5617,242 @@
           }
         }
       },
+      "platform-developer.control.v1.OperatorApp": {
+        "description": "ADR 0065: the operator view of an app (the manifest under review and the audited review history).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "clientId",
+          "projectId",
+          "organizationId",
+          "status",
+          "currentVersion",
+          "submittedVersion",
+          "reviewedVersion",
+          "publishedVersion",
+          "liveVersion",
+          "pendingChanges",
+          "manifest",
+          "testAccountIds",
+          "secretIssuedAt",
+          "review",
+          "listedInDirectory",
+          "publishedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "appId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "clientId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "projectId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+          },
+          "currentVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "submittedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publishedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liveVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pendingChanges": {
+            "type": "boolean"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppManifest"
+          },
+          "testAccountIds": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          "secretIssuedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reasonCode",
+                  "decidedAt"
+                ],
+                "properties": {
+                  "reasonCode": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listedInDirectory": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submittedManifest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.AppManifest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "developerName": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fromStatus",
+                "toStatus",
+                "version",
+                "actorKind",
+                "reasonCode",
+                "occurredAt"
+              ],
+              "properties": {
+                "fromStatus": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "toStatus": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "actorKind": {
+                  "enum": [
+                    "USER",
+                    "OPERATOR",
+                    "SERVICE"
+                  ]
+                },
+                "reasonCode": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "occurredAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "platform-developer.control.v1.OperatorOrganization": {
         "description": "Section 15 (PLT-009): an organization as listed to operators (no member role; who created it and whether a rename still has to reach Platform Access).",
         "type": "object",
@@ -5670,7 +6491,9 @@
           "PUBLIC_NETWORK_CALLING",
           "PRIVACY_RELAY",
           "NUMBERS",
-          "SMS"
+          "SMS",
+          "END_USERS",
+          "PUSH"
         ]
       },
       "platform-developer.control.v1.ProductionDecisionRequest": {
@@ -6101,7 +6924,8 @@
           "NUMBER_ACTIVE",
           "SMS_SEGMENT",
           "RECORDING_MINUTE",
-          "STORAGE_BYTE_TIME"
+          "STORAGE_BYTE_TIME",
+          "MESSAGE_SENT"
         ]
       },
       "platform-developer.control.v1.UsageUnit": {
@@ -6339,7 +7163,15 @@
             "pattern": "^whe_[0-9a-f]{32}$"
           },
           "eventType": {
-            "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+              },
+              {
+                "const": "webhook.test",
+                "description": "DF1: a test event sent on request from the Developer Console (never subscribable)."
+              }
+            ]
           },
           "replayOf": {
             "oneOf": [
@@ -6422,7 +7254,7 @@
       },
       "platform-developer.webhooks.v1.WebhookEventType": {
         "type": "string",
-        "description": "The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families.",
+        "description": "The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. ADR 0064 install events: app.installed / app.uninstalled / app.grant_revoked (the installed app's own lifecycle) and bot.message_received / bot.mentioned (Messaging, ids only, never message text); events routed to an installed app carry data.installationId.",
         "enum": [
           "call.requested",
           "call.incoming",
@@ -6502,7 +7334,12 @@
           "credential.expired",
           "production_access.requested",
           "production_access.approved",
-          "production_access.rejected"
+          "production_access.rejected",
+          "app.installed",
+          "app.uninstalled",
+          "app.grant_revoked",
+          "bot.message_received",
+          "bot.mentioned"
         ]
       },
       "platform-developer.webhooks.v1.WebhookList": {

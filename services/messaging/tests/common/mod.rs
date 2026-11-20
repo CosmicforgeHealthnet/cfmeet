@@ -139,6 +139,15 @@ async fn template(admin: &str) -> String {
             messaging_migration::GapClosureMigrator::up(&tmpl, None)
                 .await
                 .expect("gap-closure migrations apply");
+            messaging_migration::MlsJoinMigrator::up(&tmpl, None)
+                .await
+                .expect("MLS self-join migrations apply");
+            messaging_migration::MemberNotificationsMigrator::up(&tmpl, None)
+                .await
+                .expect("member-notification migrations apply");
+            messaging_migration::ChatControlsMigrator::up(&tmpl, None)
+                .await
+                .expect("chat-controls migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -285,6 +294,8 @@ impl CustomerAuthority for FakeAuthority {
 pub struct FakePrincipals {
     pub known: StdMutex<HashMap<(Uuid, Uuid), PrincipalStatus>>,
     pub down: StdMutex<bool>,
+    /// ADR 0064 app bots: (environment, principal) -> app id (`app:<appId>`).
+    pub bots: StdMutex<HashMap<(Uuid, Uuid), Uuid>>,
 }
 
 #[async_trait]
@@ -304,6 +315,26 @@ impl PrincipalDirectory for FakePrincipals {
             .get(&(scope.environment_id, principal_id))
             .cloned()
             .unwrap_or(PrincipalStatus::NotFound))
+    }
+
+    async fn application_bots(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<HashMap<Uuid, Uuid>, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self.known.lock().unwrap();
+        let bots = self.bots.lock().unwrap();
+        Ok(principals
+            .iter()
+            .filter(|p| {
+                matches!(known.get(&(scope.environment_id, **p)),
+                    Some(PrincipalStatus::Active { kind }) if kind == "BOT_OR_SERVICE")
+            })
+            .filter_map(|p| bots.get(&(scope.environment_id, *p)).map(|a| (*p, *a)))
+            .collect())
     }
 }
 
@@ -371,6 +402,8 @@ pub const MEETING_PERMISSIONS: &[&str] = &[
     "messaging-application.delegate",
     "messaging-meeting.sync",
     "messaging-organization.govern",
+    // ADR 0062 §8 partner meeting chat (engaged only with the partner flag on).
+    "messaging-meeting.sync-platform",
 ];
 
 fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {
@@ -571,6 +604,7 @@ impl Harness {
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
             personal_session_issued_at: None,
             principal_restriction: None,
+            oauth: None,
         };
         self.register_token(context)
     }

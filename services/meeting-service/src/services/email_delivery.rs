@@ -168,8 +168,9 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
     enqueue_with_calendar(conn, email, None).await
 }
 
-/// Gap audit M14: as [`enqueue`], with an RFC 5545 calendar invite sent as an `invite.ics`
-/// attachment (`text/calendar; method=PUBLISH`).
+/// Gap audit M14: as [`enqueue`], with an RFC 5545 calendar object sent as an `invite.ics`
+/// attachment whose `text/calendar` `method=` parameter is the object's own METHOD
+/// (audit M9: `REQUEST` invitations and updates, `CANCEL` cancellations, `PUBLISH` files).
 pub async fn enqueue_with_calendar<C: ConnectionTrait>(
     conn: &C,
     email: NewEmail,
@@ -373,7 +374,7 @@ impl ResendProvider {
             body["attachments"] = json!([{
                 "filename": "invite.ics",
                 "content": STANDARD.encode(ics.as_bytes()),
-                "content_type": "text/calendar; charset=utf-8; method=PUBLISH",
+                "content_type": crate::services::ics::IcsMethod::of(ics).content_type(),
             }]);
         }
         body
@@ -517,7 +518,7 @@ impl EmailProvider for SmtpProvider {
         if let Some(r) = m.reply_to.and_then(|r| r.parse::<Mailbox>().ok()) {
             builder = builder.reply_to(r);
         }
-        let alternative = MultiPart::alternative()
+        let mut alternative = MultiPart::alternative()
             .singlepart(
                 SinglePart::builder()
                     .header(ContentType::TEXT_PLAIN)
@@ -528,15 +529,32 @@ impl EmailProvider for SmtpProvider {
                     .header(ContentType::TEXT_HTML)
                     .body(m.html.to_string()),
             );
-        let body = match m.calendar {
-            Some(ics) => MultiPart::mixed().multipart(alternative).singlepart(
-                lettre::message::Attachment::new("invite.ics".to_string()).body(
-                    ics.to_string(),
-                    ContentType::parse("text/calendar; charset=utf-8; method=PUBLISH")
-                        .map_err(|_| rejected("INVALID_MESSAGE"))?,
-                ),
+        let calendar_type = m
+            .calendar
+            .map(|ics| {
+                let method = crate::services::ics::IcsMethod::of(ics);
+                ContentType::parse(&method.content_type())
+                    .map(|t| (method, t))
+                    .map_err(|_| rejected("INVALID_MESSAGE"))
+            })
+            .transpose()?;
+        if let (Some(ics), Some((method, kind))) = (m.calendar, &calendar_type) {
+            // Audit M9: an iTIP request / cancellation is also an alternative part, which is
+            // where Outlook looks for meeting requests (Gmail reads either).
+            if *method != crate::services::ics::IcsMethod::Publish {
+                alternative = alternative.singlepart(
+                    SinglePart::builder()
+                        .header(kind.clone())
+                        .body(ics.to_string()),
+                );
+            }
+        }
+        let body = match (m.calendar, calendar_type) {
+            (Some(ics), Some((_, kind))) => MultiPart::mixed().multipart(alternative).singlepart(
+                lettre::message::Attachment::new("invite.ics".to_string())
+                    .body(ics.to_string(), kind),
             ),
-            None => alternative,
+            _ => alternative,
         };
         let email = builder
             .multipart(body)

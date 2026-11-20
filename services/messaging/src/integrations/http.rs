@@ -57,19 +57,42 @@ pub fn internal_routes() -> Router<AppState> {
         .route("/team-channels", put(team_channel))
 }
 
-/// The meeting-sync caller's re-validated first-party scope.
+/// The meeting-sync caller's re-validated scope: a first-party scope
+/// (`messaging-meeting.sync`), or — ADR 0062 §8 partner meeting chat, only while
+/// `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` is on — an ACTIVE EXTERNAL environment
+/// (`messaging-meeting.sync-platform`; Platform Access re-validates the signed delegated
+/// scope). With the partner flag off this is exactly the first-party rule.
 async fn meeting_scope(
     state: &AppState,
     caller: &InternalCaller,
 ) -> Result<TrustedContext, ApiError> {
-    caller.require_permission(InternalPermission::MessagingMeetingSync)?;
-    let ctx = delegated_context(state, caller).await?;
-    if !ctx.first_party {
-        return Err(ApiError::code(
-            crate::error::ErrorCode::DelegatedContextInvalid,
-        ));
+    let first_party_sync = caller
+        .context()
+        .has_permission(InternalPermission::MessagingMeetingSync);
+    let platform_sync = state.partner.settings.session_devices_enabled
+        && caller
+            .context()
+            .has_permission(InternalPermission::MessagingMeetingSyncPlatform);
+    if !platform_sync {
+        caller.require_permission(InternalPermission::MessagingMeetingSync)?;
     }
-    Ok(ctx)
+    let ctx = delegated_context(state, caller).await?;
+    match (ctx.first_party, first_party_sync, platform_sync) {
+        (true, true, _) => Ok(ctx),
+        (true, false, _) => Err(ApiError::code(
+            crate::error::ErrorCode::InternalPermissionDenied,
+        )),
+        (false, _, true) => {
+            state
+                .partner
+                .ensure_baseline(&state.db, &ctx.scope, state.now())
+                .await;
+            Ok(ctx)
+        }
+        (false, _, false) => Err(ApiError::code(
+            crate::error::ErrorCode::DelegatedContextInvalid,
+        )),
+    }
 }
 
 async fn resolve(
@@ -78,7 +101,23 @@ async fn resolve(
     Json(body): Json<ResolveRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = meeting_scope(&state, &caller).await?;
+    // ADR 0062 §8: a partner meeting's chat is MANAGED (partner users read it with their
+    // MANAGED-only partner session devices).
+    if !ctx.first_party && body.security_profile != crate::domain::SecurityProfile::Managed {
+        return Err(ApiError::reason(
+            crate::error::ErrorCode::SecurityProfileNotAllowed,
+            "PARTNER_MEETING_CHAT_MANAGED_ONLY",
+        ));
+    }
     let owner = verify_principal(&state, &ctx, body.owner_principal_id).await?;
+    // The owner of a partner meeting's chat is the environment's meeting system
+    // principal (`cfmeet:meeting-system`, BOT_OR_SERVICE).
+    if !ctx.first_party && owner.kind != "BOT_OR_SERVICE" {
+        return Err(ApiError::reason(
+            crate::error::ErrorCode::PrincipalNotAuthorized,
+            "PARTNER_MEETING_OWNER_KIND",
+        ));
+    }
     let (status, view) = meeting::resolve(&state, &ctx, &owner, body).await?;
     state.wake_outbox();
     Ok((
@@ -96,7 +135,20 @@ async fn member(
     let ctx = meeting_scope(&state, &caller).await?;
     if body.state == "ACTIVE" {
         // Admission requires an ACTIVE messaging principal now; removals never do.
-        verify_principal(&state, &ctx, principal_id).await?;
+        let member = verify_principal(&state, &ctx, principal_id).await?;
+        // ADR 0062 §8: a partner meeting admits that environment's partner users only
+        // (another environment's principal is already unknown here).
+        if !ctx.first_party
+            && !matches!(
+                member.kind.as_str(),
+                "EXTERNAL_APPLICATION_PRINCIPAL" | "TEMPORARY_EXTERNAL_PARTICIPANT"
+            )
+        {
+            return Err(ApiError::reason(
+                crate::error::ErrorCode::PrincipalNotAuthorized,
+                "PARTNER_MEETING_MEMBER_KIND",
+            ));
+        }
     }
     let view = meeting::sync_member(&state, &ctx, conversation_id, principal_id, body).await?;
     state.wake_outbox();

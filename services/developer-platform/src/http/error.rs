@@ -66,6 +66,8 @@ error_codes! {
     ApprovalExpired = "APPROVAL_EXPIRED" => CONFLICT, "The production-access approval expired before activation; submit a new request.";
     SelfApprovalForbidden = "SELF_APPROVAL_FORBIDDEN" => FORBIDDEN, "A reviewer may not decide a request of an organization they belong to.";
     ProductionAccessRequired = "PRODUCTION_ACCESS_REQUIRED" => FORBIDDEN, "The PRODUCTION environment of this project is not live.";
+    LimitExceeded = "LIMIT_EXCEEDED" => CONFLICT, "A limit of the workspace or environment is reached.";
+    RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests; retry later.";
     CapabilityUnavailable = "CAPABILITY_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The capability is not available in this deployment.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";

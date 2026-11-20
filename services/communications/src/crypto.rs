@@ -1,24 +1,18 @@
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
-const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-/// Exactly 128 random bits, unrelated to account, principal or row identifiers.
+/// CF Meet ID alphabet: 32 characters without look-alikes (no I, O, 0 or 1).
+const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/// Characters after the `CF-` prefix (owner decision 2026-11-19: short, easy to share).
+pub const PUBLIC_ID_LEN: usize = 6;
+/// `CF-` plus 6 random characters (32^6, about 1.07 billion), unrelated to account,
+/// principal or row identifiers. Uniqueness is enforced by the table's primary key.
 pub fn public_id() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
     let mut out = String::from("CF-");
-    let mut bits = 0u32;
-    let mut n = 0;
-    for b in bytes {
-        bits = (bits << 8) | u32::from(b);
-        n += 8;
-        while n >= 5 {
-            n -= 5;
-            out.push(BASE32[((bits >> n) & 31) as usize] as char);
-        }
-    }
-    if n > 0 {
-        out.push(BASE32[((bits << (5 - n)) & 31) as usize] as char);
+    let mut b = [0u8; PUBLIC_ID_LEN];
+    OsRng.fill_bytes(&mut b);
+    for x in b {
+        out.push(ALPHABET[(x & 31) as usize] as char);
     }
     out
 }
@@ -37,18 +31,37 @@ pub fn digest(value: &serde_json::Value) -> Vec<u8> {
     Sha256::digest(serde_json::to_vec(value).expect("JSON value")).to_vec()
 }
 pub fn valid_public_id(value: &str) -> bool {
-    value.len() == 29 && value.starts_with("CF-") && value[3..].bytes().all(|b| BASE32.contains(&b))
+    value.len() == 3 + PUBLIC_ID_LEN
+        && value.starts_with("CF-")
+        && value[3..].bytes().all(|b| ALPHABET.contains(&b))
+}
+/// What a person typed, as a CF Meet ID: case-insensitive, surrounding spaces ignored, and
+/// the hyphen optional (`cf-ab7k3q`, `CFAB7K3Q`). Anything else stays invalid.
+pub fn normalize_public_id(value: &str) -> String {
+    let v = value.trim().to_ascii_uppercase();
+    match v.strip_prefix("CF") {
+        Some(rest) if !rest.starts_with('-') && rest.len() == PUBLIC_ID_LEN => format!("CF-{rest}"),
+        _ => v,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn identifiers_use_128_random_bits_and_no_account_data() {
-        let ids: std::collections::HashSet<_> = (0..10000).map(|_| public_id()).collect();
-        assert_eq!(ids.len(), 10000);
-        assert!(ids.iter().all(|s| valid_public_id(s)));
+    fn identifiers_are_short_and_avoid_look_alikes() {
+        let ids: Vec<_> = (0..10000).map(|_| public_id()).collect();
+        assert!(ids.iter().all(|s| valid_public_id(s) && s.len() == 9));
+        assert!(ids.iter().all(|s| !s[3..].contains(['I', 'O', '0', '1'])));
+        let distinct: std::collections::HashSet<_> = ids.iter().collect();
+        assert!(distinct.len() > 9_900, "random enough");
         assert!(!valid_public_id("CF-email@example.com"));
+        // Long IDs of the previous format no longer resolve (owner decision).
+        assert!(!valid_public_id("CF-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
+        assert!(!valid_public_id("CF-ABCDE0"));
+        assert_eq!(normalize_public_id(" cf-ab7k3q "), "CF-AB7K3Q");
+        assert_eq!(normalize_public_id("cfab7k3q"), "CF-AB7K3Q");
+        assert!(valid_public_id(&normalize_public_id("cfab7k3q")));
         assert_eq!(invite_token().len(), 64);
     }
     #[test]

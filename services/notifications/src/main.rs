@@ -7,7 +7,7 @@ use cf_notification_client::seal::OpeningKey;
 use cf_push_transport::{adapters::PushAdapters, LocalTestPush, PushProvider};
 use notifications::{
     authorities::{Authorities, HttpAuthorities, NoAuthorities},
-    config::{NotificationsConfig, PushProviderKind},
+    config::{NotificationsConfig, PartnerTransportKind, PushProviderKind},
     crypto::DataKeys,
     email, http,
     metrics::{Heartbeats, Metrics},
@@ -64,6 +64,18 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
+    // ADR 0063: partner push only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on.
+    let partner = config.partner_push_enabled.then(|| {
+        let transport: Arc<dyn notifications::partner::PartnerTransport> = match config
+            .partner_push_transport
+        {
+            PartnerTransportKind::Live => Arc::new(notifications::partner::LivePartnerTransport),
+            PartnerTransportKind::LocalTest => {
+                Arc::new(notifications::partner::RecordingPartnerTransport::default())
+            }
+        };
+        Arc::new(notifications::partner::PartnerPush::new(transport))
+    });
     let http_authorities = match HttpAuthorities::from_config(&config, clock.clone()) {
         Ok(a) => a.map(Arc::new),
         Err(e) => fatal("owner API configuration error", e),
@@ -93,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
                 "webPushApplicationServerKey": push.as_ref().and_then(|p| p.web_push_application_server_key()),
                 "authorities": authorities.configured(),
                 "sealedOpening": opening.is_some(),
+                "partnerPush": partner.is_some(),
                 "workers": config.workers_enabled,
             })
         );
@@ -131,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
             .authorities
             .first_party_scope
             .map(|s| (s.tenant_id, s.application_id, s.environment_id)),
+        partner,
     };
     let running = config.workers_enabled.then(|| workers::spawn(&state));
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;

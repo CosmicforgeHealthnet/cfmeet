@@ -34,6 +34,7 @@ import AbuseReportDialog from "./AbuseReportDialog";
 import VoicemailInbox from "./VoicemailInbox";
 import { CALL_SETTINGS_LINKS } from "./CallingNavigation";
 import { rememberCallName } from "@/lib/calling/call-names";
+import { launchStep } from "@/lib/calling/launch";
 
 /** Calling's group-call target bound (`target_principal_ids` ≤ 64; deployments may set a lower maximum). */
 const MAX_GROUP_TARGETS = 64;
@@ -98,7 +99,7 @@ const outcomeText: Record<string, string> = {
 
 type Launch = ({ contactId: string } | { conversationId: string }) & { kind: CallKind; name: string | null };
 
-export default function CallsContent({ initialCallId = "", launch = null }: { initialCallId?: string; launch?: Launch | null }) {
+export default function CallsContent({ initialCallId = "", launch = null, initialTab = "all" }: { initialCallId?: string; launch?: Launch | null; initialTab?: ListTab }) {
   const identity = useCallingIdentity();
   const calling = useCalling();
   // Calling starts a moment after the page: show loading, not "not available", until it has.
@@ -113,18 +114,18 @@ export default function CallsContent({ initialCallId = "", launch = null }: { in
       </div>
     );
   }
-  return <CallsWorkspace key={initialCallId} initialCallId={initialCallId} launch={launch} />;
+  return <CallsWorkspace key={`${initialCallId}:${initialTab}`} initialCallId={initialCallId} launch={launch} initialTab={initialTab} />;
 }
 
 type Runner = (action: () => Promise<unknown>) => Promise<void>;
 
-type ListTab = "all" | "missed" | "voicemail";
+export type ListTab = "all" | "missed" | "voicemail";
 
-function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; launch: Launch | null }) {
+function CallsWorkspace({ initialCallId, launch, initialTab }: { initialCallId: string; launch: Launch | null; initialTab: ListTab }) {
   const calling = useCalling()!;
   const { principalId, device } = calling;
   const [selected, setSelected] = useState(initialCallId);
-  const [tab, setTab] = useState<ListTab>("all");
+  const [tab, setTab] = useState<ListTab>(initialTab);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -148,24 +149,31 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
 
   // Arriving from a Call button (Contacts, Messages): the call screen shows at once with the
   // name; the call is placed as soon as this browser is connected (unless cancelled meanwhile).
+  // The launch is remembered here: the address bar drops `?contactId=` at once (lib/calling/launch.ts).
   const router = useRouter();
-  const launched = useRef(false);
+  const pendingLaunch = useRef<Launch | null>(null);
+  const sawPlacing = useRef(false);
   const announcedLaunch = useRef(false);
   useEffect(() => {
     if (!launch || announcedLaunch.current || calling.media) return;
     announcedLaunch.current = true;
+    pendingLaunch.current = launch;
     calling.announce(launch.kind, launch.name);
     router.replace("/calling");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [launch]);
   useEffect(() => {
-    if (!launch || launched.current || !announcedLaunch.current || !device.endpoint || calling.media) return;
-    if (!calling.placing) { launched.current = true; return; } // cancelled before it started
-    launched.current = true;
+    const decision = launchStep({ pending: !!pendingLaunch.current, placing: !!calling.placing, sawPlacing: sawPlacing.current,
+      endpointReady: !!device.endpoint, inCall: !!calling.media });
+    sawPlacing.current = decision.sawPlacing;
+    if (decision.step === "drop") { pendingLaunch.current = null; return; } // cancelled before it started
+    if (decision.step !== "place" || !pendingLaunch.current) return;
+    const placed = pendingLaunch.current;
+    pendingLaunch.current = null;
     void run(async () => {
-      const label = launch.name ?? undefined;
-      const id = "contactId" in launch ? await calling.callContact(launch.contactId, launch.kind, label) : await calling.callConversation(launch.conversationId, launch.kind, label);
-      rememberCallName(id, launch.name);
+      const label = placed.name ?? undefined;
+      const id = "contactId" in placed ? await calling.callContact(placed.contactId, placed.kind, label) : await calling.callConversation(placed.conversationId, placed.kind, label);
+      rememberCallName(id, placed.name);
       open(id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,7 +243,9 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
                 // A finished call can still report RINGING (the server leaves invitations open after a cancel): show what really happened.
                 const finished = ["ENDED", "CANCELLED", "FAILED", "NO_ANSWER", "DECLINED", "REJECTED", "BUSY"].includes(entry.state);
                 const outcome = finished && (entry.participation.outcome === "RINGING" || entry.participation.outcome === "IN_PROGRESS") ? (inbound ? "MISSED" : "NOT_ANSWERED") : entry.participation.outcome;
-                const detail = [outcomeText[outcome] ?? "", entry.durationMs ? formatCallDuration(entry.durationMs) : ""].filter(Boolean).join(" · ");
+                // CF1: an outgoing call that ended BUSY reached someone who was on another call.
+                const outcomeLabel = !inbound && entry.state === "BUSY" ? "On another call" : outcomeText[outcome] ?? "";
+                const detail = [outcomeLabel, entry.durationMs ? formatCallDuration(entry.durationMs) : ""].filter(Boolean).join(" · ");
                 return (
                   <Fragment key={entry.callId}>
                     {newDay && <li className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{dayLabel(entry.createdAt)}</li>}
@@ -533,6 +543,11 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
   const otherName = (p: (typeof others)[number]) => p.displayName || names.data?.[p.principalId] || "CF Meet user";
   const title = others.length === 0 ? "Call" : others.length === 1 ? otherName(others[0]) : `${otherName(others[0])} and ${others.length - 1} more`;
   const presentation = callStatePresentation[data.state];
+  // CF1: who is on another call (the caller's view); the busy person sees their missed call.
+  const description = data.state !== "BUSY" ? presentation.description
+    : data.initiatorPrincipalId !== principalId ? "You were on another call."
+    : others.length === 1 ? `${otherName(others[0])} is on another call.`
+    : "Everyone you called is on another call.";
   const ended = !live;
   const pending = busy || mutation.isPending;
   const sendDigit = (digit: string) => endpointId && run(() => mutation.mutateAsync({ operation: "ivrInput", callId, body: { endpointId, digit: digit as IvrInputRequest["digit"] } }));
@@ -569,7 +584,7 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
           {data.state === "CONNECTED" ? <span className="size-2 animate-pulse rounded-full bg-emerald-500" /> : null}
           {data.state === "CONNECTED" ? formatCallDuration(liveDuration) : presentation.title}
         </p>
-        {presentation.description ? <p className="mt-1 text-sm text-muted-foreground">{presentation.description}</p> : null}
+        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
         {data.failureCategory ? <p className="mt-2 text-sm text-destructive">{data.failureCategory.replaceAll("_", " ").toLowerCase().replace(/^./, (c) => c.toUpperCase())}</p> : null}
         {data.state === "ENDED" && data.connectedDurationMs !== null ? <p className="mt-1 text-sm text-muted-foreground">Lasted {formatCallDuration(data.connectedDurationMs)}</p> : null}
 

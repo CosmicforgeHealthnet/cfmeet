@@ -396,6 +396,7 @@ pub fn service_auth_fixture_targeting(
                         "calling-request.act-for-organization",
                         "calling-organization-member.act",
                         "calling-organization-member.offboard",
+                        "calling-account.privacy",
                     ],
                 ),
                 (
@@ -567,6 +568,7 @@ pub struct Harness {
 pub struct RecordingPush {
     sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
     offers: std::sync::Mutex<Vec<calling::signaling::PushOffer>>,
+    partner_offers: std::sync::Mutex<Vec<calling::signaling::PartnerPushOffer>>,
     cancels: std::sync::Mutex<Vec<calling::signaling::PushCancel>>,
 }
 
@@ -578,6 +580,11 @@ impl RecordingPush {
     /// Every offer with its recipient facts (N9).
     pub fn offers(&self) -> Vec<calling::signaling::PushOffer> {
         self.offers.lock().unwrap().clone()
+    }
+
+    /// Every partner (`platform-principal`) offer (ADR 0063).
+    pub fn partner_offers(&self) -> Vec<calling::signaling::PartnerPushOffer> {
+        self.partner_offers.lock().unwrap().clone()
     }
 
     /// Every ring cancellation Calling dispatched (gap audit C1).
@@ -595,6 +602,10 @@ impl calling::signaling::PushDispatcher for RecordingPush {
     async fn dispatch_offer(&self, offer: calling::signaling::PushOffer) {
         self.offers.lock().unwrap().push(offer.clone());
         self.dispatch(offer.push_target_ref, offer.payload).await;
+    }
+
+    async fn dispatch_partner_offer(&self, offer: calling::signaling::PartnerPushOffer) {
+        self.partner_offers.lock().unwrap().push(offer);
     }
 
     async fn dispatch_cancel(&self, cancel: calling::signaling::PushCancel) {
@@ -626,7 +637,14 @@ pub fn test_runtime(
         credential_policy: MediaCredentialPolicy::default(),
         bus,
         push: Arc::new(NoPushTransport),
-        app_config: AppCallingConfig::default(),
+        // CF1 ("on another call") is on in the service; the shared harness turns it off
+        // because most suites place calls between the same two parties while an earlier
+        // call of theirs is still live. tests/app_busy.rs turns it
+        // back on with `AppWorld::busy_on_another_call`.
+        app_config: AppCallingConfig {
+            busy_on_another_call: false,
+            ..AppCallingConfig::default()
+        },
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
         numbering: Arc::new(calling::numbering::UnconfiguredNumbering),
@@ -868,6 +886,24 @@ impl Harness {
     }
 
     pub async fn request_with(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let response = self
+            .request_unsettled(method, path, token, body, headers)
+            .await;
+        // C1: cancel / end answer before their media clean-up, which runs in the
+        // background; tests observe the settled state (the reply itself is tested apart).
+        self.state.app.settle_background().await;
+        response
+    }
+
+    /// [`Self::request_with`] without waiting for background clean-up (C1 tests).
+    pub async fn request_unsettled(
         &self,
         method: Method,
         path: &str,

@@ -335,6 +335,101 @@ pub fn seal(
     })
 }
 
+impl Sealed {
+    /// The compact wire form `<kid>.<enc>.<ct>` (the `sealed` string of the push provider
+    /// vault, contract `cfmeet.notifications.internal-api` 1.3.0). Neither the key id nor
+    /// base64url contain `.`.
+    pub fn to_compact(&self) -> String {
+        format!("{}.{}.{}", self.kid, self.enc, self.ct)
+    }
+
+    /// Parses the compact form of [`to_compact`](Self::to_compact).
+    pub fn parse_compact(text: &str) -> Result<Self, SealError> {
+        let mut parts = text.trim().split('.');
+        let (Some(kid), Some(enc), Some(ct), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(SealError::OpenFailed);
+        };
+        let b64 = |s: &str| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        if !valid_kid(kid) {
+            return Err(SealError::InvalidKid);
+        }
+        if !b64(enc) || !b64(ct) {
+            return Err(SealError::OpenFailed);
+        }
+        Ok(Self {
+            kid: kid.to_string(),
+            enc: enc.to_string(),
+            ct: ct.to_string(),
+        })
+    }
+}
+
+// ------------------------------------------------------------------------------------
+// Partner push provider credentials (ADR 0063, N-P1)
+// ------------------------------------------------------------------------------------
+
+/// HPKE `info` of a sealed push provider credential (domain-separated from event parts).
+pub const PUSH_CREDENTIAL_INFO: &[u8] = b"cfmeet.notifications.push-provider.v1";
+/// Maximum size of a push provider credential (an APNs `.p8` key or an FCM
+/// service-account JSON document).
+pub const MAX_PUSH_CREDENTIAL_BYTES: usize = 16 * 1024;
+
+/// The AAD binding a sealed push credential to its (tenant, application, environment):
+/// a credential sealed for one scope never opens for another.
+pub fn push_credential_aad(
+    tenant_id: uuid::Uuid,
+    application_id: uuid::Uuid,
+    environment_id: uuid::Uuid,
+) -> Vec<u8> {
+    format!("cfmeet.push-provider|{tenant_id}|{application_id}|{environment_id}").into_bytes()
+}
+
+/// The fingerprint the Developer Console keeps of a push credential: SHA-256 of the secret
+/// exactly as sealed, lowercase hex.
+pub fn push_credential_fingerprint(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(secret.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Seals a partner push provider credential (the APNs `.p8` PEM or the FCM service-account
+/// JSON) to the Notification Service for one (tenant, application, environment). The
+/// Developer Console calls this on receipt and forwards only the result
+/// ([`Sealed::to_compact`]) to `PUT /internal/v1/push/providers/...`; it never stores,
+/// logs or returns the secret.
+pub fn seal_push_credential(
+    key: &SealingKey,
+    tenant_id: uuid::Uuid,
+    application_id: uuid::Uuid,
+    environment_id: uuid::Uuid,
+    secret: &str,
+) -> Result<Sealed, SealError> {
+    if secret.trim().is_empty() || secret.len() > MAX_PUSH_CREDENTIAL_BYTES {
+        return Err(SealError::InvalidPlaintext);
+    }
+    let (enc, ct) = hpke::single_shot_seal::<AesGcm256, HkdfSha256, Kem>(
+        &OpModeS::Base,
+        &key.public,
+        PUSH_CREDENTIAL_INFO,
+        secret.as_bytes(),
+        &push_credential_aad(tenant_id, application_id, environment_id),
+    )
+    .map_err(|_| SealError::InvalidKey)?;
+    Ok(Sealed {
+        kid: key.kid.clone(),
+        enc: B64.encode(enc.to_bytes()),
+        ct: B64.encode(ct),
+    })
+}
+
 /// Generates a new service key pair: (`<kid>:<base64url public>`, private key bytes).
 /// Used by release tooling / tests; the private key is written to a 0400 file and never
 /// leaves the service.
@@ -350,7 +445,7 @@ pub fn generate_keypair(kid: &str) -> Result<(String, zeroize::Zeroizing<Vec<u8>
 }
 
 #[cfg(feature = "open")]
-pub use opening::{open, OpeningKey};
+pub use opening::{open, open_push_credential, OpeningKey};
 
 #[cfg(feature = "open")]
 mod opening {
@@ -421,5 +516,39 @@ mod opening {
         plain.zeroize();
         value.validate()?;
         Ok(value)
+    }
+
+    /// Opens a sealed push provider credential of (tenant, application, environment). A
+    /// credential sealed for another scope, to another key or tampered with fails closed.
+    pub fn open_push_credential(
+        key: &OpeningKey,
+        tenant_id: uuid::Uuid,
+        application_id: uuid::Uuid,
+        environment_id: uuid::Uuid,
+        sealed: &Sealed,
+    ) -> Result<zeroize::Zeroizing<String>, SealError> {
+        if sealed.kid != key.kid {
+            return Err(SealError::WrongKid);
+        }
+        let enc = B64.decode(&sealed.enc).map_err(|_| SealError::OpenFailed)?;
+        let ct = B64.decode(&sealed.ct).map_err(|_| SealError::OpenFailed)?;
+        let enc =
+            <Kem as hpke::Kem>::EncappedKey::from_bytes(&enc).map_err(|_| SealError::OpenFailed)?;
+        let plain = zeroize::Zeroizing::new(
+            hpke::single_shot_open::<AesGcm256, HkdfSha256, Kem>(
+                &OpModeR::Base,
+                &key.private,
+                &enc,
+                PUSH_CREDENTIAL_INFO,
+                &ct,
+                &push_credential_aad(tenant_id, application_id, environment_id),
+            )
+            .map_err(|_| SealError::OpenFailed)?,
+        );
+        if plain.is_empty() || plain.len() > MAX_PUSH_CREDENTIAL_BYTES {
+            return Err(SealError::InvalidPlaintext);
+        }
+        let text = std::str::from_utf8(&plain).map_err(|_| SealError::InvalidPlaintext)?;
+        Ok(zeroize::Zeroizing::new(text.to_string()))
     }
 }

@@ -8,7 +8,8 @@
 //!   quotas and forwarding to the owning service.
 //!
 //! Cross-cutting: request / correlation ids on every response, header count / size and
-//! URI length limits, and CORS for the configured exact origins only. There is no
+//! URI length limits, and CORS for the configured exact origins and (ADR 0062, flag
+//! `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`) partner websites on device routes. There is no
 //! `/internal` surface, no provider callback and no operator route.
 
 pub mod error;
@@ -78,7 +79,18 @@ async fn limits(State(state): State<AppState>, request: Request, next: Next) -> 
     next.run(request).await
 }
 
-/// CORS for the configured exact origins (no wildcard, no credentials mode).
+/// CORS for the configured exact origins (no wildcard, no credentials mode), and — with
+/// `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` — for partner websites registered per
+/// environment in Platform Access ([`crate::origins`], ADR 0062):
+///
+/// * the static list (`API_GATEWAY_CORS_ALLOWED_ORIGINS`) is checked first and behaves
+///   exactly as before;
+/// * a partner preflight is answered only for the methods of the path whose route accepts
+///   a device authentication mode (never a PLATFORM_CREDENTIAL-only route), and only when
+///   the origin is registered for some ACTIVE environment; otherwise `403`;
+/// * a partner actual response carries `Access-Control-Allow-Origin` only when the origin
+///   is registered for the environment of the request's device token
+///   ([`ingress::PartnerEnvironment`], set by the ingress for device modes only).
 async fn cors(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let origin = request
         .headers()
@@ -89,30 +101,46 @@ async fn cors(State(state): State<AppState>, request: Request, next: Next) -> Re
         return next.run(request).await;
     };
     let allowed = state.cors_allowed_origins.contains(&origin);
+    let partner = (!allowed).then(|| state.origin_index()).flatten();
     let preflight = request.method() == Method::OPTIONS
         && request
             .headers()
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
     if preflight {
         let context = RequestContext::generate();
-        if !allowed {
-            return ingress::with_ids(
+        let refuse = || {
+            ingress::with_ids(
                 ApiError::Code(ErrorCode::OriginNotAllowed).into_response(),
                 &context,
-            );
-        }
+            )
+        };
         let path = request.uri().path().to_string();
-        let mut methods = state.routes.path_exists(&path);
-        if matches!(path.as_str(), "/openapi.json" | "/discovery") || path.starts_with("/openapi/")
-        {
-            methods.push(Method::GET);
-        }
-        if methods.is_empty() {
-            return ingress::with_ids(
-                ApiError::Code(ErrorCode::NotFound).into_response(),
-                &context,
-            );
-        }
+        let methods = if allowed {
+            let mut methods = state.routes.path_exists(&path);
+            if matches!(path.as_str(), "/openapi.json" | "/discovery")
+                || path.starts_with("/openapi/")
+            {
+                methods.push(Method::GET);
+            }
+            if methods.is_empty() {
+                return ingress::with_ids(
+                    ApiError::Code(ErrorCode::NotFound).into_response(),
+                    &context,
+                );
+            }
+            methods
+        } else {
+            match partner.filter(|index| index.registered(&origin)) {
+                None => return refuse(),
+                Some(_) => {
+                    let methods = state.routes.device_methods(&path);
+                    if methods.is_empty() {
+                        return refuse();
+                    }
+                    methods
+                }
+            }
+        };
         let allow = methods
             .iter()
             .map(Method::as_str)
@@ -140,7 +168,13 @@ async fn cors(State(state): State<AppState>, request: Request, next: Next) -> Re
         return ingress::with_ids(r, &context);
     }
     let mut response = next.run(request).await;
-    if allowed {
+    let partner_allowed = partner.is_some_and(|index| {
+        response
+            .extensions()
+            .get::<ingress::PartnerEnvironment>()
+            .is_some_and(|env| index.allows(&origin, env.0))
+    });
+    if allowed || partner_allowed {
         let h = response.headers_mut();
         if let Ok(v) = HeaderValue::from_str(&origin) {
             h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, v);
@@ -150,6 +184,11 @@ async fn cors(State(state): State<AppState>, request: Request, next: Next) -> Re
             HeaderValue::from_static(CORS_EXPOSED_HEADERS),
         );
         h.append(header::VARY, HeaderValue::from_static("origin"));
+    } else if partner.is_some() {
+        // The answer depends on the origin (shared caches must not reuse it).
+        response
+            .headers_mut()
+            .append(header::VARY, HeaderValue::from_static("origin"));
     }
     response
 }
@@ -209,14 +248,13 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         upstreams.insert(service, Value::from(status));
     }
     let ready = authority_ok || !state.flags.public_routing;
+
     let code = if ready {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
-    (
-        code,
-        Json(json!({
+    let mut body = json!({
             "status": if ready { "ready" } else { "not_ready" },
             "platformAccess": if authority_ok { "reachable" } else { "unreachable" },
             "service": "api-gateway",
@@ -228,6 +266,19 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             "centralUsage": state.controls.central_usage,
             "disabledFamilies": state.controls.disabled_domains.iter().collect::<Vec<_>>(),
             "upstreams": upstreams,
-        })),
-    )
+    });
+    // ADR 0062 (informational, only while the flags are on; never affects readiness).
+    if state.flags.user_tokens {
+        body["userTokens"] = match &state.user_tokens {
+            None => json!("not_configured"),
+            Some(v) => json!({ "usableKeys": v.usable_keys() }),
+        };
+    }
+    if state.flags.environment_origins {
+        body["environmentOrigins"] = match &state.origins {
+            None => json!("not_configured"),
+            Some(i) => json!(if i.synced() { "synced" } else { "pending" }),
+        };
+    }
+    (code, Json(body))
 }

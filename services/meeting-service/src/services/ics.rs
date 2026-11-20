@@ -17,6 +17,54 @@ pub const PRODID: &str = "-//CF Meet//Meetings v2//EN";
 /// transition scan unbounded.
 const MAX_TIMEZONE_WINDOW_DAYS: i64 = 366 * 25;
 
+/// The iTIP method of a calendar object (RFC 5546). `Publish` is a plain calendar (feeds,
+/// downloads); `Request` is an invitation or its update (calendar clients show Yes / No and
+/// update the event with the same UID and a higher SEQUENCE); `Cancel` removes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IcsMethod {
+    #[default]
+    Publish,
+    Request,
+    Cancel,
+}
+
+impl IcsMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IcsMethod::Publish => "PUBLISH",
+            IcsMethod::Request => "REQUEST",
+            IcsMethod::Cancel => "CANCEL",
+        }
+    }
+
+    /// The METHOD of a rendered calendar (`PUBLISH` when absent): the MIME
+    /// `method=` parameter must equal it.
+    pub fn of(ics: &str) -> IcsMethod {
+        for line in ics.split("\r\n") {
+            match line {
+                "METHOD:REQUEST" => return IcsMethod::Request,
+                "METHOD:CANCEL" => return IcsMethod::Cancel,
+                "METHOD:PUBLISH" => return IcsMethod::Publish,
+                "BEGIN:VEVENT" => break,
+                _ => {}
+            }
+        }
+        IcsMethod::Publish
+    }
+
+    /// `text/calendar` content type with the matching `method=` parameter.
+    pub fn content_type(self) -> String {
+        format!("text/calendar; charset=utf-8; method={}", self.as_str())
+    }
+}
+
+/// An ORGANIZER / ATTENDEE (address and display name).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IcsPerson {
+    pub email: String,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcsStatus {
     Confirmed,
@@ -40,6 +88,9 @@ pub struct IcsEvent {
     pub recurrence_id: Option<DateTime<Utc>>,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: DateTime<Utc>,
+    /// Scheduling (`REQUEST` / `CANCEL` only): the organizer and the attendees.
+    pub organizer: Option<IcsPerson>,
+    pub attendees: Vec<IcsPerson>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +101,7 @@ pub struct IcsCalendar {
     pub events: Vec<IcsEvent>,
     /// End of the window the VTIMEZONE must cover (e.g. a series' last occurrence).
     pub timezone_until: Option<DateTime<Utc>>,
+    pub method: IcsMethod,
 }
 
 /// Escape a TEXT value (RFC 5545 §3.3.11).
@@ -196,14 +248,47 @@ fn vtimezone(tz: Tz, from: DateTime<Utc>, to: DateTime<Utc>, out: &mut String) {
     fold("END:VTIMEZONE", out);
 }
 
-/// Render a complete `VCALENDAR` (METHOD:PUBLISH).
+/// A `mailto:` calendar address, or `None` when it could break the content line.
+fn cal_address(email: &str) -> Option<String> {
+    let email = email.trim();
+    let ok = !email.is_empty()
+        && email.len() <= 254
+        && email.contains('@')
+        && !email
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || matches!(c, ';' | ':' | ',' | '"'));
+    ok.then(|| format!("mailto:{email}"))
+}
+
+/// A `CN` parameter value (quoted; DQUOTE and controls removed, RFC 5545 §3.2).
+fn cn_param(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '"')
+        .take(80)
+        .collect();
+    format!(";CN=\"{}\"", clean.trim())
+}
+
+fn person_line(property: &str, extra: &str, p: &IcsPerson) -> Option<String> {
+    let address = cal_address(&p.email)?;
+    let cn = p
+        .name
+        .as_deref()
+        .filter(|n| !n.trim().is_empty())
+        .map(cn_param)
+        .unwrap_or_default();
+    Some(format!("{property}{cn}{extra}:{address}"))
+}
+
+/// Render a complete `VCALENDAR` with `cal.method` (`PUBLISH` for feeds and downloads).
 pub fn render(cal: &IcsCalendar, now: DateTime<Utc>) -> String {
     let mut out = String::new();
     fold("BEGIN:VCALENDAR", &mut out);
     fold("VERSION:2.0", &mut out);
     fold(&format!("PRODID:{PRODID}"), &mut out);
     fold("CALSCALE:GREGORIAN", &mut out);
-    fold("METHOD:PUBLISH", &mut out);
+    fold(&format!("METHOD:{}", cal.method.as_str()), &mut out);
     if let Some(name) = &cal.name {
         fold(&format!("X-WR-CALNAME:{}", escape_text(name)), &mut out);
     }
@@ -263,6 +348,24 @@ pub fn render(cal: &IcsCalendar, now: DateTime<Utc>) -> String {
             &mut out,
         );
         fold("TRANSP:OPAQUE", &mut out);
+        if cal.method != IcsMethod::Publish {
+            if let Some(line) = e
+                .organizer
+                .as_ref()
+                .and_then(|o| person_line("ORGANIZER", "", o))
+            {
+                fold(&line, &mut out);
+            }
+            let attendee = match cal.method {
+                IcsMethod::Request => ";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE",
+                _ => ";ROLE=REQ-PARTICIPANT",
+            };
+            for a in &e.attendees {
+                if let Some(line) = person_line("ATTENDEE", attendee, a) {
+                    fold(&line, &mut out);
+                }
+            }
+        }
         if let Some(c) = e.created {
             fold(&format!("CREATED:{}", utc_stamp(c)), &mut out);
         }
@@ -311,6 +414,8 @@ mod tests {
             recurrence_id: None,
             created: None,
             last_modified: start,
+            organizer: None,
+            attendees: vec![],
         }
     }
 
@@ -323,6 +428,7 @@ mod tests {
                 name: None,
                 events: vec![event(start)],
                 timezone_until: None,
+                method: IcsMethod::Publish,
             },
             start,
         );
@@ -354,6 +460,7 @@ mod tests {
                 name: None,
                 events: vec![e],
                 timezone_until: None,
+                method: IcsMethod::Publish,
             },
             start,
         );
@@ -381,6 +488,7 @@ mod tests {
                 name: Some("Weekly".into()),
                 events: vec![e],
                 timezone_until: Some(start + Duration::weeks(6)),
+                method: IcsMethod::Publish,
             },
             start,
         ));
@@ -408,6 +516,68 @@ mod tests {
         );
         let lagos: Tz = "Africa/Lagos".parse().unwrap();
         assert!(transitions(lagos, from, from + Duration::days(365)).is_empty());
+    }
+
+    #[test]
+    fn requests_and_cancellations_carry_organizer_attendee_and_method() {
+        let start = Utc.with_ymd_and_hms(2026, 11, 20, 14, 0, 0).unwrap();
+        let mut e = event(start);
+        e.organizer = Some(IcsPerson {
+            email: "no-reply@cfmeet.com".into(),
+            name: Some("Ada \"via\" CF Meet".into()),
+        });
+        e.attendees = vec![
+            IcsPerson {
+                email: "guest@example.com".into(),
+                name: Some("Guest".into()),
+            },
+            IcsPerson {
+                email: "bad;addr@example.com".into(),
+                name: None,
+            },
+        ];
+        let cal = |method| IcsCalendar {
+            timezone: None,
+            name: None,
+            events: vec![e.clone()],
+            timezone_until: None,
+            method,
+        };
+        let request = unfold(&render(&cal(IcsMethod::Request), start));
+        assert!(request.contains("METHOD:REQUEST\r\n"));
+        assert_eq!(IcsMethod::of(&request), IcsMethod::Request);
+        assert!(request.contains("ORGANIZER;CN=\"Ada via CF Meet\":mailto:no-reply@cfmeet.com\r\n"));
+        assert!(request.contains(
+            "ATTENDEE;CN=\"Guest\";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:guest@example.com\r\n"
+        ));
+        assert!(
+            !request.contains("bad;addr"),
+            "unsafe addresses are skipped"
+        );
+        assert!(request.contains("UID:conference-1@cfmeet.com\r\n"));
+        let mut cancelled = e.clone();
+        cancelled.status = IcsStatus::Cancelled;
+        cancelled.sequence = 3;
+        let cancel = unfold(&render(
+            &IcsCalendar {
+                events: vec![cancelled],
+                ..cal(IcsMethod::Cancel)
+            },
+            start,
+        ));
+        assert_eq!(IcsMethod::of(&cancel), IcsMethod::Cancel);
+        assert!(cancel.contains("STATUS:CANCELLED\r\nTRANSP:OPAQUE\r\nORGANIZER"));
+        assert!(cancel.contains("SEQUENCE:3\r\n"));
+        assert!(cancel
+            .contains("ATTENDEE;CN=\"Guest\";ROLE=REQ-PARTICIPANT:mailto:guest@example.com\r\n"));
+        // A published calendar (feed, download) never lists people.
+        let published = render(&cal(IcsMethod::Publish), start);
+        assert_eq!(IcsMethod::of(&published), IcsMethod::Publish);
+        assert!(!published.contains("ORGANIZER") && !published.contains("ATTENDEE"));
+        assert_eq!(
+            IcsMethod::Cancel.content_type(),
+            "text/calendar; charset=utf-8; method=CANCEL"
+        );
     }
 
     #[test]

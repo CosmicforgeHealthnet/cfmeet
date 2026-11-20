@@ -73,6 +73,9 @@ pub struct FakeMediaProvider {
     capabilities: MediaProviderCapabilities,
     next_token: AtomicU64,
     next_event: AtomicU64,
+    /// While set, `terminate_session` waits (a slow provider) until released.
+    held: std::sync::atomic::AtomicBool,
+    released: tokio::sync::Notify,
 }
 
 impl Default for FakeMediaProvider {
@@ -103,7 +106,26 @@ impl FakeMediaProvider {
             capabilities,
             next_token: AtomicU64::new(1),
             next_event: AtomicU64::new(1),
+            held: std::sync::atomic::AtomicBool::new(false),
+            released: tokio::sync::Notify::new(),
         }
+    }
+
+    /// `terminate_session` waits from now on (a slow provider) until
+    /// [`Self::release_terminations`].
+    pub fn hold_terminations(&self) {
+        self.held.store(true, Ordering::SeqCst);
+    }
+
+    pub fn release_terminations(&self) {
+        self.held.store(false, Ordering::SeqCst);
+        self.released.notify_waiters();
+    }
+
+    /// How many times `op` was called so far.
+    pub fn calls_of(&self, op: FakeOp) -> usize {
+        let name = format!("{op:?}");
+        self.lock().log.iter().filter(|l| **l == name).count()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -402,6 +424,15 @@ impl CallMediaProvider for FakeMediaProvider {
         &self,
         session: &MediaSessionRef,
     ) -> Result<TerminationOutcome, MediaProviderError> {
+        loop {
+            let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            if !self.held.load(Ordering::SeqCst) {
+                break;
+            }
+            released.await;
+        }
         self.check(FakeOp::Terminate)?;
         match self.lock().rooms.remove(session.name.as_str()) {
             Some(_) => Ok(TerminationOutcome::Terminated),

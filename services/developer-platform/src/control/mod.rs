@@ -16,6 +16,7 @@
 //! identity mutation is DELEGATED to Platform Access ([`crate::platform_access`]).
 
 pub mod activity;
+pub mod allowed_origins;
 pub mod commercial;
 pub mod credential_lifecycle;
 pub mod credentials;
@@ -27,10 +28,12 @@ pub mod organizations;
 pub mod pagination;
 pub mod production;
 pub mod projects;
+pub mod push_credentials;
 pub mod scopes;
 pub mod service_accounts;
 pub mod support;
 pub mod usage;
+pub mod users;
 
 use cf_service_auth::DelegatedPlatformContext;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
@@ -131,6 +134,17 @@ pub fn machine_scope(action: Action) -> Option<&'static str> {
         ProductionAccessRead => Some("projects.read"),
         UsageExport => Some("usage.read"),
         SupportProfileManage => Some("organizations.manage"),
+        // ADR 0062: the partner Users API (build contract §3).
+        EndUsersRead => Some("principals.read"),
+        EndUsersManage => Some("principals.write"),
+        UserTokensIssue => Some("user_tokens.issue"),
+        // ADR 0062: allowed websites are credential-grade configuration.
+        AllowedOriginsRead => Some("projects.read"),
+        AllowedOriginsManage => Some("credentials.manage"),
+        // ADR 0063: push credentials are uploaded from the console only.
+        PushCredentialsRead | PushCredentialsManage => None,
+        // ADR 0064: apps are registered from the console only.
+        AppsRead | AppsManage => None,
         // Membership, ownership, closure and billing are role-gated human operations.
         OrganizationClose | MembersManage | OwnershipTransfer | CommercialRead
         | BillingAccountManage => None,

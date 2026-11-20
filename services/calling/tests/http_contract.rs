@@ -222,6 +222,7 @@ fn contract_paths_equal_the_registered_routes() {
             || path.ends_with("src/webhooks/ownership_migration.rs")
             || path.ends_with("src/calls/app/abuse_review.rs")
             || path.ends_with("src/organization_members.rs")
+            || path.ends_with("src/account_privacy.rs")
             || path.ends_with("src/communications.rs")
         {
             "/internal/v1"
@@ -615,6 +616,9 @@ fn every_operation_declares_its_authentication() {
                     p if p.starts_with("/internal/v1/organization-members/") => {
                         "calling-organization-member.act"
                     }
+                    p if p.starts_with("/internal/v1/account-privacy/") => {
+                        "calling-account.privacy"
+                    }
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(
@@ -632,6 +636,9 @@ fn every_operation_declares_its_authentication() {
                 || path.starts_with("/v1/calling/sessions/")
             {
                 "signalingCredential"
+            } else if path == "/v1/calling/user-sessions" {
+                // ADR 0062: the device exchange of a CF Meet user token.
+                "userToken"
             } else {
                 "platformCredential"
             };

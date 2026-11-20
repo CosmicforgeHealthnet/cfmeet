@@ -216,6 +216,7 @@ pub fn valid_recipient(r: &str) -> bool {
     ]
     .iter()
     .any(|p| r.strip_prefix(p).is_some_and(is_uuid))
+        || catalogue::parse_platform_principal(r).is_some()
 }
 
 /// Whether a `data` key is allowed by the envelope-wide rule (camelCase, ≤ 48, no
@@ -295,6 +296,24 @@ pub fn validate(env: &Envelope, issuer: Option<&str>) -> Result<&'static EventSp
         }
         if producer == Producer::Alertmanager && !r.reference.starts_with("operator-group:") {
             return Err(Invalid("recipients"));
+        }
+    }
+    // Partner end users (`platform-principal:<env>:<principal>`, ADR 0063 N-P4): only for
+    // the metadata-only partner event types, never mixed with other recipients, and in
+    // the envelope's scope when it names one.
+    let partner: Vec<(Uuid, Uuid)> = env
+        .recipients
+        .iter()
+        .filter_map(|r| catalogue::parse_platform_principal(&r.reference))
+        .collect();
+    if !partner.is_empty() {
+        if partner.len() != count || !catalogue::PARTNER_EVENT_TYPES.contains(&spec.event_type) {
+            return Err(Invalid("recipients"));
+        }
+        if let Some(scope) = &env.scope {
+            if partner.iter().any(|(e, _)| *e != scope.environment_id) {
+                return Err(Invalid("recipients"));
+            }
         }
     }
     // A type that names its recipient kind has exactly one recipient of that kind (a

@@ -19,9 +19,11 @@ use api_gateway::{
         AuthenticatedCustomer, Authentication, AuthorityUnavailable, CustomerAuthority, Throttle,
         TrustClassification,
     },
+    origins::{FeedUnavailable, OriginFeedItem, OriginFeedPage, OriginFeedSource, OriginIndex},
     quota::QuotaEngine,
     routing::{AuthMode, Protocol, RouteDefinition, RouteTable, RoutingControls},
     state::AppState,
+    user_tokens::{KeySourceUnavailable, PublishedKey, UserTokenKeySource, UserTokenVerifier},
 };
 use async_trait::async_trait;
 use axum::{
@@ -62,6 +64,8 @@ pub fn customer(scopes: &[&str]) -> AuthenticatedCustomer {
             .iter()
             .map(|s| s.to_string())
             .collect::<BTreeSet<_>>(),
+        principal_restriction: None,
+        oauth: None,
     }
 }
 
@@ -137,6 +141,8 @@ pub struct Received {
     pub request_id: Option<String>,
     pub delegated: Option<DelegatedPlatformContext>,
     pub expires_in: i64,
+    /// The request body exactly as received.
+    pub raw_body: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -215,6 +221,7 @@ async fn upstream_handler(
         request_id,
         delegated: delegated.clone(),
         expires_in,
+        raw_body: bytes.to_vec(),
     });
     let delay = *s.delay.lock().unwrap();
     if !delay.is_zero() {
@@ -280,11 +287,28 @@ async fn upstream_handler(
         .into_response()
 }
 
-/// A WebSocket upstream: requires the `cfmeet.ticket.good` subprotocol ticket (refuses
-/// 401 otherwise), selects `cfmeet.messaging.v1`, echoes frames, closes with 4001 on
-/// "bye".
-async fn ws_handler(headers: HeaderMap, upgrade: WebSocketUpgrade) -> axum::response::Response {
+/// A WebSocket upstream: records the handshake, requires the `cfmeet.ticket.good`
+/// subprotocol ticket (refuses 401 otherwise), selects `cfmeet.messaging.v1`, echoes
+/// frames, closes with 4001 on "bye".
+async fn ws_handler(
+    State(s): State<UpstreamState>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> axum::response::Response {
     use axum::extract::ws::{CloseFrame, Message};
+    s.received.lock().unwrap().push(Received {
+        method: "GET".into(),
+        path: "/v1/test/realtime".into(),
+        query: None,
+        headers: headers.clone(),
+        body: Value::Null,
+        issuer: None,
+        correlation_id: None,
+        request_id: None,
+        delegated: None,
+        expires_in: 0,
+        raw_body: Vec::new(),
+    });
     let offered = headers
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
@@ -416,6 +440,7 @@ pub fn route(
             _ => vec![],
         },
         timeout: None,
+        forward_authorization: false,
     }
 }
 
@@ -578,6 +603,12 @@ pub struct Options {
     pub controls: RoutingControls,
     /// Per-token ceiling of end-user traffic (`0`: off).
     pub token_rate_limit: u64,
+    /// ADR 0062: `Some` turns `API_GATEWAY_USER_TOKENS_ENABLED` on with this verifier.
+    pub user_tokens: Option<Arc<UserTokenVerifier>>,
+    /// ADR 0062: `Some` turns `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` on with this index.
+    pub origins: Option<Arc<OriginIndex>>,
+    /// ADR 0064: `API_GATEWAY_OAUTH_ENABLED`.
+    pub oauth: bool,
 }
 
 impl Default for Options {
@@ -591,6 +622,9 @@ impl Default for Options {
             cors: vec![],
             controls: RoutingControls::default(),
             token_rate_limit: 0,
+            user_tokens: None,
+            origins: None,
+            oauth: false,
         }
     }
 }
@@ -671,6 +705,9 @@ impl Gateway {
             .with_flags(FeatureFlags {
                 public_routing: true,
                 websockets: true,
+                user_tokens: o.user_tokens.is_some(),
+                environment_origins: o.origins.is_some(),
+                oauth: o.oauth,
             })
             .with_controls(o.controls)
             .with_upstream_timeout(o.timeout)
@@ -679,6 +716,12 @@ impl Gateway {
             .with_token_rate_limit(o.token_rate_limit);
         if let Some(q) = o.quota {
             state = state.with_quota_engine(q);
+        }
+        if let Some(v) = o.user_tokens {
+            state = state.with_user_token_verifier(v);
+        }
+        if let Some(i) = o.origins {
+            state = state.with_origin_index(i);
         }
         Self {
             router: http::app(state.clone()),
@@ -802,4 +845,138 @@ pub fn conforms(reference: &str, value: &Value) {
         errors.is_empty(),
         "{reference} violated: {errors:?}\n{value:#}"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// ADR 0062: CF Meet user tokens and partner-website origins (scripted Platform Access).
+// ---------------------------------------------------------------------------------------
+
+/// Mints CF Meet user tokens (build contract §1) with a random Ed25519 key.
+pub struct UserTokenSigner {
+    pub kid: String,
+    key: ed25519_dalek::SigningKey,
+}
+
+impl UserTokenSigner {
+    /// A random key with `kid` (16 lowercase hex characters).
+    pub fn new(kid: &str) -> Self {
+        let mut seed = [0u8; 32];
+        seed[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+        seed[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+        Self {
+            kid: kid.to_string(),
+            key: ed25519_dalek::SigningKey::from_bytes(&seed),
+        }
+    }
+
+    pub fn published(&self, status: &str) -> PublishedKey {
+        use base64::Engine;
+        PublishedKey {
+            kid: self.kid.clone(),
+            alg: "EdDSA".into(),
+            crv: "Ed25519".into(),
+            x: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(self.key.verifying_key().to_bytes()),
+            status: status.into(),
+        }
+    }
+
+    /// Signs `claims` under `header` (both serialized as given).
+    pub fn sign_raw(&self, tag: &str, header: &Value, claims: &Value) -> String {
+        use base64::Engine;
+        use ed25519_dalek::Signer;
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let input = format!(
+            "{}.{}",
+            b64.encode(header.to_string()),
+            b64.encode(claims.to_string())
+        );
+        let sig = b64.encode(self.key.sign(input.as_bytes()).to_bytes());
+        format!("cfut_{tag}_{input}.{sig}")
+    }
+
+    /// A well-formed SANDBOX token for `environment`, issued `now - 10`, valid `ttl` s.
+    pub fn token(&self, environment: Uuid, now: i64, ttl: i64) -> String {
+        self.sign_raw(
+            "sbx",
+            &json!({"alg": "EdDSA", "typ": "cfmeet-user+jwt", "kid": self.kid}),
+            &user_token_claims(environment, now - 10, now - 10 + ttl),
+        )
+    }
+}
+
+/// Contract §1 claims of a SANDBOX user token.
+pub fn user_token_claims(environment: Uuid, iat: i64, exp: i64) -> Value {
+    json!({
+        "iss": "cfmeet.platform-access", "aud": "cfmeet.platform.client",
+        "sub": Uuid::new_v4().to_string(), "tid": Uuid::new_v4(), "aid": Uuid::new_v4(),
+        "eid": environment, "ekd": "SANDBOX", "sva": Uuid::new_v4(), "crd": Uuid::new_v4(),
+        "jti": Uuid::new_v4(), "iat": iat, "nbf": iat, "exp": exp,
+        "grt": {"msg": ["read", "send"], "mtg": [{"c": Uuid::new_v4(), "r": "PARTICIPANT"}]},
+    })
+}
+
+/// A scripted `GET /internal/v1/user-tokens/keys`.
+#[derive(Default)]
+pub struct ScriptedKeys {
+    pub keys: Mutex<Vec<PublishedKey>>,
+    pub down: Mutex<bool>,
+    pub fetches: Mutex<usize>,
+}
+
+impl ScriptedKeys {
+    pub fn with(keys: Vec<PublishedKey>) -> Arc<Self> {
+        let s = Self::default();
+        *s.keys.lock().unwrap() = keys;
+        Arc::new(s)
+    }
+}
+
+#[async_trait]
+impl UserTokenKeySource for ScriptedKeys {
+    async fn fetch_keys(&self) -> Result<Vec<PublishedKey>, KeySourceUnavailable> {
+        *self.fetches.lock().unwrap() += 1;
+        if *self.down.lock().unwrap() {
+            return Err(KeySourceUnavailable("down".into()));
+        }
+        Ok(self.keys.lock().unwrap().clone())
+    }
+}
+
+/// A scripted `GET /internal/v1/environment-origins?after=&limit=` change feed.
+#[derive(Default)]
+pub struct ScriptedFeed {
+    pub items: Mutex<Vec<OriginFeedItem>>,
+    pub calls: Mutex<Vec<u64>>,
+}
+
+impl ScriptedFeed {
+    pub fn push(&self, environment: Uuid, origins: &[&str], status: &str) {
+        let mut items = self.items.lock().unwrap();
+        let seq = items.last().map(|i| i.seq).unwrap_or(0) + 1;
+        items.push(OriginFeedItem {
+            environment_id: environment,
+            origins: origins.iter().map(|o| o.to_string()).collect(),
+            environment_status: status.into(),
+            seq,
+        });
+    }
+}
+
+#[async_trait]
+impl OriginFeedSource for ScriptedFeed {
+    async fn page(&self, after: u64, limit: u32) -> Result<OriginFeedPage, FeedUnavailable> {
+        self.calls.lock().unwrap().push(after);
+        let items: Vec<_> = self
+            .items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|i| i.seq > after)
+            .take(limit as usize)
+            .cloned()
+            .collect();
+        let next_after = items.last().map(|i| i.seq);
+        Ok(OriginFeedPage { items, next_after })
+    }
 }

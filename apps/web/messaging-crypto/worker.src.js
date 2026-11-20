@@ -163,6 +163,51 @@ function aadFor(conversationId, clientMessageId, senderDeviceId) {
   return core.message_aad(s.tenantId, s.applicationId, s.environmentId, conversationId, clientMessageId, senderDeviceId);
 }
 
+// Structured payloads (F4-F7), validated on the way in AND out: only these shapes are ever
+// encrypted or shown, every string is bounded, and nothing here is fetched (a link preview
+// is built by the sender's device, the server never sees or fetches the link).
+const str = (v, max, min = 0) => (typeof v === "string" && v.length >= min && v.length <= max ? v : fail("PAYLOAD_INVALID"));
+const optStr = (v, max) => (v === undefined || v === null ? null : str(v, max));
+const CF_MEET_ID = /^[A-Za-z0-9._-]{3,40}$/;
+function linkPreview(v) {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object") fail("PAYLOAD_INVALID");
+  const url = str(v.url, 2048, 8);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail("PAYLOAD_INVALID");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") fail("PAYLOAD_INVALID");
+  return { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+}
+function coordinate(v, limit) {
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit ? Math.round(v * 1e6) / 1e6 : fail("PAYLOAD_INVALID");
+}
+/** A structured payload (not text / file), normalized; throws PAYLOAD_INVALID otherwise. */
+function richPayload(p) {
+  switch (p?.t) {
+    case "contact":
+      if (typeof p.cfMeetId !== "string" || !CF_MEET_ID.test(p.cfMeetId)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "contact", cfMeetId: p.cfMeetId, name: str(p.name, 120, 1) };
+    case "location":
+      return { v: 1, t: "location", lat: coordinate(p.lat, 90), lng: coordinate(p.lng, 180), label: optStr(p.label, 200) };
+    case "poll": {
+      if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 12) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "poll", question: str(p.question, 300, 1), options: p.options.map((o) => str(o, 100, 1)), multiple: p.multiple === true };
+    }
+    case "vote": {
+      if (!Array.isArray(p.choices) || p.choices.length > 12) fail("PAYLOAD_INVALID");
+      const choices = [...new Set(p.choices)];
+      if (choices.length !== p.choices.length || !choices.every((c) => Number.isInteger(c) && c >= 0 && c < 12)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "vote", poll: uuid(p.poll, "PAYLOAD_INVALID"), choices };
+    }
+    default:
+      return fail("PAYLOAD_INVALID");
+  }
+}
+
 /** The CF Meet message payload inside MLS (validated before anything is shown). */
 function parsePayload(plain) {
   let p;
@@ -173,14 +218,17 @@ function parsePayload(plain) {
   }
   if (!p || typeof p !== "object" || p.v !== 1) fail("PAYLOAD_INVALID");
   if (p.t === "text" && typeof p.text === "string" && p.text.length >= 1 && p.text.length <= MAX_TEXT) {
-    return { t: "text", text: p.text };
+    const preview = linkPreview(p.preview);
+    return preview ? { t: "text", text: p.text, preview } : { t: "text", text: p.text };
   }
   if (p.t === "file" && typeof p.d === "string") {
     const descriptor = b64u.dec(p.d);
     if (!core.is_descriptor(descriptor)) fail("PAYLOAD_INVALID");
     return { t: "file", d: p.d, caption: typeof p.caption === "string" ? p.caption.slice(0, 1024) : null };
   }
-  fail("PAYLOAD_INVALID");
+  const rich = richPayload(p);
+  delete rich.v;
+  return rich;
 }
 
 /** What the page sees of a stored record (never the attachment key). */
@@ -301,13 +349,31 @@ const ops = {
       at += 4 + k.length;
     }
     const r = device.addDevices(bytes(groupId), packed);
-    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch) };
+    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   async removeDevices({ groupId, deviceIds }) {
     const device = requireDevice();
     ctx.snapshot ??= device.exportState();
     const r = device.removeDevices(bytes(groupId), deviceIds.map((d) => uuid(d)));
-    return { commit: r.commit, epoch: Number(r.epoch) };
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /** A commit with a fresh leaf for this device and no membership change (publishes a GroupInfo, attests moot removals). */
+  async updateKeys({ groupId }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.updateKeys(bytes(groupId));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /**
+   * Joins a group BY ITSELF from its GroupInfo (an MLS external commit): no other member
+   * has to be online. Like every group change it is undone (`rollback`) if the Delivery
+   * Service refuses the commit.
+   */
+  async externalJoin({ groupId, groupInfo }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.externalJoin(bytes(groupId), bytes(groupInfo));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   /** The Delivery Service accepted the change: make it durable. */
   async confirm() {
@@ -403,6 +469,8 @@ const ops = {
     if (payload?.t === "text") {
       if (typeof payload.text !== "string" || payload.text.length < 1 || payload.text.length > MAX_TEXT) fail("TEXT_INVALID");
       p = { v: 1, t: "text", text: payload.text };
+      const preview = linkPreview(payload.preview);
+      if (preview) p.preview = preview;
     } else if (payload?.t === "file") {
       const h = handles.get(payload.handle) ?? fail("UNKNOWN_ATTACHMENT");
       attachmentId = uuid(payload.attachmentId);
@@ -412,7 +480,7 @@ const ops = {
       handles.delete(payload.handle);
       h.file.free();
     } else {
-      fail("PAYLOAD_INVALID");
+      p = richPayload(payload);
     }
     const plain = enc.encode(JSON.stringify(p));
     const ciphertext = device.encrypt(bytes(groupId), aadFor(conversationId, clientMessageId, ctx.deviceId), plain);
@@ -431,19 +499,21 @@ const ops = {
    * messages decrypted under the CF Meet AAD of their envelope. Every outcome, the new
    * group state and the cursor are stored in ONE IndexedDB transaction.
    */
-  async processMessages({ conversationId, groupId, messages }) {
+  async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [] }) {
     const device = requireDevice();
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
+    const allowed = Array.isArray(allowedJoiners) ? allowedJoiners.filter((a) => typeof a === "string") : [];
+    const rejected = new Set(Array.isArray(rejectedJoiners) ? rejectedJoiners : []);
     const out = [];
     const puts = [];
     const deletes = [];
     let last = cursor;
+    let joiner = null;
     for (const m of sorted) {
       if (!Number.isSafeInteger(m.sequence) || m.sequence <= last) continue;
-      last = m.sequence;
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
       try {
@@ -455,9 +525,21 @@ const ops = {
           if (own || m.epoch < epoch) {
             record = { ...base, status: "COMMIT", epoch };
           } else {
-            const r = device.process(gid, b64u.dec(m.ciphertext), undefined);
+            // An external commit (a member's device joining by itself) is merged only for
+            // the device that sent it, verified by the page (registered, ACTIVE, of a
+            // member, with exactly its logged key).
+            const sender = typeof m.senderDeviceId === "string" ? m.senderDeviceId : "";
+            const r = device.process(gid, b64u.dec(m.ciphertext), undefined, allowed.filter((a) => a.startsWith(`${sender}:`)));
+            if (r.kind === "JOINER_UNVERIFIED") {
+              if (!rejected.has(r.joiner) && r.joiner === sender) {
+                // Stop before it: the page verifies the joiner and processes it again.
+                joiner = { deviceId: r.joiner, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId };
+                break;
+              }
+              fail("JOINER_REJECTED");
+            }
             if (r.kind !== "COMMIT") fail("UNEXPECTED_MESSAGE");
-            record = { ...base, status: "COMMIT", epoch: Number(r.epoch) };
+            record = { ...base, status: "COMMIT", epoch: Number(r.epoch), ...(r.joiner ? { joiner: r.joiner } : {}) };
           }
         } else if (m.senderDeviceId === ctx.deviceId) {
           const sealed = await req((await db()).transaction("pending").objectStore("pending").get([ctx.account, m.clientMessageId]));
@@ -471,7 +553,7 @@ const ops = {
         } else if (m.epoch < Number(device.epoch(gid))) {
           record = { ...base, status: "BEFORE_JOIN" };
         } else {
-          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)));
+          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)), []);
           if (r.kind !== "APPLICATION") fail("UNEXPECTED_MESSAGE");
           const payload = parsePayload(r.plaintext);
           r.plaintext.fill(0);
@@ -486,12 +568,13 @@ const ops = {
       } catch (e) {
         record = { ...base, status: "FAILED", error: e instanceof Error ? String(e.message).slice(0, 64) : "FAILED" };
       }
+      last = m.sequence;
       puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(record)))]);
       out.push(view(record));
     }
     ctx.meta.cursors[conversationId] = last;
     await persistDevice(puts, deletes);
-    return { cursor: last, records: out };
+    return { cursor: last, records: out, joiner };
   },
 
   async cursor({ conversationId }) {

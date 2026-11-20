@@ -88,6 +88,10 @@ pub fn customer_routes() -> Router<AppState> {
             post(console_rotate),
         )
         .route(
+            "/environments/:environment_id/webhooks/:webhook_id/test",
+            post(console_send_test),
+        )
+        .route(
             "/environments/:environment_id/webhooks/:webhook_id/deliveries",
             get(console_deliveries),
         )
@@ -667,6 +671,23 @@ async fn console_replay(
         return Ok(refused);
     }
     let row = svc.replay(&c, &scope, id_path(&id)?).await?;
+    Ok(respond(StatusCode::CREATED, row.view()))
+}
+
+/// DF1: `POST /v1/environments/{environmentId}/webhooks/{webhookId}/test` — send a test
+/// event (signed and delivered like a real one, `"test": true`), rate limited per
+/// subscription; a workspace member allowed to manage webhooks (Developer Console).
+async fn console_send_test(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((env, id)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    let svc = service(&s)?;
+    let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
+    let row = svc.send_test(&c, &scope, id_path(&id)?).await?;
     Ok(respond(StatusCode::CREATED, row.view()))
 }
 

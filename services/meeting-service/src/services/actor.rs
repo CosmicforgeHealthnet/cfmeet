@@ -41,6 +41,10 @@ pub struct RegisteredActor {
     /// Meeting media opened by this request are tied to it, so ending one sign-in ends
     /// only its own device's media (multi-device policy).
     pub account_session_id: Option<Uuid>,
+    /// ADR 0064: set when an app acts for this user with an OAuth access token (the
+    /// platform middleware's verified `DelegatedUser`); the request is then restricted to
+    /// the machine operations on the user's own meetings and is never a platform admin.
+    pub delegation: Option<crate::services::apps::delegated::DelegatedUser>,
 }
 
 impl RegisteredActor {
@@ -75,6 +79,28 @@ impl PlatformActor {
     }
 }
 
+/// A partner user (ADR 0062): a Platform Access principal of an EXTERNAL application
+/// environment presenting a CF Meet user token (`Authorization: Bearer cfut_…`), verified
+/// LIVE by Platform Access. Resolved ONLY on the conference join
+/// ([`JoinActor`]); every field comes from Platform Access's answer, never from the
+/// request. It is never a registered user, a member or a machine caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformUserActor {
+    pub token: Arc<crate::services::platform::user_token::VerifiedUserToken>,
+}
+
+impl PlatformUserActor {
+    pub fn principal_id(&self) -> Uuid {
+        self.token.user.id
+    }
+
+    /// Identity reference stored on the participant (`external_ref`): bans of the
+    /// participant apply to the partner user, whatever device or token they use next.
+    pub fn external_ref(&self) -> String {
+        format!("principal:{}", self.token.user.id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActorKind {
     /// Authenticated CF Meet account.
@@ -93,6 +119,8 @@ pub enum ActorKind {
     /// manages ONLY meetings owned by that environment and is never a registered user,
     /// a participant or a meeting member.
     Platform(PlatformActor),
+    /// Partner user with a verified CF Meet user token (ADR 0062); join only.
+    PlatformUser(PlatformUserActor),
 }
 
 /// Trusted, server-resolved actor.
@@ -142,6 +170,13 @@ impl ActorContext {
         }
     }
 
+    pub fn platform_user(&self) -> Option<&PlatformUserActor> {
+        match &self.kind {
+            ActorKind::PlatformUser(u) => Some(u),
+            _ => None,
+        }
+    }
+
     pub fn participant_credential(&self) -> Option<&str> {
         match &self.kind {
             ActorKind::ParticipantCredential(c) => Some(c),
@@ -174,6 +209,7 @@ impl ActorContext {
                 "PLATFORM".into(),
                 Some(format!("service_account:{}", p.service_account_id)),
             ),
+            ActorKind::PlatformUser(u) => ("PLATFORM_USER".into(), Some(u.external_ref())),
         }
     }
 }
@@ -210,6 +246,20 @@ impl OrganizationDirectory for StaticOrganizationDirectory {
 
 pub type SharedOrganizationDirectory = Arc<dyn OrganizationDirectory>;
 
+fn client_kind_of(parts: &Parts) -> Option<String> {
+    parts
+        .headers
+        .get(&CLIENT_KIND_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            v.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .take(32)
+                .collect::<String>()
+        })
+        .filter(|v| !v.is_empty())
+}
+
 /// Resolve the actor of an HTTP request.
 ///
 /// - `Authorization: Bearer <access token>` → verified registered user (invalid → 401).
@@ -227,6 +277,47 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             client_kind: None,
         });
     }
+    // ADR 0064: an app acting for a user (OAuth access token), admitted by the platform
+    // middleware after Platform Access, the account and the revocation-epoch checks. It is
+    // the user — never a platform administrator — restricted to that middleware's
+    // operations and meetings.
+    if let Some(delegated) = parts
+        .extensions
+        .get::<crate::services::apps::delegated::DelegatedUser>()
+    {
+        let refused =
+            || ApiError::domain(ErrorCode::AuthenticationRequired, "Authentication failed");
+        let user = users::Entity::find_by_id(delegated.account_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(refused)?;
+        if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended)
+            || user.role == UserRole::Guest
+        {
+            return Err(refused());
+        }
+        let verified_email = user
+            .email_verified(state.require_email_verification)
+            .then(|| user.email.to_ascii_lowercase());
+        let verified_organizations = state
+            .organization_directory
+            .organizations_for_user(user.id)
+            .await;
+        return Ok(ActorContext {
+            kind: ActorKind::RegisteredUser(RegisteredActor {
+                user_id: user.id,
+                display_name: user.presentation_name(),
+                verified_email,
+                platform_admin: false,
+                revocation_checked: true,
+                account_session_id: None,
+                delegation: Some(delegated.clone()),
+            }),
+            verified_organizations,
+            request_id,
+            client_kind: None,
+        });
+    }
     // An internal service token is never a user, guest or anonymous identity: without
     // the platform middleware's verified actor it is refused (no fall-through).
     if parts
@@ -238,17 +329,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             "Authentication failed",
         ));
     }
-    let client_kind = parts
-        .headers
-        .get(&CLIENT_KIND_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| {
-            v.chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-                .take(32)
-                .collect::<String>()
-        })
-        .filter(|v| !v.is_empty());
+    let client_kind = client_kind_of(parts);
 
     let bearer = parts
         .headers
@@ -349,6 +430,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                     platform_admin: user.role == UserRole::Admin,
                     revocation_checked,
                     account_session_id: authorization.session_id,
+                    delegation: None,
                 }),
                 verified_organizations,
                 request_id,
@@ -391,6 +473,94 @@ impl FromRequestParts<AppState> for ActorContext {
     }
 }
 
+/// The `cfut_` bearer of a request, if it presents one.
+fn user_token_of(parts: &Parts) -> Option<&str> {
+    parts
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .filter(|t| t.starts_with(crate::services::platform::user_token::USER_TOKEN_PREFIX))
+}
+
+fn user_token_refused() -> ApiError {
+    ApiError::domain(
+        ErrorCode::AuthenticationRequired,
+        "Invalid or expired token",
+    )
+}
+
+/// ADR 0062: a partner user from a CF Meet user token, verified LIVE by Platform Access
+/// (positive answers cached at most 30 s). Refusals are the normalized 401; Platform
+/// Access unreachable is 503 (fail closed).
+async fn resolve_platform_user(
+    parts: &Parts,
+    state: &AppState,
+    token: &str,
+) -> ApiResult<ActorContext> {
+    use crate::services::platform::user_token::{looks_like_user_token, UserTokenVerification};
+    // `MEETING_PLATFORM_USER_JOIN_ENABLED` off: exactly today's answer to an unknown bearer.
+    let Some(users) = state.platform_users.as_ref() else {
+        return Err(user_token_refused());
+    };
+    // Never mixed with an internal service token or a participant credential.
+    if parts
+        .headers
+        .contains_key(cf_service_auth::headers::SERVICE_AUTHORIZATION)
+        || parts.headers.contains_key(&PARTICIPANT_TOKEN_HEADER)
+        || !looks_like_user_token(token)
+    {
+        return Err(user_token_refused());
+    }
+    match users.verifier.verify(token).await {
+        Ok(UserTokenVerification::Valid(token)) => Ok(ActorContext {
+            kind: ActorKind::PlatformUser(PlatformUserActor { token }),
+            verified_organizations: vec![],
+            request_id: current_request_id(),
+            client_kind: client_kind_of(parts),
+        }),
+        Ok(UserTokenVerification::Rejected { code }) => {
+            tracing::info!(%code, "CF Meet user token refused by Platform Access");
+            Err(user_token_refused())
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "user token authority (Platform Access) unavailable; join refused");
+            Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "The service is temporarily unavailable. Please retry.",
+            ))
+        }
+    }
+}
+
+/// The actor of the conference JOIN: everything [`resolve_actor`] accepts, plus — while
+/// `MEETING_PLATFORM_USER_JOIN_ENABLED` is on — a partner user's CF Meet user token
+/// (`Authorization: Bearer cfut_…`). No other route accepts a user token: a joined partner
+/// user continues with the participant token the join returns.
+pub struct JoinActor(pub ActorContext);
+
+#[async_trait]
+impl FromRequestParts<AppState> for JoinActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // The platform middleware's verified machine caller always wins (and a service
+        // token next to an `Authorization` header was already refused there).
+        if parts.extensions.get::<PlatformActor>().is_none() {
+            if let Some(token) = user_token_of(parts) {
+                let token = token.to_string();
+                return resolve_platform_user(parts, state, &token)
+                    .await
+                    .map(JoinActor);
+            }
+        }
+        resolve_actor(parts, state).await.map(JoinActor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +574,7 @@ mod tests {
             platform_admin: false,
             revocation_checked: true,
             account_session_id: None,
+            delegation: None,
         };
         assert_eq!(actor.verified_domain().as_deref(), Some("example.com"));
         actor.verified_email = None;

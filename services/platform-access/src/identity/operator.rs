@@ -71,6 +71,11 @@ text_enum!(
         ProductionEnvironmentActivated = "PRODUCTION_ENVIRONMENT_ACTIVATED",
         OrganizationScopeProvisioned = "ORGANIZATION_SCOPE_PROVISIONED",
         TenantRenamed = "TENANT_RENAMED",
+        // ADR 0062 (migration 000008): partner users and allowed websites.
+        PrincipalProfileSet = "PRINCIPAL_PROFILE_SET",
+        PrincipalSessionsRevoked = "PRINCIPAL_SESSIONS_REVOKED",
+        EnvironmentOriginsSet = "ENVIRONMENT_ORIGINS_SET",
+        UserTokenTestIssued = "USER_TOKEN_TEST_ISSUED",
     }
 );
 
@@ -920,9 +925,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000003 / 000004 / 000005 / 000006 (an unknown code
-        // is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 25);
+        // Kept in step with migrations 000003 / 000004 / 000005 / 000006 / 000008 (an
+        // unknown code is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 29);
         assert_eq!(AuditTargetKind::ALL.len(), 7);
     }
 }

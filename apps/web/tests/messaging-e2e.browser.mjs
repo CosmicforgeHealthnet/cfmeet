@@ -12,12 +12,15 @@
 //   E2E_SECRET      a unique phrase: it must never appear outside the devices
 //   E2E_EVIDENCE    where to write the step log (JSON)
 //
-// Steps: device registration; an end-to-end encrypted conversation created in the UI;
+// Steps: device registration; an end-to-end encrypted conversation created in the UI while
+// the recipient is offline, read when the recipient opens it with nobody else online;
 // encrypted send / receive; XSS payloads rendered as text; reload (encrypted local
 // state); offline delivery; network loss and reconnect; an encrypted attachment;
-// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser linked by a
-// trusted browser (comparison code, ADR 0060), then a second device added to the
-// group, its history recovered device-to-device with comparison codes; device removal
+// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser
+// trusted by its own sign-in (no verification step, ADR 0067) that joins the chat BY ITSELF
+// while every other device is offline (MLS external commit), older messages labelled "Sent
+// before this browser joined", its history recovered device-to-device with comparison
+// codes; device removal
 // erasing local state; CSP / Trusted Types / worker integrity; expired session.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -150,6 +153,28 @@ async function send(page, text) {
 
 const shown = (page, text) => page.locator("[data-testid=message-text]", { hasText: text }).first().waitFor({ timeout: T });
 
+/** Reopens a closed browser of `who` (same profile: same device) on the messages page. */
+async function reopen(who, s) {
+  s.page = await s.ctx.newPage();
+  pages[who] = s.page;
+  await s.page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
+  await phase(s.page, "ready");
+}
+
+/** The chat list never shows a blank placeholder bar for a private chat that has messages. */
+async function previewIsText(page) {
+  const item = page.locator("[data-testid=conversation-item][data-profile=PRIVATE_E2EE]").first();
+  await item.waitFor({ timeout: T });
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector("[data-testid=conversation-item][data-profile=PRIVATE_E2EE]");
+      return el && !el.querySelector("[aria-label='Loading message']");
+    },
+    null,
+    { timeout: T },
+  );
+}
+
 /** Every IndexedDB value of the Messaging store: is the needle anywhere, are keys extractable? */
 function inspectStorage(page, needle) {
   return page.evaluate(async (needle) => {
@@ -217,7 +242,10 @@ async function journey() {
   assert.ok(pageCsp && !pageCsp.includes("wasm-unsafe-eval") && !pageCsp.includes("'unsafe-eval'"), pageCsp);
   step("device registration", { devices: 2, pageCspWithoutWasmEval: true });
 
-  // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI.
+  // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI while Bob is
+  //         OFFLINE: his device published its keys in advance, so Alice's device adds it
+  //         on its own (WhatsApp), and Bob reads her message later with nobody else online.
+  await bob.page.close();
   await alice.page.click("[data-testid=new-conversation]");
   await pick(alice.page, USERS.bob.name);
   await alice.page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
@@ -228,14 +256,23 @@ async function journey() {
   await alice.page.click("[data-testid=conversation-members-toggle]");
   step("encrypted conversation created", {});
 
-  // ---- 3. Encrypted send and receive, both directions.
+  // ---- 3. Encrypted send and receive, both directions. Alice goes offline right after
+  //         sending; Bob's device opens the chat with no other member online.
   const hello = `${SECRET} hello bob`;
   await send(alice.page, hello);
   await alice.page.locator("[data-testid=message][data-mine=true][data-state=sent]").first().waitFor({ timeout: T });
+  await alice.page.close();
+  await reopen("bob", bob);
+  await previewIsText(bob.page);
   await openConversation(bob.page, "PRIVATE_E2EE");
   await shown(bob.page, hello);
+  assert.equal(await bob.page.locator("[data-testid=e2ee-unavailable]").count(), 0, "readable without anyone else online");
+  step("recipient offline at creation reads with nobody online", {});
   const reply = `${SECRET} hi alice`;
   await send(bob.page, reply);
+  await bob.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: reply }).waitFor({ timeout: T });
+  await reopen("alice", alice);
+  await openConversation(alice.page, "PRIVATE_E2EE");
   await shown(alice.page, reply);
   step("encrypted send / receive", { messages: 2 });
 
@@ -317,25 +354,31 @@ async function journey() {
   //          is recovered device-to-device after both devices show the same code.
   const bob2 = await open("bob");
   pages.bob2 = bob2.page;
-  // Multi-device policy (ADR 0060): a second browser is untrusted until one of Bob's trusted
-  // devices approves it by typing the code the new browser shows; then setup completes.
-  // The link request starts on its own; the new browser only shows the code to compare.
-  await bob2.page.locator("[data-testid=device-setup][data-linking=true]").first().waitFor({ timeout: T });
-  const linkCode = (await bob2.page.locator("[data-testid=account-link-code]:visible").first().textContent({ timeout: T })).trim();
-  assert.match(linkCode, /^\d{6}$/, "the new browser shows a 6-digit linking code");
-  await bob.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });
-  await bob.page.fill("[data-testid=incoming-link-code]", linkCode);
-  await bob.page.click("[data-testid=approve-link]");
-  await bob.page.locator("[data-testid=incoming-link]").waitFor({ state: "detached", timeout: T });
+  // ADR 0067: signing in is enough. The second browser is never asked to verify itself and
+  // Bob's other browser is never asked to approve it; setup is silent.
+  // Every other device goes offline before the new browser even has its messaging device:
+  // nobody can add it, so it must not wait for anyone.
+  await alice.page.close();
+  await bob.page.close();
   await phase(bob2.page, "ready");
-  step("second browser linked by a trusted browser (comparison code)", { linkCode: "######" });
+  assert.equal(await bob2.page.locator("[data-testid=account-link-code], [data-testid=link-email-code], [data-testid=incoming-link]").count(), 0, "no verification step");
+  assert.equal(await bob2.page.getByText(/Verify this browser|Securing this chat|Waiting for secure setup|can't send messages from this browser/).count(), 0, "no setup write-up");
+  step("second browser trusted by its own sign-in (no verification step)", {});
+  await previewIsText(bob2.page);
   await openConversation(bob2.page, "PRIVATE_E2EE");
-  await bob2.page.locator("[data-testid=e2ee-unavailable]").waitFor({ state: "detached", timeout: 3 * T });
-  await bob2.page.locator("[data-testid=message][data-state=before-join]").first().waitFor({ timeout: T });
+  // Older messages show a calm, accurate label (they can never arrive on this browser; history
+  // can be transferred from Bob's other browser), never "Waiting for this message".
+  const older = bob2.page.locator("[data-testid=message][data-state=before-join] [data-testid=message-note]").first();
+  await older.waitFor({ timeout: T });
+  assert.match(await older.textContent(), /^Sent before this browser joined/);
   // The new device writes first: once Alice reads it, both are in the epoch that
   // contains it (a message encrypted in an earlier epoch is, correctly, unreadable to it).
   const fromNew = `${SECRET} from bob's new device`;
   await send(bob2.page, fromNew);
+  await bob2.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: fromNew }).waitFor({ timeout: T });
+  step("new browser joins by itself with every other device offline", {});
+  await reopen("alice", alice);
+  await reopen("bob", bob);
   await openConversation(alice.page, "PRIVATE_E2EE");
   await shown(alice.page, fromNew);
   const after = `${SECRET} after the new device joined`;

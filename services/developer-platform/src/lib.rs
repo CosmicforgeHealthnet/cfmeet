@@ -15,6 +15,7 @@
 //! It owns no communications data, no E2EE material and no product-specific endpoint, and
 //! never reads another service's database.
 
+pub mod apps;
 pub mod config;
 pub mod control;
 pub mod db;
@@ -24,6 +25,7 @@ pub mod http;
 pub mod ledger;
 pub mod notification_publications;
 pub mod platform_access;
+pub mod push_providers;
 pub mod reference_reconciliation;
 pub mod retention;
 pub mod session;

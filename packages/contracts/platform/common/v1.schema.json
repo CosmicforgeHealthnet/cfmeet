@@ -161,6 +161,7 @@
         "calling-request.act-for-organization",
         "calling-organization-member.act",
         "calling-organization-member.offboard",
+        "calling-account.privacy",
         "meeting-organization-events.apply",
         "notifications-event.publish",
         "notifications-user.forward",
@@ -176,7 +177,18 @@
         "organization-invitations.read",
         "account-route-lease.claim",
         "calling-abuse-reports.review",
-        "communications-preferences.export"
+        "communications-preferences.export",
+        "platform-end-users.delegate",
+        "platform-user-token.verify",
+        "platform-environment-origins.read",
+        "platform-principal.ensure-meeting-platform",
+        "messaging-meeting.sync-platform",
+        "notifications-push-provider.manage",
+        "platform-oauth.manage",
+        "platform-oauth.token",
+        "platform-oauth.authorize",
+        "organization-apps.evaluate",
+        "meeting-oauth-userinfo.read"
       ]
     }
   }

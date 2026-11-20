@@ -1623,6 +1623,8 @@ export interface RegistrationCreated {
   admissionToken: string | null;
   expiresAt: string;
   created: boolean;
+  /** The join link emailed to the registrant (only when an email was given). */
+  emailDelivery?: "DISABLED" | "ACCEPTED" | "FAILED" | null;
 }
 
 export interface RegistrationListResponse {

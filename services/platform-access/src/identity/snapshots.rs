@@ -140,6 +140,30 @@ pub struct CredentialScopeSnapshot {
     pub granted_at: DateTime<Utc>,
 }
 
+/// ADR 0064: an app grant (installation) on the change feed (`APP_GRANT`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppGrantSnapshot {
+    pub id: Uuid,
+    pub app_id: Uuid,
+    pub target: String,
+    pub account_id: Option<Uuid>,
+    pub organization_id: Option<Uuid>,
+    pub installed_by_account_id: Uuid,
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub principal_id: Uuid,
+    pub service_account_id: Uuid,
+    pub scopes: Vec<String>,
+    pub status: String,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub revoke_reason: Option<String>,
+    pub revision: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// `snake_case` → `camelCase`.
 fn camel(key: &str) -> String {
     let mut out = String::with_capacity(key.len());

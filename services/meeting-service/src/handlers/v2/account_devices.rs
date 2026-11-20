@@ -142,12 +142,15 @@ pub async fn list_devices(
 /// `DECLARE`, context = the session id). The same installation signing in again reuses
 /// its device (older sign-ins of it end: `SUPERSEDED`), never a new one.
 ///
-/// * WEB: refused with `WEB_DEVICE_LIMIT_REACHED` beyond `maxWebDevices` active web devices.
+/// * WEB: trusted and active right away (`BOOTSTRAP`: the fresh sign-in is the proof; no
+///   verification step, ADR 0067). An existing untrusted browser declaring again is
+///   trusted the same way. Beyond `maxWebDevices` active web devices, the least recently
+///   used browser of the account is revoked (its sign-ins end) instead of refusing.
 /// * The first device of an account that never had a trusted device is trusted
 ///   (`BOOTSTRAP`); a first mobile then becomes the primary mobile.
-/// * Any other new device is `UNTRUSTED`; a new MOBILE is `REPLACEMENT_PENDING` (its
-///   sign-in is refused elsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a
-///   link: approval by a trusted device or an email step-up.
+/// * Any other new MOBILE is `UNTRUSTED` and `REPLACEMENT_PENDING` (its sign-in is refused
+///   elsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a link: approval by a
+///   trusted device or an email step-up.
 #[utoipa::path(
     post, path = "/api/v2/me/devices/current", tag = "Account devices (v2)", operation_id = "v2_declare_my_device",
     request_body = DeclareDeviceRequest,
@@ -155,7 +158,7 @@ pub async fn list_devices(
         (status = 200, description = "Device declared", body = DeviceOutcome),
         (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
         (status = 401, description = "AUTHENTICATION_REQUIRED / DEVICE_PROOF_INVALID", body = ErrorEnvelope),
-        (status = 409, description = "WEB_DEVICE_LIMIT_REACHED / DEVICE_DECLARATION_REFUSED / DEVICE_KEY_IN_USE", body = ErrorEnvelope),
+        (status = 409, description = "DEVICE_DECLARATION_REFUSED / DEVICE_KEY_IN_USE", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]

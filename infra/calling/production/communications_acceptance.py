@@ -396,10 +396,9 @@ class Journey:
                     self.request('meeting-service',path,method,{} if method=='POST' else None,expected=(404,))
             self.done('public_ingress_denies_private_account_endpoints')
         self.request('communications','/internal/v1/communications/policy/check','POST',{},expected=(401,) if self.c['stage'] else (404,))
-        swagger=self.request('meeting-service','/api-docs/communications.json')
-        operations=[v for path,item in swagger['paths'].items() for verb,v in item.items() if verb in ('get','put','post','patch','delete')]
-        assert len(operations)==73 and not any('/internal/' in x for x in swagger['paths'])
-        self.done('authenticated_ingress_private_policy_and_public_swagger')
+        # ADR 0061: the Communications Hub is first-party only; its Swagger family is not public.
+        self.request('meeting-service','/api-docs/communications.json',expected=(404,))
+        self.done('authenticated_ingress_private_policy_and_first_party_swagger')
         a,b=self.accounts()
         capabilities=self.hub(a,'/me/capabilities')
         # Contract 1.3.0: the canonical provider-gated label (DEFERRED was retired).
@@ -481,6 +480,9 @@ class Journey:
             denied=self.request('messaging','/v1/conversations/'+conversation+'/messages','POST',
                 {'clientMessageId':str(uuid.uuid4()),'text':'must be refused'},self.c['scope']['token'],a['principalId'],(403,404,409))
             assert denied.get('error',{}).get('code')=='DELIVERY_REFUSED'
+        # Contacts audit K5: unblocking restores a contact that was connected before the
+        # block unless someone removed it meanwhile; A removes it, so nothing reconnects.
+        self.hub(a,'/contacts/'+cid,'DELETE')
         self.hub(b,'/profiles/'+a['cfMeetId']+'/block','DELETE')
         assert self.dial(a,b,expected=(403,404,409)).get('error',{}).get('code')=='TARGET_UNAVAILABLE'
         self.hub_launch_denied(a,cid)

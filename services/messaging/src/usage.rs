@@ -135,6 +135,34 @@ pub async fn record<C: ConnectionTrait>(
     Ok(n == 1)
 }
 
+/// ADR 0062 / build contract §5: the usage fact of one APPLICATION message accepted in an
+/// EXTERNAL environment (`messaging_message_sent_facts`; exported as `MESSAGE_SENT` by
+/// [`crate::usage_export::MessageSent`]). Same transaction as the message; idempotent.
+pub async fn record_message_sent<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    message: &crate::messages::MessageRow,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "INSERT INTO messaging_message_sent_facts (message_id, tenant_id, application_id, environment_id, \
+           environment_kind, context_class, security_profile, occurred_at) \
+         SELECT $1, c.tenant_id, c.application_id, c.environment_id, $3, c.context_class, $4, $5 \
+           FROM messaging_conversations c WHERE c.id = $2 \
+         ON CONFLICT (message_id) DO NOTHING",
+        vec![
+            message.id.into(),
+            message.conversation_id.into(),
+            ctx.scope.environment_kind.as_str().into(),
+            message.security_profile.clone().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageQuery {

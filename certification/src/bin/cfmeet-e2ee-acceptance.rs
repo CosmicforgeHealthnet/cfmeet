@@ -1,12 +1,18 @@
 //! Production multi-device personal E2EE acceptance: REAL OpenMLS client devices and real
 //! Ed25519 account-device keys, driven only through the public CF Meet API.
 //!
-//! Account A links a primary mobile and two web browsers (plus one untrusted browser that is
-//! refused E2EE enrollment); account B has one web browser. Every device decrypts locally.
+//! Account A links a primary mobile and two web browsers (each browser is trusted by its own
+//! fresh sign-in, ADR 0067; a third browser signs in and removes itself); account B has one
+//! web browser. Every device decrypts locally.
 //! A's mobile is then replaced by a new phone: the old phone's sign-in, Hub device and
 //! Messaging device are revoked, a web device commits its MLS removal, the old phone cannot
 //! decrypt anything after the rekey, both web devices keep working, and the new phone joins
-//! with fresh keys and reads future messages only.
+//! with fresh keys and reads future messages only. Then, WhatsApp-style, with every other
+//! device offline: B's new browser reads what A sent after it was registered (A's device
+//! added it from its published KeyPackage before sending), and another new browser of B
+//! with NO KeyPackage joins the chat by itself (MLS external commit from the GroupInfo the
+//! last committer published) and writes at once; A merges that join only after verifying
+//! the device against the directory.
 //!
 //! Inputs: `CFMEET_BASE_URL` (for example https://api.cfmeet.com) and `CFMEET_E2EE_ACCOUNTS`
 //! (a JSON file of two fresh accounts). Sign-in is passwordless and every device signs in
@@ -606,13 +612,17 @@ impl Journey {
         }
         let group = by.group.as_mut().context("group")?;
         let out = by.device.prepare_add_devices(group, &packages)?;
+        // The GroupInfo of the epoch the commit creates, published with it so a member's new
+        // device can join by itself. (This journey stops on any refusal, so the commit is
+        // merged locally first, and the GroupInfo exported from the merged group.)
+        by.device.accept_pending_commit(group)?;
+        let info = by.device.export_group_info(group)?;
         let r = self
             .relay(by_s, Method::POST, &format!("conversations/{cid}/mls/commits"), Some(json!({
                 "clientMessageId": Uuid::new_v4(), "deviceId": by.device.device_id(), "epoch": out.epoch,
                 "commit": B64.encode(&out.commit), "welcome": B64.encode(out.welcome.as_ref().context("welcome")?),
-                "welcomeDeviceIds": ids, "removedDeviceIds": []})), &[201], "add commit")
+                "welcomeDeviceIds": ids, "removedDeviceIds": [], "groupInfo": B64.encode(&info)})), &[201], "add commit")
             .await?;
-        by.device.accept_pending_commit(group)?;
         by.cursor = r["sequence"].as_i64().context("sequence")?;
         for (s, t) in targets.iter_mut() {
             let w = self
@@ -655,7 +665,7 @@ impl Journey {
     }
 
     async fn run(&mut self, accounts: &[(String, Credential)]) -> anyhow::Result<()> {
-        // ---- Devices: web-only bootstrap, web linking, first mobile, untrusted browser.
+        // ---- Devices: web-only bootstrap, browsers trusted by sign-in, first mobile.
         let (mut a_web1, mut b_web) = (None, None);
         let a = self
             .account(&accounts[0].0, &accounts[0].1, &mut a_web1)
@@ -669,11 +679,10 @@ impl Journey {
         }
         self.pass("web_only_account_bootstraps_a_trusted_browser_without_phone");
         let mut a_web2 = self.sign_in(&a, "web-2", "WEB", "WEB").await?;
-        if self.declare(&mut a_web2).await?["trust"] != "UNTRUSTED" {
-            bail!("a sign-in code alone produced a trusted browser");
+        if self.declare(&mut a_web2).await?["trust"] != "TRUSTED" {
+            bail!("a freshly signed-in browser was not trusted (ADR 0067: no verification step)");
         }
-        self.link(&a_web2, &a_web1).await?;
-        self.pass("second_browser_linked_by_trusted_device_approval");
+        self.pass("second_browser_trusted_by_its_own_sign_in");
         let mut a_mobile = self.sign_in(&a, "mobile-a", "MOBILE", "ANDROID").await?;
         if self.declare(&mut a_mobile).await?["state"] != "REPLACEMENT_PENDING" {
             bail!("a new mobile was not held for approval");
@@ -698,22 +707,8 @@ impl Journey {
         }
         self.pass("first_mobile_becomes_primary_after_approval_and_web_stays_trusted");
         let mut a_web3 = self.sign_in(&a, "web-3", "WEB", "WEB").await?;
-        self.declare(&mut a_web3).await?;
-        let r = self
-            .api
-            .call(
-                Method::POST,
-                "/api/v2/messaging/devices/registration-challenges",
-                Some(&a_web3.access),
-                Some(json!({})),
-            )
-            .await?;
-        if (r.status, r.code()) != (403, Some("DEVICE_NOT_TRUSTED")) {
-            bail!(
-                "an untrusted browser could enroll an E2EE device: {} {:?}",
-                r.status,
-                r.code()
-            );
+        if self.declare(&mut a_web3).await?["trust"] != "TRUSTED" {
+            bail!("a freshly signed-in browser was not trusted (ADR 0067: no verification step)");
         }
         self.api
             .ok(
@@ -725,7 +720,7 @@ impl Journey {
                 "self revoke",
             )
             .await?;
-        self.pass("untrusted_browser_refused_e2ee_enrollment");
+        self.pass("browser_trusted_by_sign_in_removes_itself");
 
         // ---- E2EE devices, one per sign-in; contacts; a DIRECT PRIVATE_E2EE conversation.
         let mut m_web1 = self.enroll(&a_web1, 0).await?;
@@ -999,6 +994,138 @@ impl Journey {
             bail!("B did not decrypt the new phone's message");
         }
         self.pass("new_phone_fresh_keys_future_messages_only_and_replies");
+
+        // ---- WhatsApp: a recipient's new device, offline when the message is sent.
+        // B links a second browser that publishes one KeyPackage and goes offline. A's
+        // phone adds every new device of the members before it sends (from the published
+        // KeyPackage, nobody else online), then goes offline too; B's browser opens later
+        // and reads it.
+        let mut b_web2 = self.sign_in(&b, "web-2b", "WEB", "WEB").await?;
+        self.declare(&mut b_web2).await?;
+        self.link(&b_web2, &b_web).await?;
+        let mut m_b2 = self.enroll(&b_web2, 1).await?;
+        for (s, m) in [
+            (&a_web1, &mut m_web1),
+            (&a_web2, &mut m_web2),
+            (&b_web, &mut m_b),
+        ] {
+            self.receive(s, m).await?;
+        }
+        self.add(
+            &a_mobile2,
+            &mut m_mobile2,
+            &[b.principal],
+            &mut [(&b_web2, &mut m_b2)],
+        )
+        .await?;
+        let offline = format!("acceptance {tag} to B's offline browser");
+        self.send(&a, &a_mobile2, &mut m_mobile2, &offline).await?;
+        if self.receive(&b_web2, &mut m_b2).await?.last() != Some(&offline) {
+            bail!("B's new browser did not read a message sent while it was offline");
+        }
+        self.pass("sender_adds_an_offline_recipients_new_device_from_its_published_keys");
+
+        // A third browser of B with NO KeyPackage: nobody could add it, and nobody else is
+        // online. It joins by itself from the GroupInfo the last committer published.
+        let mut b_web3 = self.sign_in(&b, "web-3b", "WEB", "WEB").await?;
+        self.declare(&mut b_web3).await?;
+        self.link(&b_web3, &b_web).await?;
+        let mut m_b3 = self.enroll(&b_web3, 0).await?;
+        let st = self
+            .relay(
+                &b_web3,
+                Method::GET,
+                &format!("conversations/{cid}/mls/state"),
+                None,
+                &[200],
+                "mls state",
+            )
+            .await?;
+        if st["groupInfoEpoch"] != st["mlsEpoch"] {
+            bail!("the current epoch has no published GroupInfo: {st}");
+        }
+        let info = B64.decode(st["groupInfo"].as_str().context("groupInfo")?)?;
+        let (g3, join) = m_b3.device.join_by_external_commit(&info)?;
+        let next = m_b3.device.export_group_info(&g3)?;
+        let joined = self
+            .relay(&b_web3, Method::POST, &format!("conversations/{cid}/mls/commits"), Some(json!({
+                "clientMessageId": Uuid::new_v4(), "deviceId": m_b3.device.device_id(), "epoch": join.epoch,
+                "commit": B64.encode(&join.commit), "groupInfo": B64.encode(&next)})), &[201], "external join")
+            .await?;
+        m_b3.cursor = joined["sequence"].as_i64().context("sequence")?;
+        m_b3.group = Some(g3);
+        let by_itself = format!("acceptance {tag} from B's self-joined browser");
+        self.send(&b, &b_web3, &mut m_b3, &by_itself).await?;
+        // A comes back: the join is merged only for B's registered device with its key.
+        let dir = self
+            .relay(
+                &a_web1,
+                Method::GET,
+                &format!("messaging/principals/{}/devices", b.principal),
+                None,
+                &[200],
+                "B's devices",
+            )
+            .await?;
+        let registered: Vec<(String, Vec<u8>)> = dir["devices"]
+            .as_array()
+            .context("devices")?
+            .iter()
+            .filter_map(|d| {
+                Some((
+                    d["deviceId"].as_str()?.to_string(),
+                    B64.decode(d["signaturePublicKey"].as_str()?).ok()?,
+                ))
+            })
+            .collect();
+        let list = self
+            .relay(
+                &a_web1,
+                Method::GET,
+                &format!(
+                    "conversations/{cid}/messages?afterSequence={}&limit=100",
+                    m_web1.cursor
+                ),
+                None,
+                &[200],
+                "fetch messages",
+            )
+            .await?;
+        let mut read = vec![];
+        let mut merged_join = false;
+        for msg in list["messages"].as_array().context("messages")? {
+            m_web1.cursor = msg["sequence"].as_i64().context("sequence")?;
+            if msg["lifecycle"] != "ACTIVE"
+                || msg["senderDeviceId"] == json!(m_web1.device.device_id())
+            {
+                continue;
+            }
+            let group = m_web1.group.as_mut().context("group")?;
+            if msg["e2ee"]["epoch"].as_u64().context("epoch")? < group.epoch() {
+                continue;
+            }
+            let sender = msg["senderDeviceId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let bytes = B64.decode(msg["e2ee"]["ciphertext"].as_str().context("ciphertext")?)?;
+            match m_web1.device.process_with_joiners(group, &bytes, |d, k| {
+                d.to_string() == sender
+                    && registered.iter().any(|(id, key)| *id == sender && key == k)
+            })? {
+                Processed::Application { plaintext, .. } => {
+                    read.push(String::from_utf8(plaintext)?)
+                }
+                Processed::ExternalJoin { device_id, .. } => {
+                    merged_join |= device_id == m_b3.device.device_id()
+                }
+                _ => {}
+            }
+        }
+        if !merged_join || read.last() != Some(&by_itself) {
+            bail!("A did not merge B's verified self-join or read its message");
+        }
+        self.pass("recipients_new_device_joins_by_itself_with_nobody_online_and_is_verified");
 
         // ---- Cleanup: sign every device of both accounts out (devices revoked).
         for s in [&a_web1, &b_web] {

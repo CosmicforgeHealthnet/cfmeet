@@ -131,6 +131,12 @@ impl EventTransport for RealtimeTransport {
             if let Err(e) = super::push::fanout_jobs(&self.state, event).await {
                 return Delivery::Retryable(format!("push fan-out: {e}"));
             }
+            // ADR 0063 N-P4: partner MANAGED wake-ups (idempotent per event).
+            if self.state.partner.settings.push_enabled {
+                if let Err(e) = crate::partner::push::enqueue_wakeup(&self.state, event).await {
+                    return Delivery::Retryable(format!("partner wake-up: {e}"));
+                }
+            }
         }
         let message = match broker_message(event) {
             Some(BrokerMessage::Durable {

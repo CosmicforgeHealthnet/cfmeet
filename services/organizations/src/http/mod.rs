@@ -10,6 +10,7 @@
 //! relay, which forwards the verified acting user. Extractor rejections are normalized to
 //! the error envelope.
 
+pub mod apps;
 pub mod authorization;
 pub mod bindings;
 pub mod invitations;
@@ -140,6 +141,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/organizations/:id/policies/effective",
             get(policies::effective),
+        )
+        .route(
+            "/organizations/:id/app-install-check",
+            post(apps::install_check),
         )
         .route(
             "/organizations/:id/teams",

@@ -107,6 +107,8 @@ pub struct MessageRow {
     pub forwarded_sender_principal_id: Option<Uuid>,
     /// S2: the sender's franking commitment (PRIVATE_E2EE, optional).
     pub franking_commitment: Option<String>,
+    /// ADR 0064: the CF Meet App whose OAuth credential sent this message (MANAGED).
+    pub via_application_id: Option<Uuid>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -115,7 +117,7 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
      m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id, \
-     m.forwarded_from_message_id, m.forwarded_sender_principal_id, \
+     m.forwarded_from_message_id, m.forwarded_sender_principal_id, m.via_application_id, \
      (SELECT f.commitment FROM messaging_message_frankings f WHERE f.message_id = m.id) AS franking_commitment";
 
 impl MessageRow {
@@ -164,6 +166,11 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "forwarded": row.forwarded_from_message_id.is_some(),
         "forwardedFromPrincipalId": row.forwarded_sender_principal_id,
     });
+    // ADR 0064: "sent by App X" (only on messages a CF Meet App sent; absent otherwise,
+    // so every other message renders exactly as before).
+    if let Some(app) = row.via_application_id {
+        v["viaApplicationId"] = json!(app);
+    }
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
             v["e2ee"] = json!({
@@ -291,8 +298,10 @@ pub struct SendRequest {
     /// A reply to this earlier message of the conversation (thread metadata, ids only).
     #[serde(default)]
     pub reply_to_message_id: Option<Uuid>,
-    /// Section 13 (MSG-007), MANAGED only: current members this message mentions (ids
-    /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
+    /// Section 13 (MSG-007): current members this message mentions (ids only; at most
+    /// [`MAX_MENTIONS`]). B3: PRIVATE_E2EE too — the ids serve the mention count and the
+    /// "mentions only" notification preference; the mention TEXT stays inside the
+    /// ciphertext.
     #[serde(default)]
     pub mentioned_principal_ids: Vec<Uuid>,
     /// S2, PRIVATE_E2EE only: the sender's franking commitment ([`franking`]).
@@ -320,8 +329,10 @@ impl SendRequest {
 /// Most principals one message may mention.
 pub const MAX_MENTIONS: usize = 50;
 
-/// The distinct principals a MANAGED message mentions: current ACTIVE members other than
-/// the sender (anyone else is refused, so mentions never probe who exists).
+/// The distinct principals a message mentions: current ACTIVE members other than the
+/// sender (anyone else is refused, so mentions never probe who exists), deduplicated and
+/// capped at [`MAX_MENTIONS`]. Both profiles (B3): for PRIVATE_E2EE only these ids reach
+/// the server, the mention text stays inside the ciphertext.
 pub(crate) async fn mentions_of<C: ConnectionTrait>(
     db: &C,
     conversation: &ConversationRow,
@@ -330,12 +341,6 @@ pub(crate) async fn mentions_of<C: ConnectionTrait>(
 ) -> Result<Vec<Uuid>> {
     if requested.is_empty() {
         return Ok(Vec::new());
-    }
-    if conversation.profile() != SecurityProfile::Managed {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
     }
     let mut wanted: Vec<Uuid> = requested.iter().copied().filter(|p| *p != sender).collect();
     wanted.sort();
@@ -669,14 +674,6 @@ async fn send_checked(
     }
     let (conversation, _member, effective) =
         send_prelude(state, ctx, acting, conversation_id).await?;
-    if !request.mentioned_principal_ids.is_empty()
-        && conversation.profile() != SecurityProfile::Managed
-    {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
-    }
     if !request.attachment_ids.is_empty() {
         crate::attachments::check_message_attachments(
             state,
@@ -774,6 +771,11 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
             now,
         )
         .await?;
+        // ADR 0062 / build contract §5: the MESSAGE_SENT fact of an EXTERNAL environment
+        // (ids, context class and security profile only).
+        if !ctx.first_party && crate::partner::message_sent_recording() {
+            crate::usage::record_message_sent(db, ctx, row, now).await?;
+        }
     }
     crate::metrics::inc(
         "messaging_messages_accepted_total",

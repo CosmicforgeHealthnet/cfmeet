@@ -56,6 +56,7 @@ pub fn customer_routes() -> Router<AppState> {
 /// Routes nested under `/v1/conversations`.
 pub fn conversation_tree() -> Router<AppState> {
     crate::conversations::http::conversation_routes()
+        .merge(crate::conversations::inbox_settings::routes())
         .merge(crate::membership::http::routes())
         .merge(crate::messages::http::routes())
         .merge(crate::mls::http::conversation_routes())
@@ -72,6 +73,8 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/openapi.json", get(openapi))
         .merge(crate::realtime::http::device_routes())
+        // ADR 0062 partner device routes (user token; they authenticate themselves).
+        .merge(crate::partner::http::routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())

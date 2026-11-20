@@ -1,33 +1,18 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CheckCheck, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { notificationsService } from "@/services/v2/notifications.service";
 import type { NotificationItem } from "@/types/generated/notifications";
+import { inboxHref, mergeInboxPages } from "@/lib/notifications/inbox";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/utils/error";
 
 const KEY = ["notifications"] as const;
 const COUNT_KEY = ["notifications", "unread-count"] as const;
-
-/** Where each notification opens (the server names the target). */
-function hrefFor(n: NotificationItem): string | null {
-  const ref = n.action.ref ? encodeURIComponent(n.action.ref) : "";
-  switch (n.action.kind) {
-    case "OPEN_CONVERSATION": return ref ? `/dashboard/messages?conversation=${ref}` : "/dashboard/messages";
-    case "OPEN_CALL_HISTORY": return ref ? `/calling?call=${ref}` : "/calling";
-    case "OPEN_VOICEMAIL": return "/calling/voicemail";
-    case "OPEN_RECORDING": return "/calling";
-    case "OPEN_MEETING": return ref ? `/dashboard/meetings/${ref}` : "/dashboard/meetings";
-    case "OPEN_ORGANIZATION": case "OPEN_ORGANIZATION_INVITATION": return "/dashboard/organizations";
-    case "OPEN_CONTACT_REQUEST": case "OPEN_CONTACT": return "/dashboard/contacts";
-    case "OPEN_SECURITY_SETTINGS": return "/dashboard/settings?tab=security";
-    case "OPEN_DEVELOPER_APPLICATION": return "/developers";
-    default: return null;
-  }
-}
 
 const ago = (iso: string) => {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -37,26 +22,42 @@ const ago = (iso: string) => {
   return new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
 };
 
-/** The bell (Gmail / Teams): unread count, the latest notifications, mark all read. */
+/** The bell (Gmail / Teams): unread count, every notification of the account (all
+ *  categories, newest first, "Load more" pages through the whole inbox), mark read. */
 export default function NotificationBell() {
   const router = useRouter();
   const client = useQueryClient();
+  const [isOpen, setOpen] = useState(false);
   const count = useQuery({ queryKey: COUNT_KEY, queryFn: notificationsService.unreadCount, refetchInterval: 30_000, retry: false });
-  const list = useQuery({ queryKey: KEY, queryFn: () => notificationsService.list(), enabled: false, retry: false });
+  const list = useInfiniteQuery({
+    queryKey: KEY,
+    queryFn: ({ pageParam }) => notificationsService.list(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: isOpen,
+    retry: false,
+  });
   const refresh = () => { void client.invalidateQueries({ queryKey: KEY }); void client.invalidateQueries({ queryKey: COUNT_KEY }); };
   const readAll = useMutation({ mutationFn: () => notificationsService.markRead(), onSuccess: refresh });
   const dismiss = useMutation({ mutationFn: (id: string) => notificationsService.dismiss([id]), onSuccess: refresh });
   const unread = count.data?.unreadCount ?? 0;
-  const items = (list.data?.items ?? []).filter((n) => !n.dismissedAt);
+  const items = mergeInboxPages(list.data?.pages);
+  const { refetch } = list;
+  // A new notification while the list is open: show it (the count is polled).
+  const seenUnread = useRef(unread);
+  useEffect(() => {
+    if (isOpen && unread > seenUnread.current) void refetch();
+    seenUnread.current = unread;
+  }, [isOpen, unread, refetch]);
 
   const open = (n: NotificationItem) => {
     if (!n.readAt) void notificationsService.update(n, { read: true }).then(refresh).catch(() => undefined);
-    const href = hrefFor(n);
+    const href = inboxHref(n);
     if (href) router.push(href);
   };
 
   return (
-    <Popover.Root onOpenChange={(v) => { if (v) void list.refetch(); }}>
+    <Popover.Root onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button type="button" aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"} title="Notifications"
           className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
@@ -89,6 +90,13 @@ export default function NotificationBell() {
                 <button type="button" aria-label="Dismiss" title="Dismiss" onClick={() => dismiss.mutate(n.id)} className="absolute right-2 top-2.5 flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 hover:bg-muted group-hover:opacity-100 focus:opacity-100 max-md:opacity-100"><X className="size-4" /></button>
               </li>
             ))}
+            {list.hasNextPage ? (
+              <li className="px-4 py-3 text-center">
+                <button type="button" onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage} className="text-sm font-semibold text-primary hover:underline disabled:opacity-60">
+                  {list.isFetchingNextPage ? "Loading…" : "Load more"}
+                </button>
+              </li>
+            ) : null}
           </ul>
         </Popover.Content>
       </Popover.Portal>

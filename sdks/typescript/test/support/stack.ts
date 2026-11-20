@@ -312,7 +312,7 @@ export async function receiveDecrypted(
             senderDeviceId: msg.senderDeviceId!,
           })
         : null;
-    const r = m.device.process(groupId, unb64url(msg.e2ee.ciphertext), expectedAad);
+    const r = m.device.process(groupId, unb64url(msg.e2ee.ciphertext), expectedAad, []);
     if (r.kind === 'APPLICATION') {
       out.push({ sequence: msg.sequence!, messageId: msg.messageId!, plaintext: fromUtf8(r.plaintext), senderDeviceId: msg.senderDeviceId!, ciphertext: msg.e2ee.ciphertext });
     }

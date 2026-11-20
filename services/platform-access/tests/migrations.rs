@@ -42,6 +42,18 @@ async fn migrations_apply_roll_back_and_reapply_cleanly() {
         "platform_credential_principal_restrictions",
         "platform_credential_usage",
         "platform_organization_service_bindings",
+        // ADR 0062 (000008).
+        "platform_end_user_profiles",
+        "platform_user_token_mint_windows",
+        "platform_environment_origins",
+        "platform_environment_origin_changes",
+        // ADR 0064 (000009).
+        "platform_oauth_clients",
+        "platform_oauth_client_secrets",
+        "platform_oauth_grants",
+        "platform_oauth_codes",
+        "platform_oauth_tokens",
+        "platform_oauth_refresh_tokens",
         "platform_access_seaql_migrations",
     ] {
         assert!(up.contains(&t.to_string()), "{t} missing: {up:?}");

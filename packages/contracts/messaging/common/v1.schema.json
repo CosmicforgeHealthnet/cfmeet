@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
   "title": "CF Meet Messaging common v1",
-  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11).",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11). 1.31.0 (CF Meet Platform Build, ADR 0062 / 0063): PolicyView.applicationBaseline CFMEET_PLATFORM_PARTNER (EXTERNAL environments while partner session devices are enabled: every context allows MANAGED and PRIVATE_E2EE with MANAGED the default, attachments on); UserSessionRequest / UserSession (the user-token exchange for a MANAGED-only partner session device); UserPushRegistrationRequest / UserPushRegistration (partner push registrations synchronised to the Notification Service). 1.31.0 (CF Meet Apps, ADR 0064): Message.viaApplicationId — the CF Meet App whose OAuth credential sent the message (present only on such messages, so clients can label \"sent by App X\"). 1.33.0: CommitRequest.groupInfo; MlsGroupState.groupInfo / groupInfoEpoch (MLS self-join by external commit); Device.keyPackagesAvailable (own devices only); KeyPackageClaimRequest.deviceIds. 1.34.0: chat controls — ConversationInbox.archived / pinned / pinnedAt and ConversationInboxSettings(Request) (F1), SendMessageRequest.mentionedPrincipalIds for PRIVATE_E2EE (B3), UpdateConversationRequest.retentionSeconds may lengthen or turn off disappearing messages (B4).",
   "oneOf": [
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
@@ -396,6 +396,11 @@
         "version": {
           "type": "integer",
           "minimum": 1
+        },
+        "keyPackagesAvailable": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline."
         }
       },
       "description": "A Messaging device: PUBLIC key material only (never a private key)."
@@ -916,7 +921,7 @@
         },
         "counterpartCfMeetId": {
           "type": "string",
-          "pattern": "^CF-[A-Z2-7]{26}$",
+          "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
           "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
         },
         "title": {
@@ -1370,10 +1375,17 @@
           "format": "date-time"
         },
         "retentionSeconds": {
-          "type": "integer",
-          "minimum": 60,
-          "maximum": 3153600000,
-          "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 3153600000
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit — by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
         },
         "title": {
           "oneOf": [
@@ -2296,13 +2308,14 @@
           }
         },
         "applicationBaseline": {
-          "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document.",
+          "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document. 1.31.0: CFMEET_PLATFORM_PARTNER (ADR 0062) for EXTERNAL environments while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on: every context class allows [MANAGED, PRIVATE_E2EE] with MANAGED as the default, attachments enabled; an explicit application setting still wins.",
           "type": [
             "string",
             "null"
           ],
           "enum": [
             "CFMEET_FIRST_PARTY",
+            "CFMEET_PLATFORM_PARTNER",
             null
           ]
         }
@@ -2482,7 +2495,7 @@
         },
         "cfMeetId": {
           "type": "string",
-          "pattern": "^CF-[A-Z2-7]{26}$",
+          "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
           "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
         }
       },
@@ -2609,7 +2622,7 @@
           "items": {
             "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
           },
-          "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+          "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
         },
         "frankingCommitment": {
           "type": "string",
@@ -2877,6 +2890,10 @@
             }
           ],
           "description": "S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender)."
+        },
+        "viaApplicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "ADR 0064: the CF Meet App (OAuth client id = application id) whose OAuth access or bot credential sent this message; absent on every other message."
         }
       },
       "required": [
@@ -3147,6 +3164,11 @@
           "items": {
             "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
           }
+        },
+        "groupInfo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1."
         }
       },
       "required": [
@@ -3155,7 +3177,7 @@
         "epoch",
         "commit"
       ],
-      "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all."
+      "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or removedDeviceIds, and not while a removal of a device still in the tree is pending; every member's client verifies the joining leaf against the device directory before merging it."
     },
     "MlsGroupState": {
       "type": "object",
@@ -3209,6 +3231,30 @@
               "reason"
             ]
           }
+        },
+        "groupInfo": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit."
+        },
+        "groupInfoEpoch": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The epoch of groupInfo (always mlsEpoch when present)."
         }
       },
       "required": [
@@ -3231,6 +3277,15 @@
           "items": {
             "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
           }
+        },
+        "deviceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "description": "Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched."
         }
       },
       "required": [
@@ -7522,7 +7577,27 @@
         "mentionCount": {
           "type": "integer",
           "minimum": 0,
-          "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+          "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first)."
+        },
+        "pinnedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
         }
       }
     },
@@ -8109,6 +8184,160 @@
           }
         }
       }
+    },
+    "UserSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId"
+      ],
+      "description": "ADR 0062: the body of POST /v1/messaging/user-sessions (Authorization: Bearer cfut_...).",
+      "properties": {
+        "installationId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]{8,128}$",
+          "description": "Stable per app installation, generated by the SDK."
+        },
+        "sessionDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "Renew this ACTIVE partner session device of the same principal and installation (NOT_FOUND otherwise)."
+        }
+      }
+    },
+    "UserSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "sessionDeviceId",
+        "sessionDeviceExpiresAt",
+        "clientToken",
+        "clientTokenExpiresAt"
+      ],
+      "description": "ADR 0062: a MANAGED-only partner session device and a short-lived client token bound to it (scopes: the user token's effective msg grants; read -> messages.read / attachments.read, send -> messages.send / attachments.write). Present it as `Authorization: CF-Client-Token <clientToken>` to POST /v1/realtime/tickets and to the partner REST allowlist; renew through this exchange.",
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionDeviceExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "clientToken": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "clientTokenExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UserPushRegistrationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "handle"
+      ],
+      "description": "ADR 0063: a partner device's push handle (an APNs / APNs VoIP device token or an FCM registration token). Synchronised to the Notification Service; Messaging never stores, echoes or logs it.",
+      "properties": {
+        "platform": {
+          "enum": [
+            "APNS",
+            "APNS_VOIP",
+            "FCM"
+          ]
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "UserPushRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId",
+        "platform",
+        "status"
+      ],
+      "description": "ADR 0063: a partner push registration as the Notification Service accepted it (never the handle).",
+      "properties": {
+        "installationId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]{8,128}$",
+          "description": "Stable per app installation, generated by the SDK."
+        },
+        "platform": {
+          "enum": [
+            "APNS",
+            "APNS_VOIP",
+            "FCM"
+          ]
+        },
+        "status": {
+          "const": "ACTIVE"
+        }
+      }
+    },
+    "ConversationInboxSettingsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "archived": {
+          "type": "boolean",
+          "description": "Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED."
+        }
+      },
+      "description": "F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true."
+    },
+    "ConversationInboxSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversationId",
+        "archived",
+        "pinned",
+        "pinnedAt"
+      ],
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinnedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary)."
     }
   }
 }

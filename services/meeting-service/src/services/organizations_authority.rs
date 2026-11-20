@@ -153,6 +153,9 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ),
     ("GET", "/internal/v1/organizations/{}/policies"),
     ("PATCH", "/internal/v1/organizations/{}/policies"),
+    // ADR 0064: the workspace app install policy (`organization-apps.evaluate`), asked
+    // without an actor before an ORGANIZATION install is relayed to Platform Access.
+    ("POST", "/internal/v1/organizations/{}/app-install-check"),
     // Blueprint Section 12 follow-up (per-organization Enterprise Calling): the verified
     // technical scope and the organization's Calling service binding, read with the
     // acting user (membership required).
@@ -1887,6 +1890,7 @@ mod tests {
             platform_admin: false,
             revocation_checked: true,
             account_session_id: None,
+            delegation: None,
         };
         let acting = ActingUser::of(&actor);
         assert_eq!(acting.user_id(), actor.user_id);

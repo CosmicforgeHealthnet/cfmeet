@@ -45,6 +45,11 @@ mod m20261204_000032_application_baselines;
 mod m20261205_000033_client_session_binding;
 mod m20261206_000034_forwarding_links_announcements_franking;
 mod m20261207_000035_organization_moderation_team_channels;
+mod m20261208_000036_partner_session_devices;
+mod m20261209_000037_app_messages;
+mod m20261210_000038_mls_group_infos;
+mod m20261211_000039_member_notifications;
+mod m20261212_000040_inbox_and_chat_controls;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -148,7 +153,199 @@ where
     }
     let mut pending: Vec<String> = known.into_iter().filter(|m| !applied.contains(m)).collect();
     pending.extend(gap_closure_pending(db).await?);
+    pending.extend(mls_join_pending(db).await?);
+    pending.extend(member_notifications_pending(db).await?);
+    pending.extend(chat_controls_pending(db).await?);
     Ok(pending)
+}
+
+/// Name of the table recording the MLS self-join history ([`MlsJoinMigrator`]).
+pub const MLS_JOIN_MIGRATION_TABLE: &str = "messaging_mls_join_seaql_migrations";
+
+/// MLS self-join (GroupInfo storage for external commits): a SEPARATE, additive history
+/// applied by `messaging-migration up` after [`GapClosureMigrator`]. The previous image
+/// fails closed on any gap-closure migration it does not know, so appending there would
+/// stop it after a rollback; it never reads this table. Never merge the two. This image
+/// requires it: [`pending_migrations`] includes it.
+pub struct MlsJoinMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MlsJoinMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(self::m20261210_000038_mls_group_infos::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(MLS_JOIN_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// The MLS self-join migrations not yet applied (read-only; fails closed on unknown ones).
+pub async fn mls_join_pending<C>(db: &C) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = MlsJoinMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!("SELECT to_regclass('{MLS_JOIN_MIGRATION_TABLE}') IS NOT NULL AS present"),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {MLS_JOIN_MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if applied.iter().any(|v| !known.contains(v)) {
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            "an MLS self-join migration is applied but unknown to this binary".into(),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
+}
+
+/// Name of the table recording the member-notification history ([`MemberNotificationsMigrator`]).
+pub const MEMBER_NOTIFICATIONS_MIGRATION_TABLE: &str =
+    "messaging_member_notifications_seaql_migrations";
+
+/// "Added to a group" notices for the Notification Service: a SEPARATE, additive history
+/// applied by `messaging-migration up` after [`MlsJoinMigrator`]. The previous image fails
+/// closed on unknown migrations of the histories it knows, so appending to one of them
+/// would stop it after a rollback; it never reads this table. This image requires it:
+/// [`pending_migrations`] includes it.
+pub struct MemberNotificationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MemberNotificationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            self::m20261211_000039_member_notifications::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(MEMBER_NOTIFICATIONS_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// The member-notification migrations not yet applied (read-only; fails closed on unknown
+/// ones).
+pub async fn member_notifications_pending<C>(
+    db: &C,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = MemberNotificationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!(
+                "SELECT to_regclass('{MEMBER_NOTIFICATIONS_MIGRATION_TABLE}') IS NOT NULL AS present"
+            ),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {MEMBER_NOTIFICATIONS_MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if applied.iter().any(|v| !known.contains(v)) {
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            "a member-notification migration is applied but unknown to this binary".into(),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
+}
+
+/// Name of the table recording the chat-controls history ([`ChatControlsMigrator`]).
+pub const CHAT_CONTROLS_MIGRATION_TABLE: &str = "messaging_chat_controls_seaql_migrations";
+
+/// Chat controls (archive / pin, cached send decisions, disappearing messages that can be
+/// turned off): a SEPARATE, additive history applied by `messaging-migration up` after
+/// [`MlsJoinMigrator`]. The previous image fails closed on unknown migrations of the
+/// histories it knows, so appending to one of them would stop it after a rollback; it
+/// never reads this table. This image requires it: [`pending_migrations`] includes it.
+pub struct ChatControlsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ChatControlsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            self::m20261212_000040_inbox_and_chat_controls::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(CHAT_CONTROLS_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// The chat-controls migrations not yet applied (read-only; fails closed on unknown ones).
+pub async fn chat_controls_pending<C>(
+    db: &C,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = ChatControlsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!("SELECT to_regclass('{CHAT_CONTROLS_MIGRATION_TABLE}') IS NOT NULL AS present"),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {CHAT_CONTROLS_MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if applied.iter().any(|v| !known.contains(v)) {
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            "a chat-controls migration is applied but unknown to this binary".into(),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
 }
 
 /// Name of the table recording the backend gap-closure history ([`GapClosureMigrator`]).
@@ -166,6 +363,12 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(self::m20261205_000033_client_session_binding::Migration),
             Box::new(self::m20261206_000034_forwarding_links_announcements_franking::Migration),
             Box::new(self::m20261207_000035_organization_moderation_team_channels::Migration),
+            // ADR 0062 / 0063: partner session devices, the partner baseline, MESSAGE_SENT
+            // facts and partner push (additive; every flag default-off).
+            Box::new(self::m20261208_000036_partner_session_devices::Migration),
+            // ADR 0064 CF Meet Apps: messages record the sending app (additive; the
+            // MESSAGING_APPS_ENABLED flag is default-off).
+            Box::new(self::m20261209_000037_app_messages::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

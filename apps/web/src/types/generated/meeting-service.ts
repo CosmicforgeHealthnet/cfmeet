@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.7.0";
+export const CONTRACT_VERSION = "1.9.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -348,6 +348,29 @@ export interface ApiKeyResponse {
   used_count: number;
 }
 
+
+export interface AppContextJwk {
+  alg: string;
+  crv: string;
+  kid: string;
+  kty: string;
+  use: string;
+  x: string;
+}
+
+/** JWKS of the app-context signing keys. */
+export interface AppContextKeySet {
+  keys: Array<AppContextJwk>;
+}
+
+
+export interface AppContextTokenResponse {
+  /** Ed25519 JWS (verify with `GET /api/v2/app-context-keys`). */
+  contextToken: string;
+  /** Seconds (300). */
+  expiresIn: number;
+}
+
 /** `POST /api/v2/admin/organizations/{id}/owners` (platform administrators). */
 export interface AppointOrganizationOwnerRequest {
   /**
@@ -481,6 +504,43 @@ export interface AttendanceReport {
 export interface AuditProfile {
   /** Enhanced semantic audit (join, artefact access, consent, admin access). */
   enhanced: boolean;
+}
+
+/** Consent data for the consent page. */
+export interface AuthorizeContextResponse {
+  app: OauthAppSummary;
+  organizationId?: string | null;
+  organizationInstall?: OrganizationInstallDecision | null;
+  /** The redirect URI Platform Access validated (exactly the requested one). */
+  redirectUri: string;
+  scopes: Array<OauthScopeView>;
+  state?: string | null;
+  /** `USER` or `ORGANIZATION`. */
+  target: string;
+}
+
+/** `POST /api/v2/oauth/authorize/approve`. */
+export interface AuthorizeDecisionRequest {
+  clientId: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  /** `APPROVE` or `DENY`. */
+  decision: string;
+  /** `organization` for a workspace install; absent or `user` for a personal install. */
+  install?: string | null;
+  organizationId?: string | null;
+  redirectUri: string;
+  scope: string;
+  state?: string | null;
+}
+
+
+export interface AuthorizeDecisionResponse {
+  /**
+   * Where the browser goes next: `redirect_uri?code=…&state=…` on approval,
+   * `redirect_uri?error=access_denied&state=…` on denial.
+   */
+  redirectTo: string;
 }
 
 
@@ -644,6 +704,22 @@ export interface BusinessOrganizationPage {
   nextCursor?: string | null;
 }
 
+/** Audit MF2: the caller's private calendar feed (webcal / ICS subscription). */
+export interface CalendarFeedResponse {
+  /** A feed exists (its URL works until it is replaced or deleted). */
+  active: boolean;
+  createdAt?: string | null;
+  lastUsedAt?: string | null;
+  /**
+   * The feed path relative to the API origin (`/api/v2/calendar-feeds/<token>.ics`), only
+   * when the feed is created. Subscribe to `https://<api host><path>` (or the same with
+   * `webcal://`).
+   */
+  path?: string | null;
+  /** The feed token, returned only when the feed is created (only its hash is stored). */
+  token?: string | null;
+}
+
 /** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
 export interface CancelOwnRegistrationRequest {
   /** The admission token returned when registering (`reg_…`). */
@@ -801,6 +877,22 @@ export interface ConferenceActionResponse {
   providerEnforcement: ProviderEnforcement;
 }
 
+/** An app with a meeting surface installed for the meeting's owner or organization. */
+export interface ConferenceApp {
+  appId: string;
+  developerName?: string | null;
+  /** `OWNER` (the meeting owner's personal install) or `ORGANIZATION`. */
+  installedFor: string;
+  logoUrl?: string | null;
+  name?: string | null;
+  surface: MeetingSurfaceView;
+}
+
+
+export interface ConferenceAppList {
+  items: Array<ConferenceApp>;
+}
+
 
 export type ConferenceKind = "INSTANT" | "SCHEDULED" | "RECURRING" | "LEGACY";
 
@@ -863,6 +955,28 @@ export interface ConferenceSummary {
   scheduledStartAt?: string | null;
   startedAt?: string | null;
   status: ConferenceStatus;
+}
+
+/** One installed app (a grant). */
+export interface ConnectedApp {
+  appId: string;
+  createdAt?: string | null;
+  developerName?: string | null;
+  grantId: string;
+  /** Whether the app has an in-meeting panel. */
+  hasMeetingSurface: boolean;
+  logoUrl?: string | null;
+  name?: string | null;
+  organizationId?: string | null;
+  scopes: Array<string>;
+  status: string;
+  /** `USER` or `ORGANIZATION`. */
+  target: string;
+}
+
+
+export interface ConnectedAppList {
+  items: Array<ConnectedApp>;
 }
 
 
@@ -1306,7 +1420,10 @@ export interface DeviceView {
   /** `TRUSTED` or `UNTRUSTED`. */
   trust: string;
   trustedAt?: string | null;
-  /** `BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only). */
+  /**
+   * `BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,
+   * ADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
+   */
   trustedVia?: string | null;
 }
 
@@ -1378,7 +1495,7 @@ export interface ErrorBody {
 }
 
 /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "APP_NOT_FOUND" | "OAUTH_REQUEST_INVALID" | "CALENDAR_FEED_NOT_FOUND" | "DATABASE_ERROR" | "INTERNAL_ERROR";
 
 /** OpenAPI description of the public error envelope. */
 export interface ErrorEnvelope {
@@ -1402,6 +1519,15 @@ export interface ExportProfile {
   chatExportAllowed: boolean;
   pollReportAllowed: boolean;
   retentionDays: number;
+}
+
+/** MF1: extend a live conference's scheduled end. */
+export interface ExtendConferenceRequest {
+  /**
+   * Minutes added to the scheduled end (or to now, when the scheduled end has already
+   * passed and the meeting is in its grace period): 1 to 240.
+   */
+  minutes: number;
 }
 
 
@@ -1833,6 +1959,14 @@ export interface MeetingSpaceResponse {
 }
 
 
+export interface MeetingSurfaceView {
+  /** Origins the panel's messaging bridge accepts. */
+  origins: Array<string>;
+  /** The iframe URL (`https://`). */
+  url: string;
+}
+
+
 export type MeetingType = "STANDARD" | "HEALTHCARE" | "WEBINAR" | "TOWN_HALL" | "TRAINING";
 
 
@@ -2034,6 +2168,25 @@ export interface MySecurityEventPage {
 
 export type NetworkType = "WIFI" | "CELLULAR" | "ETHERNET" | "UNKNOWN";
 
+
+export interface OauthAppSummary {
+  clientId: string;
+  developerName?: string | null;
+  /** `PRIVATE` or `PUBLIC`. */
+  distribution?: string | null;
+  name: string;
+  /** `DRAFT`, `APPROVED`, `PUBLISHED` (or `SUSPENDED`, never authorizable). */
+  status?: string | null;
+}
+
+
+export interface OauthScopeView {
+  description?: string | null;
+  name: string;
+  /** `user` or `bot`. */
+  who?: string | null;
+}
+
 /** Who performed an audited organization change. */
 export interface OrganizationAuditActor {
   /** USER, OPERATOR or SYSTEM. */
@@ -2067,6 +2220,13 @@ export interface OrganizationAuditEventPage {
   items: Array<OrganizationAuditEvent>;
   /** Pass as `before` for the next (older) page; null on the last page. */
   nextCursor?: number | null;
+}
+
+/** The organization's install decision for a workspace install (Organizations policy). */
+export interface OrganizationInstallDecision {
+  allowed: boolean;
+  /** `NOT_A_MEMBER`, `ROLE_REQUIRED`, `NOT_ALLOWLISTED` or `ORGANIZATION_NOT_READY`. */
+  reason?: string | null;
 }
 
 /** An organization invitation. The raw `token` is returned once, at creation only. */
@@ -3091,12 +3251,14 @@ export interface RefreshTokenResponse {
 
 export interface RegistrationCreated {
   /**
-   * Opaque admission token (shown once; only its hash is stored). Absent for an
-   * idempotent repeat.
+   * Opaque admission token (only its hash is stored). An idempotent repeat (same
+   * `idempotencyKey` and request) returns the same token while the registration is
+   * active (audit M10); absent once it was cancelled or revoked.
    */
   admissionToken?: string | null;
   conferenceId?: string | null;
   created: boolean;
+  emailDelivery?: EmailDelivery | null;
   expiresAt: string;
   meetingSpaceId: string;
   registrationId: string;
@@ -3974,12 +4136,15 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/pin": "v2_unpin_question",
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/vote": "v2_unvote_question",
   "DELETE /api/v2/conferences/{id}/spotlights/{participantId}": "v2_remove_spotlight",
+  "DELETE /api/v2/me/apps/{grantId}": "v2_revoke_my_app",
   "DELETE /api/v2/me/avatar": "v2_remove_my_avatar",
+  "DELETE /api/v2/me/calendar-feed": "v2_delete_calendar_feed",
   "DELETE /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_revoke_member",
   "DELETE /api/v2/meeting-spaces/{id}/recurrence": "v2_end_recurrence",
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
   "DELETE /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_remove",
+  "DELETE /api/v2/organizations/{id}/apps/{grantId}": "v2_revoke_organization_app",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
   "DELETE /api/v2/organizations/{id}/member-calling/endpoints/{endpointId}": "v2_organization_member_calling_endpoints_revoke",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
@@ -4007,8 +4172,11 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/admin/organization-event-delivery": "v2_admin_organization_event_delivery",
   "GET /api/v2/admin/organizations": "v2_admin_list_organizations",
   "GET /api/v2/admin/organizations/{id}/service-bindings/{service}": "v2_admin_get_organization_service_binding",
+  "GET /api/v2/app-context-keys": "v2_app_context_keys",
   "GET /api/v2/avatars/{avatarId}": "v2_get_avatar",
+  "GET /api/v2/calendar-feeds/{file}": "v2_read_calendar_feed",
   "GET /api/v2/conferences/{id}": "v2_get_conference",
+  "GET /api/v2/conferences/{id}/apps": "v2_list_conference_apps",
   "GET /api/v2/conferences/{id}/artifacts": "v2_list_artifacts",
   "GET /api/v2/conferences/{id}/artifacts/{artifactId}": "v2_get_artifact",
   "GET /api/v2/conferences/{id}/attendance": "v2_conference_attendance",
@@ -4034,6 +4202,8 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/transcripts": "v2_list_transcripts",
   "GET /api/v2/conferences/{id}/transcripts/{artifactId}": "v2_get_transcript",
   "GET /api/v2/conferences/{id}/waiting-room": "v2_get_waiting_room",
+  "GET /api/v2/me/apps": "v2_list_my_apps",
+  "GET /api/v2/me/calendar-feed": "v2_get_calendar_feed",
   "GET /api/v2/me/conferences": "v2_my_conferences",
   "GET /api/v2/me/data-export": "v2_export_my_data",
   "GET /api/v2/me/device-links": "v2_list_pending_device_links",
@@ -4065,7 +4235,9 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/notifications": "v2_notifications_list",
   "GET /api/v2/notifications/preferences": "v2_notifications_preferences_get",
   "GET /api/v2/notifications/unread-count": "v2_notifications_unread_count",
+  "GET /api/v2/oauth/authorize/context": "v2_oauth_authorize_context",
   "GET /api/v2/organizations/{id}": "v2_get_business_organization",
+  "GET /api/v2/organizations/{id}/apps": "v2_list_organization_apps",
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
   "GET /api/v2/organizations/{id}/export": "v2_export_organization",
@@ -4143,6 +4315,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/admin/organizations/{id}/provisioning/retry": "v2_admin_retry_organization_provisioning",
   "POST /api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": "v2_admin_rotate_organization_service_binding",
   "POST /api/v2/admin/users/{userId}/sessions/revoke": "v2_admin_revoke_user_sessions",
+  "POST /api/v2/conferences/{id}/apps/{appId}/context": "v2_create_app_context",
   "POST /api/v2/conferences/{id}/artifacts/reports": "v2_generate_report",
   "POST /api/v2/conferences/{id}/artifacts/{artifactId}/access": "v2_artifact_access",
   "POST /api/v2/conferences/{id}/backstage": "v2_enter_backstage",
@@ -4160,6 +4333,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/consents": "v2_record_consents",
   "POST /api/v2/conferences/{id}/consents/{consentType}/withdraw": "v2_withdraw_consent",
   "POST /api/v2/conferences/{id}/end": "v2_end_conference",
+  "POST /api/v2/conferences/{id}/extend": "v2_extend_conference",
   "POST /api/v2/conferences/{id}/hand-raise": "v2_raise_hand",
   "POST /api/v2/conferences/{id}/intelligence/requests": "v2_request_intelligence",
   "POST /api/v2/conferences/{id}/join": "v2_join_conference",
@@ -4206,6 +4380,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/instant-meetings": "v2_create_instant_meeting",
   "POST /api/v2/invitations/{token}/resolve": "v2_resolve_invitation",
   "POST /api/v2/me/account/delete": "v2_delete_my_account",
+  "POST /api/v2/me/calendar-feed": "v2_create_calendar_feed",
   "POST /api/v2/me/device-links": "v2_create_device_link",
   "POST /api/v2/me/device-links/{linkId}/approve": "v2_approve_device_link",
   "POST /api/v2/me/device-links/{linkId}/cancel": "v2_cancel_device_link",
@@ -4246,6 +4421,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/messaging/session-tokens": "v2_messaging_session_token",
   "POST /api/v2/notifications/dismiss": "v2_notifications_dismiss",
   "POST /api/v2/notifications/read": "v2_notifications_mark_read",
+  "POST /api/v2/oauth/authorize/approve": "v2_oauth_authorize_decide",
   "POST /api/v2/organization-invitations/accept": "v2_accept_organization_invitation",
   "POST /api/v2/organization-invitations/decline": "v2_decline_organization_invitation",
   "POST /api/v2/organization-invitations/{invitationId}/accept": "v2_accept_my_organization_invitation",

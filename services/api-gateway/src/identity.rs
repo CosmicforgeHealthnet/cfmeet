@@ -6,13 +6,21 @@
 //! account and scopes ONLY from the authority chain Platform Access returns. A tenant,
 //! project or environment id in a request (header, query or body) never becomes authority.
 //! Platform Access unreachable means the request is refused (fail closed).
+//!
+//! CF Meet Apps OAuth credentials (ADR 0064; `cfoa_` access and `cfob_` bot tokens) are
+//! authenticated by the same call. Platform Access additionally returns the
+//! `credentialKind` (`OAUTH_ACCESS` | `OAUTH_BOT`), the `appId` and the `grantId` (read
+//! from the authority chain, its `credential` snapshot, or the response itself, in that
+//! order) and a `principalRestriction` to exactly the user (or bot) principal; the
+//! authority chain is the install target (its FIRST_PARTY triple and installation
+//! service account).
 
 use std::{collections::BTreeSet, sync::Arc};
 
 use cf_service_auth::{
     client::{InternalCallError, InternalServiceClient},
-    ApplicationEnvironmentKind, CorrelationId, DelegatedPlatformContext, OutboundServiceRequest,
-    ServiceId,
+    ApplicationEnvironmentKind, CorrelationId, DelegatedPlatformContext, DelegatedPrincipalKind,
+    OutboundServiceRequest, ServiceId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,6 +33,40 @@ use uuid::Uuid;
 pub enum TrustClassification {
     FirstParty,
     External,
+}
+
+/// The kind of an OAuth credential (Platform Access `credentialKind`, ADR 0064).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialKind {
+    /// `cfoa_…`: acts for the granting CF Meet user (`NATIVE_CF_USER`).
+    OauthAccess,
+    /// `cfob_…`: the organization install's bot (`BOT_OR_SERVICE`).
+    OauthBot,
+}
+
+impl CredentialKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CredentialKind::OauthAccess => "OAUTH_ACCESS",
+            CredentialKind::OauthBot => "OAUTH_BOT",
+        }
+    }
+
+    /// The delegated principal kind of the token's restricted principal.
+    pub fn principal_kind(&self) -> DelegatedPrincipalKind {
+        match self {
+            CredentialKind::OauthAccess => DelegatedPrincipalKind::NativeCfUser,
+            CredentialKind::OauthBot => DelegatedPrincipalKind::BotOrService,
+        }
+    }
+}
+
+/// What Platform Access says about an OAuth credential (identifiers only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OauthCredential {
+    pub kind: CredentialKind,
+    pub app_id: Uuid,
+    pub grant_id: Uuid,
 }
 
 /// The authenticated customer of a request, from Platform Access's authority chain.
@@ -40,6 +82,11 @@ pub struct AuthenticatedCustomer {
     /// FULL authority; SAFETY_ONLY contexts are refused at the ingress.
     pub full_authority: bool,
     pub scopes: BTreeSet<String>,
+    /// The authorized-principal restriction (`None`: unrestricted). A malformed list is
+    /// kept as an empty one (it then never names exactly one principal).
+    pub principal_restriction: Option<Vec<Uuid>>,
+    /// `Some` for CF Meet Apps OAuth credentials (ADR 0064); `None` for API keys.
+    pub oauth: Option<OauthCredential>,
 }
 
 impl AuthenticatedCustomer {
@@ -47,9 +94,21 @@ impl AuthenticatedCustomer {
         self.scopes.contains(scope)
     }
 
-    /// The signed delegated context forwarded upstream (identifiers only).
+    /// The single principal an OAuth credential is restricted to (`None`: not an OAuth
+    /// credential, or a restriction that is not exactly one principal — refused).
+    pub fn oauth_principal(&self) -> Option<Uuid> {
+        self.oauth?;
+        match self.principal_restriction.as_deref() {
+            Some([principal]) => Some(*principal),
+            _ => None,
+        }
+    }
+
+    /// The signed delegated context forwarded upstream (identifiers only). For an OAuth
+    /// credential the initiating principal is its single restricted principal (the wire
+    /// format is unchanged; the receiver learns the acting app from the credential).
     pub fn delegated(&self) -> DelegatedPlatformContext {
-        DelegatedPlatformContext::new(
+        let context = DelegatedPlatformContext::new(
             self.tenant_id,
             self.application_id,
             self.environment_id,
@@ -58,11 +117,23 @@ impl AuthenticatedCustomer {
         )
         // The receiver re-verifies this credential with Platform Access (revocation,
         // expiry and effective scopes are evaluated live, never trusted from here).
-        .with_initiating_credential(self.credential_id)
+        .with_initiating_credential(self.credential_id);
+        match (self.oauth, self.oauth_principal()) {
+            (Some(oauth), Some(principal)) => {
+                context.with_initiating_principal(principal, oauth.kind.principal_kind())
+            }
+            _ => context,
+        }
     }
 
     /// Parses Platform Access's `AuthorityChain` (contract `cfmeet.platform-access.identity`).
     pub fn from_authority(authority: &Value) -> Option<Self> {
+        Self::from_response(authority, &Value::Null)
+    }
+
+    /// [`from_authority`](Self::from_authority) with the OAuth fields (`credentialKind`,
+    /// `appId`, `grantId`) also looked up in the whole authentication `response`.
+    pub fn from_response(authority: &Value, response: &Value) -> Option<Self> {
         let id = |path: &[&str]| -> Option<Uuid> {
             let mut v = authority;
             for p in path {
@@ -87,6 +158,41 @@ impl AuthenticatedCustomer {
             .iter()
             .filter_map(|s| s.as_str().map(str::to_string))
             .collect();
+        let principal_restriction = match authority.get("principalRestriction") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(items)) => Some(
+                items
+                    .iter()
+                    .map(|v| v.as_str().and_then(|s| Uuid::parse_str(s).ok()))
+                    .collect::<Option<Vec<_>>>()
+                    .unwrap_or_default(),
+            ),
+            Some(_) => Some(Vec::new()),
+        };
+        // OAuth fields: the chain, its credential snapshot, then the response itself.
+        let field = |name: &str| -> Option<&Value> {
+            [authority, &authority["credential"], response]
+                .into_iter()
+                .find_map(|v| v.get(name).filter(|f| !f.is_null()))
+        };
+        let oauth = match field("credentialKind").map(|k| k.as_str()) {
+            None => None,
+            Some(Some(kind)) if !kind.starts_with("OAUTH") => None,
+            Some(kind) => {
+                let kind = match kind? {
+                    "OAUTH_ACCESS" => CredentialKind::OauthAccess,
+                    "OAUTH_BOT" => CredentialKind::OauthBot,
+                    // An unknown OAuth kind never authenticates (malformed chain).
+                    _ => return None,
+                };
+                let uuid = |name: &str| Uuid::parse_str(field(name)?.as_str()?).ok();
+                Some(OauthCredential {
+                    kind,
+                    app_id: uuid("appId")?,
+                    grant_id: uuid("grantId")?,
+                })
+            }
+        };
         Some(Self {
             tenant_id: id(&["tenant", "id"])?,
             application_id: id(&["application", "id"])?,
@@ -97,6 +203,8 @@ impl AuthenticatedCustomer {
             classification,
             full_authority: authority.get("authorityMode")?.as_str()? == "FULL",
             scopes,
+            principal_restriction,
+            oauth,
         })
     }
 }
@@ -202,7 +310,7 @@ impl CustomerAuthority for PlatformAccessAuthority {
         match body.get("outcome").and_then(Value::as_str) {
             Some("AUTHENTICATED") => body
                 .get("authority")
-                .and_then(AuthenticatedCustomer::from_authority)
+                .and_then(|a| AuthenticatedCustomer::from_response(a, &body))
                 .map(|c| Authentication::Authenticated(Box::new(c)))
                 .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
             Some("REJECTED") => Ok(Authentication::Rejected {
@@ -252,5 +360,76 @@ mod tests {
         assert!(AuthenticatedCustomer::from_authority(&chain("STAGING", "EXTERNAL")).is_none());
         assert!(AuthenticatedCustomer::from_authority(&chain("SANDBOX", "PARTNER")).is_none());
         assert!(AuthenticatedCustomer::from_authority(&json!({})).is_none());
+        assert_eq!((c.oauth, c.principal_restriction.clone()), (None, None));
+        assert_eq!(d.initiating_principal(), None);
+    }
+
+    #[test]
+    fn oauth_credentials_carry_their_single_restricted_principal() {
+        let (app, grant, principal) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let mut a = chain("PRODUCTION", "FIRST_PARTY");
+        a["credentialKind"] = json!("OAUTH_ACCESS");
+        a["appId"] = json!(app);
+        a["grantId"] = json!(grant);
+        a["principalRestriction"] = json!([principal]);
+        let c = AuthenticatedCustomer::from_authority(&a).unwrap();
+        assert_eq!(
+            c.oauth,
+            Some(OauthCredential {
+                kind: CredentialKind::OauthAccess,
+                app_id: app,
+                grant_id: grant
+            })
+        );
+        assert_eq!(c.oauth_principal(), Some(principal));
+        let d = c.delegated();
+        assert_eq!(d.initiating_credential_id(), Some(c.credential_id));
+        let p = d.initiating_principal().unwrap();
+        assert_eq!(
+            (p.principal_id, p.principal_kind),
+            (principal, DelegatedPrincipalKind::NativeCfUser)
+        );
+        // The fields may also come with the credential snapshot or the response itself.
+        let mut b = chain("PRODUCTION", "FIRST_PARTY");
+        b["credential"]["credentialKind"] = json!("OAUTH_BOT");
+        b["principalRestriction"] = json!([principal]);
+        let response = json!({ "appId": app, "grantId": grant });
+        let c = AuthenticatedCustomer::from_response(&b, &response).unwrap();
+        assert_eq!(c.oauth.unwrap().kind, CredentialKind::OauthBot);
+        assert_eq!(
+            c.delegated().initiating_principal().unwrap().principal_kind,
+            DelegatedPrincipalKind::BotOrService
+        );
+        // Not exactly one principal: no OAuth principal (the ingress refuses).
+        for restriction in [
+            json!(null),
+            json!([]),
+            json!([principal, Uuid::new_v4()]),
+            json!(["not-a-uuid"]),
+            json!("x"),
+        ] {
+            let mut x = a.clone();
+            x["principalRestriction"] = restriction.clone();
+            let c = AuthenticatedCustomer::from_authority(&x).unwrap();
+            assert_eq!(c.oauth_principal(), None, "{restriction}");
+            assert_eq!(c.delegated().initiating_principal(), None);
+        }
+        // An OAuth kind without its app / grant, or an unknown OAuth kind: malformed.
+        for (k, v) in [
+            ("appId", json!(null)),
+            ("grantId", json!("x")),
+            ("credentialKind", json!("OAUTH_REFRESH")),
+        ] {
+            let mut x = a.clone();
+            x[k] = v;
+            assert!(AuthenticatedCustomer::from_authority(&x).is_none(), "{k}");
+        }
+        // A non-OAuth kind is an ordinary credential.
+        let mut x = chain("SANDBOX", "EXTERNAL");
+        x["credentialKind"] = json!("API_KEY");
+        assert_eq!(
+            AuthenticatedCustomer::from_authority(&x).unwrap().oauth,
+            None
+        );
     }
 }

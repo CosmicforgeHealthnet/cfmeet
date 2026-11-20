@@ -6,11 +6,35 @@ use crate::{
     State,
 };
 use cf_communications_policy::Scope;
-use cf_service_auth::DelegatedPlatformContext;
+use cf_service_auth::{DelegatedPlatformContext, OutboundServiceRequest, ServiceId};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
+
+/// KF1: email lookups one person may make per hour (enumeration guard).
+pub const EMAIL_LOOKUPS_PER_HOUR: i64 = 20;
+
+/// KF1: a lower-cased, trimmed address of a plausible shape (`local@domain.tld`, no
+/// spaces or control characters, at most 254 characters), or None.
+pub fn normalize_email(raw: &str) -> Option<String> {
+    let email = raw.trim().to_lowercase();
+    let (local, domain) = email.split_once('@')?;
+    let ok = (3..=254).contains(&email.len())
+        && !local.is_empty()
+        && local.len() <= 64
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains('@')
+        && !email.chars().any(|c| c.is_whitespace() || c.is_control());
+    ok.then_some(email)
+}
+
+/// KF2: an "About" line is at most 140 characters with no control characters.
+pub fn valid_about(about: Option<&str>) -> bool {
+    about.is_none_or(|a| a.chars().count() <= 140 && !a.chars().any(char::is_control))
+}
 
 impl State {
     pub async fn ensure_profile(
@@ -142,9 +166,131 @@ impl State {
     pub async fn me(&self, p: &Profile) -> Result<Value> {
         Ok(
             json!({"schemaVersion":1,"profileId":p.id,"cfMeetId":self.store.current_public_id(&self.store.db,p.id).await?,"displayName":p.display_name,"avatarReference":p.avatar_reference,
-            "activationState":p.activation_state,"version":p.version,"createdAt":p.created_at,"updatedAt":p.updated_at,
+            "about":p.about,"activationState":p.activation_state,"version":p.version,"createdAt":p.created_at,"updatedAt":p.updated_at,
             "phoneVerification":{"status":"PROVIDER_BLOCKED","required":false}}),
         )
+    }
+    /// KF2: edit the "About" line (at most 140 characters, no control characters; empty or
+    /// null clears it). Only CONNECTED contacts see it (contact views), never discovery.
+    pub async fn patch_me(&self, p: &Profile, body: Value, key: Uuid) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Patch {
+            expected_version: i64,
+            about: Option<String>,
+        }
+        let update: Patch = serde_json::from_value(body.clone()).map_err(|_| Error::Validation)?;
+        if body.get("about").is_none() {
+            return Err(Error::Validation);
+        }
+        let about = update
+            .about
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_owned);
+        if !valid_about(about.as_deref()) {
+            return Err(Error::Validation);
+        }
+        let txn = self.store.begin().await?;
+        if let Some(v) = self
+            .store
+            .idempotency(&txn, p, "profile.patch", key, &body)
+            .await?
+        {
+            txn.commit().await?;
+            return Ok(v);
+        }
+        let current = self.store.profile(&txn, p.scope(), p.id, true).await?;
+        if current.version != update.expected_version {
+            return Err(Error::Version);
+        }
+        execute(
+            &txn,
+            "UPDATE communication_profiles SET about=$2,version=version+1,updated_at=now() WHERE id=$1",
+            vec![p.id.into(), about.clone().into()],
+        )
+        .await?;
+        self.store
+            .audit(&txn, p, "PROFILE_ABOUT_UPDATED", Some(p.id), json!({}))
+            .await?;
+        self.store
+            .change(&txn, p.id, "PROFILE", Some(p.id), Some(current.version + 1))
+            .await?;
+        let updated = self.store.profile(&txn, p.scope(), p.id, false).await?;
+        let result = self.me(&updated).await?;
+        self.store
+            .finish_idempotency(&txn, p, "profile.patch", key, result.clone())
+            .await?;
+        txn.commit().await?;
+        Ok(result)
+    }
+    /// KF1: find a person by their verified email address. The Account answers which
+    /// account (if any) has that verified address; the person must have turned on
+    /// `emailDiscoverable`, and then exactly the CF Meet ID discovery rules apply (active
+    /// account, discoverable ID, profile visibility, no block either way). Every miss is
+    /// the same 404 as an unknown address. Lookups are limited per person and hour
+    /// (enumeration), on top of the shared discovery budget.
+    pub async fn resolve_email(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        body: Value,
+    ) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Resolve {
+            email: String,
+        }
+        let request: Resolve = serde_json::from_value(body).map_err(|_| Error::Validation)?;
+        let email = normalize_email(&request.email).ok_or(Error::Validation)?;
+        self.limit_attempt(p, "discovery.email", EMAIL_LOOKUPS_PER_HOUR)
+            .await?;
+        self.limit_attempt(p, "discovery.resolve", 120).await?;
+        let req = OutboundServiceRequest::new_operation(ServiceId::meeting_service())
+            .with_delegated_context(scope.clone());
+        let response = self
+            .config
+            .client
+            .post_json(
+                &req,
+                "/internal/v1/accounts/communications/email-lookup",
+                &json!({"email":email}),
+            )
+            .await
+            .map_err(|_| Error::Unavailable)?;
+        let answer: Value = match response.status() {
+            200 => response.json().map_err(|_| Error::Unavailable)?,
+            // An older Account image without the route: nobody can be found by email yet.
+            404 => return Err(Error::NotFound),
+            _ => return Err(Error::Unavailable),
+        };
+        if answer["found"] != true {
+            return Err(Error::NotFound);
+        }
+        let reference = answer["accountReference"]
+            .as_str()
+            .filter(|r| r.len() <= 80)
+            .ok_or(Error::Unavailable)?;
+        let mut v = store::scoped(p.scope());
+        v.push(reference.into());
+        let target: Profile = store::one(&self.store.db,"SELECT to_jsonb(p) doc FROM communication_profiles p WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND account_reference=$4",v).await?.ok_or(Error::NotFound)?;
+        if target.id != p.id
+            && self
+                .store
+                .privacy(&self.store.db, target.id)
+                .await?
+                .email_discoverable
+                != Some(true)
+        {
+            return Err(Error::NotFound);
+        }
+        self.visible_profile(scope, p, &target, false)
+            .await
+            .map_err(|e| match e {
+                e @ (Error::Unavailable | Error::Database(_)) => e,
+                _ => Error::NotFound,
+            })
     }
     pub async fn rotate_public_id(
         &self,
@@ -257,7 +403,14 @@ impl State {
                 .map(str::to_owned)
                 .into(),
         );
-        let changed=execute(&txn,"UPDATE communication_privacy SET public_id_discoverable=$3,invitation_permissions=$4,contact_request_permissions=$5,incoming_call_policy=$6,direct_chat_policy=$7,public_profile_visibility=$8,presence_visibility=$9,group_invitation_policy=COALESCE($10,group_invitation_policy),version=version+1,updated_at=now() WHERE profile_id=$1 AND version=$2",values).await?;
+        values.push(
+            encoded["contactApproval"]
+                .as_str()
+                .map(str::to_owned)
+                .into(),
+        );
+        values.push(update.privacy.email_discoverable.into());
+        let changed=execute(&txn,"UPDATE communication_privacy SET public_id_discoverable=$3,invitation_permissions=$4,contact_request_permissions=$5,incoming_call_policy=$6,direct_chat_policy=$7,public_profile_visibility=$8,presence_visibility=$9,group_invitation_policy=COALESCE($10,group_invitation_policy),contact_approval=COALESCE($11,contact_approval),email_discoverable=COALESCE($12,email_discoverable),version=version+1,updated_at=now() WHERE profile_id=$1 AND version=$2",values).await?;
         if changed != 1 {
             return Err(Error::Version);
         }
@@ -286,8 +439,10 @@ impl State {
         self.store
             .change(&txn, p.id, "PRIVACY", Some(p.id), Some(current.version + 1))
             .await?;
-        let result =
-            json!({"schemaVersion":1,"version":current.version+1,"privacy":update.privacy});
+        // The stored settings: fields left out of the update (optional ones) read back
+        // with their current values, never as null.
+        let stored = self.store.privacy(&txn, p.id).await?.settings();
+        let result = json!({"schemaVersion":1,"version":current.version+1,"privacy":stored});
         self.store
             .finish_idempotency(&txn, p, "privacy.update", key, result.clone())
             .await?;

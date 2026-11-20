@@ -176,6 +176,18 @@ async fn template(admin: &str) -> String {
             migration::GapClosureMigrator::up(&tmpl, None)
                 .await
                 .expect("gap-closure migrations apply");
+            // ADR 0062: partner user participants and partner meeting chat links.
+            migration::PlatformBuildMigrator::up(&tmpl, None)
+                .await
+                .expect("platform-build migrations apply");
+            // Server audit MF2: calendar feed tokens (their own additive history).
+            migration::MeetingAuditMigrator::up(&tmpl, None)
+                .await
+                .expect("meeting-audit migrations apply");
+            // S2: durable erasure jobs of deleted accounts.
+            migration::AccountPrivacyMigrator::up(&tmpl, None)
+                .await
+                .expect("account-privacy migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -474,6 +486,8 @@ pub struct TestOptions {
     /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`).
     pub organization_calling:
         Option<backend::services::organization_calling::SharedOrganizationCalling>,
+    /// ADR 0064 / 0065: CF Meet Apps (`None` = every Apps flag off).
+    pub apps: Option<backend::services::apps::Apps>,
 }
 
 impl Default for TestOptions {
@@ -499,6 +513,7 @@ impl Default for TestOptions {
             platform: None,
             organizations_authority: None,
             organization_calling: None,
+            apps: None,
         }
     }
 }
@@ -837,6 +852,9 @@ impl TestApp {
         );
         if let Some(platform) = opts.platform.clone() {
             state = state.with_platform(platform);
+        }
+        if let Some(apps) = opts.apps.clone() {
+            state = state.with_apps(apps);
         }
         let router = routes::create_routes(state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));

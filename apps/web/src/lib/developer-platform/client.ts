@@ -78,6 +78,7 @@ export const DEVELOPER_OPERATIONS = {
   updateEnvironmentWebhook: ["PATCH", "/v1/environments/{environmentId}/webhooks/{webhookId}"],
   deleteEnvironmentWebhook: ["DELETE", "/v1/environments/{environmentId}/webhooks/{webhookId}"],
   rotateEnvironmentWebhookSecret: ["POST", "/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret"],
+  sendEnvironmentWebhookTest: ["POST", "/v1/environments/{environmentId}/webhooks/{webhookId}/test"],
   listEnvironmentWebhookDeliveries: ["GET", "/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries"],
   listWebhookDeliveryAttempts: ["GET", "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts"],
   replayEnvironmentWebhookDelivery: ["POST", "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/replay"],

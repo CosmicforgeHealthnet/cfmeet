@@ -17,6 +17,7 @@ pub mod owners;
 pub mod policy;
 pub mod preference_authority;
 pub mod preferences;
+pub mod privacy;
 pub mod profiles;
 pub mod relationships;
 pub mod restrictions;

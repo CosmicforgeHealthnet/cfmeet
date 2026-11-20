@@ -24,6 +24,15 @@ pub struct NotificationConfig {
     pub invite_emails_per_hour: i64,
     /// Jobs claimed per worker tick.
     pub batch: i64,
+    /// `NOTIFICATIONS_IN_APP_DELIVERY_ENABLED` (default false; audit M4): while the
+    /// `MEETING_NOTIFICATION` routing fence routes OLD (`SHADOW` / `FENCED_OLD`), each
+    /// reschedule / cancellation notice and reminder is ALSO published to the Notification
+    /// Service as a delivered (non-shadow) event addressed to its CF Meet account
+    /// recipients, so it reaches the in-app inbox. Email is unchanged: the legacy job is
+    /// still written and emailed by this service. Set only by the release operation
+    /// `activate-meeting-in-app-notices` (needs the service's `MEETING_NOTIFICATION` IN_APP
+    /// row ACTIVE and its EMAIL row not ACTIVE; EMAIL ACTIVE is refused while it is on).
+    pub in_app_delivery: bool,
 }
 
 impl Default for NotificationConfig {
@@ -35,6 +44,7 @@ impl Default for NotificationConfig {
             poll_secs: 30,
             invite_emails_per_hour: 50,
             batch: 20,
+            in_app_delivery: false,
         }
     }
 }
@@ -58,6 +68,7 @@ impl NotificationConfig {
             )
             .clamp(1, 1000),
             batch: d.batch,
+            in_app_delivery: env_bool("NOTIFICATIONS_IN_APP_DELIVERY_ENABLED", d.in_app_delivery),
         }
     }
 

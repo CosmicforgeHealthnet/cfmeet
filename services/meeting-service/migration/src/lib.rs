@@ -47,6 +47,9 @@ mod m20261118_000004_email_calendar_invite;
 mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
 mod m20261118_000006_team_channel_sync;
+mod m20261118_000007_platform_user_participants;
+mod m20261119_000001_account_privacy_jobs;
+mod m20261119_000001_calendar_feeds;
 
 pub mod phase2_backfill;
 
@@ -486,6 +489,83 @@ pub async fn gap_closure_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<GapClosureMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0062 (CF Meet Platform "Build"): partner users joining meetings with their CF Meet
+/// user token (`meeting_platform_participants`) and partner meeting chat links. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup only while `MEETING_PLATFORM_USER_JOIN_ENABLED` or
+/// `MEETING_PLATFORM_CHAT_ENABLED` is on.
+pub struct PlatformBuildMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for PlatformBuildMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261118_000007_platform_user_participants::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_platform_build_migrations").into_iden()
+    }
+}
+
+/// The platform-build history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn platform_build_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<PlatformBuildMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Server audit closure (audit MF2): private, revocable calendar feed tokens. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Not required at startup: only the calendar-feed endpoints use it (they answer
+/// FEATURE_DISABLED until `meeting-audit-migration up` has run).
+pub struct MeetingAuditMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MeetingAuditMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_calendar_feeds::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_audit_closure_migrations").into_iden()
+    }
+}
+
+/// The audit-closure history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn meeting_audit_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<MeetingAuditMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// S2: the durable erasure jobs of a deleted account (`account_privacy_jobs`). A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup by the image that queues the jobs.
+pub struct AccountPrivacyMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountPrivacyMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_account_privacy_jobs::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_account_privacy_migrations").into_iden()
+    }
+}
+
+/// The account-privacy history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AccountPrivacyMigrator, _>(db)
         .await?
         .is_empty())
 }

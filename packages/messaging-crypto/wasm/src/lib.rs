@@ -11,7 +11,7 @@ use cf_messaging_crypto::{
     attachment::{self, AttachmentDescriptor},
     binding::{self, ApplicationMessageBinding},
     device::Device,
-    group::{ClientGroup, Processed},
+    group::{ClientGroup, GroupError, Processed},
     history_transfer::{self, TransferContext, TransferKeys},
     key_package::{validate_key_package, LifetimePolicy},
     transparency,
@@ -25,6 +25,10 @@ fn id(s: &str) -> Result<Uuid, JsError> {
 
 fn code(c: &str) -> JsError {
     JsError::new(c)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The CF Meet AAD of one application message (binds tenant, application, environment,
@@ -183,14 +187,28 @@ pub struct ProcessResult {
     kind: String,
     plaintext: Vec<u8>,
     epoch: u64,
+    joiner: Option<String>,
+    joiner_key: Vec<u8>,
 }
 
 #[wasm_bindgen]
 impl ProcessResult {
-    /// `APPLICATION`, `COMMIT` or `PROPOSAL`.
+    /// `APPLICATION`, `COMMIT` (an external join included: see `joiner`), `PROPOSAL` or
+    /// `JOINER_UNVERIFIED` (an external commit of a device not in `allowed_joiners`:
+    /// nothing was merged; verify `joiner` / `joinerKey` and process it again).
     #[wasm_bindgen(getter)]
     pub fn kind(&self) -> String {
         self.kind.clone()
+    }
+    /// The device that joined (or asks to join) by an external commit.
+    #[wasm_bindgen(getter)]
+    pub fn joiner(&self) -> Option<String> {
+        self.joiner.clone()
+    }
+    /// The joining device's signature public key, as its leaf carries it.
+    #[wasm_bindgen(getter, js_name = joinerKey)]
+    pub fn joiner_key(&self) -> Vec<u8> {
+        self.joiner_key.clone()
     }
     #[wasm_bindgen(getter)]
     pub fn plaintext(&self) -> Vec<u8> {
@@ -534,6 +552,53 @@ impl WebDevice {
         Ok(e)
     }
 
+    /// Joins the group by itself from its GroupInfo (an MLS external commit) and merges it
+    /// locally; refuses a GroupInfo of another group than `group_id`. Submit the commit;
+    /// if the Delivery Service refuses it, the worker restores its snapshot.
+    #[wasm_bindgen(js_name = externalJoin)]
+    pub fn external_join(
+        &mut self,
+        group_id: &[u8],
+        group_info: &[u8],
+    ) -> Result<CommitResult, JsError> {
+        if self.has_group(group_id) {
+            return Err(code("GROUP_EXISTS"));
+        }
+        let header = cf_messaging_crypto::framing::inspect_group_info(group_info)
+            .map_err(|_| code("GROUP_INFO_INVALID"))?;
+        if header.group_id != group_id {
+            return Err(code("GROUP_INFO_GROUP_MISMATCH"));
+        }
+        let (g, out) = self
+            .device
+            .join_by_external_commit(group_info)
+            .map_err(|_| code("EXTERNAL_JOIN_REFUSED"))?;
+        if g.group_id() != group_id {
+            return Err(code("GROUP_INFO_GROUP_MISMATCH"));
+        }
+        self.groups.push((group_id.to_vec(), g));
+        Ok(commit_result(out))
+    }
+
+    /// The group's current GroupInfo, signed by this device (public material only).
+    #[wasm_bindgen(js_name = groupInfo)]
+    pub fn group_info(&mut self, group_id: &[u8]) -> Result<Vec<u8>, JsError> {
+        let g = group_of(&self.device, &mut self.groups, group_id)?;
+        self.device
+            .export_group_info(g)
+            .map_err(|_| code("GROUP_INFO_REFUSED"))
+    }
+
+    /// Commits a fresh leaf for this device (no membership change) and merges it locally.
+    #[wasm_bindgen(js_name = updateKeys)]
+    pub fn update_keys(&mut self, group_id: &[u8]) -> Result<CommitResult, JsError> {
+        let g = group_of(&self.device, &mut self.groups, group_id)?;
+        self.device
+            .update_keys(g)
+            .map(commit_result)
+            .map_err(|_| code("UPDATE_REFUSED"))
+    }
+
     /// Commits adding the devices of the packed KeyPackages (`[u32 len][bytes]...`, each
     /// validated by OpenMLS: signature, suite, lifetime) and merges it locally.
     #[wasm_bindgen(js_name = addDevices)]
@@ -582,18 +647,35 @@ impl WebDevice {
     /// Decrypts an application message (only when MLS authenticated exactly
     /// `expected_aad` with it: the CF Meet binding of tenant, application, environment,
     /// conversation, client message id and sending device) or verifies and merges a
-    /// commit. A mismatched AAD, a tampered or replayed message is refused.
+    /// commit. A mismatched AAD, a tampered or replayed message is refused. An external
+    /// commit is merged only when its joining device is in `allowed_joiners`
+    /// (`"<device id>:<hex signature key>"`, devices the page verified as registered,
+    /// ACTIVE devices of members); otherwise the result is `JOINER_UNVERIFIED`.
     pub fn process(
         &mut self,
         group_id: &[u8],
         message: &[u8],
         expected_aad: Option<Vec<u8>>,
+        allowed_joiners: Vec<String>,
     ) -> Result<ProcessResult, JsError> {
         let g = group_of(&self.device, &mut self.groups, group_id)?;
-        let p = self
-            .device
-            .process(g, message)
-            .map_err(|_| code("MESSAGE_REFUSED"))?;
+        let allowed = |device: Uuid, key: &[u8]| {
+            let entry = format!("{device}:{}", hex(key));
+            allowed_joiners.contains(&entry)
+        };
+        let p = match self.device.process_with_joiners(g, message, allowed) {
+            Ok(p) => p,
+            Err(GroupError::JoinerNotAllowed(device)) => {
+                return Ok(ProcessResult {
+                    kind: "JOINER_UNVERIFIED".into(),
+                    plaintext: vec![],
+                    epoch: g.epoch(),
+                    joiner: Some(device.to_string()),
+                    joiner_key: vec![],
+                })
+            }
+            Err(_) => return Err(code("MESSAGE_REFUSED")),
+        };
         let epoch = g.epoch();
         Ok(match p {
             Processed::Application { aad, plaintext } => {
@@ -604,17 +686,34 @@ impl WebDevice {
                     kind: "APPLICATION".into(),
                     plaintext,
                     epoch,
+                    joiner: None,
+                    joiner_key: vec![],
                 }
             }
             Processed::CommitMerged { epoch } => ProcessResult {
                 kind: "COMMIT".into(),
                 plaintext: vec![],
                 epoch,
+                joiner: None,
+                joiner_key: vec![],
+            },
+            Processed::ExternalJoin {
+                epoch,
+                device_id,
+                signature_key,
+            } => ProcessResult {
+                kind: "COMMIT".into(),
+                plaintext: vec![],
+                epoch,
+                joiner: Some(device_id.to_string()),
+                joiner_key: signature_key,
             },
             Processed::Proposal => ProcessResult {
                 kind: "PROPOSAL".into(),
                 plaintext: vec![],
                 epoch,
+                joiner: None,
+                joiner_key: vec![],
             },
         })
     }

@@ -11,6 +11,7 @@
 //! | `PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD` | no | failed authentications of one credential key id tolerated per window before throttling (default 20, 1–10000) |
 //! | `PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS` | no | the failure window (default 300, 10–86400) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
+//! | `PLATFORM_ACCESS_*_ENABLED`, `PLATFORM_ACCESS_MAX_END_USERS_*`, `PLATFORM_ACCESS_USER_TOKEN_*` | no | ADR 0062 partner users, user tokens, allowed websites (see [`platform_build`]; all off by default) |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
 //!
@@ -19,6 +20,7 @@
 //! `API_CREDENTIAL_PEPPER` stops the service and the admin CLI from starting. Every
 //! secret may be mounted as a file instead (`<NAME>_FILE`, see [`secret`]).
 
+pub mod platform_build;
 pub mod secret;
 pub mod service_auth;
 
@@ -82,6 +84,8 @@ pub struct PlatformAccessConfig {
     pub credential_policy: CredentialPolicy,
     pub auth_failure_policy: AuthFailurePolicy,
     pub log_format: LogFormat,
+    /// ADR 0062 feature flags, caps and user-token keys (everything off by default).
+    pub build: platform_build::PlatformBuildConfig,
 }
 
 impl fmt::Debug for PlatformAccessConfig {
@@ -95,6 +99,7 @@ impl fmt::Debug for PlatformAccessConfig {
             .field("credential_policy", &self.credential_policy)
             .field("auth_failure_policy", &self.auth_failure_policy)
             .field("log_format", &self.log_format)
+            .field("build", &self.build)
             .finish()
     }
 }
@@ -217,6 +222,8 @@ impl PlatformAccessConfig {
             window: chrono::Duration::seconds(window),
         };
 
+        let build = platform_build::PlatformBuildConfig::from_lookup(&get)?;
+
         Ok(Self {
             database_url,
             database_max_connections: u32::try_from(database_max_connections).map_err(|_| {
@@ -231,6 +238,7 @@ impl PlatformAccessConfig {
             credential_policy,
             auth_failure_policy,
             log_format,
+            build,
         })
     }
 

@@ -28,6 +28,15 @@ async fn main() {
         messaging_migration::GapClosureMigrator::up(&db, None)
             .await
             .expect("Messaging gap-closure migrations failed");
+        messaging_migration::MlsJoinMigrator::up(&db, None)
+            .await
+            .expect("Messaging MLS self-join migrations failed");
+        messaging_migration::MemberNotificationsMigrator::up(&db, None)
+            .await
+            .expect("Messaging member-notification migrations failed");
+        messaging_migration::ChatControlsMigrator::up(&db, None)
+            .await
+            .expect("Messaging chat-controls migrations failed");
         println!("Messaging migrations applied");
         return;
     }
@@ -42,6 +51,15 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Messaging migration database connection failed");
+        messaging_migration::ChatControlsMigrator::reset(&db)
+            .await
+            .expect("Messaging chat-controls rollback failed");
+        messaging_migration::MemberNotificationsMigrator::reset(&db)
+            .await
+            .expect("Messaging member-notification rollback failed");
+        messaging_migration::MlsJoinMigrator::reset(&db)
+            .await
+            .expect("Messaging MLS self-join rollback failed");
         messaging_migration::GapClosureMigrator::reset(&db)
             .await
             .expect("Messaging gap-closure rollback failed");

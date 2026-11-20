@@ -20,8 +20,50 @@ export type {
 } from './client.js';
 export type { ApiResponse, GatewayForwardedHeaders, QueryValue, RequestOptions, RequestParams } from './types.js';
 export { buildPath } from './path.js';
-export { AUTH_MODES, BROWSER_ESCAPE_HATCH, isBrowserLike } from './auth.js';
-export type { AuthType, CfMeetAuth, TokenSource } from './auth.js';
+export { AUTH_MODES, BROWSER_ESCAPE_HATCH, isBrowserLike, userTokenCache } from './auth.js';
+export type { AuthType, CfMeetAuth, TokenSource, UserTokenAuth } from './auth.js';
+export {
+  USER_TOKEN_MAX_LENGTH,
+  USER_TOKEN_PREFIX,
+  USER_TOKEN_REFRESH_CODES,
+  UserTokenCache,
+  decodeUserTokenClaims,
+  isUserToken,
+} from './user-token.js';
+export type { UserTokenCacheOptions, UserTokenClaims, UserTokenGrants } from './user-token.js';
+export { USER_ROUTES, DEVICE_ROUTES } from './platform-routes.js';
+export { UsersClient } from './users.js';
+export type {
+  CreatePartnerUser,
+  IssueUserTokenRequest,
+  IssuedUserToken,
+  ListPartnerUsersQuery,
+  MeetingGrant,
+  PartnerUser,
+  PartnerUserPage,
+  PartnerUserStatus,
+  UpdatePartnerUser,
+  UpsertUserTokenRequest,
+  UpsertedUserToken,
+  UserRequestOptions,
+  UserTokenGrantsRequest,
+} from './users.js';
+export {
+  DEFAULT_INSTALLATION_ID_KEY,
+  INSTALLATION_ID_RE,
+  InstallationIdStore,
+  browserLocalStorage,
+  createMemoryStorage,
+  generateInstallationId,
+  isValidInstallationId,
+} from './installation.js';
+export type { InstallationIdSource, InstallationIdStoreOptions, KeyValueStorage } from './installation.js';
+export { CfMeetDeviceClient, MeetingJoin, MeetingsDeviceClient, PushClient } from './device.js';
+export type { CfMeetDeviceClientConfig, MeetingJoinOptions, PushPlatform, PushRegistration } from './device.js';
+export { ChatClient, ChatSession } from './chat.js';
+export type { ChatConnectOptions, ChatEvents, ChatMessageInput, MessagingUserSession } from './chat.js';
+export { CallSession, CallsClient } from './calls.js';
+export type { CallEvents, CallSignal, CallingUserSession, CallsConnectOptions, IncomingInvitation } from './calls.js';
 export { DEFAULT_RETRY_POLICY, backoffDelay, parseRetryAfter, retryableStatus, retryableTransport } from './retry.js';
 export type { RetryPolicy } from './retry.js';
 export {

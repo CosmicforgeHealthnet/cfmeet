@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -596,6 +596,124 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConversationAccessRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/conversations/messages/access": {
+      "post": {
+        "operationId": "readMessagingCommunicationsMessagesAccess",
+        "summary": "Read the delegated user's access to several saved messages at once",
+        "description": "Read the delegated user's access to up to 50 messages at once (the Hub's saved-messages list, contacts audit K9): one entry per reference, in request order. member is whether the user is an ACTIVE member of that conversation right now (a non-member and an unknown conversation are the same member:false entry); for members, state is the message state exactly as conversations/access reports it. Metadata only. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesAccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagesAccessRequest"
               }
             }
           }
@@ -2184,6 +2302,102 @@
         },
         "required": [
           "groups"
+        ]
+      },
+      "MessagesAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "member": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "VISIBLE",
+                    "DELETED",
+                    "HIDDEN_FOR_ME",
+                    "EXPIRED",
+                    "NOT_FOUND"
+                  ]
+                },
+                "sequence": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "conversationId",
+                "messageId",
+                "member"
+              ],
+              "description": "member:false carries nothing else; member:true carries state and sequence."
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "items"
+        ]
+      },
+      "MessagesAccessRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "conversationId",
+                "messageId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "principalId",
+          "items"
         ]
       },
       "Pair": {

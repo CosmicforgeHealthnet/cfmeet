@@ -425,16 +425,19 @@ impl AppCallService {
             MediaEventKind::ResourceStarted
                 if call.current_state.is_terminal() || call.current_state == CallState::Ending =>
             {
-                // A resource of a finished Call must not exist.
-                self.teardown_media(call.id).await;
+                // A resource of a finished Call must not exist (the provider says it does,
+                // whatever the binding recorded).
+                self.teardown_lingering_media(call.id).await;
                 MediaEventOutcome::Applied
             }
             MediaEventKind::ResourceFinished => {
-                if call.current_state.is_terminal() || call.current_state == CallState::Ending {
+                if call.current_state == CallState::Ending {
+                    // finish_ending runs the cleanup itself (once, not twice).
+                    self.finish_ending(call.id).await?;
+                    MediaEventOutcome::Applied
+                } else if call.current_state.is_terminal() {
+                    // The room is gone: a binding already TERMINATED needs no provider call.
                     self.teardown_media(call.id).await;
-                    if call.current_state == CallState::Ending {
-                        self.finish_ending(call.id).await?;
-                    }
                     MediaEventOutcome::Applied
                 } else {
                     // An active Call lost its resource: reconciliation re-ensures it —
@@ -794,7 +797,11 @@ impl AppCallService {
                 .await
                 .map(|s| s.exists)
                 .unwrap_or(true);
-            if lingering || binding.status != MediaSessionStatus::Terminated {
+            if lingering {
+                self.teardown_lingering_media(call.id).await;
+                return Ok(1);
+            }
+            if binding.status != MediaSessionStatus::Terminated {
                 self.teardown_media(call.id).await;
                 return Ok(1);
             }

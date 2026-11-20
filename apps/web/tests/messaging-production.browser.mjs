@@ -187,6 +187,8 @@ test("production: sign in, choose a contact, chat — encryption automatic and i
   await send(a1.page, early);
   await mine(a1.page, early, "pending-setup").waitFor({ timeout: T });
   assert.equal(await mine(a1.page, early, "sent").count(), 0, "never reported sent before it can be decrypted");
+  // It looks like any message being sent: no write-up under it.
+  assert.equal(await mine(a1.page, early, "pending-setup").locator("[data-testid=message-note]").count(), 0, "no note under a pending message");
   pass("chat_with_unenrolled_contact_is_pending_not_failed");
   const c1 = await signIn(C, "c1");
   await phase(c1.page, "ready");
@@ -199,21 +201,17 @@ test("production: sign in, choose a contact, chat — encryption automatic and i
   evidence.timings.setupToDeliveryMs = Date.now() - t0;
   pass("pending_message_delivered_after_recipient_setup", { setupToDeliveryMs: evidence.timings.setupToDeliveryMs });
 
-  // 6. A second browser of A: verification is required (code typed on the trusted browser),
-  //    no encryption activation; afterwards both of A's browsers receive the same messages.
+  // 6. A second browser of A: signing in is enough (ADR 0067). No verification, no approval
+  //    on the other browser, no encryption activation; afterwards both of A's browsers
+  //    receive the same messages.
   const a2 = await signIn(A, "a2");
-  await a2.page.locator("[data-testid=device-setup][data-linking=true]").first().waitFor({ timeout: T });
   await noManualActivation(a2.page);
-  const code = (await a2.page.locator("[data-testid=account-link-code]:visible").first().textContent({ timeout: T })).trim();
-  assert.match(code, /^\d{6}$/);
-  await a1.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });
-  await a1.page.fill("[data-testid=incoming-link-code]", code);
-  await a1.page.click("[data-testid=approve-link]");
   await phase(a2.page, "ready");
   await connected(a2.page);
-  pass("new_untrusted_browser_verification_only");
+  assert.equal(await a2.page.locator("[data-testid=account-link-code], [data-testid=link-email-code]").count(), 0, "no verification step");
+  assert.equal(await a1.page.locator("[data-testid=incoming-link]").count(), 0, "the other browser is not asked to approve");
+  pass("new_browser_trusted_by_sign_in");
   await openChatWith(a2.page, label(A, B)).catch(() => openChat(a2.page));
-  await a2.page.locator("[data-testid=e2ee-unavailable]").waitFor({ state: "detached", timeout: 3 * T });
   // A's first browser still shows the chat with C (step 5): open the chat with B there too.
   await openChatWith(a1.page, label(A, B));
   const sync = `journey ${RUN} to both browsers`;

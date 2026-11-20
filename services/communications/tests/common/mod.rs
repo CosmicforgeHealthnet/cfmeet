@@ -63,6 +63,18 @@ pub struct World {
     pub backfill_page: Option<Value>,
     /// The Notification Service I2 (U6 / U7 only) behind the N10 preference facade.
     pub notifications: MockNotifications,
+    /// Conversations Messaging reports as MANAGED (every other one is PRIVATE_E2EE).
+    pub managed: std::collections::BTreeSet<Uuid>,
+    /// Messaging answers 404 to the batched message access route (an older image).
+    pub no_batch_access: bool,
+    /// Messaging answers 503 to the batched message access route.
+    pub batch_access_down: bool,
+    /// Calls made to the batched message access route.
+    pub batch_access_calls: usize,
+    /// Calls made to the single conversation access route.
+    pub access_calls: usize,
+    /// The Account's verified email addresses (lower case) -> account reference.
+    pub verified_emails: BTreeMap<String, String>,
 }
 /// One account's preference document in the mock Notification Service (U6 / U7 rules:
 /// absent = everything enabled, one document version bumped by every write).
@@ -212,6 +224,7 @@ fn entry(world: &World, call: Uuid, viewer: Uuid) -> Option<Value> {
 fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Option<Response> {
     const WORLD: &[&str] = &[
         "conversations/access",
+        "conversations/messages/access",
         "conversations/attachments",
         "storage-summary",
         "devices/verify",
@@ -248,8 +261,47 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
     }
     let ok = |v: Value| Some(Json(v).into_response());
     match path {
+        "/internal/v1/communications/conversations/messages/access" => {
+            world.batch_access_calls += 1;
+            if world.no_batch_access {
+                return Some(reject(StatusCode::NOT_FOUND, "NOT_FOUND"));
+            }
+            if world.batch_access_down {
+                return Some(reject(StatusCode::SERVICE_UNAVAILABLE, "UNAVAILABLE"));
+            }
+            let items: Vec<Value> = body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| {
+                    let (c, m) = (uuid_at(i, "conversationId"), uuid_at(i, "messageId"));
+                    match world
+                        .conversations
+                        .get(&c)
+                        .filter(|x| x.members.contains(&principal))
+                    {
+                        None => json!({"conversationId":c,"messageId":m,"member":false}),
+                        Some(x) => match x.messages.get(&m) {
+                            Some((seq, state)) => {
+                                json!({"conversationId":c,"messageId":m,"member":true,"state":state,"sequence":seq})
+                            }
+                            None => {
+                                json!({"conversationId":c,"messageId":m,"member":true,"state":"NOT_FOUND","sequence":null})
+                            }
+                        },
+                    }
+                })
+                .collect();
+            ok(json!({"schemaVersion":1,"items":items}))
+        }
         "/internal/v1/communications/conversations/access" => {
+            world.access_calls += 1;
             let id = uuid_at(body, "conversationId");
+            let security = if world.managed.contains(&id) {
+                "MANAGED"
+            } else {
+                "PRIVATE_E2EE"
+            };
             match world
                 .conversations
                 .get(&id)
@@ -258,7 +310,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 None => ok(json!({"schemaVersion":1,"member":false})),
                 Some(c) => {
                     let mut v = json!({"schemaVersion":1,"member":true,"conversationId":id,"contextClass":c.context,
-                        "securityProfile":"PRIVATE_E2EE","lifecycleState":"ACTIVE","lastSequence":c.last_sequence,
+                        "securityProfile":security,"lifecycleState":"ACTIVE","lastSequence":c.last_sequence,
                         "visibleFromSequence":0,"retentionSeconds":null,"expiresAt":null,"role":"MEMBER",
                         "memberCount":c.members.len(),"memberPrincipalIds":c.members});
                     if let Some(m) = body["messageId"]
@@ -514,6 +566,14 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             }
             None => json!({"active":false,"version":0}),
         },
+        // KF1: the Account's verified-email lookup.
+        "/internal/v1/accounts/communications/email-lookup" => {
+            let email = body["email"].as_str().unwrap_or_default().to_owned();
+            match s.world.read().unwrap().verified_emails.get(&email) {
+                Some(r) => json!({"schemaVersion":1,"found":true,"accountReference":r}),
+                None => json!({"schemaVersion":1,"found":false}),
+            }
+        }
         // The Account's backfill page: accounts ordered by principal id after `cursor`.
         "/internal/v1/accounts/communications/backfill" => {
             if let Some(page) = s.world.read().unwrap().backfill_page.clone() {
@@ -837,11 +897,32 @@ impl Harness {
             .clone()
             .with_initiating_principal(a.principal_id, DelegatedPrincipalKind::NativeCfUser)
     }
+    /// A profile with MANUAL contact approval, so the request flow these tests cover still
+    /// applies; [`Harness::direct_profile`] keeps the AUTOMATIC default.
     pub async fn profile(&self, a: &VerifiedAccount) -> Profile {
+        let p = self.direct_profile(a).await;
+        self.set_contact_approval(&p, "MANUAL").await;
+        p
+    }
+    /// A profile with the default contact approval (AUTOMATIC: direct contact by CF Meet ID).
+    pub async fn direct_profile(&self, a: &VerifiedAccount) -> Profile {
         self.state
             .ensure_profile(&self.delegated(a), a)
             .await
             .unwrap()
+    }
+    /// Sets contact approval without advancing the privacy version (test setup only).
+    pub async fn set_contact_approval(&self, p: &Profile, value: &str) {
+        let db = &self.state.store.db;
+        for sql in [
+            "ALTER TABLE communication_privacy DISABLE TRIGGER communication_privacy_version".to_owned(),
+            format!("UPDATE communication_privacy SET contact_approval = '{value}' WHERE profile_id = '{}'", p.id),
+            "ALTER TABLE communication_privacy ENABLE TRIGGER communication_privacy_version".to_owned(),
+        ] {
+            db.execute(Statement::from_string(DbBackend::Postgres, sql))
+                .await
+                .unwrap();
+        }
     }
     pub async fn public_id(&self, p: &Profile) -> String {
         self.state
@@ -927,6 +1008,9 @@ impl Harness {
             .await
             .unwrap();
         let id = Uuid::parse_str(request["requestId"].as_str().unwrap()).unwrap();
+        if request["state"] == "ACCEPTED" {
+            return id; // direct contact: already connected
+        }
         self.state
             .decide_request(
                 &self.scope,

@@ -821,18 +821,19 @@ class ClientTokenRequest {
   Map<String, Object?> toJson() => json;
 }
 
-/// An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all.
+/// An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or …
 class CommitRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const CommitRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CommitRequest.create({required Uuid clientMessageId, required String commit, required Uuid deviceId, required int epoch, List<Uuid>? removedDeviceIds, String? welcome, List<Uuid>? welcomeDeviceIds}) =>
+  factory CommitRequest.create({required Uuid clientMessageId, required String commit, required Uuid deviceId, required int epoch, String? groupInfo, List<Uuid>? removedDeviceIds, String? welcome, List<Uuid>? welcomeDeviceIds}) =>
       CommitRequest.fromJson(<String, Object?>{
         'clientMessageId': clientMessageId,
         'commit': commit,
         'deviceId': deviceId,
         'epoch': epoch,
+        if (groupInfo != null) 'groupInfo': groupInfo,
         if (removedDeviceIds != null) 'removedDeviceIds': removedDeviceIds,
         if (welcome != null) 'welcome': welcome,
         if (welcomeDeviceIds != null) 'welcomeDeviceIds': welcomeDeviceIds,
@@ -848,6 +849,9 @@ class CommitRequest {
   Uuid get deviceId => json['deviceId']! as String;
 
   int get epoch => (json['epoch']! as num).toInt();
+
+  /// base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1.
+  String? get groupInfo => json['groupInfo'] as String?;
 
   List<Uuid>? get removedDeviceIds => json['removedDeviceIds'] == null ? null : (json['removedDeviceIds']! as List<Object?>).map((e) => e! as String).toList();
 
@@ -1043,27 +1047,91 @@ class ConversationInbox {
   const ConversationInbox.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationInbox.create({required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, required int unreadCount}) =>
+  factory ConversationInbox.create({bool? archived, required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, bool? pinned, String? pinnedAt, required int unreadCount}) =>
       ConversationInbox.fromJson(<String, Object?>{
+        if (archived != null) 'archived': archived,
         'lastActivityAt': lastActivityAt,
         'lastMessage': lastMessage?.toJson(),
         'mentionCount': mentionCount,
+        if (pinned != null) 'pinned': pinned,
+        if (pinnedAt != null) 'pinnedAt': pinnedAt,
         'unreadCount': unreadCount,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members.
+  bool? get archived => json['archived'] as bool?;
+
   /// The latest application message (or the creation time); the key of orderBy=lastActivity.
   String get lastActivityAt => json['lastActivityAt']! as String;
 
   ConversationLastMessage? get lastMessage => json['lastMessage'] == null ? null : ConversationLastMessage.fromJson(json['lastMessage']! as Map<String, Object?>);
 
-  /// Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext).
+  /// Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext).
   int get mentionCount => (json['mentionCount']! as num).toInt();
+
+  /// F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first).
+  bool? get pinned => json['pinned'] as bool?;
+
+  /// F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned.
+  String? get pinnedAt => json['pinnedAt'] as String?;
 
   /// Active application messages from others after the member's read cursor, inside its history window, not hidden for it.
   int get unreadCount => (json['unreadCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary).
+class ConversationInboxSettings {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationInboxSettings.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationInboxSettings.create({required bool archived, required Uuid conversationId, required bool pinned, required String? pinnedAt}) =>
+      ConversationInboxSettings.fromJson(<String, Object?>{
+        'archived': archived,
+        'conversationId': conversationId,
+        'pinned': pinned,
+        'pinnedAt': pinnedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get archived => json['archived']! as bool;
+
+  Uuid get conversationId => json['conversationId']! as String;
+
+  bool get pinned => json['pinned']! as bool;
+
+  String? get pinnedAt => json['pinnedAt'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true.
+class ConversationInboxSettingsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationInboxSettingsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationInboxSettingsRequest.create({bool? archived, bool? pinned}) =>
+      ConversationInboxSettingsRequest.fromJson(<String, Object?>{
+        if (archived != null) 'archived': archived,
+        if (pinned != null) 'pinned': pinned,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it.
+  bool? get archived => json['archived'] as bool?;
+
+  /// Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED.
+  bool? get pinned => json['pinned'] as bool?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1335,13 +1403,14 @@ class Device {
   const Device.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Device.create({required Ciphersuite ciphersuite, required String credentialIdentity, required Uuid deviceId, required String? displayLabel, required String keyFingerprint, required Uuid principalId, required String protocol, required String registeredAt, required RevocationReason? revocationReason, required String? revokedAt, required String signaturePublicKey, required DeviceStatus status, required Map<String, Object?> transparency, required int version}) =>
+  factory Device.create({required Ciphersuite ciphersuite, required String credentialIdentity, required Uuid deviceId, required String? displayLabel, required String keyFingerprint, int? keyPackagesAvailable, required Uuid principalId, required String protocol, required String registeredAt, required RevocationReason? revocationReason, required String? revokedAt, required String signaturePublicKey, required DeviceStatus status, required Map<String, Object?> transparency, required int version}) =>
       Device.fromJson(<String, Object?>{
         'ciphersuite': ciphersuite,
         'credentialIdentity': credentialIdentity,
         'deviceId': deviceId,
         'displayLabel': displayLabel,
         'keyFingerprint': keyFingerprint,
+        if (keyPackagesAvailable != null) 'keyPackagesAvailable': keyPackagesAvailable,
         'principalId': principalId,
         'protocol': protocol,
         'registeredAt': registeredAt,
@@ -1365,6 +1434,9 @@ class Device {
   String? get displayLabel => json['displayLabel'] as String?;
 
   String get keyFingerprint => json['keyFingerprint']! as String;
+
+  /// Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline.
+  int? get keyPackagesAvailable => (json['keyPackagesAvailable'] as num?)?.toInt();
 
   Uuid get principalId => json['principalId']! as String;
 
@@ -1973,13 +2045,17 @@ class KeyPackageClaimRequest {
   const KeyPackageClaimRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory KeyPackageClaimRequest.create({required List<Uuid> principalIds}) =>
+  factory KeyPackageClaimRequest.create({List<Uuid>? deviceIds, required List<Uuid> principalIds}) =>
       KeyPackageClaimRequest.fromJson(<String, Object?>{
+        if (deviceIds != null) 'deviceIds': deviceIds,
         'principalIds': principalIds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched.
+  List<Uuid>? get deviceIds => json['deviceIds'] == null ? null : (json['deviceIds']! as List<Object?>).map((e) => e! as String).toList();
 
   List<Uuid> get principalIds => (json['principalIds']! as List<Object?>).map((e) => e! as String).toList();
 
@@ -2260,7 +2336,7 @@ class Message {
   const Message.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Message.create({required List<Uuid> attachmentIds, String? channel, required Uuid clientMessageId, required Uuid conversationId, required String createdAt, Map<String, Object?>? e2ee, int? editCount, String? editedAt, bool? forwarded, Uuid? forwardedFromPrincipalId, required MessageKind kind, required MessageLifecycle lifecycle, String? lifecycleReason, Map<String, Object?>? managed, required Uuid messageId, int? mlsEpoch, String? originalCreatedAt, Uuid? replyToMessageId, required SecurityProfile securityProfile, String? securityProvenance, Uuid? senderDeviceId, required Uuid senderPrincipalId, required int sequence, Uuid? targetMessageId, Uuid? threadRootId}) =>
+  factory Message.create({required List<Uuid> attachmentIds, String? channel, required Uuid clientMessageId, required Uuid conversationId, required String createdAt, Map<String, Object?>? e2ee, int? editCount, String? editedAt, bool? forwarded, Uuid? forwardedFromPrincipalId, required MessageKind kind, required MessageLifecycle lifecycle, String? lifecycleReason, Map<String, Object?>? managed, required Uuid messageId, int? mlsEpoch, String? originalCreatedAt, Uuid? replyToMessageId, required SecurityProfile securityProfile, String? securityProvenance, Uuid? senderDeviceId, required Uuid senderPrincipalId, required int sequence, Uuid? targetMessageId, Uuid? threadRootId, Uuid? viaApplicationId}) =>
       Message.fromJson(<String, Object?>{
         'attachmentIds': attachmentIds,
         if (channel != null) 'channel': channel,
@@ -2287,6 +2363,7 @@ class Message {
         'sequence': sequence,
         if (targetMessageId != null) 'targetMessageId': targetMessageId,
         if (threadRootId != null) 'threadRootId': threadRootId,
+        if (viaApplicationId != null) 'viaApplicationId': viaApplicationId,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -2348,6 +2425,9 @@ class Message {
 
   /// The root of the reply thread (the first message replied to).
   Uuid? get threadRootId => json['threadRootId'] as String?;
+
+  /// ADR 0064: the CF Meet App (OAuth client id = application id) whose OAuth access or bot credential sent this message; absent on every other message.
+  Uuid? get viaApplicationId => json['viaApplicationId'] as String?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -2438,10 +2518,12 @@ class MlsGroupState {
   const MlsGroupState.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MlsGroupState.create({required int commitsAccepted, required Uuid conversationId, required int mlsEpoch, required List<Map<String, Object?>> pendingRemovals, required String? rekeyReason, required bool rekeyRequired}) =>
+  factory MlsGroupState.create({required int commitsAccepted, required Uuid conversationId, String? groupInfo, int? groupInfoEpoch, required int mlsEpoch, required List<Map<String, Object?>> pendingRemovals, required String? rekeyReason, required bool rekeyRequired}) =>
       MlsGroupState.fromJson(<String, Object?>{
         'commitsAccepted': commitsAccepted,
         'conversationId': conversationId,
+        if (groupInfo != null) 'groupInfo': groupInfo,
+        if (groupInfoEpoch != null) 'groupInfoEpoch': groupInfoEpoch,
         'mlsEpoch': mlsEpoch,
         'pendingRemovals': pendingRemovals,
         'rekeyReason': rekeyReason,
@@ -2454,6 +2536,12 @@ class MlsGroupState {
   int get commitsAccepted => (json['commitsAccepted']! as num).toInt();
 
   Uuid get conversationId => json['conversationId']! as String;
+
+  /// base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit.
+  String? get groupInfo => json['groupInfo'] as String?;
+
+  /// The epoch of groupInfo (always mlsEpoch when present).
+  int? get groupInfoEpoch => (json['groupInfoEpoch'] as num?)?.toInt();
 
   int get mlsEpoch => (json['mlsEpoch']! as num).toInt();
 
@@ -3483,7 +3571,7 @@ class SendMessageRequest {
   /// MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext).
   String? get managedPresentation => json['managedPresentation'] as String?;
 
-  /// Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate …
+  /// Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must …
   List<Uuid>? get mentionedPrincipalIds => json['mentionedPrincipalIds'] == null ? null : (json['mentionedPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
 
   /// false: no push notification jobs (mirrored / migrated writes). Default true.
@@ -3903,7 +3991,7 @@ class UpdateConversationRequest {
 
   String? get reason => json['reason'] as String?;
 
-  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS).
+  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that …
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
 
   /// Section 13: a new display title; null clears it (MANAGED only, owner).
@@ -3937,6 +4025,109 @@ class UsageSummary {
   String get to => json['to']! as String;
 
   List<Map<String, Object?>> get totals => (json['totals']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0063: a partner push registration as the Notification Service accepted it (never the handle).
+class UserPushRegistration {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserPushRegistration.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserPushRegistration.create({required String installationId, required String platform, required String status}) =>
+      UserPushRegistration.fromJson(<String, Object?>{
+        'installationId': installationId,
+        'platform': platform,
+        'status': status,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Stable per app installation, generated by the SDK.
+  String get installationId => json['installationId']! as String;
+
+  String get platform => json['platform']! as String;
+
+  String get status => json['status']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0063: a partner device's push handle (an APNs / APNs VoIP device token or an FCM registration token). Synchronised to the Notification Service; Messaging never stores, echoes or logs it.
+class UserPushRegistrationRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserPushRegistrationRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserPushRegistrationRequest.create({required String handle, required String platform}) =>
+      UserPushRegistrationRequest.fromJson(<String, Object?>{
+        'handle': handle,
+        'platform': platform,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get handle => json['handle']! as String;
+
+  String get platform => json['platform']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0062: a MANAGED-only partner session device and a short-lived client token bound to it (scopes: the user token's effective msg grants; read -› messages.read / attachments.read, send -› messages.send / attachments.write). Present it as `Authorization: CF-Client-Token ‹clientToken›` to POST /v1/realtime/tickets and to the partner REST allowlist; renew through this exchange.
+class UserSession {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserSession.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserSession.create({required String clientToken, required String clientTokenExpiresAt, required Uuid principalId, required String sessionDeviceExpiresAt, required Uuid sessionDeviceId}) =>
+      UserSession.fromJson(<String, Object?>{
+        'clientToken': clientToken,
+        'clientTokenExpiresAt': clientTokenExpiresAt,
+        'principalId': principalId,
+        'sessionDeviceExpiresAt': sessionDeviceExpiresAt,
+        'sessionDeviceId': sessionDeviceId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get clientToken => json['clientToken']! as String;
+
+  String get clientTokenExpiresAt => json['clientTokenExpiresAt']! as String;
+
+  Uuid get principalId => json['principalId']! as String;
+
+  String get sessionDeviceExpiresAt => json['sessionDeviceExpiresAt']! as String;
+
+  Uuid get sessionDeviceId => json['sessionDeviceId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0062: the body of POST /v1/messaging/user-sessions (Authorization: Bearer cfut_...).
+class UserSessionRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserSessionRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserSessionRequest.create({required String installationId, Uuid? sessionDeviceId}) =>
+      UserSessionRequest.fromJson(<String, Object?>{
+        'installationId': installationId,
+        if (sessionDeviceId != null) 'sessionDeviceId': sessionDeviceId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Stable per app installation, generated by the SDK.
+  String get installationId => json['installationId']! as String;
+
+  /// Renew this ACTIVE partner session device of the same principal and installation (NOT_FOUND otherwise).
+  Uuid? get sessionDeviceId => json['sessionDeviceId'] as String?;
 
   Map<String, Object?> toJson() => json;
 }

@@ -209,13 +209,18 @@ fn cases() -> Vec<Case> {
             bin: "platform-access-migration",
             // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058) and Section 15
             // (credential last use, TENANT_RENAMED), then ADR 0058 Amendment A2 (automatic
-            // organization service bindings): all newer than the deployed schema and
-            // upgraded / rolled back together.
+            // organization service bindings), then the CF Meet Platform Build (partner end
+            // users, user-token mint windows and allowed websites; OAuth apps; OAuth client
+            // presentation, ADR 0064): all newer than the deployed schema and upgraded /
+            // rolled back together.
             part_vi: &[
                 "m20261120_000004_credential_suspension_production_activation",
                 "m20261121_000005_first_party_organization_scopes",
                 "m20261122_000006_credential_usage_tenant_rename",
                 "m20261123_000007_organization_service_bindings",
+                "m20261124_000008_partner_users_tokens_origins",
+                "m20261125_000009_oauth_apps",
+                "m20261126_000010_oauth_client_presentation",
             ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
@@ -267,15 +272,30 @@ fn cases() -> Vec<Case> {
                     "SELECT count(*) = 0 FROM platform_credential_usage",
                 ),
                 (
+                    "no partner end-user profile or allowed website is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_end_user_profiles) = 0 \
+                       AND (SELECT count(*) FROM platform_environment_origins) = 0",
+                ),
+                (
+                    "no OAuth client or app grant is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_oauth_clients) = 0 \
+                       AND (SELECT count(*) FROM platform_oauth_grants) = 0",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
                 ),
             ],
             // Data of the newest migration first refuses its own down (so nothing is rolled
-            // back), and the Part VI audit row would refuse 000004's.
+            // back), and the Part VI audit row would refuse 000004's. The OAuth client with
+            // its presentation set refuses 000010's (and 000009's) down.
             part_vi_data: Some(
-                "INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
+                "INSERT INTO platform_oauth_clients (application_id, tenant_id, name, redirect_uris, distribution, \
+                   status, created_at, updated_at, developer_name) VALUES \
+                   ('7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000001', 'Acme App', \
+                    ARRAY['https://acme.example/callback'], 'PRIVATE', 'DRAFT', now(), now(), 'Acme'); \
+                 INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
                    (gen_random_uuid(), 'operator@cfmeet', 'corr-upgrade-sus', 'CREDENTIAL_SUSPENDED', 'CREDENTIAL', \
                     '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001'); \
                  INSERT INTO platform_organization_scopes (organization_ref, capability, tenant_id, application_id, \

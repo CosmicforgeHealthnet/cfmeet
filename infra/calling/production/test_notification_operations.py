@@ -3,6 +3,7 @@
 import json
 import re
 import unittest
+import unittest.mock
 
 import coordinated_release as cr
 import notification_operations as no
@@ -125,6 +126,107 @@ class Routing(unittest.TestCase):
         granted = [(r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-notifications-owners']
         self.assertEqual({r for r, _, _ in granted}, {'meeting-service', 'messaging', 'communications', 'organizations'})
         self.assertTrue(all(i == 'notifications' for _, i, _ in granted))
+
+
+class BundleRelease:
+    """notif_routing rows by (category, channel) and a HELD-release answer."""
+
+    def __init__(self, modes, held='3:2'):
+        self.rows = {key: dict(mode=mode, version=1) for key, mode in modes.items()}
+        self.held = held
+        self.sql = []
+
+    def db_sql(self, db, sql):
+        self.sql.append((db, sql))
+        found = re.search(r"WHERE category = '([A-Z_]+)' AND channel = '([A-Z_]+)'", sql)
+        if sql.startswith('SELECT coalesce(json_agg'):
+            row = self.rows.get(found.groups())
+            return json.dumps([row] if row else [])
+        if sql.startswith('WITH u AS (UPDATE'):
+            row = self.rows[found.groups()]
+            row['mode'] = re.search(r"SET mode = '([A-Z]+)'", sql).group(1)
+            row['version'] += 1
+            return '1:%d' % row['version']
+        if sql.startswith('WITH routable AS'):
+            return self.held
+        raise AssertionError(sql)
+
+
+class BundleCr(FakeCr):
+    def __init__(self, modes, done=('activate-notifications-owners',), held='3:2'):
+        super().__init__([])
+        self.release = BundleRelease(modes, held)
+        self.finished = set(done)
+
+    def done(self, op):
+        return op in self.finished
+
+
+def seed_modes(mode='OFF'):
+    return {(c, ch): mode for c, ch in Parse.seed_rows()}
+
+
+class RoutingBundle(unittest.TestCase):
+    def test_parse(self):
+        self.assertEqual(no.parse_bundle('user-facing-in-app-active'), ('IN_APP', 'ACTIVE'))
+        self.assertEqual(no.parse_bundle('user-facing-push-shadow'), ('PUSH', 'SHADOW'))
+        self.assertIsNone(no.parse_bundle('contact-requests-in-app-active'))
+        for bad in ('user-facing-email-active', 'user-facing-operator-active', 'user-facing-in-app-on'):
+            with self.assertRaises(RuntimeError):
+                no.parse_bundle(bad)
+        self.assertRegex('user-facing-in-app-active', r'^[a-z0-9,=-]{0,120}$')
+
+    def test_every_bundled_row_is_seeded_and_no_critical_or_email_row_is_bundled(self):
+        seeded = set(Parse.seed_rows())
+        for channel, categories in no.BUNDLE_CHANNELS.items():
+            for category in categories:
+                self.assertIn((category, channel), seeded)
+                self.assertNotIn(category, no.CRITICAL)
+        # Every seeded user-facing IN_APP row is in the bundle (the bell shows everything).
+        in_app = {c for c, ch in seeded if ch == 'IN_APP' and c not in no.CRITICAL}
+        self.assertEqual(in_app, set(no.BUNDLE_CHANNELS['IN_APP']))
+
+    def test_in_app_bundle_turns_every_row_on_releases_held_events_and_rolls_back(self):
+        fake = BundleCr(seed_modes())
+        fake.release.rows[('MISSED_CALLS', 'IN_APP')]['mode'] = 'ACTIVE'
+        no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-in-app-active')
+        entry = fake.journal[-1]
+        self.assertEqual(entry['status'], 'done')
+        record = entry['notificationRouting']
+        self.assertEqual([r['category'] for r in record['rows']], list(no.USER_FACING))
+        for category in no.USER_FACING:
+            self.assertEqual(fake.release.rows[(category, 'IN_APP')]['mode'], 'ACTIVE')
+        # Rows of other channels are untouched; an already ACTIVE row is not rewritten.
+        self.assertEqual(fake.release.rows[('CONTACT_REQUESTS', 'PUSH')]['mode'], 'OFF')
+        self.assertEqual(fake.release.rows[('MEETING_NOTIFICATION', 'EMAIL')]['mode'], 'OFF')
+        self.assertEqual(fake.release.rows[('MISSED_CALLS', 'IN_APP')]['version'], 1)
+        self.assertEqual((record['heldReleased'], record['heldLeft']), (3, 2))
+        release = fake.release.sql[-1][1]
+        self.assertIn("lane <> 'CRITICAL' AND NOT shadow", release)
+        self.assertIn("interval '7 days'", release)
+        self.assertIn("{delivery,expiresAt}", release)
+        for category in no.USER_FACING:
+            self.assertIn("'%s'" % category, release)
+        no.undo_routing(fake, record, '43-1')
+        for category in no.USER_FACING:
+            expected = 'ACTIVE' if category == 'MISSED_CALLS' else 'OFF'
+            self.assertEqual(fake.release.rows[(category, 'IN_APP')]['mode'], expected)
+
+    def test_a_refused_row_changes_nothing(self):
+        fake = BundleCr(seed_modes(), done=())
+        with self.assertRaisesRegex(RuntimeError, 'owners'):
+            no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-in-app-active')
+        self.assertEqual(fake.journal, [])
+        self.assertFalse(any('UPDATE' in sql for _, sql in fake.release.sql))
+
+    def test_push_active_needs_the_push_provider_and_shadow_releases_nothing(self):
+        fake = BundleCr(seed_modes())
+        with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
+            no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-push-active')
+        no.activate_routing(fake, 'a' * 40, '42-2', 'user-facing-push-shadow')
+        self.assertFalse(any(sql.startswith('WITH routable') for _, sql in fake.release.sql))
+        self.assertEqual(fake.release.rows[('CONTACT_REQUESTS', 'PUSH')]['mode'], 'SHADOW')
+        self.assertNotIn(('DEVELOPER_PLATFORM', 'PUSH'), fake.release.rows)
 
 
 class FakeRelayCr(FakeCr):
@@ -879,6 +981,79 @@ class Push(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
             no.activate_calling_push(fake, 'a' * 40, '42-1', '')
         self.assertEqual(fake.activations, [])
+
+
+class MeetingInApp(unittest.TestCase):
+    """Audit M4: meeting notices reach the in-app inbox; email stays with the Meeting Service."""
+    ready = dict(publications_done=True, protocol=1, fence='SHADOW',
+                 service_modes={'EMAIL': 'SHADOW', 'IN_APP': 'ACTIVE', 'PUSH': 'OFF'})
+
+    def test_enable_gate(self):
+        self.assertIsNone(no.meeting_in_app_gate(True, self.ready))
+        self.assertIsNone(no.meeting_in_app_gate(True, dict(self.ready, fence='FENCED_OLD')))
+        self.assertIsNone(no.meeting_in_app_gate(True, dict(self.ready, service_modes={'IN_APP': 'ACTIVE'})))
+        self.assertIn('activate-meeting-publications',
+                      no.meeting_in_app_gate(True, dict(self.ready, publications_done=False)))
+        self.assertIn('routingProtocol', no.meeting_in_app_gate(True, dict(self.ready, protocol=None)))
+        for fence in ('LEGACY_ONLY', 'FENCED_NEW', None):
+            self.assertIn('SHADOW or FENCED_OLD', no.meeting_in_app_gate(True, dict(self.ready, fence=fence)))
+        self.assertIn('IN_APP row ACTIVE', no.meeting_in_app_gate(
+            True, dict(self.ready, service_modes={'EMAIL': 'OFF', 'IN_APP': 'SHADOW'})))
+        self.assertIn('second time', no.meeting_in_app_gate(
+            True, dict(self.ready, service_modes={'EMAIL': 'ACTIVE', 'IN_APP': 'ACTIVE'})))
+        # Turning the path off is always allowed.
+        self.assertIsNone(no.meeting_in_app_gate(False, {}))
+
+    def test_email_active_and_fenced_new_are_refused_while_the_path_is_on(self):
+        facts = dict(email_provider='resend', resend_done=True, owners_done=True)
+        self.assertIn('twice', no.gate('MEETING_NOTIFICATION', 'EMAIL', 'ACTIVE', dict(facts, meeting_in_app=True)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'EMAIL', 'ACTIVE', dict(facts, meeting_in_app=False)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'IN_APP', 'ACTIVE', dict(facts, meeting_in_app=True)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'EMAIL', 'SHADOW', dict(facts, meeting_in_app=True)))
+        fence = dict(protocol=1, publications_done=True, service_modes={'EMAIL': 'ACTIVE', 'IN_APP': 'ACTIVE'})
+        self.assertIn('disable first', no.fence_gate('meeting-service', 'MEETING_NOTIFICATION', 'FENCED_NEW',
+                                                     'SHADOW', dict(fence, meeting_in_app=True)))
+        self.assertIsNone(no.fence_gate('meeting-service', 'MEETING_NOTIFICATION', 'FENCED_NEW', 'SHADOW', fence))
+
+    def test_operation_is_registered_flag_is_a_safe_default_and_confirm_is_checked(self):
+        from unittest import mock
+        self.assertIn(no.MEETING_IN_APP_OPERATION, cr.OPERATIONS)
+        self.assertEqual(cr.ACTIVATIONS[no.MEETING_IN_APP_OPERATION][0], ('activate-meeting-publications',))
+        workflow = (cr.Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn(no.MEETING_IN_APP_OPERATION, workflow)
+        with mock.patch.object(cr, 'done', return_value=False):
+            self.assertNotIn('true', cr.safe_defaults()['meeting-service'][no.MEETING_IN_APP_FLAG])
+        with mock.patch.object(cr, 'done', side_effect=lambda op: op == no.MEETING_IN_APP_OPERATION):
+            self.assertIn('true', cr.safe_defaults()['meeting-service'][no.MEETING_IN_APP_FLAG])
+        fake = FakeCr([])
+        with self.assertRaisesRegex(RuntimeError, 'enable or disable'):
+            no.activate_meeting_in_app(fake, 'a' * 40, '42-1', 'on')
+
+    def test_enable_applies_only_the_flag_to_the_meeting_service(self):
+        applied = []
+
+        class Fake(FakeCr):
+            def done(self, op):
+                return op == 'activate-meeting-publications'
+
+            def apply_activation(self, op, sha, run_id, changes, **kw):
+                applied.append((op, changes))
+
+        fake = Fake([{'mode': 'SHADOW', 'version': 2}])
+        with unittest.mock.patch.object(no, 'routing_protocol', return_value=1), \
+                unittest.mock.patch.object(no, 'fence_row', return_value={'mode': 'SHADOW', 'version': 2}), \
+                unittest.mock.patch.object(no, 'service_modes', return_value={'EMAIL': 'OFF', 'IN_APP': 'ACTIVE'}):
+            no.activate_meeting_in_app(fake, 'a' * 40, '42-1', 'enable')
+        self.assertEqual(applied, [(no.MEETING_IN_APP_OPERATION,
+                                    [('meeting-service', {'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED': 'true'})])])
+        with unittest.mock.patch.object(no, 'service_modes', return_value={'EMAIL': 'OFF', 'IN_APP': 'OFF'}), \
+                unittest.mock.patch.object(no, 'routing_protocol', return_value=1), \
+                unittest.mock.patch.object(no, 'fence_row', return_value={'mode': 'SHADOW', 'version': 2}):
+            with self.assertRaisesRegex(RuntimeError, 'nothing changed'):
+                no.activate_meeting_in_app(fake, 'a' * 40, '42-2', 'enable')
+        self.assertEqual(len(applied), 1)
+        no.activate_meeting_in_app(fake, 'a' * 40, '42-3', 'disable')
+        self.assertEqual(applied[-1][1], [('meeting-service', {'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED': 'false'})])
 
 
 if __name__ == '__main__':
