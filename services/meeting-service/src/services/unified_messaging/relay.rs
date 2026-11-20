@@ -220,6 +220,13 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // F1: the member's own archive / pin of a chat (Messaging enforces membership).
+    r(
+        Method::PUT,
+        &[Lit("conversations"), Id, Lit("inbox-settings")],
+        &[],
+        false,
+    ),
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("unread")],

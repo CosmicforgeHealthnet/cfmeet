@@ -38,6 +38,8 @@ import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
 import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
+import { inboxFlags, type InboxFlags } from "./chat-list";
+import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
@@ -83,7 +85,7 @@ export type ConversationView = {
   myRole: MemberRole | null;
   /** Only owners and admins can send (S13). */
   announcementOnly: boolean;
-};
+} & InboxFlags;
 
 export type MessageView = {
   key: string;
@@ -111,6 +113,8 @@ export type MessageView = {
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
+  /** F4-F7: a private chat's poll, location, contact card or link preview (encrypted content). */
+  rich?: RichContent | null;
 };
 
 export type IncomingTransfer = {
@@ -169,6 +173,10 @@ type ServerConversation = {
     lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null } | null;
     unreadCount: number;
     mentionCount: number;
+    /** F1: this member's own archive / pin of the chat. */
+    archived?: boolean;
+    pinned?: boolean;
+    pinnedAt?: string | null;
   };
 };
 
@@ -1169,6 +1177,7 @@ export class MessagingEngine {
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
         announcementOnly: !!c.announcementOnly,
+        ...inboxFlags(c.inbox, previous),
       });
     }
     if (needNames.size) {
@@ -1453,6 +1462,29 @@ export class MessagingEngine {
 
   /** Renames a MANAGED group (compare-and-swap on the conversation version). */
   /** S13: only owners and admins can send in this group. */
+  /**
+   * F4-F6: send a poll, a vote, a location or a contact card. Private chats only: it travels
+   * inside the end-to-end encrypted content (the server sees an ordinary encrypted message).
+   */
+  async sendRich(conversationId: string, payload: RichPayload): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) return;
+    if (conv.securityProfile !== "PRIVATE_E2EE") throw new MessagingApiError(0, "PRIVATE_CHATS_ONLY", null);
+    await this.enqueue(conversationId, async () => {
+      await this.sendEncrypted(conv, payload, []);
+      await this.sync(conversationId);
+    });
+  }
+
+  /** F1: archive / pin this chat for me (WhatsApp); the list updates straight away. */
+  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean }): Promise<void> {
+    const r = await relay<InboxFlags>("PUT", `v1/conversations/${conversationId}/inbox-settings`, change);
+    const flags = inboxFlags(r);
+    const c = this.server.get(conversationId);
+    if (c?.inbox) c.inbox = { ...c.inbox, ...flags };
+    this.set({ conversations: this.snapshot.conversations.map((x) => (x.id === conversationId ? { ...x, ...flags } : x)) });
+  }
+
   async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {
     const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
     await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, announcementOnly: on });
@@ -1817,8 +1849,13 @@ export class MessagingEngine {
       .filter((r) => { const l = r.messageId ? meta.get(r.messageId)?.lifecycle : undefined; return !l || l === "ACTIVE" || l === "HIDDEN_FOR_YOU"; })
       .map((r) => ({ sequence: r.sequence, senderPrincipalId: r.senderPrincipalId ?? null, text: r.payload?.t === "text" ? r.payload.text : null }));
     const named = groupTitleFromRecords(titleRecords);
+    // F4: votes are encrypted messages of their own, counted on the poll they point at.
+    const votes: VoteRecord[] = [];
     for (const r of records) {
-      if (r.status === "COMMIT" || r.kind === "EDIT") continue;
+      if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "vote") votes.push({ poll: r.payload.poll, choices: r.payload.choices, sender: r.senderPrincipalId ?? null, sequence: r.sequence });
+    }
+    for (const r of records) {
+      if (r.status === "COMMIT" || r.kind === "EDIT" || r.payload?.t === "vote") continue;
       if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text)) {
         const t = named.changes.get(r.sequence);
         if (t) {
@@ -1854,6 +1891,11 @@ export class MessagingEngine {
       if (r.status === "DECRYPTED" || r.status === "SENT") {
         base.state = r.status === "SENT" ? "sent" : "delivered";
         if (r.payload?.t === "text") base.text = r.payload.text;
+        const rich = richContent(r.payload, r.messageId ?? null, votes, me ?? null);
+        if (rich) {
+          base.rich = rich;
+          base.text = richSummary(r.payload) ?? base.text;
+        }
         if (r.messageId && edits.has(r.messageId)) {
           base.text = edits.get(r.messageId) ?? base.text;
           base.editCount = 1;
@@ -2419,7 +2461,7 @@ export class MessagingEngine {
       this.scheduleSync(conversationId);
       return;
     }
-    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null));
+    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null, options.mentionedPrincipalIds ?? []));
   }
 
   /**
@@ -2443,9 +2485,13 @@ export class MessagingEngine {
     for (const q of queued) void this.send(q.conversationId, q.text, q.options).catch(() => {});
   }
 
-  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string, replyToMessageId: string | null = null): Promise<void> {
+  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string, replyToMessageId: string | null = null, mentionedPrincipalIds: string[] = []): Promise<void> {
     try {
-      if (conv.securityProfile === "PRIVATE_E2EE") await this.sendEncrypted(conv, { t: "text", text }, [], { replyToMessageId });
+      if (conv.securityProfile === "PRIVATE_E2EE") {
+        // F7: the preview is built here from the link itself (nothing is fetched).
+        const preview = linkPreviewFor(text);
+        await this.sendEncrypted(conv, preview ? { t: "text", text, preview } : { t: "text", text }, [], { replyToMessageId, mentionedPrincipalIds });
+      }
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
@@ -2454,7 +2500,7 @@ export class MessagingEngine {
     await this.sync(conversationId);
   }
 
-  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[], extra: { replyToMessageId?: string | null; kind?: "EDIT"; targetMessageId?: string } = {}): Promise<void> {
+  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[], extra: { replyToMessageId?: string | null; kind?: "EDIT"; targetMessageId?: string; mentionedPrincipalIds?: string[] } = {}): Promise<void> {
     const c = this.crypto;
     const deviceId = this.snapshot.deviceId;
     if (!c || !deviceId || !conv.encryption.mlsGroupId) throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
@@ -2475,6 +2521,8 @@ export class MessagingEngine {
           ...(attachmentIds.length ? { attachmentIds } : {}),
           ...(extra.replyToMessageId ? { replyToMessageId: extra.replyToMessageId } : {}),
           ...(extra.kind ? { kind: extra.kind, targetMessageId: extra.targetMessageId } : {}),
+          // B3: ids only (deduplicated, at most 50); the mention text stays encrypted.
+          ...(extra.mentionedPrincipalIds?.length && !extra.kind ? { mentionedPrincipalIds: [...new Set(extra.mentionedPrincipalIds)].slice(0, 50) } : {}),
         });
         this.scheduleSync(conv.conversationId);
         return;

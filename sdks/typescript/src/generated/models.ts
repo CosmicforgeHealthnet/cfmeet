@@ -6928,8 +6928,28 @@ export namespace Messaging {
     lastMessage: ConversationLastMessage | null;
     /** Active application messages from others after the member's read cursor, inside its history window, not hidden for it. */
     unreadCount: number;
-    /** Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext). */
+    /** Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext). */
     mentionCount: number;
+    /** F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members. */
+    archived?: boolean;
+    /** F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first). */
+    pinned?: boolean;
+    /** F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned. */
+    pinnedAt?: string | null;
+  };
+  /** F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary). */
+  export type ConversationInboxSettings = {
+    conversationId: Uuid;
+    archived: boolean;
+    pinned: boolean;
+    pinnedAt: string | null;
+  };
+  /** F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true. */
+  export type ConversationInboxSettingsRequest = {
+    /** Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it. */
+    archived?: boolean;
+    /** Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED. */
+    pinned?: boolean;
   };
   /** Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured). */
   export type ConversationLastMessage = {
@@ -7752,7 +7772,7 @@ export namespace Messaging {
     /** MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext). */
     managedPresentation?: "STANDARD" | "ANNOUNCEMENT";
     replyToMessageId?: Uuid;
-    /** Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate … */
+    /** Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must … */
     mentionedPrincipalIds?: Array<Uuid>;
     /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
     frankingCommitment?: string;
@@ -7885,8 +7905,8 @@ export namespace Messaging {
     lifecycleState?: "ACTIVE" | "LOCKED" | "CLOSED" | "ARCHIVED" | "DELETED";
     reason?: string;
     expiresAt?: string;
-    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS). */
-    retentionSeconds?: number;
+    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that … */
+    retentionSeconds?: number | null;
     /** Section 13: a new display title; null clears it (MANAGED only, owner). */
     title?: string | null;
     /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
@@ -8442,6 +8462,11 @@ export namespace Messaging {
     sendMessage: {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: SendMessageRequest };
       response: Message;
+    };
+    /** PUT /v1/conversations/{conversationId}/inbox-settings — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry IDEMPOTENT */
+    setConversationInboxSettings: {
+      params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: ConversationInboxSettingsRequest };
+      response: ConversationInboxSettings;
     };
     /** PUT /v1/conversations/{conversationId}/read-cursor — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry IDEMPOTENT */
     setReadCursor: {

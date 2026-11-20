@@ -77,6 +77,10 @@ jobs:
       # and each one opens the chat, call history, contact requests or meeting it is about.
       - name: Notification bell tests
         run: node --experimental-strip-types --test tests/notification-inbox.test.mjs
+      # Chat controls: archive / pin (F1) and private-chat polls, locations, contact cards and
+      # link previews (F4-F7) inside the encrypted content, validated by the crypto worker.
+      - name: Messaging chat controls tests
+        run: node --experimental-strip-types --test tests/messaging-chat-controls.test.mjs
 
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh

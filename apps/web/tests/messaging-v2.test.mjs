@@ -199,6 +199,8 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
     "@/lib/auth/device-label": load("../src/lib/auth/device-label.ts"),
     "./conversation-title": load("../src/lib/messaging/conversation-title.ts"),
     "./e2ee-membership": load("../src/lib/messaging/e2ee-membership.ts"),
+    "./chat-list": load("../src/lib/messaging/chat-list.ts"),
+    "./rich-content": load("../src/lib/messaging/rich-content.ts"),
     "@/lib/auth/account-device": { accountDevice: {} },
     "@/lib/auth/session": { accountSession: {} },
   }, { process: { env: { NEXT_PUBLIC_MESSAGING_URL: "https://messaging.example" } },

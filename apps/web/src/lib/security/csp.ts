@@ -132,7 +132,7 @@ export const SECURITY_HEADERS: { key: string; value: string }[] = [
   {
     key: "Permissions-Policy",
     value:
-      "camera=(self), microphone=(self), display-capture=(self), fullscreen=(self), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), interest-cohort=()",
+      "camera=(self), microphone=(self), display-capture=(self), fullscreen=(self), geolocation=(self), payment=(), usb=(), serial=(), hid=(), bluetooth=(), interest-cohort=()",
   },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
 ];

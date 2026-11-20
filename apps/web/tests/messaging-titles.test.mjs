@@ -157,6 +157,8 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "@/lib/auth/device-label": { browserDeviceLabel: () => "Browser" },
     "./conversation-title": titles,
     "./e2ee-membership": load("../src/lib/messaging/e2ee-membership.ts"),
+    "./chat-list": load("../src/lib/messaging/chat-list.ts"),
+    "./rich-content": load("../src/lib/messaging/rich-content.ts"),
   });
   const engine = new mod.MessagingEngine();
   engine.crypto = fakeCrypto;

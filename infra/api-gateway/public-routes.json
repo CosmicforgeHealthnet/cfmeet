@@ -3561,6 +3561,12 @@
     {
       "domain": "messaging",
       "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/inbox-settings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
       "path": "/v1/conversations/{conversationId}/read-cursor",
       "class": "PUBLIC_CUSTOMER"
     },

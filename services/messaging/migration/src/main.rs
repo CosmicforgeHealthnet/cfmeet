@@ -34,6 +34,9 @@ async fn main() {
         messaging_migration::MemberNotificationsMigrator::up(&db, None)
             .await
             .expect("Messaging member-notification migrations failed");
+        messaging_migration::ChatControlsMigrator::up(&db, None)
+            .await
+            .expect("Messaging chat-controls migrations failed");
         println!("Messaging migrations applied");
         return;
     }
@@ -48,6 +51,9 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Messaging migration database connection failed");
+        messaging_migration::ChatControlsMigrator::reset(&db)
+            .await
+            .expect("Messaging chat-controls rollback failed");
         messaging_migration::MemberNotificationsMigrator::reset(&db)
             .await
             .expect("Messaging member-notification rollback failed");

@@ -1275,7 +1275,27 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first)."
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
           }
         }
       },

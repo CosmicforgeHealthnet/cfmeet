@@ -1016,3 +1016,107 @@ async fn relationship_reads_and_events_never_cross_environments() {
         0
     );
 }
+
+/// A scripted Communications policy endpoint: counts checks and answers `allow`.
+struct PolicyStub {
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    allow: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+async fn policy_stub(h: &mut Harness, c: &Customer) -> PolicyStub {
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let allow = Arc::new(AtomicBool::new(true));
+    let (n, a) = (calls.clone(), allow.clone());
+    let app = axum::Router::new().route(
+        cf_communications_policy::CHECK_PATH,
+        axum::routing::post(move || {
+            let (n, a) = (n.clone(), a.clone());
+            async move {
+                n.fetch_add(1, Ordering::SeqCst);
+                let allowed = a.load(Ordering::SeqCst);
+                axum::Json(json!({"schemaVersion": 1, "allowed": allowed,
+                    "reason": if allowed {"ALLOWED"} else {"NOT_PERMITTED"}, "policyVersion": 1}))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    let mut targets = cf_service_auth::client::InternalTargets::new(ENV);
+    targets
+        .insert(
+            cf_service_auth::ServiceId::parse("cfmeet.communications").unwrap(),
+            &url,
+        )
+        .unwrap();
+    let client = Arc::new(
+        cf_service_auth::client::InternalServiceClient::new(
+            h.state.service_auth.shared_signer(),
+            targets,
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap(),
+    );
+    h.state.communications = Some(cf_communications_policy::PolicyClient::new(
+        client,
+        cf_communications_policy::Scope {
+            tenant_id: c.context.scope.tenant_id,
+            application_id: c.context.scope.application_id,
+            environment_id: c.context.scope.environment_id,
+        },
+    ));
+    PolicyStub { calls, allow }
+}
+
+/// B2: an allowed one-to-one send decision is reused (one Communications check for many
+/// messages); a block event from Communications invalidates it at once (the next send is
+/// checked again and refused); a refusal is never cached.
+#[tokio::test]
+async fn allowed_send_decisions_are_cached_until_a_communications_event() {
+    use std::sync::atomic::Ordering;
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    let (conv, mut alice, bob) = h.e2ee_direct(&c).await;
+    // The Communications event inbox is its own history (`CommunicationsMigrator`).
+    use messaging_migration::MigratorTrait as _;
+    messaging_migration::CommunicationsMigrator::up(h.conn(), None)
+        .await
+        .unwrap();
+    let stub = policy_stub(&mut h, &c).await;
+    for text in ["one", "two", "three"] {
+        let sent = h.send_e2ee(&c, &conv, &mut alice, text).await;
+        assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    }
+    assert_eq!(
+        stub.calls.load(Ordering::SeqCst),
+        1,
+        "one check, then cached"
+    );
+
+    // Bob blocks Alice in Communications: the durable event reaches Messaging.
+    stub.allow.store(false, Ordering::SeqCst);
+    let event = json!({"schemaVersion": 1, "eventId": Uuid::new_v4(), "aggregateId": Uuid::new_v4(),
+        "version": 2, "type": "communications.block.changed",
+        "data": {"actorPrincipalId": bob.principal, "targetPrincipalId": alice.principal, "blocked": true}});
+    let applied = hub(&h, &c, bob.principal, "events", event).await;
+    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
+    let refused = h.send_e2ee(&c, &conv, &mut alice, "after the block").await;
+    assert_eq!(refused.code(), "DELIVERY_REFUSED", "{}", refused.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+    // A refusal is not remembered: once allowed again the next send is checked and sent.
+    let refused = h.send_e2ee(&c, &conv, &mut alice, "still blocked").await;
+    assert_eq!(refused.code(), "DELIVERY_REFUSED", "{}", refused.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 3);
+    stub.allow.store(true, Ordering::SeqCst);
+    let sent = h.send_e2ee(&c, &conv, &mut alice, "unblocked").await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 4);
+}

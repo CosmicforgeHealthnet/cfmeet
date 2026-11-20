@@ -617,18 +617,18 @@ async fn large_group_membership_is_paginated_and_the_view_is_bounded() {
     assert_eq!(view.json["members"][0]["role"], "OWNER");
 }
 
-/// §90 / Appendix K (G-14): a conversation-specific retention is only ever stricter than
-/// the context's policy, only ever tightens (the database refuses loosening too), is
-/// audited, and the retention worker expires that conversation's messages while a sibling
-/// conversation under the same policy keeps its own.
+/// §90 / Appendix K (G-14), B4: a conversation-specific retention (disappearing messages)
+/// is never looser than the context's policy, can be shortened, lengthened or turned off
+/// within it, is audited, applies to messages sent while it is in force, and the retention
+/// worker expires that conversation's messages while a sibling conversation under the same
+/// policy keeps its own.
 #[tokio::test]
-async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
-    use sea_orm::ConnectionTrait;
+async fn a_conversation_retention_stays_within_policy_and_expires_its_own_messages() {
     let Some(h) = Harness::new().await else {
         return;
     };
     let c = h.customer(ALL_SCOPES);
-    let (conv, people) = h.managed_group(&c, 2).await;
+    let (conv, people) = h.managed_group(&c, 3).await;
     let (sibling, _) = {
         let r = h
             .create_conversation(
@@ -687,6 +687,7 @@ async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
         &set.json,
     );
     assert_eq!(set.json["retentionSeconds"], 3600);
+    // B4: a chat admin may lengthen it (within the policy) and turn it off again.
     let loosen = h
         .patch(
             &c,
@@ -695,26 +696,74 @@ async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
             json!({ "expectedVersion": version(&set.json), "retentionSeconds": 7200 }),
         )
         .await;
-    assert_eq!(
-        loosen.reason(),
-        "RETENTION_ONLY_TIGHTENS",
-        "{}",
-        loosen.text
-    );
-    let refused = h
-        .state
-        .db
-        .execute_unprepared(&format!(
-            "UPDATE messaging_conversations SET retention_seconds = NULL WHERE id = '{cid}'"
-        ))
+    assert_eq!(loosen.status, StatusCode::OK, "{}", loosen.text);
+    assert_eq!(loosen.json["retentionSeconds"], 7200);
+    let off = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&loosen.json), "retentionSeconds": null }),
+        )
         .await;
-    assert!(
-        refused.is_err(),
-        "the database refuses removing a retention"
+    assert_eq!(off.status, StatusCode::OK, "{}", off.text);
+    assert_eq!(off.json["retentionSeconds"], Value::Null);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &off.json,
     );
+    let again = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&off.json), "retentionSeconds": 3600 }),
+        )
+        .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text);
+    // B4: a plain member may not change it; a group admin (not the owner) may.
+    let refused = h
+        .patch(
+            &c,
+            Some(people[1]),
+            &path,
+            json!({ "expectedVersion": version(&again.json), "retentionSeconds": null }),
+        )
+        .await;
+    assert_eq!(refused.reason(), "NOT_ADMIN", "{}", refused.text);
+    let promoted = h
+        .patch(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/members/{}", people[1]),
+            json!({ "role": "ADMIN" }),
+        )
+        .await;
+    assert_eq!(promoted.status, StatusCode::OK, "{}", promoted.text);
+    let again = h.get(&c, None, &path).await;
+    let by_admin = h
+        .patch(
+            &c,
+            Some(people[1]),
+            &path,
+            json!({ "expectedVersion": version(&again.json), "retentionSeconds": 3600 }),
+        )
+        .await;
+    assert_eq!(by_admin.status, StatusCode::OK, "{}", by_admin.text);
+    // ... but nothing else an owner administers.
+    let not_owner = h
+        .patch(
+            &c,
+            Some(people[1]),
+            &path,
+            json!({ "expectedVersion": version(&by_admin.json), "announcementOnly": true }),
+        )
+        .await;
+    assert_eq!(not_owner.reason(), "NOT_OWNER", "{}", not_owner.text);
+    let again = by_admin;
     assert_eq!(
         h.scalar(&format!("SELECT count(*) FROM messaging_audit WHERE action = 'CONVERSATION_RETENTION_SET' AND target_id = '{cid}'")).await,
-        1
+        5
     );
 
     let mine = h.send_managed(&c, &conv, people[0], "disappears").await;
@@ -723,6 +772,18 @@ async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
         (mine.status, theirs.status),
         (StatusCode::CREATED, StatusCode::CREATED)
     );
+    // Turning it off applies to messages sent afterwards: the earlier one still expires.
+    let off = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&again.json), "retentionSeconds": null }),
+        )
+        .await;
+    assert_eq!(off.status, StatusCode::OK, "{}", off.text);
+    let kept = h.send_managed(&c, &conv, people[0], "sent after off").await;
+    assert_eq!(kept.status, StatusCode::CREATED, "{}", kept.text);
     h.clock.advance(chrono::Duration::hours(2));
     let mut report = messaging::compliance::retention::RetentionReport::default();
     messaging::compliance::retention::expire_due(&h.state, 100, &mut report)
@@ -737,6 +798,7 @@ async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
     };
     assert_eq!(h.scalar(&lifecycle(&mine.json["messageId"])).await, 0);
     assert_eq!(h.scalar(&lifecycle(&theirs.json["messageId"])).await, 1);
+    assert_eq!(h.scalar(&lifecycle(&kept.json["messageId"])).await, 1);
     // A second pass finds nothing more (idempotent).
     let mut again = messaging::compliance::retention::RetentionReport::default();
     messaging::compliance::retention::expire_due(&h.state, 100, &mut again)
@@ -1485,4 +1547,175 @@ async fn direct_message_requests_and_block_aware_key_lookup() {
         h.get(&c, Some(y.principal), &dir(z.principal)).await.status,
         StatusCode::OK
     );
+}
+
+/// The acting principal's chat list entry of `cid` (its `inbox` summary).
+async fn inbox_of(h: &Harness, c: &Customer, who: Uuid, cid: &str) -> Value {
+    let list = h
+        .get(c, Some(who), "/v1/conversations?orderBy=lastActivity")
+        .await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ConversationPage",
+        &list.json,
+    );
+    list.json["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["conversationId"] == cid)
+        .map(|v| v["inbox"].clone())
+        .expect("listed")
+}
+
+/// F1: a member archives and pins chats for itself only (WhatsApp-style: three pins at
+/// most, pinning un-archives, archiving un-pins); the chat list returns both; a non-member
+/// is told nothing.
+#[tokio::test]
+async fn members_archive_and_pin_chats_for_themselves() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (me, other) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let settings = |id: &str| format!("/v1/conversations/{id}/inbox-settings");
+
+    let fresh = inbox_of(&h, &c, me, &cid).await;
+    assert_eq!(
+        (fresh["archived"].clone(), fresh["pinned"].clone()),
+        (json!(false), json!(false))
+    );
+    let archived = h
+        .put(&c, Some(me), &settings(&cid), json!({ "archived": true }))
+        .await;
+    assert_eq!(archived.status, StatusCode::OK, "{}", archived.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ConversationInboxSettings",
+        &archived.json,
+    );
+    assert_eq!(archived.json["archived"], true);
+    assert_eq!(inbox_of(&h, &c, me, &cid).await["archived"], true);
+    // Only for me: the other member's list is unchanged, and new messages keep it archived.
+    assert_eq!(inbox_of(&h, &c, other, &cid).await["archived"], false);
+    let sent = h.send_managed(&c, &conv, other, "still archived").await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(inbox_of(&h, &c, me, &cid).await["archived"], true);
+
+    // Pinning un-archives.
+    let pinned = h
+        .put(&c, Some(me), &settings(&cid), json!({ "pinned": true }))
+        .await;
+    assert_eq!(pinned.status, StatusCode::OK, "{}", pinned.text);
+    assert_eq!(
+        (
+            pinned.json["pinned"].clone(),
+            pinned.json["archived"].clone()
+        ),
+        (json!(true), json!(false))
+    );
+    let inbox = inbox_of(&h, &c, me, &cid).await;
+    assert_eq!(inbox["pinned"], true);
+    assert!(inbox["pinnedAt"].is_string());
+
+    // At most three pins.
+    let mut more = Vec::new();
+    for _ in 0..3 {
+        let r = h
+            .create_conversation(
+                &c,
+                me,
+                json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        more.push(r.json["conversationId"].as_str().unwrap().to_string());
+    }
+    for id in &more[..2] {
+        let r = h
+            .put(&c, Some(me), &settings(id), json!({ "pinned": true }))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
+    let fourth = h
+        .put(&c, Some(me), &settings(&more[2]), json!({ "pinned": true }))
+        .await;
+    assert_eq!(fourth.reason(), "PIN_LIMIT_REACHED", "{}", fourth.text);
+    // Archiving un-pins, which frees a pin.
+    let r = h
+        .put(&c, Some(me), &settings(&cid), json!({ "archived": true }))
+        .await;
+    assert_eq!(
+        (r.json["pinned"].clone(), r.json["archived"].clone()),
+        (json!(false), json!(true))
+    );
+    let fourth = h
+        .put(&c, Some(me), &settings(&more[2]), json!({ "pinned": true }))
+        .await;
+    assert_eq!(fourth.status, StatusCode::OK, "{}", fourth.text);
+
+    let empty = h.put(&c, Some(me), &settings(&cid), json!({})).await;
+    assert_eq!(empty.code(), "VALIDATION_ERROR", "{}", empty.text);
+    let outsider = h.principal(&c);
+    let hidden = h
+        .put(
+            &c,
+            Some(outsider),
+            &settings(&cid),
+            json!({ "pinned": true }),
+        )
+        .await;
+    assert_eq!(hidden.code(), "NOT_FOUND", "{}", hidden.text);
+}
+
+/// B3: an encrypted group message may name the members it mentions (ids only; the mention
+/// text stays inside the ciphertext): they get the mention count, anyone else is refused.
+#[tokio::test]
+async fn encrypted_messages_carry_mention_ids_for_members_only() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, mut members) = h.e2ee_group(&c, 3).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let (bob, carol) = (members[1].principal, members[2].principal);
+    let alice = &mut members[0];
+    async fn send(
+        h: &Harness,
+        c: &Customer,
+        conv: &Value,
+        alice: &mut common::flows::Member,
+        mentions: Value,
+    ) -> Response {
+        let client_message_id = Uuid::new_v4();
+        let ciphertext = h.encrypt_for(c, conv, alice, client_message_id, "hi @bob");
+        let body = json!({
+            "clientMessageId": client_message_id,
+            "deviceId": alice.device_id(),
+            "epoch": alice.group.as_ref().unwrap().epoch(),
+            "ciphertext": common::b64(&ciphertext),
+            "mentionedPrincipalIds": mentions,
+        });
+        let path = format!(
+            "/v1/conversations/{}/messages",
+            conv["conversationId"].as_str().unwrap()
+        );
+        h.post(c, Some(alice.principal), &path, body).await
+    }
+    let outsider = h.principal(&c);
+    let refused = send(&h, &c, &conv, alice, json!([outsider])).await;
+    assert_eq!(refused.code(), "VALIDATION_ERROR", "{}", refused.text);
+    let sent = send(&h, &c, &conv, alice, json!([bob, bob])).await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_mentions WHERE message_id = '{}'",
+            sent.json["messageId"].as_str().unwrap()
+        ))
+        .await,
+        1
+    );
+    assert_eq!(inbox_of(&h, &c, bob, &cid).await["mentionCount"], 1);
+    assert_eq!(inbox_of(&h, &c, carol, &cid).await["mentionCount"], 0);
 }

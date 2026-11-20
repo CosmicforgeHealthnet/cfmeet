@@ -137,6 +137,8 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
     ("GET", "/v1/conversations/*/messages/*/sms-transport"),
     ("PUT", "/v1/conversations/*/read-cursor"),
+    // F1: the member's own archive / pin of a chat.
+    ("PUT", "/v1/conversations/*/inbox-settings"),
     ("GET", "/v1/conversations/*/events"),
     ("GET", "/v1/conversations/*/unread"),
     ("GET", "/v1/conversations/*/pins"),

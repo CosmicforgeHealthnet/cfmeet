@@ -189,11 +189,25 @@ pub async fn http_layer(
         400..=499 => "4xx",
         _ => "5xx",
     };
+    let elapsed = started.elapsed();
     observe(
         "messaging_http_request_duration_seconds",
         &[("method", method), ("route", route), ("status", class)],
-        started.elapsed().as_secs_f64(),
+        elapsed.as_secs_f64(),
     );
+    // B8: one line per request, as Communications logs its signed requests: the route
+    // TEMPLATE (ids replaced by `{id}`, never a query string), the status and the
+    // duration. Never a body, header, principal or conversation id. Probes stay quiet.
+    if !matches!(route, "/health" | "/ready") {
+        tracing::info!(
+            service = "messaging",
+            method,
+            route,
+            status = response.status().as_u16(),
+            elapsed_ms = elapsed.as_millis() as u64,
+            "request completed"
+        );
+    }
     response
 }
 
