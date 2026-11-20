@@ -1820,11 +1820,20 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
         ),
     ];
-    // ADR 0068: the admin bridge's operator reads (messaging-firstparty.administer,
+    // ADR 0068: the admin bridge's operator reads and commands (messaging-firstparty.administer,
     // cfmeet.admin-bridge only, plus X-CF-Operator; no delegated scope). Their behaviour is
-    // proven in tests/bridge_operator_reads.rs; here each
+    // proven in tests/bridge_operator_reads.rs and tests/bridge_operator_commands.rs; here each
     // is refused to every other identity, and to the bridge without an operator, changing
     // nothing.
+    let (hold, incident, event, op_key) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let tenant = fp.context.scope.tenant_id;
+    let env = fp.context.scope.environment_id;
+    let versioned = json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX" });
     let operator: Vec<(Method, String, Value)> = vec![
         (
             Method::GET,
@@ -1868,6 +1877,91 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "/internal/v1/operator/key-transparency".into(),
             json!({}),
         ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/operations/{op_key}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/conversations/{cid}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/policy".into(),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/reports/{rid}/remove-message"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "messageId": mid, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/reports/{rid}/dismiss"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}/mute"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX", "durationSeconds": 600 }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}/remove"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/restrict"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/policy".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "expectedVersion": 0, "reasonCode": "MATRIX", "policy": {} }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/holds".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "scopeKind": "ENVIRONMENT", "reasonCategory": "LITIGATION" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/holds/{hold}/release"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/deletion-requests".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "kind": "PRINCIPAL_ERASURE", "principalId": pid, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/switches/MESSAGE_SEND".into(),
+            json!({ "engaged": true, "expectedVersion": 0, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/incidents/{incident}/resolve"),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/failed-messages/{event}/retry"),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/key-transparency/checkpoint".into(),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
     ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
@@ -1887,7 +1981,12 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
                 .replace(&cid.to_string(), "{conversationId}")
                 .replace(&pid.to_string(), "{principalId}")
                 .replace(&mid.to_string(), "{messageId}")
-                .replace(&rid.to_string(), "{reportId}");
+                .replace(&rid.to_string(), "{reportId}")
+                .replace(&hold.to_string(), "{holdId}")
+                .replace(&incident.to_string(), "{incidentId}")
+                .replace(&event.to_string(), "{eventId}")
+                .replace(&op_key.to_string(), "{idempotencyKey}")
+                .replace("/switches/MESSAGE_SEND", "/switches/{switchName}");
             (m.to_string(), t)
         })
         .collect();
