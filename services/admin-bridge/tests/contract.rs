@@ -221,7 +221,13 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "notifications.failed-deliveries.list",
             "notifications.suppressions.list",
             "notifications.routing.read",
-            "notifications.providers.read"
+            "notifications.providers.read",
+            "privacy.requests.list",
+            "privacy.requests.read",
+            "privacy.request.register",
+            "privacy.request.complete-service",
+            "operations.health.read",
+            "audit.entries.list"
         ]
     );
     for c in catalog() {

@@ -8,6 +8,7 @@ pub use sea_orm_migration::prelude::*;
 
 pub mod m20261119_000001_admin_bridge_foundation;
 pub mod m20261121_000001_admin_operations;
+pub mod m20261122_000001_admin_privacy;
 
 pub use m20261119_000001_admin_bridge_foundation::AUDIT_LOCK_KEY;
 
@@ -22,6 +23,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20261119_000001_admin_bridge_foundation::Migration),
             Box::new(m20261121_000001_admin_operations::Migration),
+            Box::new(m20261122_000001_admin_privacy::Migration),
         ]
     }
 
