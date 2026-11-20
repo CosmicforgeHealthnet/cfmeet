@@ -53,6 +53,7 @@ pub const BINARIES: &[&str] = &[
     "gap-closure-migration",
     "meeting-audit-migration",
     "account-privacy-migration",
+    "admin-operations-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -369,6 +370,8 @@ impl Stack {
             db::migrate(&self.bin("meeting-audit-migration"), &url)?;
             // S2: account-deletion erasure jobs, required at startup.
             db::migrate(&self.bin("account-privacy-migration"), &url)?;
+            // ADR 0068: the admin bridge operations ledger and the account version.
+            db::migrate(&self.bin("admin-operations-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under
