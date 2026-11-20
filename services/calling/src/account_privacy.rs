@@ -180,9 +180,17 @@ async fn erasure(
         .map_err(|_| CallingError::ServiceUnavailable)?;
     }
     txn.commit().await.map_err(unavailable)?;
+    // `outcome` is on the bounded label allow-list (tests/metric_safety.rs).
     crate::metrics::inc(
         "calling_account_erasures_total",
-        &[("complete", if live == 0 { "true" } else { "false" })],
+        &[(
+            "outcome",
+            if live == 0 {
+                "complete"
+            } else {
+                "pending_live_calls"
+            },
+        )],
     );
     tracing::info!(
         hidden,
