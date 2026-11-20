@@ -111,6 +111,26 @@ pub fn app(state: State) -> Router {
             post(crate::internal::review_report),
         )
         .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id",
+            get(crate::operator::profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/reports",
+            get(crate::operator::reports),
+        )
+        .route(
+            "/internal/v1/communications/operator/holds",
+            get(crate::operator::holds),
+        )
+        .route(
+            "/internal/v1/communications/operator/audit",
+            get(crate::operator::audit),
+        )
+        .route(
+            "/internal/v1/communications/operator/metrics",
+            get(crate::operator::metrics),
+        )
+        .route(
             "/internal/v1/communications/verification/callback",
             post(crate::internal::phone_deferred),
         )

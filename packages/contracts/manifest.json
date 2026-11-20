@@ -1057,14 +1057,14 @@
     },
     {
       "id": "cfmeet.communications.communications-internal",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "kind": "openapi",
       "path": "communications/internal/v1.openapi.json",
       "owner": "communications",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority. 1.5.0 (Session 3): POST /internal/v1/communications/organization-invitations/resolve (Meeting Service only; CF Meet ID \u2192 account for organization invitations under the consumer-discovery rules). 1.6.0: POST /internal/v1/communications/contacts/names (Meeting Service only; names of the caller's connected, unblocked contacts for the client names lookup). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back."
+      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority. 1.5.0 (Session 3): POST /internal/v1/communications/organization-invitations/resolve (Meeting Service only; CF Meet ID \u2192 account for organization invitations under the consumer-discovery rules). 1.6.0: POST /internal/v1/communications/contacts/names (Meeting Service only; names of the caller's connected, unblocked contacts for the client names lookup). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.10.0 (ADR 0068): the admin bridge's operator reads under /internal/v1/communications/operator/* (profile by CF Meet ID, reports, holds, audit, metrics; communications.administer and X-CF-Operator) and operator attribution accepted only from cfmeet.admin-bridge."
     },
     {
       "id": "cfmeet.calling.communications-internal",
