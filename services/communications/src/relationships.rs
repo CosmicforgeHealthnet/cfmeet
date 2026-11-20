@@ -504,11 +504,11 @@ impl State {
             .as_ref()
             .is_some_and(|a| a.chars().count() > 160 || a.chars().any(char::is_control))
             || update.notifications.as_ref().is_some_and(|n| {
-                !matches!(n.as_str(), "ALL" | "MUTED")
-                    // K11: a contact's level governs private (one-to-one, end-to-end
-                    // encrypted) chats, where mentions cannot be read; offered again once
-                    // they can (crate::policy::MENTIONS_IN_PRIVATE_CHATS).
-                    && !(n == "MENTIONS" && crate::policy::MENTIONS_IN_PRIVATE_CHATS)
+                // K11: a contact's level governs private (one-to-one, end-to-end
+                // encrypted) chats, where mentions cannot be read; offered again once
+                // they can (crate::policy::MENTIONS_IN_PRIVATE_CHATS).
+                !(matches!(n.as_str(), "ALL" | "MUTED")
+                    || (n == "MENTIONS" && crate::policy::MENTIONS_IN_PRIVATE_CHATS))
             })
         {
             return Err(Error::Validation);
