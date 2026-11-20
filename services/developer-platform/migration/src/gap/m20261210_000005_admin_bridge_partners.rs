@@ -10,6 +10,8 @@
 //!   metadata (never key material); the partner re-enables push by uploading again (a new
 //!   row). The previous image keeps working: it never reads the new columns and its
 //!   inserts take their defaults.
+//! * `devplat_operator_audit` (platform-level operator commands) also accepts the admin
+//!   bridge's `hq:<staff>` operator (a usage reprocess, the pricing commands).
 //!
 //! Rollback: DOWN drops the push columns and restores the original subject check
 //! (`NOT VALID`, so A4 records already written do not block it).
@@ -33,9 +35,17 @@ ALTER TABLE devplat_push_providers ADD CONSTRAINT ck_devplat_push_providers_disa
     (state = 'DISABLED') = (disabled_at IS NOT NULL)
     AND (disabled_reason IS NULL OR disabled_reason ~ '^[A-Z][A-Z0-9_]{1,63}$'));
 ALTER TABLE devplat_push_providers ADD CONSTRAINT ck_devplat_push_providers_version CHECK (version >= 1);
+
+ALTER TABLE devplat_operator_audit ALTER COLUMN operator TYPE VARCHAR(160);
+ALTER TABLE devplat_operator_audit DROP CONSTRAINT ck_devplat_operator_audit_operator;
+ALTER TABLE devplat_operator_audit ADD CONSTRAINT ck_devplat_operator_audit_operator CHECK (
+    operator ~ '^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$' OR operator ~ '^hq:[A-Za-z0-9._:@-]{1,128}$');
 "#;
 
 const DOWN: &str = r#"
+ALTER TABLE devplat_operator_audit DROP CONSTRAINT ck_devplat_operator_audit_operator;
+ALTER TABLE devplat_operator_audit ADD CONSTRAINT ck_devplat_operator_audit_operator
+    CHECK (operator ~ '^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$') NOT VALID;
 ALTER TABLE devplat_push_providers DROP CONSTRAINT IF EXISTS ck_devplat_push_providers_version;
 ALTER TABLE devplat_push_providers DROP CONSTRAINT IF EXISTS ck_devplat_push_providers_disabled;
 ALTER TABLE devplat_push_providers DROP CONSTRAINT IF EXISTS ck_devplat_push_providers_state;
