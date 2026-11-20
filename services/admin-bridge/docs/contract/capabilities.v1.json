@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.4.0",
+  "contract_version": "1.5.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "8ead0abc2955ddf86eaa377311ebf159519b15377b2e64eb3da21d8e999e4796",
-    "capability_matrix_sha256": "cf714b7ba3b76b24dc5e532a5afe9ca92dd1f489a81646447ffcb866e358f1ed"
+    "openapi_sha256": "9bb20eaebf8dda2b60d0f96e3f5b69c2ef8e7047bdce40111437e0480e52ec0f",
+    "capability_matrix_sha256": "2b141c99e5f8d24cf50c1f011a2af09fae64455d4f9e166823f47aee94e993d2"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 17,
+      "READ_ONLY": 31,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 115
+      "BLOCKED_DEPENDENCY": 101
     }
   },
   "capabilities": [
@@ -6720,9 +6720,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWorkspacePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.workspaces.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -6731,8 +6731,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_workspaces_search_drops_the_support_address"
+      ],
       "contact_search": false
     },
     {
@@ -6774,9 +6776,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWorkspaceDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.workspaces.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -6785,8 +6787,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_workspace_detail_carries_counts"
+      ],
       "contact_search": false
     },
     {
@@ -6830,9 +6834,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerActivityPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.workspace-activity.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -6841,8 +6845,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_activity_maps_window_and_workspace"
+      ],
       "contact_search": false
     },
     {
@@ -6988,9 +6994,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerProjectPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.projects.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -6999,8 +7005,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -7042,9 +7050,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerEnvironmentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.environments.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7053,8 +7061,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -7096,9 +7106,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerMemberPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.members.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -7107,8 +7117,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -7150,9 +7162,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerInvitationPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.invitations.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -7161,8 +7173,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -7546,9 +7560,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerPushKeyPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.push-keys.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7557,8 +7571,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_push_keys_are_details_only"
+      ],
       "contact_search": false
     },
     {
@@ -7775,9 +7791,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebhookPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.webhooks.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -7786,8 +7802,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_webhooks_expose_the_host_only"
+      ],
       "contact_search": false
     },
     {
@@ -7831,9 +7849,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebhookDeliveryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.webhook-deliveries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -7842,8 +7860,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_activity_maps_window_and_workspace"
+      ],
       "contact_search": false
     },
     {
@@ -9456,9 +9476,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "apps.apps.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9467,8 +9487,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "apps_search_and_detail"
+      ],
       "contact_search": false
     },
     {
@@ -9510,9 +9532,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "apps.apps.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9521,8 +9543,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "apps_search_and_detail"
+      ],
       "contact_search": false
     },
     {
@@ -9564,9 +9588,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppVersionPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "apps.versions.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9575,8 +9599,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -9618,9 +9644,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppInstallPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "apps.installs.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9629,8 +9655,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {

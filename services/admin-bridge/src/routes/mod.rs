@@ -3,6 +3,7 @@
 
 pub mod notifications;
 pub mod organizations;
+pub mod partners;
 pub mod translate;
 
 use std::collections::BTreeMap;
@@ -20,6 +21,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = notifications::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = partners::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {

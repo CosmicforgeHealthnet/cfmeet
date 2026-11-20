@@ -2444,7 +2444,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.workspaces.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2453,8 +2453,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_workspaces_search_drops_the_support_address"
+    ]
   },
   {
     "id": "partners.workspaces.read",
@@ -2463,7 +2465,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.workspaces.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2472,8 +2474,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_workspace_detail_carries_counts"
+    ]
   },
   {
     "id": "partners.workspace-activity.list",
@@ -2482,7 +2486,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/staff-activity",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.workspace-activity.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -2491,8 +2495,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_activity_maps_window_and_workspace"
+    ]
   },
   {
     "id": "partners.workspace.state.change",
@@ -2539,7 +2545,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/projects",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.projects.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2548,8 +2554,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "partners.environments.list",
@@ -2558,7 +2566,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/environments",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.environments.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2567,8 +2575,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "partners.members.list",
@@ -2577,7 +2587,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/members",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.members.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -2586,8 +2596,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "partners.invitations.list",
@@ -2596,7 +2608,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/invitations",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.invitations.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -2605,8 +2617,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "partners.keys.list",
@@ -2729,7 +2743,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/push-keys",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.push-keys.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2738,8 +2752,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_push_keys_are_details_only"
+    ]
   },
   {
     "id": "partners.push-key.disable",
@@ -2805,7 +2821,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/webhooks",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.webhooks.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2814,8 +2830,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_webhooks_expose_the_host_only"
+    ]
   },
   {
     "id": "partners.webhook-deliveries.list",
@@ -2824,7 +2842,7 @@
     "method": "GET",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/webhook-deliveries",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "partners.webhook-deliveries.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -2833,8 +2851,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-    "blocker": "Phase A2: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_activity_maps_window_and_workspace"
+    ]
   },
   {
     "id": "partners.webhook-delivery.retry",
@@ -3394,7 +3414,7 @@
     "method": "GET",
     "bridge_endpoint": "/apps/apps",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "apps.apps.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3403,8 +3423,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "apps_search_and_detail"
+    ]
   },
   {
     "id": "apps.apps.read",
@@ -3413,7 +3435,7 @@
     "method": "GET",
     "bridge_endpoint": "/apps/apps/{app_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "apps.apps.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3422,8 +3444,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "apps_search_and_detail"
+    ]
   },
   {
     "id": "apps.versions.list",
@@ -3432,7 +3456,7 @@
     "method": "GET",
     "bridge_endpoint": "/apps/apps/{app_id}/versions",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "apps.versions.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3441,8 +3465,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "apps.installs.list",
@@ -3451,7 +3477,7 @@
     "method": "GET",
     "bridge_endpoint": "/apps/apps/{app_id}/installs",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "apps.installs.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3460,8 +3486,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
-    "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "partners_lists_translate_strictly"
+    ]
   },
   {
     "id": "apps.app.suspend",

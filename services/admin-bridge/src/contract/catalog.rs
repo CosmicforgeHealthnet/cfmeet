@@ -3008,4 +3008,67 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "NotificationProviders",
         &["notifications_providers_report_status_only"],
     ),
+    // A2.1 Developer Platform.
+    (
+        "partners.workspaces.search",
+        "PartnerWorkspacePage",
+        &["partners_workspaces_search_drops_the_support_address"],
+    ),
+    (
+        "partners.workspaces.read",
+        "PartnerWorkspaceDetail",
+        &["partners_workspace_detail_carries_counts"],
+    ),
+    (
+        "partners.workspace-activity.list",
+        "PartnerActivityPage",
+        &["partners_activity_maps_window_and_workspace"],
+    ),
+    (
+        "partners.projects.list",
+        "PartnerProjectPage",
+        &["partners_lists_translate_strictly"],
+    ),
+    (
+        "partners.environments.list",
+        "PartnerEnvironmentPage",
+        &["partners_lists_translate_strictly"],
+    ),
+    (
+        "partners.members.list",
+        "PartnerMemberPage",
+        &["partners_lists_translate_strictly"],
+    ),
+    (
+        "partners.invitations.list",
+        "PartnerInvitationPage",
+        &["partners_lists_translate_strictly"],
+    ),
+    (
+        "partners.push-keys.list",
+        "PartnerPushKeyPage",
+        &["partners_push_keys_are_details_only"],
+    ),
+    (
+        "partners.webhooks.list",
+        "PartnerWebhookPage",
+        &["partners_webhooks_expose_the_host_only"],
+    ),
+    (
+        "partners.webhook-deliveries.list",
+        "PartnerWebhookDeliveryPage",
+        &["partners_activity_maps_window_and_workspace"],
+    ),
+    ("apps.apps.search", "AppPage", &["apps_search_and_detail"]),
+    ("apps.apps.read", "AppDetail", &["apps_search_and_detail"]),
+    (
+        "apps.versions.list",
+        "AppVersionPage",
+        &["partners_lists_translate_strictly"],
+    ),
+    (
+        "apps.installs.list",
+        "AppInstallPage",
+        &["partners_lists_translate_strictly"],
+    ),
 ];

@@ -1,0 +1,68 @@
+{
+  "description": "One webhook delivery outcome (no payload, no response body).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delivery_id",
+    "subscription_id",
+    "event_id",
+    "environment_id",
+    "status",
+    "attempt_count",
+    "last_http_status",
+    "failure_category",
+    "created_at",
+    "completed_at"
+  ],
+  "properties": {
+    "delivery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subscription_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 36
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "attempt_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_http_status": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "failure_category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
