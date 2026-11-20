@@ -914,3 +914,244 @@ async fn privacy_requests_change_with_their_operation_in_one_transaction() {
         .is_err());
     db.drop().await;
 }
+
+fn owner_event(subject: &str, version: i64, kind: &str) -> admin_bridge::store::OwnerEvent {
+    admin_bridge::store::OwnerEvent {
+        producer: "developer-platform".into(),
+        event_id: Uuid::new_v4(),
+        event_type: kind.into(),
+        subject_kind: "verification_case".into(),
+        subject_id: subject.into(),
+        state: "OPEN".into(),
+        version,
+        occurred_at: Utc.timestamp_opt(1_795_000_000, 123_456_789).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn owner_events_append_in_sequence_once_and_acknowledgements_move_forward() {
+    use admin_bridge::store::{AckOutcome, IngestOutcome};
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let s = &db.store;
+    let at = Utc.timestamp_opt(1_795_000_100, 0).unwrap();
+    const CASE: &str = "verification.case.changed.v1";
+    let first = owner_event("case-1", 2, CASE);
+    assert_eq!(
+        s.ingest_event(&first, true, at).await.unwrap(),
+        IngestOutcome::Appended(1)
+    );
+    assert_eq!(
+        s.ingest_event(&first, true, at).await.unwrap(),
+        IngestOutcome::Duplicate
+    );
+    assert_eq!(
+        s.ingest_event(&owner_event("case-1", 2, CASE), true, at)
+            .await
+            .unwrap(),
+        IngestOutcome::Stale
+    );
+    assert_eq!(
+        s.ingest_event(&owner_event("case-1", 3, CASE), true, at)
+            .await
+            .unwrap(),
+        IngestOutcome::Appended(2)
+    );
+    assert_eq!(
+        s.ingest_event(&owner_event("case-2", 1, "unknown.thing.v1"), false, at)
+            .await
+            .unwrap(),
+        IngestOutcome::Quarantined
+    );
+    // Concurrent appends: one sequence each, no gaps among the committed ones, in order.
+    let mut set = tokio::task::JoinSet::new();
+    for n in 0..8 {
+        let st = s.clone();
+        set.spawn(async move {
+            st.ingest_event(&owner_event(&format!("c-{n}"), 1, CASE), true, at)
+                .await
+                .unwrap()
+        });
+    }
+    while set.join_next().await.is_some() {}
+    let feed = s
+        .event_feed(
+            at - Duration::seconds(1),
+            at + Duration::seconds(1),
+            None,
+            100,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        feed.iter().map(|f| f.sequence).collect::<Vec<_>>(),
+        (1..=10).collect::<Vec<i64>>()
+    );
+    assert_eq!(
+        feed[0].event.occurred_at,
+        first.occurred_at.trunc_subsecs(6)
+    );
+    let page = s
+        .event_feed(
+            at - Duration::seconds(1),
+            at + Duration::seconds(1),
+            Some(2),
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page.iter().map(|f| f.sequence).collect::<Vec<_>>(),
+        [3, 4, 5]
+    );
+    let inbox = s
+        .projections()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.name == "events.inbox")
+        .unwrap();
+    assert_eq!((inbox.quarantined, inbox.last_event_at), (1, Some(at)));
+
+    assert_eq!(
+        s.acknowledge_events("hq-worker", 4, at).await.unwrap(),
+        AckOutcome::Acknowledged(4)
+    );
+    assert_eq!(
+        s.acknowledge_events("hq-worker", 2, at).await.unwrap(),
+        AckOutcome::Acknowledged(4)
+    );
+    assert_eq!(
+        s.acknowledge_events("hq-worker", 11, at).await.unwrap(),
+        AckOutcome::BeyondHead
+    );
+    // Guards: the feed and the inbox are append-only; acknowledgements never go back.
+    for sql in [
+        "UPDATE admin_hq_outbox SET state = 'CLOSED'",
+        "DELETE FROM admin_hq_outbox",
+        "DELETE FROM admin_event_inbox",
+        "UPDATE admin_hq_consumer_cursors SET acknowledged_sequence = 1",
+        "DELETE FROM admin_hq_consumer_cursors",
+    ] {
+        assert!(db.exec(sql, vec![]).await.is_err(), "{sql}");
+    }
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn activation_requests_record_their_dispatch_with_their_operation() {
+    use admin_bridge::store::{
+        ActivationRequest, ActivationUpdate, BeginOutcome, OpStatus, Settlement,
+    };
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let s = &db.store;
+    let key = Uuid::new_v4();
+    let mut op = operation(key, &format!("github:release:activation:{key}"), "0");
+    op.capability = "operations.activation.request".into();
+    op.owner = "github-actions".into();
+    let rec = ActivationRequest {
+        request_id: key,
+        operation: "activate-oauth".into(),
+        release_sha: "a".repeat(40),
+        confirm: Some("owner-approved".into()),
+        requested_by: "hq:staff-0001".into(),
+        approver: "hq:staff-0002".into(),
+        approval_id: "ap-1".into(),
+        state: "REQUESTED".into(),
+        created_at: op.created_at,
+        dispatched_at: None,
+        run_id: None,
+    };
+    assert_eq!(
+        s.begin_activation(&op, &rec).await.unwrap(),
+        BeginOutcome::Started
+    );
+    assert!(matches!(
+        s.begin_activation(&op, &rec).await.unwrap(),
+        BeginOutcome::Existing(_)
+    ));
+    // Another staff member with the same id: the slot is taken (nothing recorded).
+    let mut other = op.clone();
+    other.principal_sub = "staff-0009".into();
+    assert_eq!(
+        s.begin_activation(&other, &rec).await.unwrap(),
+        BeginOutcome::VersionTaken
+    );
+    let at = op.created_at + Duration::seconds(1);
+    assert!(s.mark_sent("staff-0001", key, at).await.unwrap());
+    let unknown = Settlement {
+        status: OpStatus::UnknownOutcome,
+        source_status: None,
+        source_version: None,
+        error_code: Some("UNKNOWN_OUTCOME".into()),
+        at,
+    };
+    let keep = ActivationUpdate {
+        state: None,
+        dispatched_at: None,
+        run_id: None,
+    };
+    assert!(s
+        .settle_activation("staff-0001", key, &unknown, &keep)
+        .await
+        .unwrap());
+    let stored = s.activation_request(key).await.unwrap().unwrap();
+    assert_eq!((stored.state.as_str(), stored.run_id), ("REQUESTED", None));
+    let ok = Settlement {
+        status: OpStatus::Succeeded,
+        source_status: Some("DISPATCHED".into()),
+        source_version: Some("88".into()),
+        error_code: None,
+        at,
+    };
+    let dispatched = ActivationUpdate {
+        state: Some("DISPATCHED"),
+        dispatched_at: Some(at),
+        run_id: Some(88),
+    };
+    assert!(s
+        .settle_activation("staff-0001", key, &ok, &dispatched)
+        .await
+        .unwrap());
+    // Settled once: a second outcome changes nothing.
+    assert!(!s
+        .settle_activation("staff-0001", key, &ok, &dispatched)
+        .await
+        .unwrap());
+    let stored = s.activation_request(key).await.unwrap().unwrap();
+    assert_eq!(
+        (stored.state.as_str(), stored.run_id),
+        ("DISPATCHED", Some(88))
+    );
+    assert_eq!(
+        s.operation("staff-0001", key)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        OpStatus::Succeeded
+    );
+    assert_eq!(s.activations_for_runs(&[88, 89]).await.unwrap().len(), 1);
+    assert!(
+        !s.link_activation_run(key, 90).await.unwrap(),
+        "linked once"
+    );
+    assert_eq!(s.activation_requests(None, 10).await.unwrap().len(), 1);
+    assert!(s
+        .activation_requests(Some((stored.created_at, key)), 10)
+        .await
+        .unwrap()
+        .is_empty());
+    for sql in [
+        "UPDATE admin_activation_requests SET run_id = 91",
+        "UPDATE admin_activation_requests SET operation = 'release'",
+        "UPDATE admin_activation_requests SET state = 'FAILED'",
+        "DELETE FROM admin_activation_requests",
+    ] {
+        assert!(db.exec(sql, vec![]).await.is_err(), "{sql}");
+    }
+    db.drop().await;
+}

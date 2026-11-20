@@ -14,7 +14,8 @@ pub fn insert(m: &mut Map<String, Value>) {
     let uuid = json!({"type": "string", "format": "uuid"});
     let ts = json!({"type": "string", "format": "date-time"});
     let nullable_ts = json!({"type": ["string", "null"], "format": "date-time"});
-    let staff = json!({"type": "string", "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$", "maxLength": 132});
+    let staff =
+        json!({"type": "string", "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$", "maxLength": 132});
     let sha = json!({"type": "string", "pattern": "^[0-9a-f]{40}$"});
     let operation = json!({"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"});
     let run_id = json!({"type": ["integer", "null"], "minimum": 1});

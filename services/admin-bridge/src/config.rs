@@ -465,7 +465,10 @@ fn github(
                 .is_some_and(|after| after.is_empty() || after.starts_with([':', '/']))
         })
     };
-    let ok = match (api_url.strip_prefix("https://"), api_url.strip_prefix("http://")) {
+    let ok = match (
+        api_url.strip_prefix("https://"),
+        api_url.strip_prefix("http://"),
+    ) {
         (Some(rest), _) => !rest.is_empty(),
         (None, Some(rest)) => {
             loopback(rest)
@@ -663,7 +666,10 @@ mod tests {
         assert!(Config::from_env(&V(enabled(&[]))).unwrap().github.is_none());
         let g = Config::from_env(&V(enabled(&[
             ("ADMIN_BRIDGE_GITHUB_TOKEN_FILE", "/run/secrets/gh"),
-            ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "CosmicforgeHealthnet/cfmeet"),
+            (
+                "ADMIN_BRIDGE_GITHUB_REPOSITORY",
+                "CosmicforgeHealthnet/cfmeet",
+            ),
         ])))
         .unwrap()
         .github
@@ -677,8 +683,11 @@ mod tests {
             .unwrap_err(),
             ConfigError::Missing("ADMIN_BRIDGE_GITHUB_REPOSITORY")
         );
-        let e = Config::from_env(&V(enabled(&[("ADMIN_BRIDGE_GITHUB_TOKEN", "ghp_secretvalue")])))
-            .unwrap_err();
+        let e = Config::from_env(&V(enabled(&[(
+            "ADMIN_BRIDGE_GITHUB_TOKEN",
+            "ghp_secretvalue",
+        )])))
+        .unwrap_err();
         assert!(!e.to_string().contains("ghp_secretvalue"));
         for (var, value) in [
             ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "not a repo"),
@@ -709,11 +718,9 @@ mod tests {
             ("ADMIN_BRIDGE_GITHUB_API_URL", "http://127.0.0.1:9999"),
         ])))
         .is_err());
-        assert!(Config::from_env(&V(enabled(&[(
-            "ADMIN_BRIDGE_GITHUB_REPOSITORY",
-            "o/n"
-        )])))
-        .is_err());
+        assert!(
+            Config::from_env(&V(enabled(&[("ADMIN_BRIDGE_GITHUB_REPOSITORY", "o/n")]))).is_err()
+        );
     }
 
     #[test]

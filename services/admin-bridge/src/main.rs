@@ -35,7 +35,10 @@ async fn main() {
         )
         .unwrap_or_else(|err| fatal("CF_SERVICE_TRUST_BUNDLE_FILE", err));
         Arc::new(admin_bridge::events::EventIngress::new(
-            cf_service_auth::ServiceTokenVerifier::new(policy, Arc::new(cf_service_auth::SystemClock)),
+            cf_service_auth::ServiceTokenVerifier::new(
+                policy,
+                Arc::new(cf_service_auth::SystemClock),
+            ),
         ))
     });
     let releases = config.github.as_ref().map(|g| {

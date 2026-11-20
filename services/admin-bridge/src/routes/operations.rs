@@ -109,10 +109,7 @@ async fn finish(
         }
         // Not recorded: the sweep settles it later from the runs list.
         Ok(false) | Err(_) => {
-            tracing::warn!(
-                status = status.as_str(),
-                "activation outcome not recorded"
-            );
+            tracing::warn!(status = status.as_str(), "activation outcome not recorded");
         }
     }
 }
@@ -153,8 +150,7 @@ async fn answer(
 
 async fn request(bridge: &Bridge, auth: &Authorized) -> Result<Answer, ErrorCode> {
     let bad = ErrorCode::CommandBodyInvalid;
-    let (base, body) =
-        commands::parse_body(&auth.body, &["operation", "release_sha", "confirm"])?;
+    let (base, body) = commands::parse_body(&auth.body, &["operation", "release_sha", "confirm"])?;
     if base.expected_version != "0" {
         return Err(bad);
     }
@@ -608,10 +604,8 @@ async fn releases(bridge: &Bridge, auth: &Authorized) -> Result<Answer, ErrorCod
         })
         .collect();
     let seen = u64::from(page) * u64::from(limit);
-    let next = (full_page
-        && seen < listed.total_count
-        && seen < u64::from(MAX_LISTED_RUNS))
-    .then(|| (page + 1).to_string());
+    let next = (full_page && seen < listed.total_count && seen < u64::from(MAX_LISTED_RUNS))
+        .then(|| (page + 1).to_string());
     Ok(Answer {
         result: json!({"items": items, "next_cursor": next}),
         freshness: "LIVE",

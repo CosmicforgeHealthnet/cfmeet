@@ -58,7 +58,8 @@ fn operation_row(r: &QueryResult) -> StoreResult<Operation> {
     })
 }
 
-const ACTIVATION_COLUMNS: &str = "request_id, operation, release_sha, confirm, requested_by, approver, \
+const ACTIVATION_COLUMNS: &str =
+    "request_id, operation, release_sha, confirm, requested_by, approver, \
      approval_id, state, created_at, dispatched_at, run_id";
 
 fn activation_row(r: &QueryResult) -> StoreResult<ActivationRequest> {
@@ -933,7 +934,10 @@ impl Store for PgStore {
             .await
             .map_err(unavailable)?
             .ok_or(StoreError::Invalid("no row"))?;
-        Ok(AckOutcome::Acknowledged(get(&row, "acknowledged_sequence")?))
+        Ok(AckOutcome::Acknowledged(get(
+            &row,
+            "acknowledged_sequence",
+        )?))
     }
 
     async fn begin_activation(
