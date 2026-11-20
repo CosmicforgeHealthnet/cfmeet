@@ -1,0 +1,92 @@
+{
+  "description": "One price version (its state and content digest; no rates).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version_id",
+    "price_book_id",
+    "seq",
+    "version_state",
+    "rates_digest",
+    "submitted_at",
+    "approved_at",
+    "approval_expires_at",
+    "rejected_reason",
+    "decided_at",
+    "created_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "version_state": {
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "APPROVED",
+        "REJECTED",
+        "SUPERSEDED"
+      ]
+    },
+    "rates_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approval_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "rejected_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    }
+  }
+}

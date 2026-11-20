@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "0d7c795a9ac3fc0f30b99025990cfd53615191adb7cc53731a49bc97bb609bd0",
-    "capability_matrix_sha256": "f6e081d40fc42febb1c8abd85c6c1bbef87c2148912b92e60e5cd40ace14d52b"
+    "openapi_sha256": "a5197ee283932a2e04410fab50dfb4ace5010a68e7befed5dac780b8f7c49c96",
+    "capability_matrix_sha256": "35453c5e9559a41b4c60382a54e131616d93f9014a853bf3484671c39ab4892d"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 247,
     "by_state": {
-      "READ_ONLY": 98,
-      "AVAILABLE": 51,
-      "DISABLED": 63,
-      "BLOCKED_DEPENDENCY": 35
+      "READ_ONLY": 110,
+      "AVAILABLE": 63,
+      "DISABLED": 51,
+      "BLOCKED_DEPENDENCY": 23
     }
   },
   "capabilities": [
@@ -10755,9 +10755,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPriceBookPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.price-books.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -10766,8 +10766,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -10809,9 +10811,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.versions.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -10820,8 +10822,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -10863,9 +10867,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.versions.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -10874,8 +10878,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_version_detail_carries_the_content_by_product_line"
+      ],
       "contact_search": false
     },
     {
@@ -10884,11 +10890,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/price-books/{price_book_id}/versions",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/price-books/{price_book_id}/versions",
       "path_params": [
         {
           "name": "price_book_id",
@@ -10912,14 +10918,14 @@
         "cfmeet.pricing.editor"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionDraftRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.draft",
       "risk": "R3",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -10928,8 +10934,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -10938,11 +10946,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/edit",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/edit",
       "path_params": [
         {
           "name": "version_id",
@@ -10966,14 +10974,14 @@
         "cfmeet.pricing.editor"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionEditRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.edit",
       "risk": "R3",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -10982,8 +10990,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -10992,11 +11002,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/submit",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/submit",
       "path_params": [
         {
           "name": "version_id",
@@ -11020,14 +11030,14 @@
         "cfmeet.pricing.editor"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionSubmitRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.submit",
       "risk": "R3",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11036,8 +11046,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11046,11 +11058,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/approve",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/approve",
       "path_params": [
         {
           "name": "version_id",
@@ -11074,14 +11086,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionApproveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.approve",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11090,8 +11102,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11100,11 +11114,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/reject",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/reject",
       "path_params": [
         {
           "name": "version_id",
@@ -11128,14 +11142,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionRejectRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.reject",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11144,8 +11158,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11187,9 +11203,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingActivationPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.activations.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11198,8 +11214,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -11208,11 +11226,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/schedule",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/schedule",
       "path_params": [
         {
           "name": "version_id",
@@ -11236,14 +11254,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionScheduleRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.schedule",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11252,8 +11270,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11262,11 +11282,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/versions/{version_id}/activate",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/activate",
       "path_params": [
         {
           "name": "version_id",
@@ -11290,14 +11310,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionActivateRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingVersionCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.version.activate",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11306,8 +11326,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11316,11 +11338,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/price-books/{price_book_id}/rollback",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/price-books/{price_book_id}/rollback",
       "path_params": [
         {
           "name": "price_book_id",
@@ -11344,14 +11366,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPriceBookRollbackRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPriceBookRollbackResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.price-book.rollback",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11360,8 +11382,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11397,9 +11421,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingFreezePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.freezes.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11408,8 +11432,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -11418,11 +11444,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/markets/{market_code}/freeze",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/markets/{market_code}/freeze",
       "path_params": [
         {
           "name": "market_code",
@@ -11446,14 +11472,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingMarketFreezeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingMarketFreezeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.market.freeze",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11462,8 +11488,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11472,11 +11500,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/markets/{market_code}/unfreeze",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/markets/{market_code}/unfreeze",
       "path_params": [
         {
           "name": "market_code",
@@ -11500,14 +11528,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingMarketUnfreezeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingMarketFreezeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.market.unfreeze",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11516,8 +11544,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11553,9 +11583,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPlanPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.plans.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11564,8 +11594,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_plans_are_one_page"
+      ],
       "contact_search": false
     },
     {
@@ -11602,9 +11634,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPlanAssignmentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.plan-assignments.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11613,8 +11645,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_plan_assignments_search_by_holder_or_plan"
+      ],
       "contact_search": false
     },
     {
@@ -11623,11 +11657,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/plan-assignments",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/plan-assignments",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -11645,14 +11679,14 @@
         "cfmeet.pricing.editor"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPlanAssignRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingPlanAssignResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.plan.assign",
       "risk": "R3",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11661,8 +11695,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11698,9 +11734,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingOverridePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.overrides.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11709,8 +11745,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -11719,11 +11757,11 @@
       "module": "pricing",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A6",
       "method": "POST",
       "path": "/pricing/overrides",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/pricing/overrides",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -11741,14 +11779,14 @@
         "cfmeet.pricing.approver"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingOverrideChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingOverrideChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "pricing.override.change",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11757,8 +11795,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -11791,14 +11831,14 @@
         "cfmeet.finance"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingChargeSimulationRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PricingChargeSimulation"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "pricing.charges.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11807,8 +11847,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "pricing_simulation_is_a_checked_post_read"
+      ],
       "contact_search": false
     },
     {
@@ -11843,9 +11885,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/FinanceUsageReport"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "finance.usage.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11854,8 +11896,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "finance_reports_map_the_window"
+      ],
       "contact_search": false
     },
     {
@@ -11890,9 +11934,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/FinanceEstimatedChargesReport"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "finance.estimated-charges.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11901,8 +11945,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "finance_estimated_charges_use_the_market_partner_book"
+      ],
       "contact_search": false
     },
     {
@@ -11937,9 +11983,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/FinancePlanSpreadReport"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "finance.plan-spread.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -11948,8 +11994,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-      "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "finance_reports_map_the_window"
+      ],
       "contact_search": false
     },
     {

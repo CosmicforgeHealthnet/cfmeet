@@ -1,0 +1,102 @@
+{
+  "description": "An estimate in minor units of the book's currency (never a charge).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "price_book_id",
+    "version_id",
+    "version_state",
+    "currency",
+    "estimate",
+    "total_minor",
+    "lines",
+    "plan_code",
+    "cycle"
+  ],
+  "properties": {
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "version_state": {
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "APPROVED",
+        "REJECTED",
+        "SUPERSEDED"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "estimate": {
+      "const": true
+    },
+    "total_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lines": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 16,
+      "items": {
+        "description": "One priced usage type: quantities and the amount in minor units.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "usage_type",
+          "quantity",
+          "included_quantity",
+          "billable_quantity",
+          "amount_minor"
+        ],
+        "properties": {
+          "usage_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "included_quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "billable_quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "plan_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "cycle": {
+      "enum": [
+        "MONTHLY",
+        "YEARLY",
+        null
+      ]
+    }
+  }
+}

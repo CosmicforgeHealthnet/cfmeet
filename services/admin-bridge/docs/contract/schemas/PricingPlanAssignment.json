@@ -1,0 +1,56 @@
+{
+  "description": "One plan assignment of a user or organization (append-only history).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assignment_id",
+    "holder_kind",
+    "holder_id",
+    "plan_code",
+    "price_book_id",
+    "reason_code",
+    "assigned_by",
+    "effective_from",
+    "current"
+  ],
+  "properties": {
+    "assignment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "holder_kind": {
+      "enum": [
+        "USER",
+        "ORGANIZATION"
+      ]
+    },
+    "holder_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "plan_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "assigned_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "description": "The HQ staff member (hq:<sub>)."
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "current": {
+      "type": "boolean"
+    }
+  }
+}

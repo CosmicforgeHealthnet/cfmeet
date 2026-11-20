@@ -522,6 +522,97 @@ const fn dp(
     }
 }
 
+// ---- Developer Platform (A6): pricing and plans --------------------------------------
+
+const PRICE_VERSION: &[OutField] = &[
+    o("version_id", "versionId", Out::Uuid, false),
+    o("price_book_id", "priceBookId", Out::Uuid, false),
+    o("seq", "seq", Out::Int, false),
+    o("version_state", "state", Out::Code, false),
+    o("rates_digest", "ratesDigest", Out::Str, false),
+    o("submitted_at", "submittedAt", Out::Time, true),
+    o("approved_at", "approvedAt", Out::Time, true),
+    o("approval_expires_at", "approvalExpiresAt", Out::Time, true),
+    o("rejected_reason", "rejectedReason", Out::Code, true),
+    o("decided_at", "decidedAt", Out::Time, true),
+    o("created_at", "createdAt", Out::Time, false),
+    o("updated_at", "updatedAt", Out::Time, false),
+    o("version", "version", Out::Int, false),
+];
+const PRICE_BOOK: &[OutField] = &[
+    o("price_book_id", "priceBookId", Out::Uuid, false),
+    o("product_line", "productLine", Out::Code, false),
+    o("currency", "currency", Out::Code, false),
+    o("market_code", "marketCode", Out::Code, false),
+    o(
+        "effective_version_id",
+        "effectiveVersionId",
+        Out::Uuid,
+        true,
+    ),
+    o("updated_at", "updatedAt", Out::Time, false),
+    o("version", "version", Out::Int, false),
+];
+const MARKET_FREEZE: &[OutField] = &[
+    o("market_code", "marketCode", Out::Code, false),
+    o("freeze_state", "state", Out::Code, false),
+    o("reason_code", "reasonCode", Out::Code, true),
+    o("frozen_at", "frozenAt", Out::Time, true),
+    o("updated_at", "updatedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const PLAN_HOLDER: &[OutField] = &[
+    o("holder_kind", "holderKind", Out::Code, false),
+    o("holder_id", "holderId", Out::Uuid, false),
+    o("plan_code", "planCode", Out::Code, false),
+    o("price_book_id", "priceBookId", Out::Uuid, true),
+    o("updated_at", "updatedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+/// The limits a CF Meet user plan controls (an override sets a subset).
+pub const PLAN_LIMITS: &[OutField] = &[
+    o("meeting_minutes", "meetingMinutes", Out::Int, true),
+    o("participants", "participants", Out::Int, true),
+    o("recording", "recording", Out::Bool, true),
+    o("storage_bytes", "storageBytes", Out::Int, true),
+    o("attachment_bytes", "attachmentBytes", Out::Int, true),
+    o("webinars", "webinars", Out::Bool, true),
+];
+const PLAN_OVERRIDE: &[OutField] = &[
+    o("override_id", "overrideId", Out::Uuid, true),
+    o("holder_kind", "holderKind", Out::Code, false),
+    o("holder_id", "holderId", Out::Uuid, false),
+    o("override_state", "state", Out::Code, false),
+    o("limits", "limits", Out::Obj(PLAN_LIMITS), true),
+    o("reason_code", "reasonCode", Out::Code, true),
+    o("updated_at", "updatedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const HOLDER_KINDS: &[&str] = &["USER", "ORGANIZATION"];
+
+/// A command on one price version (`/pricing/versions/{version_id}/<verb>`), at the
+/// version's row version.
+const fn price_version(
+    id: &'static str,
+    source: &'static str,
+    reason: Reason,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    body_schema: &'static str,
+) -> OwnerCommand {
+    dp(
+        id,
+        source,
+        Some(1),
+        reason,
+        body,
+        statuses,
+        PRICE_VERSION,
+        body_schema,
+        "PricingVersionCommandResult",
+    )
+}
+
 pub const COMMANDS: &[OwnerCommand] = &[
     OwnerCommand {
         id: "communications.profile.suspend",
@@ -1062,6 +1153,136 @@ pub const COMMANDS: &[OwnerCommand] = &[
         DP_APP,
         "AppLiftSuspensionRequest",
         "AppCommandResult",
+    ),
+    // Developer Platform: pricing and plans (every command two-person; nothing charges).
+    dp(
+        "pricing.version.draft",
+        "POST /internal/v1/operator/pricing/price-books/{price_book_id}/versions",
+        // The price book (lineage) version.
+        Some(1),
+        Reason::Ledger,
+        &[b("rates", "rates", In::Object, false)],
+        &["DRAFT"],
+        PRICE_VERSION,
+        "PricingVersionDraftRequest",
+        "PricingVersionCommandResult",
+    ),
+    price_version(
+        "pricing.version.edit",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/edit",
+        Reason::Ledger,
+        &[b("rates", "rates", In::Object, true)],
+        &["DRAFT"],
+        "PricingVersionEditRequest",
+    ),
+    price_version(
+        "pricing.version.submit",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/submit",
+        Reason::Ledger,
+        &[],
+        &["SUBMITTED"],
+        "PricingVersionSubmitRequest",
+    ),
+    price_version(
+        "pricing.version.approve",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/approve",
+        Reason::Ledger,
+        &[],
+        &["APPROVED"],
+        "PricingVersionApproveRequest",
+    ),
+    price_version(
+        "pricing.version.reject",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/reject",
+        Reason::Forward,
+        &[],
+        &["REJECTED"],
+        "PricingVersionRejectRequest",
+    ),
+    price_version(
+        "pricing.version.schedule",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/schedule",
+        Reason::Ledger,
+        &[b("effective_from", "effectiveFrom", In::Time, true)],
+        &["SCHEDULED"],
+        "PricingVersionScheduleRequest",
+    ),
+    price_version(
+        "pricing.version.activate",
+        "POST /internal/v1/operator/pricing/versions/{version_id}/activate",
+        Reason::Ledger,
+        &[],
+        &["ACTIVE"],
+        "PricingVersionActivateRequest",
+    ),
+    dp(
+        "pricing.price-book.rollback",
+        "POST /internal/v1/operator/pricing/price-books/{price_book_id}/rollback",
+        Some(1),
+        Reason::Ledger,
+        &[b("version_id", "versionId", In::Uuid, true)],
+        &["ROLLED_BACK"],
+        PRICE_BOOK,
+        "PricingPriceBookRollbackRequest",
+        "PricingPriceBookRollbackResult",
+    ),
+    dp(
+        "pricing.market.freeze",
+        "POST /internal/v1/operator/pricing/markets/{market_code}/freeze",
+        // The market's freeze version, 0 when it was never frozen.
+        Some(0),
+        Reason::Required,
+        &[],
+        &["FROZEN"],
+        MARKET_FREEZE,
+        "PricingMarketFreezeRequest",
+        "PricingMarketFreezeResult",
+    ),
+    dp(
+        "pricing.market.unfreeze",
+        "POST /internal/v1/operator/pricing/markets/{market_code}/unfreeze",
+        Some(0),
+        Reason::Required,
+        &[],
+        &["UNFROZEN"],
+        MARKET_FREEZE,
+        "PricingMarketUnfreezeRequest",
+        "PricingMarketFreezeResult",
+    ),
+    dp(
+        "pricing.plan.assign",
+        "POST /internal/v1/operator/pricing/plan-assignments",
+        // The holder's version, 0 when never assigned (on Free).
+        Some(0),
+        Reason::Forward,
+        &[
+            bt("holder_kind", "holderKind", In::Enum(HOLDER_KINDS)),
+            bt("holder_id", "holderId", In::Uuid),
+            b("plan_code", "planCode", In::Code, true),
+            b("price_book_id", "priceBookId", In::Uuid, true),
+            b("billing_account_ref", "billingAccountRef", In::Str(1, 128), false),
+        ],
+        // The resulting state is the assigned plan code.
+        &[],
+        PLAN_HOLDER,
+        "PricingPlanAssignRequest",
+        "PricingPlanAssignResult",
+    ),
+    dp(
+        "pricing.override.change",
+        "POST /internal/v1/operator/pricing/overrides",
+        // The override's version, 0 when the holder has none.
+        Some(0),
+        Reason::Required,
+        &[
+            bt("holder_kind", "holderKind", In::Enum(HOLDER_KINDS)),
+            bt("holder_id", "holderId", In::Uuid),
+            b("limits", "limits", In::NullableObject, true),
+        ],
+        &["ACTIVE", "REVOKED"],
+        PLAN_OVERRIDE,
+        "PricingOverrideChangeRequest",
+        "PricingOverrideChangeResult",
     ),
 ];
 

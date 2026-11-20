@@ -1,0 +1,119 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "override_id",
+        "holder_kind",
+        "holder_id",
+        "override_state",
+        "limits",
+        "reason_code",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "override_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "holder_kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "holder_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "override_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "limits": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "meeting_minutes",
+            "participants",
+            "recording",
+            "storage_bytes",
+            "attachment_bytes",
+            "webinars"
+          ],
+          "properties": {
+            "meeting_minutes": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "participants": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "recording": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "storage_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "attachment_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "webinars": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "description": "The resource after pricing.override.change; status: ACTIVE, REVOKED."
+    }
+  }
+}
