@@ -48,8 +48,8 @@ mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
 mod m20261118_000006_team_channel_sync;
 mod m20261118_000007_platform_user_participants;
-mod m20261119_000001_calendar_feeds;
 mod m20261119_000001_account_privacy_jobs;
+mod m20261119_000001_calendar_feeds;
 
 pub mod phase2_backfill;
 
