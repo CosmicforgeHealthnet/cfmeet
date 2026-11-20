@@ -75,7 +75,7 @@ class ResourceGate(unittest.TestCase):
     def test_required_memory_is_new_container_limits_plus_transient(self):
         new = cr.planned_new(['cfmeet-platform-access'])
         self.assertNotIn('platform-access', new)
-        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + 256 * 2 + cr.TRANSIENT_MIB)
+        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + 256 * 2 + 128 + cr.TRANSIENT_MIB)
         self.assertEqual(cr.required_mib([]), cr.TRANSIENT_MIB)
         for name in cr.ORDER:
             s = cr.SERVICES[name]
@@ -680,6 +680,105 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         later = tuple(op for op in integrate if op not in options)
         self.assertIn(later, ((), integrate))
         self.assertEqual(options, tuple(op for op in cr.OPERATIONS if op not in pending + later))
+
+
+class AdminBridge(unittest.TestCase):
+    """HQ admin bridge (ADR 0067): dark deployment, least privilege, grants, HQ port."""
+
+    def test_it_is_released_dark_with_no_owner_url(self):
+        with patch.object(cr, 'runtime_url', lambda name: 'postgres://r@db/' + name):
+            env = cr.template_env('admin-bridge')
+        self.assertEqual(env['ADMIN_BRIDGE_ENABLED'], 'false')
+        self.assertEqual(env['ADMIN_BRIDGE_WRITES_ENABLED'], 'false')
+        modules = [k for k in env if k.startswith('ADMIN_BRIDGE_MODULE_')]
+        self.assertEqual(len(modules), 17)
+        self.assertTrue(all(env[k] == 'false' for k in modules))
+        self.assertEqual([k for k in env if k.startswith('CF_') and k.endswith('_BASE_URL')], [])
+        self.assertEqual(env['ADMIN_BRIDGE_OPS_BIND_ADDRESS'], '127.0.0.1:8190')
+        s = cr.SERVICES['admin-bridge']
+        self.assertEqual((s['port'], s['health'], s['tls'], s['db'], s['role']),
+                         (8190, '/ready', None, 'cfmeet_admin_bridge', 'admin_bridge'))
+        self.assertEqual(cr.safe_default_violations({'admin-bridge': env}), [])
+
+    def test_safe_defaults_keep_it_off_and_widen_only_the_activated_module(self):
+        on = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_ENABLED='true')
+        writes = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_WRITES_ENABLED='true')
+        orgs = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_MODULE_ORGANIZATIONS='true')
+        accounts = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_MODULE_ACCOUNTS='true')
+        with patch.object(cr, 'done', lambda op: False):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': on}), ['admin-bridge ADMIN_BRIDGE_ENABLED'])
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': writes}), ['admin-bridge ADMIN_BRIDGE_WRITES_ENABLED'])
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': orgs}),
+                             ['admin-bridge ADMIN_BRIDGE_MODULE_ORGANIZATIONS'])
+        with patch.object(cr, 'done', lambda op: op == 'activate-admin-bridge'):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': orgs}), [])
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': accounts}),
+                             ['admin-bridge ADMIN_BRIDGE_MODULE_ACCOUNTS'])
+            # The bridge itself and commands stay off until their own later operation.
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': on}), ['admin-bridge ADMIN_BRIDGE_ENABLED'])
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': writes}), ['admin-bridge ADMIN_BRIDGE_WRITES_ENABLED'])
+
+    def test_activation_grants_exactly_the_organizations_operator_reads(self):
+        rows = [g for g in cr.GRANTS if g[0] == 'activate-admin-bridge']
+        self.assertEqual(rows, [('activate-admin-bridge', 'organizations', 'admin-bridge',
+                                 ('organization.administer', 'organization.operator-read'))])
+        self.assertEqual(cr.validate_grants(permission_registry(), tuple(rows)), [])
+        self.assertEqual(cr.service_id('admin-bridge'), 'cfmeet.admin-bridge')
+        self.assertEqual(cr.ACTIVATIONS['activate-admin-bridge'][0], ())
+        workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn('activate-admin-bridge,', workflow)
+        self.assertIn("'admin-bridge.yml'", workflow)
+
+    def test_activation_points_the_bridge_at_organizations_and_switches_only_that_module(self):
+        applied = []
+        env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'CF_SERVICE_AUTH_KEY_ID': 'k', 'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/f'}
+        with patch.object(cr, 'env_of', lambda name: env), \
+                patch.object(cr, 'tls_route_present', lambda port: None), \
+                patch.object(cr, 'apply_activation', lambda op, sha, run, changes, **kw: applied.append((op, changes))):
+            cr.activate_admin_bridge('a' * 40, '1', '')
+        self.assertEqual(applied, [('activate-admin-bridge', [('admin-bridge', {
+            'CF_ORGANIZATIONS_BASE_URL': cr.private_url(cr.SERVICES['organizations']['tls']),
+            'ADMIN_BRIDGE_MODULE_ORGANIZATIONS': 'true'})])])
+        with patch.object(cr, 'env_of', lambda name: dict(env, CF_RUNTIME_ENVIRONMENT='staging')), \
+                patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            with self.assertRaisesRegex(RuntimeError, 'signing identity'):
+                cr.activate_admin_bridge('a' * 40, '1', '')
+
+    def test_runtime_role_is_narrowed_to_db_roles_sql_after_every_migration(self):
+        sql = cr.admin_bridge_grants_sql()
+        self.assertIn('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM admin_bridge;', sql)
+        self.assertIn('FOR ROLE admin_bridge_migrator IN SCHEMA public REVOKE ALL ON TABLES FROM admin_bridge;', sql)
+        self.assertNotIn('{', sql.split('DO $$')[0])
+        grants = [l for l in sql.splitlines() if l.startswith('GRANT ')]
+        for line in grants:
+            for table in ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions'):
+                if table in line:
+                    self.assertTrue(line.startswith('GRANT SELECT, INSERT ON'), line)
+        self.assertFalse(any('TRUNCATE' in l for l in grants))
+        self.assertTrue(sql.strip().startswith('BEGIN;') and sql.strip().endswith('COMMIT;'))
+        calls = []
+        with patch.object(cr, 'migrator_target', lambda name: ('postgres://m@db/x', 'net')), \
+                patch.object(cr.release, 'env_file', lambda path, values: Path(tempfile.mkdtemp()) / 'e'), \
+                patch.object(cr, 'run_binary', lambda args, step=None: calls.append(('migrate', step))), \
+                patch.object(cr.release, 'db_sql', lambda db, text: calls.append(('sql', db, text))), \
+                patch.object(cr, 'emit', lambda *a: None):
+            cr.migrate('admin-bridge', 'sha256:x')
+        self.assertEqual(calls[0], ('migrate', 'admin-bridge-migration'))
+        self.assertEqual(calls[1], ('sql', 'cfmeet_admin_bridge', sql))
+
+    def test_hq_port_is_a_passthrough_relay_admitting_only_hq(self):
+        config = cr.admin_bridge_hq_relay_config('203.0.113.7')
+        self.assertIn('listen %d;' % cr.ADMIN_BRIDGE_HQ_PORT, config)
+        self.assertIn('allow 203.0.113.7;\n        deny all;', config)
+        self.assertIn('set $peer cfmeet-admin-bridge:8443;', config)
+        self.assertNotIn('ssl', config, 'TLS passes straight through: the bridge terminates mTLS')
+        for bad in ('', '0.0.0.0/0', '10.0.0.0/4', '999.1.1.1', 'any', '203.0.113.7; allow all'):
+            with self.assertRaises(RuntimeError, msg=bad):
+                cr.admin_bridge_hq_relay_config(bad)
+        self.assertNotIn(cr.ADMIN_BRIDGE_HQ_PORT, [s['tls'] for s in cr.SERVICES.values() if s['tls']])
+        routes = cr.tls_routes('http {\n  server { listen 9999 ssl; }\n}')
+        self.assertNotIn(str(cr.ADMIN_BRIDGE_HQ_PORT), routes)
+        self.assertNotIn('admin-bridge', routes)
 
 
 class PublicInternalDenial(unittest.TestCase):

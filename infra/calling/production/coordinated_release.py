@@ -111,6 +111,51 @@ NOTIFICATIONS_DARK_ENV = {
     'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
 }
 
+# CF Meet Admin Bridge (ADR 0067, docs/admin/cfmeet-admin-bridge.md): the only doorway from
+# the CosmicForge central admin (HQ). Deployed dark: ADMIN_BRIDGE_ENABLED, _WRITES_ENABLED and
+# every module switch off, no owner base URL. Only the loopback ops listener answers (the
+# release health probe runs inside the container's network namespace); the HQ mTLS listener
+# is not started while disabled.
+ADMIN_BRIDGE_MODULES = ('ACCOUNTS', 'MEETINGS', 'MESSAGING', 'CALLING', 'COMMUNICATIONS', 'ORGANIZATIONS',
+                        'PARTNERS', 'IDENTITY', 'APPS', 'VERIFICATION', 'PRICING', 'FINANCE', 'NOTIFICATIONS',
+                        'PRIVACY', 'OPERATIONS', 'AUDIT', 'TELECOM')
+ADMIN_BRIDGE_DARK_ENV = dict({
+    'ADMIN_BRIDGE_ENABLED': 'false',
+    'ADMIN_BRIDGE_WRITES_ENABLED': 'false',
+    'ADMIN_BRIDGE_OPS_BIND_ADDRESS': '127.0.0.1:8190',
+    'ADMIN_BRIDGE_HQ_BIND_ADDRESS': '0.0.0.0:8443',
+    'ADMIN_BRIDGE_DATABASE_MAX_CONNECTIONS': '5',
+}, **{'ADMIN_BRIDGE_MODULE_' + m: 'false' for m in ADMIN_BRIDGE_MODULES})
+
+# The HQ port (design §14): a dedicated private port on the CF Meet host whose TLS is passed
+# straight through to the bridge (the bridge terminates mutual TLS itself and checks HQ's
+# client certificate on every request). It is NEVER routed by api.cfmeet.com or any public
+# ingress and is never part of the private TLS proxy (which terminates TLS). Only the HQ
+# staging egress address may connect: ADMIN_BRIDGE_HQ_ALLOWED_SOURCE (one IPv4 address or
+# CIDR, set on the VPS; production HQ later). Declared here; the relay is installed by the
+# HQ enablement step of the runbook, never by `release`.
+ADMIN_BRIDGE_HQ_PORT = 8460
+ADMIN_BRIDGE_HQ_RELAY = 'cfmeet-admin-bridge-hq-relay'
+ADMIN_BRIDGE_HQ_SOURCE_ENV = 'ADMIN_BRIDGE_HQ_ALLOWED_SOURCE'
+
+
+def admin_bridge_hq_relay_config(allowed_source):
+    """nginx stream relay (TCP passthrough, no TLS termination) that admits only HQ's
+    egress address. Refuses an absent, wildcard or malformed source."""
+    source = (allowed_source or '').strip()
+    m = re.fullmatch(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?', source)
+    if not m or any(int(o) > 255 for o in m.groups()[:4]) or (m.group(6) and not 8 <= int(m.group(6)) <= 32):
+        raise RuntimeError('%s must be HQ\'s egress IPv4 address or a CIDR of /8 or narrower' % ADMIN_BRIDGE_HQ_SOURCE_ENV)
+    if source.startswith('0.') or source.endswith('/0'):
+        raise RuntimeError('%s must not admit everyone' % ADMIN_BRIDGE_HQ_SOURCE_ENV)
+    return ('daemon off;\nworker_processes 1;\npid /tmp/nginx.pid;\nerror_log stderr warn;\n'
+            'events { worker_connections 256; }\nstream {\n    resolver 127.0.0.11 valid=10s ipv6=off;\n'
+            '    server {\n        listen %d;\n        allow %s;\n        deny all;\n'
+            '        set $peer %s:8443;\n        proxy_pass $peer;\n'
+            '        proxy_connect_timeout 5s;\n        proxy_timeout 60s;\n    }\n}\n'
+            % (ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
+
+
 SERVICES = {
     'platform-access': _service('cfmeet-platform-access', 8094, '/ready', tls=8443,
         db='cfmeet_platform_access', role='platform_access', migrations=['platform-access-migration'],
@@ -179,6 +224,11 @@ SERVICES = {
              'DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WEBHOOKS_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WORKER_INSTANCE_ID': 'worker-production-1'}),
+    # HQ admin bridge (ADR 0067): dark (see ADMIN_BRIDGE_DARK_ENV); /ready on the loopback ops
+    # port; no private TLS route (no CF Meet service calls it until owner events, phase A7).
+    'admin-bridge': _service('cfmeet-admin-bridge', 8190, '/ready', db='cfmeet_admin_bridge',
+        role='admin_bridge', migrations=['admin-bridge-migration'], history=['admin_bridge_seaql_migrations'],
+        memory=128, env=ADMIN_BRIDGE_DARK_ENV),
     # No database, no trust bundle (it receives no internal call); public only after
     # activate-developer-platform + activate-gateway-routing.
     'api-gateway': _service('cfmeet-api-gateway', 8099, '/ready', memory=192,
@@ -189,7 +239,7 @@ SERVICES = {
 # Owners before callers (final-production-activation-runbook §1).
 ORDER = ('platform-access', 'organizations', 'notifications', 'notifications-2',
          'messaging', 'calling', 'communications', 'numbering', 'privacy-relay', 'sms-gateway', 'telephony',
-         'meeting-service', 'developer-platform', 'developer-platform-worker', 'api-gateway')
+         'meeting-service', 'developer-platform', 'developer-platform-worker', 'admin-bridge', 'api-gateway')
 DEPENDS = {
     'organizations': ('platform-access',),
     'notifications': ('platform-access',),
@@ -202,10 +252,12 @@ DEPENDS = {
     'developer-platform': ('platform-access', 'meeting-service', 'calling'),
     'developer-platform-worker': ('developer-platform',),
     'api-gateway': ('platform-access', 'developer-platform'),
+    # Reads its owners lazily (OWNER_UNAVAILABLE until reachable); released after them anyway.
+    'admin-bridge': ('organizations',),
 }
 IMAGES = ('platform-access', 'organizations', 'notifications', 'messaging', 'calling', 'communications', 'numbering',
           'privacy-relay', 'sms-gateway', 'telephony', 'meeting-service', 'developer-platform',
-          'api-gateway', 'security-scan-gateway')
+          'admin-bridge', 'api-gateway', 'security-scan-gateway')
 
 # --- Resource gate -----------------------------------------------------------------------
 
@@ -573,6 +625,10 @@ def service_id(name):
     return 'cfmeet.' + ((s and s['identity']) or name)
 
 
+ADMIN_BRIDGE_GRANTS = (
+    ('activate-admin-bridge', 'organizations', 'admin-bridge', ('organization.administer', 'organization.operator-read')),
+)
+
 # (operation, receiver, issuer, permissions): final-production-activation-runbook §2,
 # organizations-cutover-runbook (Organizations bundle) and the developer-platform gateway
 # activation checklist §4. Every row is checked against packages/service-auth/src/permissions.rs
@@ -621,7 +677,10 @@ GRANTS = (
     ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
     # S2: account deletion and the data download reach the person's call history.
     ('activate-account-privacy', 'calling', 'meeting-service', ('calling-account.privacy',)),
-) + notif_ops.GRANTS + platform_ops.GRANTS + integrate_ops.GRANTS
+    # HQ admin bridge (ADR 0068), phase A2.0: the Organizations operator reads. Every owner
+    # receives the bridge's grants through its own trust bundle; later phases add one row per
+    # owner and permission here (ADMIN_BRIDGE_GRANTS), never a wildcard.
+) + ADMIN_BRIDGE_GRANTS + notif_ops.GRANTS + platform_ops.GRANTS + integrate_ops.GRANTS
 
 
 def validate_grants(registry_, grants=GRANTS):
@@ -788,6 +847,52 @@ def migrator_target(name):
     return core_url(s['role'] + '_migrator', password(s['role'], 'migrator'), host, port, db), p.NET
 
 
+# services/admin-bridge/deploy/db-roles.sql (step=grants) in this tool's role names (runtime
+# = role, migrator = role_migrator): the generic SCHEMA_SQL grants are narrowed right after
+# every bridge migration so the runtime role can never change history (audit, revocations,
+# policy revisions) or the schema. Fails the release (and rolls the step back) otherwise.
+ADMIN_BRIDGE_GRANTS_SQL = """BEGIN;
+REVOKE ALL ON SCHEMA public FROM {runtime};
+GRANT USAGE ON SCHEMA public TO {runtime};
+REVOKE TEMPORARY ON DATABASE {db} FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {runtime};
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {runtime};
+ALTER DEFAULT PRIVILEGES FOR ROLE {migrator} IN SCHEMA public REVOKE ALL ON TABLES FROM {runtime};
+ALTER DEFAULT PRIVILEGES FOR ROLE {migrator} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {runtime};
+ALTER DEFAULT PRIVILEGES FOR ROLE {migrator} IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM {runtime};
+GRANT SELECT, INSERT ON admin_remote_principals, admin_security_claims, admin_revocations, admin_rate_limits,
+    admin_policy_revisions, admin_audit_entries, admin_dataset_days, admin_projections TO {runtime};
+GRANT UPDATE (revoked_at) ON admin_remote_principals TO {runtime};
+GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections TO {runtime};
+GRANT DELETE ON admin_security_claims, admin_rate_limits TO {runtime};
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO {runtime};
+GRANT SELECT ON admin_bridge_seaql_migrations TO {runtime};
+DO $$
+DECLARE bad TEXT;
+BEGIN
+    SELECT string_agg(table_name || ':' || privilege_type, ', ') INTO bad
+      FROM information_schema.role_table_grants
+     WHERE grantee = '{runtime}'
+       AND (privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
+            OR (privilege_type IN ('UPDATE', 'DELETE')
+                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions')));
+    IF bad IS NOT NULL THEN
+        RAISE EXCEPTION 'admin bridge runtime role has forbidden privileges: %', bad;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname = '{runtime}') THEN
+        RAISE EXCEPTION 'admin bridge runtime role must own nothing';
+    END IF;
+END $$;
+COMMIT;
+"""
+
+
+def admin_bridge_grants_sql():
+    s = SERVICES['admin-bridge']
+    assert re.fullmatch(r'[a-z_]+', s['role']) and re.fullmatch(r'cfmeet_[a-z_]+', s['db'])
+    return ADMIN_BRIDGE_GRANTS_SQL.format(runtime=s['role'], migrator=s['role'] + '_migrator', db=s['db'])
+
+
 def migrate(name, image_id):
     s = SERVICES[name]
     if not s['migrations']:
@@ -803,6 +908,9 @@ def migrate(name, image_id):
                         '--entrypoint', '/app/' + binary, image_id, 'up'], step=binary)
     finally:
         path.unlink(missing_ok=True)
+    if name == 'admin-bridge':
+        release.db_sql(s['db'], admin_bridge_grants_sql())
+        emit('grants', {'service': name, 'runtime': 'least-privilege (db-roles.sql)'})
 
 
 def meeting_psql(sql, url=None):
@@ -1202,6 +1310,10 @@ def template_env(name):
            'SERVICE_AUTH_REQUEST_BINDING_MODE': 'accept'}
     if name != 'api-gateway':
         env['CF_SERVICE_TRUST_BUNDLE_FILE'] = '/run/secrets/trust.json'
+    if name == 'admin-bridge':
+        # The bridge treats every CF_<OWNER>_BASE_URL as an owner it reads: none while dark;
+        # each activation adds exactly the owners its grants cover.
+        env.pop('CF_PLATFORM_ACCESS_BASE_URL')
     if s['db']:
         env['DATABASE_URL'] = runtime_url(name)
     env.update(s['env'])
@@ -1311,6 +1423,11 @@ SAFE_DEFAULTS = {
     # Dark until the Notification Service activation operations (N5 / N9) are recorded.
     'notifications': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
     'notifications-2': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
+    # HQ admin bridge: off, no writes, every module off. A module may be on only after its
+    # activation is recorded (safe_defaults); enabling the bridge itself (HQ enrolment, TLS and
+    # policy key mounts) is a later dedicated operation, so ADMIN_BRIDGE_ENABLED stays false here.
+    'admin-bridge': dict({'ADMIN_BRIDGE_ENABLED': (None, 'false'), 'ADMIN_BRIDGE_WRITES_ENABLED': (None, 'false')},
+                         **{'ADMIN_BRIDGE_MODULE_' + m: (None, 'false') for m in ADMIN_BRIDGE_MODULES}),
 }
 
 
@@ -1341,6 +1458,9 @@ def safe_defaults():
     # Audit M4: the Meeting in-app-only path is on only after its gated activation.
     rules.setdefault('meeting-service', {})[notif_ops.MEETING_IN_APP_FLAG] = \
         (None, '', 'false', 'true') if done(notif_ops.MEETING_IN_APP_OPERATION) else (None, '', 'false')
+    # HQ admin bridge: the Organizations module after activate-admin-bridge (its grants).
+    if done('activate-admin-bridge'):
+        rules['admin-bridge']['ADMIN_BRIDGE_MODULE_ORGANIZATIONS'] = (None, 'false', 'true')
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
@@ -1817,6 +1937,18 @@ def activate_meeting_notice_preferences(sha, run_id, confirm):
     recreated; a failure restores the previous bundle. No flag, provider or route changes."""
     has_signing_identity('meeting-service')
     apply_activation('activate-meeting-notice-preferences', sha, run_id, [])
+
+
+def activate_admin_bridge(sha, run_id, confirm):
+    """ADR 0067, phase A2.0: grant the admin bridge the Organizations operator reads in the
+    Organizations trust bundle (merged; nothing dropped), point the bridge at Organizations and
+    switch its Organizations module on. The bridge stays disabled (ADMIN_BRIDGE_ENABLED=false)
+    until HQ is enrolled (docs/operations/admin-bridge-runbook.md); a failure restores both."""
+    has_signing_identity('admin-bridge')
+    tls_route_present(SERVICES['organizations']['tls'])
+    apply_activation('activate-admin-bridge', sha, run_id, [
+        ('admin-bridge', {'CF_ORGANIZATIONS_BASE_URL': private_url(SERVICES['organizations']['tls']),
+                          'ADMIN_BRIDGE_MODULE_ORGANIZATIONS': 'true'})])
 
 
 PUBLIC_SITE = Path('/etc/nginx/sites-available/api.cfmeet.com')
@@ -2937,6 +3069,8 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
     'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # HQ admin bridge (ADR 0067): owner grants for the served reads, bridge still disabled.
+    'activate-admin-bridge': ((), activate_admin_bridge),
     # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.
