@@ -210,7 +210,7 @@ pub struct Peers {
     pub rogue_meeting: Arc<ServiceTokenSigner>,
     /// The Notification Service: `organization-invitations.read` only (X5).
     pub notifications: Arc<ServiceTokenSigner>,
-    /// The HQ admin bridge (ADR 0067): `organization.operator-read` only.
+    /// The HQ admin bridge (ADR 0068): `organization.operator-read` only.
     pub bridge: Arc<ServiceTokenSigner>,
 }
 

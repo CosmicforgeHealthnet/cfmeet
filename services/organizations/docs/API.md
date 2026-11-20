@@ -14,7 +14,7 @@ The API is the frozen internal contract
 | `organization.write` | Meeting Service | every mutation for an acting user |
 | `organization.act-for-user` (sensitive) | Meeting Service | `X-CF-Acting-User`, `X-CF-Acting-User-Verified-Email` |
 | `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade), admin bridge | admin listing / create / lifecycle |
-| `organization.operator-read` (sensitive) | admin bridge (`cfmeet.admin-bridge`, ADR 0067) only | operator reads `GET /internal/v1/operator/organizations/{id}`, `…/members`, `…/teams`, `…/policies`, `GET /internal/v1/operator/audit-events`; each also needs `X-CF-Operator: hq:<staff>` |
+| `organization.operator-read` (sensitive) | admin bridge (`cfmeet.admin-bridge`, ADR 0068) only | operator reads `GET /internal/v1/operator/organizations/{id}`, `…/members`, `…/teams`, `…/policies`, `GET /internal/v1/operator/audit-events`; each also needs `X-CF-Operator: hq:<staff>` |
 | `organization.migrate` (sensitive) | operator console, Meeting Service | import, reconciliation |
 
 Operator attribution (`X-CF-Operator`, `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`)
