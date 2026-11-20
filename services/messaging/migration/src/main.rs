@@ -31,6 +31,9 @@ async fn main() {
         messaging_migration::MlsJoinMigrator::up(&db, None)
             .await
             .expect("Messaging MLS self-join migrations failed");
+        messaging_migration::MemberNotificationsMigrator::up(&db, None)
+            .await
+            .expect("Messaging member-notification migrations failed");
         println!("Messaging migrations applied");
         return;
     }
@@ -45,6 +48,9 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Messaging migration database connection failed");
+        messaging_migration::MemberNotificationsMigrator::reset(&db)
+            .await
+            .expect("Messaging member-notification rollback failed");
         messaging_migration::MlsJoinMigrator::reset(&db)
             .await
             .expect("Messaging MLS self-join rollback failed");

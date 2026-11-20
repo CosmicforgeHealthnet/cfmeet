@@ -25,7 +25,7 @@ on:
         type: string
         required: true
       confirm:
-        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp; activate-service-key-*: service=<name>; activate-gateway-calling-edge: owner-approved-calling-edge; activate-oauth-apps: no-reviewers-yet (only while CFMEET_APP_REVIEWERS is empty)'
+        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp; activate-service-key-*: service=<name>; activate-gateway-calling-edge: owner-approved-calling-edge; activate-oauth-apps: no-reviewers-yet (only while CFMEET_APP_REVIEWERS is empty); activate-notifications-routing: <category>-<channel>-<mode> or user-facing-<in-app|push>-<mode>'
         type: string
         required: false
         default: ''

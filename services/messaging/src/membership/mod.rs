@@ -509,7 +509,7 @@ async fn activate<C: ConnectionTrait>(
         return Err(Error::reason(ErrorCode::Conflict, "MEMBER_LIMIT_REACHED"));
     }
     let (next_sequence, _) = positions(txn, conversation_id).await?;
-    let (_, cursor) = outbox::enqueue_conversation(
+    let (added_event, cursor) = outbox::enqueue_conversation(
         txn,
         conversation_id,
         NewEvent {
@@ -592,6 +592,26 @@ async fn activate<C: ConnectionTrait>(
         now,
     )
     .await?;
+    // The added person's "Added to a group" notice (only when a person added someone else
+    // through the API; never an accepted invitation or an authority snapshot).
+    if source == "API" {
+        crate::member_notifications::enqueue(
+            st,
+            txn,
+            crate::member_notifications::MemberNotice {
+                outbox_event_id: added_event,
+                event_sequence: cursor,
+                conversation_id,
+                context_class: &conversation.context_class,
+                principal_id: request.principal_id,
+                actor_principal_id: admin.principal_id(),
+                scope: &ctx.scope,
+                first_party: ctx.first_party,
+                occurred_at: now,
+            },
+        )
+        .await?;
+    }
     crate::metrics::inc("messaging_members_added_total", &[]);
     Ok((
         201,
@@ -1513,7 +1533,7 @@ pub async fn invite_in<C: ConnectionTrait>(
         )
         .await?;
     }
-    outbox::enqueue_conversation(
+    let (invited_event, invited_cursor) = outbox::enqueue_conversation(
         txn,
         conversation.id,
         NewEvent {
@@ -1542,6 +1562,23 @@ pub async fn invite_in<C: ConnectionTrait>(
         json!({ "member_principal_id": principal_id, "role": role }),
         request_ctx,
         now,
+    )
+    .await?;
+    // The invitee's notice (multi-party conversations only; see member_notifications).
+    crate::member_notifications::enqueue(
+        st,
+        txn,
+        crate::member_notifications::MemberNotice {
+            outbox_event_id: invited_event,
+            event_sequence: invited_cursor,
+            conversation_id: conversation.id,
+            context_class: &conversation.context_class,
+            principal_id,
+            actor_principal_id: inviter,
+            scope: &ctx.scope,
+            first_party: ctx.first_party,
+            occurred_at: now,
+        },
     )
     .await?;
     crate::metrics::inc("messaging_members_invited_total", &[]);

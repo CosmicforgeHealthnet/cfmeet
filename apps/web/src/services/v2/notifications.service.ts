@@ -3,6 +3,7 @@
  * inbox (bell), read/dismiss, and the push endpoint of this browser's Account device.
  */
 import apiV2 from "./api";
+import { INBOX_PAGE_SIZE } from "@/lib/notifications/inbox";
 import type {
   DismissMyNotificationsResponse,
   GetMyNotificationUnreadCountResponse,
@@ -15,7 +16,7 @@ const key = () => ({ headers: { "Idempotency-Key": crypto.randomUUID() } });
 
 export const notificationsService = {
   list: async (cursor?: string | null) =>
-    (await apiV2.get<ListMyNotificationsResponse>("/notifications", { params: { limit: 30, ...(cursor ? { cursor } : {}) } })).data,
+    (await apiV2.get<ListMyNotificationsResponse>("/notifications", { params: { limit: INBOX_PAGE_SIZE, ...(cursor ? { cursor } : {}) } })).data,
   unreadCount: async () => (await apiV2.get<GetMyNotificationUnreadCountResponse>("/notifications/unread-count")).data,
   markRead: async (ids?: string[]) =>
     (await apiV2.post<MarkMyNotificationsReadResponse>("/notifications/read", ids ? { ids } : { upTo: new Date().toISOString() }, key())).data,

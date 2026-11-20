@@ -525,6 +525,9 @@ async fn legacy_only_writes_no_fence_rows_and_identical_push_jobs() {
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let mut plain = Harness::on(db, |_| {});
     let g = fixture(&mut plain).await;
     let e2 = send(&plain, &g, "legacy").await;
@@ -995,6 +998,9 @@ async fn unpublishable_rows_are_skipped_retried_or_expired_and_content_is_refuse
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let plain = Harness::on(db, |_| {});
     assert_eq!(maintain(&plain.state, 100).await.unwrap(), (0, 0));
 
@@ -1228,4 +1234,158 @@ async fn external_conversations_never_take_the_organization_route() {
     push::fanout_jobs(&h.state, &e).await.unwrap();
     assert_eq!(decisions_of(&h, &e).await, 0);
     assert!(publications_of(&h, &e).await.is_empty());
+}
+
+// ------------------------------------------- owner request 2026-11-19: "added to a group"
+
+/// A person someone else adds to a group gets one `messaging.member.invited` notice
+/// (GROUP_INVITATIONS, the bell's "Added to a group"), addressed to their CF Meet account,
+/// ids only; the person who created the group gets none. Nothing is written while the
+/// Notification Service is not configured. A member who left before the relay is skipped.
+#[tokio::test]
+async fn people_added_to_a_group_get_a_member_notice_only_when_configured() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let rows = "SELECT count(*) FROM messaging_member_notifications";
+    // Not configured: nothing is written.
+    let _off = first_party_fixture(&mut h).await;
+    assert_eq!(h.scalar(rows).await, 0);
+    // A customer's conversation (neither first party nor CF Meet's governed scope): nothing.
+    h.state.member_notices = true;
+    let _customer = fixture(&mut h).await;
+    assert_eq!(h.scalar(rows).await, 0);
+
+    let f = first_party_fixture(&mut h).await;
+    assert_eq!(h.scalar(rows).await, 2);
+    // Adding an ACTIVE member again announces nothing new.
+    let again = h
+        .post(
+            &f.c,
+            Some(f.people[0].principal),
+            &format!("/v1/conversations/{}/members", cid(&f.conversation)),
+            json!({ "principalId": f.people[1].principal }),
+        )
+        .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text);
+    assert_eq!(h.scalar(rows).await, 2);
+
+    let key = cf_service_auth::KeyId::parse("messaging-members-1").unwrap();
+    let key = ServiceSigningKey::generate(key);
+    let i1 = FakeI1::start(&key).await;
+    let sink = NotificationServiceEvents::new(client(copy(&key), Some(&i1.url)));
+    h.state.communications = Some(f.governed.clone());
+    let report = messaging::member_notifications::relay_due(&h.state, &sink, 500)
+        .await
+        .unwrap();
+    assert_eq!(
+        (report.acked, report.dead, report.skipped),
+        (2, 0, 0),
+        "{report:?}"
+    );
+    let batches = i1.batches();
+    let events: Vec<&Value> = batches
+        .iter()
+        .flat_map(|b| b["events"].as_array().unwrap())
+        .collect();
+    assert!(batches.iter().all(|b| b.get("shadow").is_none()));
+    let mut recipients: Vec<String> = events
+        .iter()
+        .map(|e| {
+            assert_eq!(e["eventType"], "messaging.member.invited");
+            assert_eq!(e["data"]["conversationId"], json!(cid(&f.conversation)));
+            assert_eq!(e["data"].as_object().unwrap().len(), 2);
+            let r = e["recipients"].as_array().unwrap();
+            assert_eq!(r.len(), 1);
+            r[0]["ref"].as_str().unwrap().to_string()
+        })
+        .collect();
+    recipients.sort();
+    assert_eq!(recipients, f.recipient_refs());
+    assert!(i1.inner.lock().unwrap().invalid.is_empty());
+    // Settled once.
+    let next = messaging::member_notifications::relay_due(&h.state, &sink, 500)
+        .await
+        .unwrap();
+    assert_eq!(next.acked, 0);
+
+    // Someone added and removed before the relay ran is not told. (Adding asks the Hub's
+    // policy when the scope is governed, which these tests do not run.)
+    h.state.communications = None;
+    let late = h.member(&f.c, 0).await;
+    let add = h
+        .post(
+            &f.c,
+            Some(f.people[0].principal),
+            &format!("/v1/conversations/{}/members", cid(&f.conversation)),
+            json!({ "principalId": late.principal }),
+        )
+        .await;
+    assert_eq!(add.status, StatusCode::CREATED, "{}", add.text);
+    h.sql(&format!(
+        "UPDATE messaging_conversation_members SET state = 'REMOVED', removed_at = now(), removed_reason = 'REMOVED' WHERE principal_id = '{}'",
+        late.principal
+    ))
+    .await
+    .unwrap();
+    h.state.communications = Some(f.governed.clone());
+    let skipped = messaging::member_notifications::relay_due(&h.state, &sink, 500)
+        .await
+        .unwrap();
+    assert_eq!((skipped.acked, skipped.skipped), (0, 1), "{skipped:?}");
+    h.state.communications = None;
+}
+
+/// A MANAGED GROUP of three members (the first added the others) in a first-party scope,
+/// with each member's CF Meet account; `governed` names that scope (CF Meet's personal one).
+async fn first_party_fixture(h: &mut Harness) -> Fixture {
+    let c = h.first_party(true);
+    h.allow_managed(&c, "GROUP").await;
+    let mut people = Vec::new();
+    for _ in 0..3 {
+        people.push(h.member(&c, 0).await);
+    }
+    let r = h
+        .create_conversation(
+            &c,
+            people[0].principal,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conversation = r.json;
+    for p in &people[1..] {
+        let a = h
+            .post(
+                &c,
+                Some(people[0].principal),
+                &format!("/v1/conversations/{}/members", cid(&conversation)),
+                json!({ "principalId": p.principal }),
+            )
+            .await;
+        assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+    }
+    let accounts: HashMap<Uuid, String> = people
+        .iter()
+        .map(|m| (m.principal, format!("cfmeet-user:{}", Uuid::new_v4())))
+        .collect();
+    h.state.principals = Arc::new(Accounts {
+        inner: h.principals.clone(),
+        references: accounts.clone(),
+    });
+    let governed = cf_communications_policy::PolicyClient::new(
+        h.state.service_auth.client(),
+        cf_communications_policy::Scope {
+            tenant_id: c.context.scope.tenant_id,
+            application_id: c.context.scope.application_id,
+            environment_id: c.context.scope.environment_id,
+        },
+    );
+    Fixture {
+        c,
+        conversation,
+        people,
+        accounts,
+        governed,
+    }
 }

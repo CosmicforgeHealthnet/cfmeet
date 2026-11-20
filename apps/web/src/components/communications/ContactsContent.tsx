@@ -557,9 +557,18 @@ export default function ContactsContent() {
   const pendingCount = (incoming.data?.data ?? []).filter((r) => r.state === "PENDING").length;
   const contactCount = connectedContacts(contacts.data ?? []).length;
   const organization = workspace.kind === "ORGANIZATION" && workspace.organizationId ? { id: workspace.organizationId, name: workspace.workspace?.displayName ?? "this organization" } : null;
-  const [tab, setTab] = useState<Tab>("connections");
+  const params = useSearchParams();
+  // "/dashboard/contacts?tab=requests" (a contact request in the bell) opens Requests.
+  const requestsLink = params.get("tab") === "requests";
+  const [tab, setTab] = useState<Tab>(requestsLink ? "requests" : "connections");
+  // Also when the bell links here while Contacts is already open.
+  const [linked, setLinked] = useState(requestsLink);
+  if (linked !== requestsLink) {
+    setLinked(requestsLink);
+    if (requestsLink) setTab("requests");
+  }
   // "/dashboard/contacts?add=1" (e.g. "New contact" in Chats) opens Add contact straight away.
-  const [adding, setAdding] = useState(useSearchParams().get("add") === "1");
+  const [adding, setAdding] = useState(params.get("add") === "1");
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const tabs: [Tab, string, number | null][] = [
     ["connections", "Contacts", contacts.isSuccess ? contactCount : null],

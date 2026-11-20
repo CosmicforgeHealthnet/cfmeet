@@ -127,6 +127,107 @@ class Routing(unittest.TestCase):
         self.assertTrue(all(i == 'notifications' for _, i, _ in granted))
 
 
+class BundleRelease:
+    """notif_routing rows by (category, channel) and a HELD-release answer."""
+
+    def __init__(self, modes, held='3:2'):
+        self.rows = {key: dict(mode=mode, version=1) for key, mode in modes.items()}
+        self.held = held
+        self.sql = []
+
+    def db_sql(self, db, sql):
+        self.sql.append((db, sql))
+        found = re.search(r"WHERE category = '([A-Z_]+)' AND channel = '([A-Z_]+)'", sql)
+        if sql.startswith('SELECT coalesce(json_agg'):
+            row = self.rows.get(found.groups())
+            return json.dumps([row] if row else [])
+        if sql.startswith('WITH u AS (UPDATE'):
+            row = self.rows[found.groups()]
+            row['mode'] = re.search(r"SET mode = '([A-Z]+)'", sql).group(1)
+            row['version'] += 1
+            return '1:%d' % row['version']
+        if sql.startswith('WITH routable AS'):
+            return self.held
+        raise AssertionError(sql)
+
+
+class BundleCr(FakeCr):
+    def __init__(self, modes, done=('activate-notifications-owners',), held='3:2'):
+        super().__init__([])
+        self.release = BundleRelease(modes, held)
+        self.finished = set(done)
+
+    def done(self, op):
+        return op in self.finished
+
+
+def seed_modes(mode='OFF'):
+    return {(c, ch): mode for c, ch in Parse.seed_rows()}
+
+
+class RoutingBundle(unittest.TestCase):
+    def test_parse(self):
+        self.assertEqual(no.parse_bundle('user-facing-in-app-active'), ('IN_APP', 'ACTIVE'))
+        self.assertEqual(no.parse_bundle('user-facing-push-shadow'), ('PUSH', 'SHADOW'))
+        self.assertIsNone(no.parse_bundle('contact-requests-in-app-active'))
+        for bad in ('user-facing-email-active', 'user-facing-operator-active', 'user-facing-in-app-on'):
+            with self.assertRaises(RuntimeError):
+                no.parse_bundle(bad)
+        self.assertRegex('user-facing-in-app-active', r'^[a-z0-9,=-]{0,120}$')
+
+    def test_every_bundled_row_is_seeded_and_no_critical_or_email_row_is_bundled(self):
+        seeded = set(Parse.seed_rows())
+        for channel, categories in no.BUNDLE_CHANNELS.items():
+            for category in categories:
+                self.assertIn((category, channel), seeded)
+                self.assertNotIn(category, no.CRITICAL)
+        # Every seeded user-facing IN_APP row is in the bundle (the bell shows everything).
+        in_app = {c for c, ch in seeded if ch == 'IN_APP' and c not in no.CRITICAL}
+        self.assertEqual(in_app, set(no.BUNDLE_CHANNELS['IN_APP']))
+
+    def test_in_app_bundle_turns_every_row_on_releases_held_events_and_rolls_back(self):
+        fake = BundleCr(seed_modes())
+        fake.release.rows[('MISSED_CALLS', 'IN_APP')]['mode'] = 'ACTIVE'
+        no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-in-app-active')
+        entry = fake.journal[-1]
+        self.assertEqual(entry['status'], 'done')
+        record = entry['notificationRouting']
+        self.assertEqual([r['category'] for r in record['rows']], list(no.USER_FACING))
+        for category in no.USER_FACING:
+            self.assertEqual(fake.release.rows[(category, 'IN_APP')]['mode'], 'ACTIVE')
+        # Rows of other channels are untouched; an already ACTIVE row is not rewritten.
+        self.assertEqual(fake.release.rows[('CONTACT_REQUESTS', 'PUSH')]['mode'], 'OFF')
+        self.assertEqual(fake.release.rows[('MEETING_NOTIFICATION', 'EMAIL')]['mode'], 'OFF')
+        self.assertEqual(fake.release.rows[('MISSED_CALLS', 'IN_APP')]['version'], 1)
+        self.assertEqual((record['heldReleased'], record['heldLeft']), (3, 2))
+        release = fake.release.sql[-1][1]
+        self.assertIn("lane <> 'CRITICAL' AND NOT shadow", release)
+        self.assertIn("interval '7 days'", release)
+        self.assertIn("{delivery,expiresAt}", release)
+        for category in no.USER_FACING:
+            self.assertIn("'%s'" % category, release)
+        no.undo_routing(fake, record, '43-1')
+        for category in no.USER_FACING:
+            expected = 'ACTIVE' if category == 'MISSED_CALLS' else 'OFF'
+            self.assertEqual(fake.release.rows[(category, 'IN_APP')]['mode'], expected)
+
+    def test_a_refused_row_changes_nothing(self):
+        fake = BundleCr(seed_modes(), done=())
+        with self.assertRaisesRegex(RuntimeError, 'owners'):
+            no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-in-app-active')
+        self.assertEqual(fake.journal, [])
+        self.assertFalse(any('UPDATE' in sql for _, sql in fake.release.sql))
+
+    def test_push_active_needs_the_push_provider_and_shadow_releases_nothing(self):
+        fake = BundleCr(seed_modes())
+        with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
+            no.activate_routing(fake, 'a' * 40, '42-1', 'user-facing-push-active')
+        no.activate_routing(fake, 'a' * 40, '42-2', 'user-facing-push-shadow')
+        self.assertFalse(any(sql.startswith('WITH routable') for _, sql in fake.release.sql))
+        self.assertEqual(fake.release.rows[('CONTACT_REQUESTS', 'PUSH')]['mode'], 'SHADOW')
+        self.assertNotIn(('DEVELOPER_PLATFORM', 'PUSH'), fake.release.rows)
+
+
 class FakeRelayCr(FakeCr):
     """Records probes, signing checks and the activation request of activate_relay."""
 

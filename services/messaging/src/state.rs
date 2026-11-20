@@ -61,6 +61,10 @@ pub struct AppState {
     /// conversations in an organization's own first-party scope go to the Notification
     /// Service (route `NEW`), addressed to the members' CF Meet accounts.
     pub organization_wakeups: bool,
+    /// "Added to a group" notices (`messaging_member_notifications`) are written for the
+    /// Notification Service: set when `CF_NOTIFICATIONS_BASE_URL` is configured (default
+    /// off: nothing is written).
+    pub member_notices: bool,
 }
 
 impl AppState {
@@ -99,6 +103,7 @@ impl AppState {
             partner: Arc::new(crate::partner::Partner::disabled()),
             apps: crate::apps::AppsSettings::default(),
             organization_wakeups: false,
+            member_notices: false,
         }
     }
 

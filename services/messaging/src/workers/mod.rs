@@ -67,6 +67,12 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
             {
                 tracing::warn!(error = %e, "notification publication maintenance pass failed");
             }
+            if let Err(e) =
+                crate::member_notifications::maintain(&state, crate::realtime::push::PURGE_BATCH)
+                    .await
+            {
+                tracing::warn!(error = %e, "member notification maintenance pass failed");
+            }
         }
         tokio::time::sleep(interval).await;
     }
