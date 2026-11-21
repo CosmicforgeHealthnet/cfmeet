@@ -70,6 +70,8 @@ export const DEVELOPER_OPERATIONS = {
   suspendCredential: ["POST", "/v1/environments/{environmentId}/credentials/{credentialId}/suspend"],
   resumeCredential: ["POST", "/v1/environments/{environmentId}/credentials/{credentialId}/resume"],
   putCredentialLimits: ["PUT", "/v1/environments/{environmentId}/credentials/{credentialId}/limits"],
+  listCredentialDeliveries: ["GET", "/v1/environments/{environmentId}/credential-deliveries"],
+  revealCredentialDelivery: ["POST", "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal"],
   getCredentialPolicy: ["GET", "/v1/organizations/{organizationId}/credential-policy"],
   putCredentialPolicy: ["PUT", "/v1/organizations/{organizationId}/credential-policy"],
   listEnvironmentWebhooks: ["GET", "/v1/environments/{environmentId}/webhooks"],

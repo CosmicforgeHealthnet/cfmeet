@@ -9806,6 +9806,79 @@
           "minimum": 1
         }
       }
+    },
+    "CredentialDelivery": {
+      "description": "ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliveryRef",
+        "deliveryChannel",
+        "state",
+        "environmentId",
+        "credentialId",
+        "publicId",
+        "serviceAccountId",
+        "createdAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CONSOLE_REVEAL_ONCE"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING"
+          ]
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "publicId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CredentialDeliveryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CredentialDelivery"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
     }
   }
 }
