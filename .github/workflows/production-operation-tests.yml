@@ -1,0 +1,38 @@
+name: Production operation tests
+
+# Test release and activation logic before main approval, without VPS access.
+on:
+  pull_request:
+    paths:
+      - "infra/calling/production/**"
+      - "infra/deployment/backup/**"
+      - ".github/workflows/cfmeet-coordinated-release.yml"
+      - ".github/workflows/production-operation-tests.yml"
+  push:
+    branches: [main, staging]
+    paths:
+      - "infra/calling/production/**"
+      - "infra/deployment/backup/**"
+      - ".github/workflows/cfmeet-coordinated-release.yml"
+      - ".github/workflows/production-operation-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-operation-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Linux release and activation tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test production operations without production credentials
+        run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
