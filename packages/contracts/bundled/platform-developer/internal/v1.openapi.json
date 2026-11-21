@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.16.0",
+    "version": "1.17.0",
     "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version. 1.15.0 (ADR 0068 A6): pricing and plans under /internal/v1/operator/pricing/** and finance reports under /internal/v1/operator/finance/** (pricing.administer, admin bridge only): price books, versions (draft, edit, submit, two-person approve / reject, schedule, activate), rollback, market freezes, CF Meet user plans, plan assignments, overrides, a charge simulation read and the usage / estimated charges / plan spread reports. Nothing charges anyone."
   },
   "tags": [
@@ -7872,6 +7872,83 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{day}": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "One UTC day of a dataset",
+        "operationId": "operatorGetDatasetDay",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A7: the daily counts the admin bridge pulls (it sends `X-CF-Operator: hq:dataset-sync`), for `cfmeet.partners_daily` and `cfmeet.apps_daily`: counts only, a snapshot at the end of that UTC day (now for today) reconstructed from the transition and activity history; a metric that cannot be computed is null, never a guessed 0. A future or malformed day is VALIDATION_ERROR; an unknown dataset NOT_FOUND. The admin bridge only (404 for every other caller). Permission `developer-platform.administer` AND the bridge's `X-CF-Operator`.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cfmeet.partners_daily",
+                "cfmeet.apps_daily"
+              ]
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "description": "The UTC day (yyyy-mm-dd).",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.DatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9178,6 +9255,59 @@
           "costCenterRef": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        }
+      },
+      "platform-developer.control.v1.DatasetDay": {
+        "description": "ADR 0068 A7: one UTC day of a dataset the admin bridge pulls (datasets.v1.json): end-of-day counts reconstructed from history; null where a metric cannot be computed (never a guessed 0). cfmeet.partners_daily: workspaces_active, workspaces_restricted, workspaces_suspended (null beyond the activity history kept), partners_live, partner_mau (null: not metered). cfmeet.apps_daily: apps_draft, apps_in_review, apps_published, apps_suspended, installs (null while the installation projection is off).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "date",
+          "metrics"
+        ],
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "enum": [
+              "cfmeet.partners_daily",
+              "cfmeet.apps_daily"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "metrics": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "enum": [
+                "workspaces_active",
+                "workspaces_restricted",
+                "workspaces_suspended",
+                "partners_live",
+                "partner_mau",
+                "apps_draft",
+                "apps_in_review",
+                "apps_published",
+                "apps_suspended",
+                "installs"
+              ]
+            },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
           }
         }
       },

@@ -9591,6 +9591,59 @@
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
+    },
+    "DatasetDay": {
+      "description": "ADR 0068 A7: one UTC day of a dataset the admin bridge pulls (datasets.v1.json): end-of-day counts reconstructed from history; null where a metric cannot be computed (never a guessed 0). cfmeet.partners_daily: workspaces_active, workspaces_restricted, workspaces_suspended (null beyond the activity history kept), partners_live, partner_mau (null: not metered). cfmeet.apps_daily: apps_draft, apps_in_review, apps_published, apps_suspended, installs (null while the installation projection is off).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "date",
+        "metrics"
+      ],
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "enum": [
+            "cfmeet.partners_daily",
+            "cfmeet.apps_daily"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "metrics": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "enum": [
+              "workspaces_active",
+              "workspaces_restricted",
+              "workspaces_suspended",
+              "partners_live",
+              "partner_mau",
+              "apps_draft",
+              "apps_in_review",
+              "apps_published",
+              "apps_suspended",
+              "installs"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
     }
   }
 }
