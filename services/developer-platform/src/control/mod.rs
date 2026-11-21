@@ -21,6 +21,7 @@ pub mod bridge_command;
 pub mod commercial;
 pub mod credential_lifecycle;
 pub mod credentials;
+pub mod datasets;
 pub mod entitlements;
 pub mod idempotency;
 pub mod members;

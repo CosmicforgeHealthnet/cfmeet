@@ -91,6 +91,40 @@ pub fn routes() -> Router<AppState> {
             "/operator/owner-deliveries/:delivery_ref",
             get(owner_delivery),
         )
+        // ADR 0068 A7: the daily datasets the admin bridge pulls.
+        .route("/operator/datasets/:dataset_id/days/:day", get(dataset_day))
+}
+
+/// `GET /internal/v1/operator/datasets/{datasetId}/days/{yyyy-mm-dd}` — the admin bridge
+/// only (404 for every other caller and for an unknown dataset): one UTC day's counts.
+async fn dataset_day(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((dataset, day)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    if caller.bridge_operator().is_none() {
+        return Err(ApiError(ErrorCode::NotFound));
+    }
+    let date = crate::control::usage::parse_day(&day)?;
+    // The activity history the purge keeps (the worker's own setting, read the same way).
+    let retention =
+        crate::retention::RetentionSettings::from_lookup(&|k: &str| std::env::var(k).ok())
+            .unwrap_or_default();
+    let activity_days = if retention.enabled {
+        retention.days(crate::retention::Class::ActivityEvents)
+    } else {
+        None
+    };
+    let ctx = crate::control::datasets::DatasetContext {
+        installs_known: s.build.install_events,
+        activity_days,
+        now: Utc::now(),
+    };
+    Ok(Json(
+        crate::control::datasets::day(&s.db, &dataset, date, ctx).await?,
+    ))
 }
 
 /// `GET /internal/v1/operator/owner-deliveries/{deliveryRef}` — the admin bridge only
