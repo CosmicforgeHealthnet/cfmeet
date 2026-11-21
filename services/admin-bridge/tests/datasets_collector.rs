@@ -39,17 +39,25 @@ impl OwnerPort for FakeNotifications {
             .unwrap()
             .push((owner, path.to_string(), operator.to_string()));
         let day = path.rsplit('/').next().unwrap().to_string();
+        let dataset = path.split('/').nth(5).unwrap().to_string();
         let yesterday = (Utc::now().date_naive() - Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
+        let y = day == yesterday;
         // Yesterday is countable; older days are null (beyond the owner's retention).
-        let failed = if day == yesterday {
-            json!(7)
-        } else {
-            Value::Null
+        let n = |v: i64| if y { json!(v) } else { Value::Null };
+        let metrics = match (owner, dataset.as_str()) {
+            (Owner::Notifications, "cfmeet.operations_health") => {
+                json!({"failed_deliveries": n(7), "extra": 1})
+            }
+            (Owner::Messaging, "cfmeet.operations_health") => json!({"failed_messages": n(2)}),
+            (Owner::Messaging, "cfmeet.messaging_daily") => json!({"messages_sent": n(42)}),
+            (Owner::DeveloperPlatform, "cfmeet.partners_daily") => json!({
+                "workspaces_active": n(5), "workspaces_restricted": n(0), "workspaces_suspended": n(1),
+                "partners_live": n(2), "partner_mau": null}),
+            _ => return Err(OwnerError::NotFound),
         };
-        Ok(json!({"datasetId": "cfmeet.operations_health", "date": day,
-                  "metrics": {"failed_deliveries": failed, "extra": 1}}))
+        Ok(json!({"datasetId": dataset, "date": day, "metrics": metrics}))
     }
 }
 

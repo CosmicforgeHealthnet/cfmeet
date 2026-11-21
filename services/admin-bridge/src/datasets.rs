@@ -40,13 +40,56 @@ pub struct Pull {
     pub dataset: &'static str,
     pub owner: Owner,
     pub metrics: &'static [&'static str],
+    /// Metrics the owner documents as not computable (always null): they do not keep the
+    /// source from reporting.
+    pub unmetered: &'static [&'static str],
 }
 
-pub const PULLS: &[Pull] = &[Pull {
-    dataset: "cfmeet.operations_health",
-    owner: Owner::Notifications,
-    metrics: &["failed_deliveries"],
-}];
+pub const PULLS: &[Pull] = &[
+    Pull {
+        dataset: "cfmeet.operations_health",
+        owner: Owner::Notifications,
+        metrics: &["failed_deliveries"],
+        unmetered: &[],
+    },
+    Pull {
+        dataset: "cfmeet.operations_health",
+        owner: Owner::Messaging,
+        metrics: &["failed_messages"],
+        unmetered: &[],
+    },
+    Pull {
+        dataset: "cfmeet.messaging_daily",
+        owner: Owner::Messaging,
+        metrics: &["messages_sent"],
+        unmetered: &[],
+    },
+    Pull {
+        dataset: "cfmeet.partners_daily",
+        owner: Owner::DeveloperPlatform,
+        metrics: &[
+            "workspaces_active",
+            "workspaces_restricted",
+            "workspaces_suspended",
+            "partners_live",
+            "partner_mau",
+        ],
+        // Partner end users are not metered by the Developer Platform.
+        unmetered: &["partner_mau"],
+    },
+    Pull {
+        dataset: "cfmeet.apps_daily",
+        owner: Owner::DeveloperPlatform,
+        metrics: &[
+            "apps_draft",
+            "apps_in_review",
+            "apps_published",
+            "apps_suspended",
+            "installs",
+        ],
+        unmetered: &[],
+    },
+];
 
 /// The bridge's own source in `cfmeet.operations_health`.
 const BRIDGE_METRICS: &[&str] = &["projection_gaps", "quarantined_events"];
@@ -140,6 +183,7 @@ pub fn pulled(pull: &Pull, day: NaiveDate, v: &Value) -> Option<(Map<String, Val
     let mut complete = true;
     for m in pull.metrics {
         match reported.get(*m) {
+            Some(Value::Null) | None if pull.unmetered.contains(m) => {}
             Some(Value::Null) | None => complete = false,
             Some(x) if x.as_i64().is_some_and(|n| n >= 0) => {
                 out.insert((*m).to_string(), x.clone());
