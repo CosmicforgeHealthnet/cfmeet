@@ -79,10 +79,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE admin_bridge_migrator IN SCHEMA public REVOKE 
 GRANT SELECT, INSERT ON
     admin_remote_principals, admin_security_claims, admin_revocations, admin_rate_limits,
     admin_policy_revisions, admin_audit_entries, admin_dataset_days, admin_projections,
-    admin_operations
+    admin_operations, admin_privacy_requests, admin_privacy_request_services
     TO admin_bridge_runtime;
 GRANT UPDATE (revoked_at) ON admin_remote_principals TO admin_bridge_runtime;
-GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections, admin_operations TO admin_bridge_runtime;
+GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections, admin_operations,
+    admin_privacy_requests, admin_privacy_request_services TO admin_bridge_runtime;
 GRANT DELETE ON admin_security_claims, admin_rate_limits TO admin_bridge_runtime;
 -- Identity columns (audit sequence, revocation id).
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO admin_bridge_runtime;
