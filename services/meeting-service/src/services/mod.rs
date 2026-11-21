@@ -63,6 +63,7 @@ pub mod organization_policy;
 pub mod organizations;
 pub mod organizations_authority;
 pub mod outbox;
+pub mod plan_limits;
 pub mod platform;
 pub mod profiles;
 pub mod quality;

@@ -1152,6 +1152,17 @@ impl ConferenceService {
                 "A conference can run at most 24 hours from its start".into(),
             ));
         }
+        // ADR 0068 A6: the space holder's plan may allow less (fail open).
+        if let Some(max) = crate::services::plan_limits::for_space(&self.core.plan_limits, &space)
+            .await
+            .and_then(|p| p.meeting_minutes())
+        {
+            if new_end - began > Duration::minutes(max) {
+                return Err(ApiError::ValidationError(format!(
+                    "A conference can run at most {max} minutes on this meeting owner's plan"
+                )));
+            }
+        }
         let legacy = conference.origin == RecordOrigin::Legacy;
         if legacy {
             let Some(legacy_id) = space.legacy_meeting_id else {
