@@ -48,12 +48,30 @@ def evaluate(repo, head, base):
     return doc
 
 
+
+def include_missing_services(doc, present_containers):
+    """Add images for services not running on the VPS, even with no source diff.
+
+    The runtime still enforces service ownership, provisioning, resource limits,
+    migration checks and feature safe defaults. This function only plans images.
+    """
+    present = set(present_containers)
+    missing = [name for name in cr.ORDER if cr.SERVICES[name]['container'] not in present]
+    changed = set(doc['changed']) | {cr.image_of(name) for name in missing}
+    doc['changed'] = [name for name in cr.IMAGES if name in changed]
+    doc['unchanged'] = [name for name in cr.IMAGES if name not in changed]
+    doc['missingServices'] = missing
+    return doc
+
+
 def main(argv):
-    if len(argv) != 4:
-        print('usage: release_scope.py <repo> <release sha> <base sha|-> <out.json>')
+    if len(argv) not in (4, 5):
+        print('usage: release_scope.py <repo> <release sha> <base sha|-> <out.json> [running-containers.txt]')
         return 2
-    repo, head, base, out = argv
+    repo, head, base, out = argv[:4]
     doc = evaluate(Path(repo), head, None if base == '-' else base)
+    if len(argv) == 5:
+        doc = include_missing_services(doc, Path(argv[4]).read_text().splitlines())
     Path(out).write_text(json.dumps(doc, indent=1, sort_keys=True))
     print(json.dumps({k: doc[k] for k in ('head', 'base', 'changed', 'unchanged', 'reason')}, sort_keys=True))
     return 0

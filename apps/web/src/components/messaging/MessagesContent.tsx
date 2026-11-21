@@ -12,8 +12,8 @@
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
 import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
-import { ArchivedHeader, ArchivedRow, ChatListToggles } from "./ChatListControls";
-import { RichContentView, ShareMenu } from "./RichMessages";
+import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
+import { AttachMenu, RichContentView } from "./RichMessages";
 import PrivateShares from "./PrivateShares";
 import { isLiveStatus, statusPostId } from "@/lib/messaging/private-shares";
 import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
@@ -23,7 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, BellOff, Check, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
-  MoreHorizontal, Paperclip, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
+  MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
   UserPlus, Users,
 } from "lucide-react";
@@ -575,7 +575,7 @@ type BubbleActions = {
   vote?: (choices: number[]) => void;
 };
 
-function MessageBubble({ m, name, names, onDownload, actions, managed, first, last, group }: {
+function MessageBubble({ m, name, names, onDownload, actions, first, last, group }: {
   m: MessageView; name: string; names: Record<string, string>; onDownload: () => void; actions: BubbleActions; managed: boolean;
   /** first / last of a run from the same sender (grouping, Messenger-style corners) */ first: boolean; last: boolean; group: boolean;
 }) {
@@ -768,6 +768,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
         {shareEnabled ? <ShareMeeting engine={engine} conversation={conversation} /> : null}
         <ChatInfoExtras conversationId={conversation.id} direct={!isGroup} groupTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? null} />
         <ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} />
+        <DisappearingMessages engine={engine} conversation={conversation} canChange={!isGroup || manager} />
         <section>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{conversation.members.length} {conversation.members.length === 1 ? "member" : "members"}</p>
           <ul className="space-y-1">
@@ -1118,8 +1119,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                   e.target.value = "";
                 }}
               />
-              <button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={!canAttach} onClick={() => file.current?.click()} aria-label="Attach a file" title={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"}><Paperclip className="size-5" /></button>
-              {e2ee ? <ShareMenu disabled={!canSend} onSend={(payload) => engine.sendRich(conversation.id, payload)} /> : null}
+              <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
+                fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
                 ref={composer}
                 rows={1}

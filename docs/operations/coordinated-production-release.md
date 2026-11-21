@@ -16,6 +16,29 @@ every mutating `cfmeet-calling-production.yml` operation, take the same
 production changes never overlap. GitHub keeps only one *pending* run per group: a third
 dispatch while one runs and one waits cancels the waiting one; dispatch again after it.
 
+### Automatic latest-main reconciliation
+
+A push to `main` starts `.github/workflows/cfmeet-auto-production-deploy.yml`.
+Its concurrency group coalesces pending runs so newer commits supersede old pending
+automatic releases without cancelling an active production operation. Each automatic
+release targets its exact main SHA; it fails closed if `main` advances before the
+production operation. One newest eligible SHA includes all earlier merged work.
+
+The image `plan` reads the last completed release in the VPS journal and compares
+it with the current main commit. It also includes missing, newly registered
+service/replica containers. Only the changed image set is built, transferred and
+verified. Unchanged running containers keep their exact previous image ID and
+revision; a completely unchanged release is verified without repeating migrations,
+backups or container restarts. If the VPS journal changes after planning, the
+release refuses the stale plan instead of deploying incomplete images.
+
+First-time deployment is supported for services explicitly listed in the production
+service catalogue with defined database/provisioning, migration, authentication and
+readiness behavior. This does **not** automatically enable telecom, external
+providers, irreversible cutovers, public ingress changes or owner-approved feature
+activations. Backend CI requirements remain mandatory; frontend/Vercel failure is
+not a backend release blocker. GitHub runner allocation can still cause delays.
+
 ## Services, order and runtime
 
 | Order | Service | Container | Private HTTPS (`api.cfmeet.com:<port>` on `cfmeet-core-private`) | New in production | Memory limit |
