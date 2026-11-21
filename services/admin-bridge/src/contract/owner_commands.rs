@@ -417,7 +417,7 @@ const PA_SIGNED_OUT: &[OutField] = &[
     o("application_id", "applicationId", Out::Uuid, true),
     o("environment_id", "environmentId", Out::Uuid, true),
     o("kind", "kind", Out::Code, false),
-    o("tokens_not_before", "tokensNotBefore", Out::Time, true),
+    o("sessions_invalid_before", "tokensNotBefore", Out::Time, true),
 ];
 const SCOPE_BODY: &[BodyField] = &[
     p("application_id", In::Uuid),
