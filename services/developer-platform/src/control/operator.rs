@@ -62,6 +62,12 @@ pub async fn register_first_party(
     let txn = state.db.begin().await?;
     let (invitation, token) =
         insert_first_party(&txn, operator, request, &body, &name, &owner, None).await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(body.tenant_id),
+    )
+    .await?;
     let org = organizations::view(&txn, body.tenant_id, None).await?;
     txn.commit().await?;
     let mut invitation = invitation;
@@ -120,6 +126,12 @@ pub async fn register_first_party_bridge(
         &name,
         &owner,
         Some(delivery_ref),
+    )
+    .await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
     )
     .await?;
     let invitation_id = invitation["id"]

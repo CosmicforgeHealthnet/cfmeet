@@ -386,6 +386,24 @@ pub async fn operator_incident(
         },
     )
     .await?;
+    // ADR 0068 A7: the incident record (its id is the activity event's, as the incidents
+    // read lists it).
+    if state.bridge_events.enabled() {
+        if let Some(r) = txn
+            .query_one(stmt(
+                "SELECT id FROM devplat_activity_events WHERE tenant_id = $1                    AND action = 'support_profile.incident_recorded' AND request_id = $2                  ORDER BY occurred_at DESC LIMIT 1",
+                vec![tenant_id.into(), request.request_id.as_str().into()],
+            ))
+            .await?
+        {
+            crate::bridge_events::record(
+                &txn,
+                state.bridge_events,
+                crate::bridge_events::Source::Incident(r.try_get("", "id")?),
+            )
+            .await?;
+        }
+    }
     let v = view(&txn, tenant_id).await?;
     if let Some(b) = bridge {
         let version = v["version"].as_i64();

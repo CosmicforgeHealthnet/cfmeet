@@ -325,6 +325,13 @@ async fn record_created(
         ],
     ))
     .await?;
+    // ADR 0068 A7: a new partner workspace.
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
     let member_id = Uuid::new_v4();
     txn.execute(stmt(
         "INSERT INTO devplat_workspace_members \
@@ -650,6 +657,12 @@ pub async fn update(
         ))
         .await?
         .ok_or(ApiError(ErrorCode::VersionConflict))?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
     let pending_name = updated
         .try_get::<bool>("", "pending")?
         .then(|| updated.try_get::<String>("", "display_name"))
@@ -716,6 +729,12 @@ pub async fn close(state: &AppState, caller: &Caller, tenant_id: Uuid) -> Result
     if n != 1 {
         return Err(ApiError(ErrorCode::InvalidState));
     }
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
     activity::record(
         &txn,
         caller,
@@ -821,6 +840,12 @@ pub async fn operator_set_state(
             now.into(),
         ],
     ))
+    .await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
     .await?;
     activity::record_operator(
         &txn,
