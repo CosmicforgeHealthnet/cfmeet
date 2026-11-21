@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 40 inbound types, the routing category (the unit of the cutover: one row per
+//! the 41 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -644,6 +644,21 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // ADR 0068 A4 (event contract 1.6.0): the first-party workspace owner invitation, email
+    // only, to the sealed address of its one email principal (the owner may have no account
+    // yet); the single-use claim link is rebuilt from the sealed token.
+    TypeRoute {
+        email_category: Some("DEVELOPER_PLATFORM"),
+        ..r(
+            "developer-platform.workspace.owner-invitation.email-requested",
+            "DEVELOPER_PLATFORM",
+            C::DeveloperUpdates,
+            &[E],
+            "developer.workspace_owner_invitation",
+            "NONE",
+            None,
+        )
+    },
     TypeRoute {
         email_category: Some("OPERATIONS_ALERT"),
         ..r(
@@ -705,7 +720,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 40);
+        assert_eq!(inbound.len(), 41);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -713,7 +728,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 40);
+        assert_eq!(ROUTES.len(), 41);
     }
 
     #[test]

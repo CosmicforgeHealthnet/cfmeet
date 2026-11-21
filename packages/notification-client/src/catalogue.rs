@@ -1,8 +1,9 @@
-//! The closed event catalogue (Document 4 §5.2): 40 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 41 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
 //! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
-//! #35–#38: welcome, new sign-in, email-in-use and email-changed, and since 1.4.0 the
-//! organization lifecycle notices #39–#40: archived and reactivated) and the control event
+//! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
+//! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
+//! Developer Platform's first-party workspace owner invitation #41) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -428,7 +429,7 @@ const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 
-/// The catalogue, in contract order (#1–#40, then the control event).
+/// The catalogue, in contract order (#1–#41, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -910,6 +911,25 @@ pub const CATALOGUE: &[EventSpec] = &[
         "ORGANIZATION",
         &["organizationId"],
     ),
+    // ADR 0068 A4 (contract 1.6.0): the one-time owner invitation of a first-party
+    // workspace HQ registers through the admin bridge, delivered ONLY to the invited address
+    // as a single-use claim link (owner-delivered secret: HQ never sees the token). The token
+    // and the address are sealed; one email principal keyed by the invitation (the owner may
+    // have no account yet); the ORGANIZATION_INVITATION subject is the invitation.
+    EventSpec {
+        sealed: &[Token, Address],
+        optional_data: &["expiresAt"],
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            41,
+            "developer-platform.workspace.owner-invitation.email-requested",
+            DEV,
+            Normal,
+            "DEVELOPER_UPDATES",
+            "ORGANIZATION_INVITATION",
+            &["invitationId", "organizationId"],
+        )
+    },
     EventSpec {
         number: 0,
         event_type: CONTROL_EVENT,

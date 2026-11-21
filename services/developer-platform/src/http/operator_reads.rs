@@ -85,6 +85,30 @@ pub fn routes() -> Router<AppState> {
             get(organization_usage),
         )
         .route("/operator/incidents", get(incidents))
+        // ADR 0068 A4: the state of an owner-delivered secret (a reference, never the
+        // secret, a link or the address).
+        .route(
+            "/operator/owner-deliveries/:delivery_ref",
+            get(owner_delivery),
+        )
+}
+
+/// `GET /internal/v1/operator/owner-deliveries/{deliveryRef}` — the admin bridge only
+/// (404 for every other caller and for an unknown or purged reference).
+async fn owner_delivery(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(delivery_ref): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    if caller.bridge_operator().is_none() {
+        return Err(ApiError(ErrorCode::NotFound));
+    }
+    crate::control::owner_delivery::view(&s.db, delivery_ref)
+        .await?
+        .map(Json)
+        .ok_or(ApiError(ErrorCode::NotFound))
 }
 
 #[derive(Deserialize)]
