@@ -2062,7 +2062,13 @@ pub fn service_auth_with_producers() -> (
         ),
     ];
     for (s, k) in &producer_keys {
-        issuers.push(issuer(s, k, &["developer-event.publish"]));
+        // ADR 0068 A6: the Meeting Service and Messaging also read plan limits.
+        let perms: &[&str] = if *s == svc::MEETING_SERVICE || *s == svc::MESSAGING {
+            &["developer-event.publish", "developer-entitlement.read"]
+        } else {
+            &["developer-event.publish"]
+        };
+        issuers.push(issuer(s, k, perms));
     }
     let bundle = json!({
         "bundle_version": 1, "receiver": svc::DEVELOPER_PLATFORM, "runtime_environment": ENV,

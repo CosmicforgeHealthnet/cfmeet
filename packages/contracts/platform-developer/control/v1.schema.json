@@ -9644,6 +9644,168 @@
           }
         }
       }
+    },
+    "EffectivePlanLimits": {
+      "description": "ADR 0068 A6: the effective CF Meet plan limits of a user or business organization, for the services that enforce them where the usage happens (the Meeting Service, Messaging): the holder's plan (FREE when never assigned) priced by the effective version of its CONSUMER lineage, an ACTIVE override applied key by key. A null limit is not set by the plan (keep today's behaviour). cacheSeconds bounds the caller's cache.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "holderKind",
+        "holderId",
+        "planCode",
+        "assigned",
+        "holderVersion",
+        "priceBookId",
+        "versionId",
+        "overrideApplied",
+        "overrideVersion",
+        "limits",
+        "evaluatedAt",
+        "cacheSeconds"
+      ],
+      "properties": {
+        "holderKind": {
+          "type": "string",
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "assigned": {
+          "type": "boolean"
+        },
+        "holderVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "priceBookId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overrideApplied": {
+          "type": "boolean"
+        },
+        "overrideVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "meetingMinutes",
+            "participants",
+            "recording",
+            "storageBytes",
+            "attachmentBytes",
+            "webinars"
+          ],
+          "properties": {
+            "meetingMinutes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "participants": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recording": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "storageBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attachmentBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "webinars": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "evaluatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cacheSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 }
