@@ -85,7 +85,6 @@ pub const DATASETS: &[Dataset] = &[
         sources: &[
             event(Owner::Messaging, "incident.changed.v1"),
             event(Owner::Calling, "incident.changed.v1"),
-            event(Owner::Notifications, "incident.changed.v1"),
             event(Owner::MeetingService, "incident.changed.v1"),
             event(Owner::DeveloperPlatform, "incident.changed.v1"),
             pull(Owner::Messaging),

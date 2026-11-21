@@ -28,6 +28,8 @@ struct Inner {
     operations: Vec<Operation>,
     privacy: Vec<PrivacyRequest>,
     inbox: HashMap<(String, uuid::Uuid), &'static str>,
+    /// `received_at` of every quarantined owner event.
+    quarantined_at: Vec<DateTime<Utc>>,
     outbox: Vec<FeedEvent>,
     cursors: HashMap<String, i64>,
     activations: Vec<ActivationRequest>,
@@ -240,6 +242,97 @@ impl Store for MemoryStore {
         let mut v = self.inner.lock().unwrap().projections.clone();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
+    }
+
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let i = match g
+            .datasets
+            .iter()
+            .position(|d| d.dataset_id == dataset_id && d.day == day)
+        {
+            Some(i) => i,
+            None => {
+                g.datasets.push(DatasetDay {
+                    dataset_id: dataset_id.to_string(),
+                    day,
+                    metrics: serde_json::Map::new(),
+                    sources_reported: Vec::new(),
+                    updated_at: at,
+                });
+                g.datasets.len() - 1
+            }
+        };
+        let d = &mut g.datasets[i];
+        for (k, v) in metrics {
+            d.metrics.insert(k.clone(), v.clone());
+        }
+        d.sources_reported.extend(sources.iter().cloned());
+        d.sources_reported.sort();
+        d.sources_reported.dedup();
+        d.updated_at = at;
+        Ok(())
+    }
+
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        let mut latest: HashMap<(String, String, String), (i64, String)> = HashMap::new();
+        for f in g
+            .outbox
+            .iter()
+            .filter(|f| f.event.event_type == event_type && f.event.occurred_at < end)
+        {
+            let e = &f.event;
+            let key = (
+                e.producer.clone(),
+                e.subject_kind.clone(),
+                e.subject_id.clone(),
+            );
+            let newer = latest.get(&key).is_none_or(|(v, _)| e.version > *v);
+            if newer {
+                latest.insert(key, (e.version, e.state.clone()));
+            }
+        }
+        let mut counts: HashMap<(String, String), i64> = HashMap::new();
+        for ((producer, _, _), (_, state)) in latest {
+            *counts.entry((producer, state)).or_default() += 1;
+        }
+        let mut v: Vec<EventStateCount> = counts
+            .into_iter()
+            .map(|((producer, state), subjects)| EventStateCount {
+                producer,
+                state,
+                subjects,
+            })
+            .collect();
+        v.sort_by(|a, b| (&a.producer, &a.state).cmp(&(&b.producer, &b.state)));
+        Ok(v)
+    }
+
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        Ok(g.quarantined_at
+            .iter()
+            .filter(|t| **t >= start && **t < end)
+            .count() as i64)
     }
 
     async fn audit_window(
@@ -531,6 +624,9 @@ impl Store for MemoryStore {
             IngestOutcome::Appended(sequence)
         };
         g.inbox.insert(key, outcome.as_str());
+        if outcome == IngestOutcome::Quarantined {
+            g.quarantined_at.push(received_at);
+        }
         let name = crate::routes::EVENT_INBOX_PROJECTION;
         let mut row = g
             .projections

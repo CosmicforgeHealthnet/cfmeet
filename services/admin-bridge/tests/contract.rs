@@ -583,14 +583,15 @@ fn datasets_and_event_adapters_are_as_agreed_with_hq() {
             "cfmeet.operations_health",
         ]
     );
-    assert_eq!(ADAPTERS.len(), 13);
+    assert_eq!(ADAPTERS.len(), 12);
     let mut keys = HashSet::new();
     for a in ADAPTERS {
         assert!(keys.insert((a.source, a.export_type)), "duplicate adapter");
     }
     let count = |t: &str| ADAPTERS.iter().filter(|a| a.export_type == t).count();
     assert_eq!(count("abuse.report.changed.v1"), 4);
-    assert_eq!(count("incident.changed.v1"), 5);
+    // Notifications has no incident entity (agreed with HQ).
+    assert_eq!(count("incident.changed.v1"), 4);
     assert_eq!(count("pricing.version.changed.v1"), 1);
 }
 

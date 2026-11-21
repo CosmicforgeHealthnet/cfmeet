@@ -74,13 +74,6 @@
       "fields": {}
     },
     {
-      "source_service": "notifications",
-      "export_type": "incident.changed.v1",
-      "entity_type": "incident",
-      "classification": "OPERATIONS_MINIMIZED",
-      "fields": {}
-    },
-    {
       "source_service": "meeting-service",
       "export_type": "incident.changed.v1",
       "entity_type": "incident",
