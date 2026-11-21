@@ -406,6 +406,108 @@ pub async fn get(
     with_limits(&state.db, view(&pa, environment_id, &env)?).await
 }
 
+/// ADR 0068 A4 — owner-delivered keys: an API key HQ staff issued or rotated through the
+/// admin bridge is held sealed by Platform Access for ONE reveal in the partner's console.
+/// `GET /v1/environments/{id}/credential-deliveries` lists the keys still waiting (ids,
+/// public id, expiry; never a secret).
+pub async fn list_deliveries(
+    state: &AppState,
+    caller: &Caller,
+    environment_id: Uuid,
+) -> Result<Value, ApiError> {
+    let env = environment(&state.db, environment_id).await?;
+    authorize(state, caller, env.tenant_id, Action::CredentialsRead).await?;
+    let pa = delegate(
+        state,
+        caller,
+        DelegationCall::ListCredentialDeliveries { environment_id },
+    )
+    .await?;
+    let mut items = Vec::new();
+    for d in pa
+        .get("deliveries")
+        .and_then(Value::as_array)
+        .ok_or(ApiError(ErrorCode::ServiceUnavailable))?
+    {
+        let f = |k: &str| d.get(k).cloned().unwrap_or(Value::Null);
+        let ok_id = |k: &str| {
+            d.get(k)
+                .and_then(Value::as_str)
+                .is_some_and(|s| Uuid::parse_str(s).is_ok())
+        };
+        if !ok_id("deliveryRef") || !ok_id("credentialId") {
+            tracing::warn!("platform access returned an inconsistent credential delivery");
+            return Err(ApiError(ErrorCode::ServiceUnavailable));
+        }
+        items.push(json!({
+            "deliveryRef": f("deliveryRef"),
+            "deliveryChannel": f("deliveryChannel"),
+            "state": f("state"),
+            "environmentId": environment_id,
+            "credentialId": f("credentialId"),
+            "publicId": f("publicId"),
+            "serviceAccountId": f("serviceAccountId"),
+            "createdAt": f("createdAt"),
+            "expiresAt": f("expiresAt"),
+        }));
+    }
+    Ok(json!({ "items": items, "nextCursor": null }))
+}
+
+/// `POST /v1/environments/{id}/credential-deliveries/{deliveryRef}/reveal` — the ONE
+/// reveal of an owner-delivered key to a signed-in human member who manages credentials
+/// (never a machine credential). The answer `{credential, secret}` is never stored,
+/// replayed or logged here: a lost answer is recovered by rotating the key.
+pub async fn reveal_delivery(
+    state: &AppState,
+    caller: &Caller,
+    environment_id: Uuid,
+    delivery_ref: Uuid,
+) -> Result<Value, ApiError> {
+    if matches!(caller.principal, Principal::Machine(_)) {
+        return Err(ApiError(ErrorCode::PermissionDenied));
+    }
+    let env = environment(&state.db, environment_id).await?;
+    authorize(state, caller, env.tenant_id, Action::CredentialsManage).await?;
+    let pa = delegate(
+        state,
+        caller,
+        DelegationCall::RevealCredentialDelivery {
+            actor: caller.delegation_actor(),
+            environment_id,
+            delivery_ref,
+        },
+    )
+    .await?;
+    let credential = view(&pa["credential"], environment_id, &env)?;
+    let secret = pa
+        .get("secret")
+        .and_then(Value::as_str)
+        .ok_or(ApiError(ErrorCode::ServiceUnavailable))?
+        .to_string();
+    let id = credential["id"].as_str().unwrap_or_default().to_string();
+    // The key is already revealed (Platform Access destroyed its sealed copy): a failed
+    // activity write must not lose it, so the failure is logged and the answer stands.
+    if let Err(e) = record(
+        state,
+        caller,
+        &env,
+        "credential.delivery_revealed",
+        &id,
+        json!({ "environmentId": environment_id, "deliveryRef": delivery_ref,
+                "publicId": credential["publicId"] }),
+    )
+    .await
+    {
+        tracing::warn!(
+            code = e.0.as_str(),
+            "owner-delivered key reveal not recorded in activity"
+        );
+    }
+    let credential = with_limits(&state.db, credential).await?;
+    Ok(json!({ "credential": credential, "secret": secret }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RotateCredential {

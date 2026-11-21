@@ -152,6 +152,23 @@ export type IssuedCredential = {
   rotatedFromCredentialId?: string;
 };
 
+/**
+ * listCredentialDeliveries: an API key CF Meet staff issued or rotated for this environment,
+ * held for ONE reveal in this console until `expiresAt` (never a secret here).
+ */
+export type CredentialDelivery = {
+  deliveryRef: string;
+  deliveryChannel: "CONSOLE_REVEAL_ONCE";
+  state: "PENDING";
+  environmentId: string;
+  credentialId: string;
+  publicId: string;
+  serviceAccountId: string;
+  createdAt: string;
+  expiresAt: string;
+};
+export type CredentialDeliveryList = { items: CredentialDelivery[]; nextCursor: null };
+
 export type CredentialPolicy = {
   organizationId: string;
   configured: boolean;

@@ -120,6 +120,14 @@ pub fn routes() -> Router<AppState> {
             axum::routing::put(service_account_limits),
         )
         .route(
+            "/environments/:environment_id/credential-deliveries",
+            get(list_credential_deliveries),
+        )
+        .route(
+            "/environments/:environment_id/credential-deliveries/:delivery_ref/reveal",
+            post(reveal_credential_delivery),
+        )
+        .route(
             "/environments/:environment_id/credentials/:credential_id",
             get(get_credential),
         )
@@ -969,6 +977,27 @@ async fn create_credential(
     )
     .await?;
     Ok(no_store(reply(out)))
+}
+
+/// ADR 0068 A4: owner-delivered keys waiting for their one reveal.
+async fn list_credential_deliveries(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(env): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        control::credentials::list_deliveries(&s, &c, env).await?,
+    ))
+}
+
+/// ADR 0068 A4: the ONE reveal (no-store; never wrapped in an idempotent replay).
+async fn reveal_credential_delivery(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((env, delivery)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Response> {
+    let out = control::credentials::reveal_delivery(&s, &c, env, delivery).await?;
+    Ok(no_store(Json(out).into_response()))
 }
 
 async fn list_credentials(
