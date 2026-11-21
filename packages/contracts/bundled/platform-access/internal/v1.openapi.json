@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.14.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them. 1.12.0 (ADR 0064, CF Meet Apps / \"Integrate\"; every operation behind PLATFORM_ACCESS_OAUTH_ENABLED, off: 404 NOT_FOUND): OAuth client profiles, client secrets and app grant listing for the Developer Console (platform-oauth.manage) — PUT / GET /internal/v1/oauth/clients/{applicationId}, POST …/secret, GET …/grants; authorization for the Meeting Service (platform-oauth.authorize) — POST /internal/v1/oauth/authorization-requests/validate, POST /internal/v1/oauth/authorizations, GET /internal/v1/oauth/grants, DELETE /internal/v1/oauth/grants/{grantId}; the token endpoint backend for the Developer Console (platform-oauth.token) — POST /internal/v1/oauth/token, /revoke, /introspect. POST /internal/v1/credentials/authenticate (and delegated-authority) also accept cfoa_ / cfob_ app tokens: the authority chain is the grant's target FIRST_PARTY triple and installation service account, scopes are mapped from the grant, the principal restriction is exactly the user / bot principal, and the chain adds credentialKind, appId and grantId. The identity change feed gains APP_GRANT. New error codes INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED, APP_NOT_AVAILABLE and RFC 6749 invalid_grant, invalid_client, unsupported_grant_type, invalid_request. 1.12.0 also: client profiles take optional developerName, logoUrl and meetingSurface {url, origins}; grant items carry app {name, developerName, logoUrl, meetingSurface} and the pairwise sub; authentication / credential status of OAuth tokens add restrictedPrincipal {id, kind, reference} and credentialIssuedAt. 1.13.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) is accepted from cfmeet.admin-bridge (strict hq:<staff>) and, for the legacy named operator only, from the operator console; from any other caller any of them is refused (INTERNAL_PERMISSION_DENIED). The admin bridge's read-only operator views under GET /internal/v1/operator/*: tenants, a tenant's applications, environments, service accounts, scope grants, API keys (public id and last four only), principals (exact-match search, external reference never returned), allowed websites, cross-tenant identity-record search, OAuth apps and their grants, and the audit trail without detail; each requires platform-identity.administer and the bridge's HQ operator. 1.14.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/operator/tenants/{tenantId}/status, applications/{applicationId}/status, environments/{environmentId}/status, service-accounts/{serviceAccountId}/status, applications/{applicationId}/scope-grants and privileged-scope-grants, credentials/{credentialId}/revoke | suspend | resume, environments/{environmentId}/principals, principals/{principalId}/status | remove | sign-out, app-grants/{grantId}/revoke and environments/{environmentId}/origins/remove, and GET /internal/v1/operator/operations/{idempotencyKey}; each command requires platform-identity.administer, the bridge's hq: operator, Idempotency-Key and the two-person approval headers, takes expectedVersion for versioned subjects (409 VERSION_CONFLICT), is recorded in platform_access_admin_operations in the same transaction and answers {status, version, resource}. API keys are never issued or rotated through the bridge. Bridge API key reads add `version` (revision + suspension changes); the audit targetKind gains APP_GRANT (action APP_GRANT_REVOKED); new error code VERSION_CONFLICT (409)."
+    "version": "1.15.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them. 1.12.0 (ADR 0064, CF Meet Apps / \"Integrate\"; every operation behind PLATFORM_ACCESS_OAUTH_ENABLED, off: 404 NOT_FOUND): OAuth client profiles, client secrets and app grant listing for the Developer Console (platform-oauth.manage) — PUT / GET /internal/v1/oauth/clients/{applicationId}, POST …/secret, GET …/grants; authorization for the Meeting Service (platform-oauth.authorize) — POST /internal/v1/oauth/authorization-requests/validate, POST /internal/v1/oauth/authorizations, GET /internal/v1/oauth/grants, DELETE /internal/v1/oauth/grants/{grantId}; the token endpoint backend for the Developer Console (platform-oauth.token) — POST /internal/v1/oauth/token, /revoke, /introspect. POST /internal/v1/credentials/authenticate (and delegated-authority) also accept cfoa_ / cfob_ app tokens: the authority chain is the grant's target FIRST_PARTY triple and installation service account, scopes are mapped from the grant, the principal restriction is exactly the user / bot principal, and the chain adds credentialKind, appId and grantId. The identity change feed gains APP_GRANT. New error codes INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED, APP_NOT_AVAILABLE and RFC 6749 invalid_grant, invalid_client, unsupported_grant_type, invalid_request. 1.12.0 also: client profiles take optional developerName, logoUrl and meetingSurface {url, origins}; grant items carry app {name, developerName, logoUrl, meetingSurface} and the pairwise sub; authentication / credential status of OAuth tokens add restrictedPrincipal {id, kind, reference} and credentialIssuedAt. 1.13.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) is accepted from cfmeet.admin-bridge (strict hq:<staff>) and, for the legacy named operator only, from the operator console; from any other caller any of them is refused (INTERNAL_PERMISSION_DENIED). The admin bridge's read-only operator views under GET /internal/v1/operator/*: tenants, a tenant's applications, environments, service accounts, scope grants, API keys (public id and last four only), principals (exact-match search, external reference never returned), allowed websites, cross-tenant identity-record search, OAuth apps and their grants, and the audit trail without detail; each requires platform-identity.administer and the bridge's HQ operator. 1.14.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/operator/tenants/{tenantId}/status, applications/{applicationId}/status, environments/{environmentId}/status, service-accounts/{serviceAccountId}/status, applications/{applicationId}/scope-grants and privileged-scope-grants, credentials/{credentialId}/revoke | suspend | resume, environments/{environmentId}/principals, principals/{principalId}/status | remove | sign-out, app-grants/{grantId}/revoke and environments/{environmentId}/origins/remove, and GET /internal/v1/operator/operations/{idempotencyKey}; each command requires platform-identity.administer, the bridge's hq: operator, Idempotency-Key and the two-person approval headers, takes expectedVersion for versioned subjects (409 VERSION_CONFLICT), is recorded in platform_access_admin_operations in the same transaction and answers {status, version, resource}. API keys are issued and rotated through the bridge only OWNER-DELIVERED (1.15.0). Bridge API key reads add `version` (revision + suspension changes); the audit targetKind gains APP_GRANT (action APP_GRANT_REVOKED); new error code VERSION_CONFLICT (409). 1.15.0 (ADR 0068 A4, owner-delivered secrets): identity.key.issue (POST /internal/v1/operator/service-accounts/{serviceAccountId}/credentials) and identity.key.rotate (POST /internal/v1/operator/credentials/{credentialId}/rotate) answer ISSUED / ROTATED with the delivery REFERENCE only (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, deliveryState, expiresAt, key id / public id / last4 / version); the secret is sealed for one reveal in the partner's Developer Platform console through the new delegation routes GET /internal/v1/delegation/environments/{environmentId}/credential-deliveries and POST …/credential-deliveries/{deliveryRef}/reveal (human member only, destroyed at the reveal, after 7 days or on revocation, never resent). Bridge API key reads add `delivery`; the audit action CREDENTIAL_DELIVERY_REVEALED."
   },
   "components": {
     "securitySchemes": {
@@ -371,7 +371,8 @@
           "lastUsedAt",
           "revision",
           "version",
-          "createdAt"
+          "createdAt",
+          "delivery"
         ],
         "properties": {
           "id": {
@@ -480,6 +481,17 @@
             "type": "integer",
             "minimum": 1,
             "description": "The bridge commands' expected version of this key: revision + the number of suspensions / resumptions (a suspension does not change the revision)."
+          },
+          "delivery": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BridgeKeyDelivery"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The delivery reference of a key issued or rotated through the admin bridge (null: a key the partner created themselves)."
           }
         }
       },
@@ -569,6 +581,123 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "BridgeDeliveredKeyResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A key issued or rotated through the admin bridge with its delivery reference (ADR 0068, owner-delivered): ids, last four, state, version and the delivery channel / ref / state / expiry. Never the secret, a token, the sealed copy, a URL or an address.",
+        "required": [
+          "id",
+          "publicId",
+          "last4",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "serviceAccountId",
+          "state",
+          "version",
+          "credentialExpiresAt",
+          "rotatedFromCredentialId",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "deliveryState",
+          "expiresAt",
+          "revealedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "last4": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 4
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REVOKED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The new key's version (revision + suspension changes): the next key command's expectedVersion."
+          },
+          "credentialExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rotatedFromCredentialId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "identity.key.rotate: the rotated key (null for identity.key.issue)."
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "deliveryState": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "REVEALED",
+              "EXPIRED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the unrevealed sealed copy is destroyed."
+          },
+          "revealedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -722,6 +851,60 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "BridgeKeyDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The REFERENCE of an owner-delivered API key (ADR 0068, issued or rotated through the admin bridge): never the secret, a token, the sealed copy or a URL. The partner reveals the secret once in their own Developer Platform console; PENDING until then, REVEALED after, EXPIRED when the window passed or the key was revoked first (the sealed copy is destroyed; nothing is resent, the command is re-issued).",
+        "required": [
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "deliveryState",
+          "expiresAt",
+          "revealedAt"
+        ],
+        "properties": {
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "deliveryState": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "REVEALED",
+              "EXPIRED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the sealed copy is destroyed if it was not revealed (7 days after issuance)."
+          },
+          "revealedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -1559,6 +1742,63 @@
             "maxLength": 512,
             "pattern": "^https://",
             "description": "An https:// URL of at most 512 characters; null clears it."
+          }
+        }
+      },
+      "DelegatedCredentialDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An owner-delivered key waiting for its one reveal (no secret).",
+        "required": [
+          "deliveryRef",
+          "delivery",
+          "deliveryChannel",
+          "state",
+          "credentialId",
+          "publicId",
+          "serviceAccountId",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "deliveryRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ]
+          },
+          "credentialId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -15757,6 +15997,443 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/internal/v1/operator/service-accounts/{serviceAccountId}/credentials": {
+      "post": {
+        "operationId": "bridgeIssueCredential",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Issue an API key, owner-delivered (admin bridge)",
+        "description": "identity.key.issue (R4): issues a new key of an ACTIVE service account (its environment, application and tenant ACTIVE; scopes validated as for every issuance). `expectedVersion` is the service account's `version` from GET /internal/v1/operator/tenants/{tenantId}/service-accounts; the account row is locked and another version is 409 VERSION_CONFLICT (nothing done). Answers ISSUED with the new key's version. OWNER-DELIVERED (ADR 0068, brief §1): HQ never sees the secret. In the same transaction as the change, its audit row and its record, the new key's secret is sealed (XChaCha20-Poly1305, key derived from the credential pepper) for ONE reveal in the partner's own Developer Platform console (POST /internal/v1/delegation/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal, a human member only); the sealed copy is destroyed at the reveal, after 7 days or when the key is revoked first, and nothing is ever resent (an expired delivery is re-issued by a new command). Only an EXTERNAL tenant (`tenantId` re-checked: another tenant's subject is 404) and an environment the console reaches (SANDBOX / TEST or an activated PRODUCTION; otherwise 422 POLICY_VIOLATION, nothing done). The answer's resource is the new key with the delivery REFERENCE (delivery, deliveryChannel, deliveryRef, deliveryState, expiresAt) and never the secret, a token, the sealed copy or a URL; HQ reads the delivery state afterwards in GET /internal/v1/operator/tenants/{tenantId}/credentials (`delivery`) or by replaying the command. Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "tenantId",
+                  "scopes"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The service account's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "tenantId": {
+                    "$ref": "#/components/schemas/platform.common.v1.Uuid",
+                    "description": "The tenant HQ acts in; another tenant's service account is 404."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "description": "Registry scopes allowed for the application in this environment kind."
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Optional key expiry (default: the platform's default lifetime; capped by its maximum)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ISSUED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The NEW key's version (integer as a string)."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeDeliveredKeyResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/credentials/{credentialId}/rotate": {
+      "post": {
+        "operationId": "bridgeRotateCredential",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Rotate an API key, owner-delivered (admin bridge)",
+        "description": "identity.key.rotate (R4): rotates an ACTIVE key into an independent successor (same service account; scopes default to the predecessor's) and limits the predecessor to min(its expiry, now + overlap). The default overlap is the delivery window (7 days, capped by the platform maximum) so the partner can reveal and deploy the successor first. `expectedVersion` is the rotated key's `version` (revision + suspension changes); the key row is locked and another version is 409 VERSION_CONFLICT; a suspended, expired, revoked or already rotated key is 409 INVALID_STATE (nothing done). Answers ROTATED with the successor's version (`rotatedFromCredentialId`: the rotated key). OWNER-DELIVERED (ADR 0068, brief §1): HQ never sees the secret. In the same transaction as the change, its audit row and its record, the new key's secret is sealed (XChaCha20-Poly1305, key derived from the credential pepper) for ONE reveal in the partner's own Developer Platform console (POST /internal/v1/delegation/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal, a human member only); the sealed copy is destroyed at the reveal, after 7 days or when the key is revoked first, and nothing is ever resent (an expired delivery is re-issued by a new command). Only an EXTERNAL tenant (`tenantId` re-checked: another tenant's subject is 404) and an environment the console reaches (SANDBOX / TEST or an activated PRODUCTION; otherwise 422 POLICY_VIOLATION, nothing done). The answer's resource is the new key with the delivery REFERENCE (delivery, deliveryChannel, deliveryRef, deliveryState, expiresAt) and never the secret, a token, the sealed copy or a URL; HQ reads the delivery state afterwards in GET /internal/v1/operator/tenants/{tenantId}/credentials (`delivery`) or by replaying the command. Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "tenantId"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The rotated key's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "tenantId": {
+                    "$ref": "#/components/schemas/platform.common.v1.Uuid",
+                    "description": "The tenant HQ acts in; another tenant's key is 404."
+                  },
+                  "overlapMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "How long the predecessor keeps working (default: the 7-day delivery window, capped by the platform maximum)."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "description": "Replacement scope set (default: the predecessor's)."
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Optional successor expiry (default: the platform's default lifetime)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ROTATED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The NEW key's version (integer as a string)."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeDeliveredKeyResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credential-deliveries": {
+      "get": {
+        "operationId": "delegateListCredentialDeliveries",
+        "description": "ADR 0068: the owner-delivered API keys of this environment (issued or rotated by HQ staff through the admin bridge) still waiting for their one reveal, oldest first (at most 100): delivery ref, channel, key id, public id and expiry. Never a secret. The console shows them to the partner's members with a reveal action. Unknown environment: NOT_FOUND. Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "deliveries"
+                  ],
+                  "properties": {
+                    "deliveries": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/DelegatedCredentialDelivery"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "List owner-delivered keys awaiting their reveal"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal": {
+      "post": {
+        "operationId": "delegateRevealCredentialDelivery",
+        "description": "ADR 0068: the ONE reveal of an owner-delivered key's secret to the partner (Cache-Control: no-store). Only a human member the Developer Platform authorized (`X-CF-Delegated-Actor: u-…`; a machine credential `s-…` or operator command `o-…` is 422 POLICY_VIOLATION). The sealed copy is destroyed in the same transaction and the reveal is audited (CREDENTIAL_DELIVERY_REVEALED). An unknown delivery, one of another environment, an already revealed or expired one, or one whose key was revoked / expired / superseded first is NOT_FOUND (an unusable copy is destroyed); nothing is ever resent. The Developer Platform must not store or replay this response (no idempotent replay of the secret). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "deliveryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revealed (this once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "credential",
+                    "secret"
+                  ],
+                  "properties": {
+                    "credential": {
+                      "type": "object",
+                      "description": "The credential view (as GET …/credentials/{credentialId})."
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "The raw key, shown exactly once."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Reveal an owner-delivered key (once)"
       }
     }
   }

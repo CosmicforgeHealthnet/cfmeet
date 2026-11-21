@@ -132,6 +132,8 @@ async fn the_bridge_reads_the_identity_hierarchy_without_secrets() {
     let list = items(&creds);
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["lastFour"].as_str().unwrap().len(), 4);
+    // A key the partner created themselves has no owner-delivery reference.
+    assert!(list[0]["delivery"].is_null(), "{}", list[0]);
     let text = creds.body.to_string();
     assert!(!text.contains(&secret), "never the secret");
     for k in [

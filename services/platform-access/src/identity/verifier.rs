@@ -147,6 +147,14 @@ impl VerifierKeyring {
         mac.finalize().into_bytes().into()
     }
 
+    /// MAC of `message` under the pepper of `version` (`None`: that pepper is not
+    /// deployed). Used to derive version-bound keys from a label.
+    pub(crate) fn compute_with(&self, version: i32, message: &[u8]) -> Option<[u8; VERIFIER_LEN]> {
+        let mut mac = self.mac(version)?;
+        mac.update(message);
+        Some(mac.finalize().into_bytes().into())
+    }
+
     /// Constant-time comparison of `expected` with the MAC of `message` under the pepper
     /// of `version`. An unknown version never verifies.
     pub(crate) fn verify(&self, version: i32, message: &[u8], expected: &[u8]) -> bool {
