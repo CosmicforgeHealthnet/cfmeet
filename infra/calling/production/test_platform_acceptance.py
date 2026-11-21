@@ -245,15 +245,7 @@ class FakePlatform:
         m = re.fullmatch(r'/v1/conversations/(\w+)', bare)
         if m:
             c = self.conversations.get(m.group(1))
-            if not c or c['env'] != env:
-                return self.nf()
-            if m.group(2) and method == 'POST':
-                if not isinstance(body, dict) or body.get('expectedVersion') != c['version']:
-                    return 400, {'error': {'code': 'VALIDATION_ERROR'}}
-                c['state'] = 'CANCELLED'
-                c['version'] += 1
-                return 200, {}
-            return 200, dict(c)
+            return (200, {}) if c and c['env'] == env else self.nf()
         if bare == '/v1/calls' and method == 'POST':
             call = self.id('call')
             self.calls_[call] = dict(env=env, state='RINGING', version=1)
@@ -264,7 +256,15 @@ class FakePlatform:
         m = re.fullmatch(r'/v1/calls/(\w+)(/cancel)?', bare)
         if m:
             c = self.calls_.get(m.group(1))
-            return (200, {}) if c and c['env'] == env else self.nf()
+            if not c or c['env'] != env:
+                return self.nf()
+            if m.group(2) and method == 'POST':
+                if not isinstance(body, dict) or body.get('expectedVersion') != c['version']:
+                    return 400, {'error': {'code': 'VALIDATION_ERROR'}}
+                c['state'] = 'CANCELLED'
+                c['version'] += 1
+                return 200, {}
+            return 200, dict(c)
         return 404, {}
 
     def device_user_token(self, method, path, body, bearer):
