@@ -934,7 +934,7 @@ mod tests {
             Err(RenderError::SecretUnavailable)
         );
         let secrets = Secrets {
-            token: Some("exp_0123456789abcdefghij".into()),
+            token: Some("exp_fixture_0123456789abcdefghij".into()),
             ..Default::default()
         };
         let e = render_email(
@@ -946,7 +946,7 @@ mod tests {
             "https://cfmeet.com/",
         )
         .unwrap();
-        let link = "https://cfmeet.com/organizations/exports/download#org=6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b&export=7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d&token=exp_0123456789abcdefghij";
+        let link = "https://cfmeet.com/organizations/exports/download#org=6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b&export=7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d&token=exp_fixture_0123456789abcdefghij";
         assert!(e.text.contains(link), "{}", e.text);
         // The HTML part escapes the fragment separators.
         assert!(e.html.contains(&link.replace('&', "&amp;")), "{}", e.html);
@@ -993,7 +993,7 @@ mod tests {
             Err(RenderError::SecretUnavailable)
         );
         let secrets = Secrets {
-            token: Some("cfinv_0123456789abcdefghij".into()),
+            token: Some("cfinv_fixture_0123456789abcdefghij".into()),
             address: Some("owner@example.com".into()),
             ..Default::default()
         };
@@ -1007,7 +1007,7 @@ mod tests {
         )
         .unwrap();
         let link =
-            "https://cfmeet.com/developers/invitations/accept#token=cfinv_0123456789abcdefghij";
+            "https://cfmeet.com/developers/invitations/accept#token=cfinv_fixture_0123456789abcdefghij";
         assert!(e.text.contains(link) && e.html.contains(link));
         assert!(e.text.contains("Sat 28 Nov 2026, 12:00 (UTC)"));
         assert!(!e.text.contains("owner@example.com"));
