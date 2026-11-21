@@ -307,11 +307,13 @@ async fn the_bridge_pulls_daily_failed_deliveries_counts_only() {
     let Some(h) = Harness::new().await else {
         return;
     };
-    with_deliveries(&h).await;
-    with_deliveries(&h).await;
-    with_deliveries(&h).await;
+    // Each call records one delivery row (email is disabled in the harness, so the
+    // pipeline itself adds none): four rows, three to fail and one to be SENT.
+    for _ in 0..4 {
+        with_deliveries(&h).await;
+    }
     let total = h.count("SELECT count(*) FROM notif_deliveries").await;
-    assert!(total >= 3, "{total}");
+    assert!(total >= 4, "{total}");
     // The database's UTC days: yesterday, the day before, and today.
     let day = |offset: i32| {
         let h = &h;
@@ -348,15 +350,18 @@ async fn the_bridge_pulls_daily_failed_deliveries_counts_only() {
     ))
     .await
     .unwrap();
-    if total > 3 {
-        h.exec(&format!(
-            "UPDATE notif_deliveries SET status = 'SENT', completed_at = {}
-              WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 3)",
-            at(&yesterday, "12:00:00")
-        ))
-        .await
-        .unwrap();
-    }
+    h.exec(&format!(
+        "UPDATE notif_deliveries SET status = 'SENT', completed_at = {}
+          WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 3)",
+        at(&yesterday, "12:00:00")
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        h.count("SELECT count(*) FROM notif_deliveries WHERE status = 'FAILED'")
+            .await,
+        3
+    );
     let bridge = h.peers.bridge.clone();
     let pull = |date: String| {
         let (h, bridge) = (&h, bridge.clone());

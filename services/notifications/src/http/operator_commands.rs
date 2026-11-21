@@ -802,7 +802,8 @@ pub async fn cancel_reroute(
 /// `GET /internal/v1/operator/operations/{idempotencyKey}` — the bridge's settlement read:
 /// `{idempotency_key, outcome: APPLIED, source_status, source_version}` with the status and
 /// version the command answered. 404 for an unknown key and for any caller but the bridge
-/// with `notifications.administer` and `X-CF-Operator`.
+/// with `notifications.administer` (a bridge request without `X-CF-Operator` never gets here:
+/// the attribution middleware refuses it with 403).
 pub async fn operation(
     State(state): State<AppState>,
     caller: Caller,
