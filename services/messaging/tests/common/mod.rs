@@ -299,6 +299,8 @@ pub struct FakePrincipals {
     pub down: StdMutex<bool>,
     /// ADR 0064 app bots: (environment, principal) -> app id (`app:<appId>`).
     pub bots: StdMutex<HashMap<(Uuid, Uuid), Uuid>>,
+    /// CF Meet account principals: (environment, principal) -> `cfmeet-user:<account>`.
+    pub native: StdMutex<HashMap<(Uuid, Uuid), String>>,
 }
 
 #[async_trait]
@@ -318,6 +320,30 @@ impl PrincipalDirectory for FakePrincipals {
             .get(&(scope.environment_id, principal_id))
             .cloned()
             .unwrap_or(PrincipalStatus::NotFound))
+    }
+
+    async fn native_user_references(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<HashMap<Uuid, String>, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self.known.lock().unwrap();
+        let native = self.native.lock().unwrap();
+        Ok(principals
+            .iter()
+            .filter(|p| {
+                matches!(known.get(&(scope.environment_id, **p)),
+                    Some(PrincipalStatus::Active { kind }) if kind == "NATIVE_CF_USER")
+            })
+            .filter_map(|p| {
+                native
+                    .get(&(scope.environment_id, *p))
+                    .map(|r| (*p, r.clone()))
+            })
+            .collect())
     }
 
     async fn application_bots(

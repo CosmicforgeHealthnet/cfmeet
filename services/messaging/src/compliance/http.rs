@@ -7,6 +7,15 @@
 //! | `POST /exports`, `GET /exports/{exportId}`, `POST /exports/{exportId}/download-grants` (MANAGED only) | `messaging.export` |
 //! | `POST /deletion-requests`, `GET /deletion-requests/{requestId}` | `conversations.manage` |
 //! | `GET /audit` | `conversations.manage` |
+//!
+//! Owner-delivered exports ([`recipient_routes`]) are served ONLY on the delegated mirror
+//! (`/internal/v1/delegated/v1/messaging/...`): a FIRST_PARTY backend (the CF Meet
+//! console's) relays the signed-in recipient, named SIGNED in its token. A customer
+//! credential on `/v1` never reaches them, so the tenant cannot claim its users' exports.
+//!
+//! | Route | Scope |
+//! |---|---|
+//! | `GET /export-deliveries`, `POST /exports/{exportId}/claim` | `messages.read` |
 
 use axum::{
     extract::{Path, Query, State},
@@ -22,12 +31,13 @@ use super::{
     holds::{self, CreateHold, ReleaseHold},
 };
 use crate::{
-    conversations::http::CONVERSATIONS_MANAGE,
+    conversations::http::{CONVERSATIONS_MANAGE, MESSAGES_READ},
     error::{Error, ErrorCode},
     http::{
         error::ApiError,
         middleware::{acting_header, CustomerCaller},
     },
+    messages::http::acting_with,
     state::AppState,
 };
 
@@ -45,6 +55,14 @@ pub fn routes() -> Router<AppState> {
 }
 
 pub const MESSAGING_EXPORT: &str = "messaging.export";
+
+/// The recipient's owner-delivered export routes, nested under `/v1/messaging` of the
+/// delegated mirror only ([`crate::http::app`]).
+pub fn recipient_routes() -> Router<AppState> {
+    Router::new()
+        .route("/exports/:export_id/claim", post(export_claim))
+        .route("/export-deliveries", get(export_deliveries))
+}
 
 async fn export(
     State(state): State<AppState>,
@@ -77,6 +95,29 @@ async fn export_grant(
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = administration(&caller, &headers, MESSAGING_EXPORT)?;
     Ok(Json(exports::grant(&state, ctx, id).await?))
+}
+
+async fn export_claim(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok(Json(
+        exports::claim(&state, caller.context(), &acting, id).await?,
+    ))
+}
+
+async fn export_deliveries(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok(Json(
+        exports::deliveries(&state, caller.context(), &acting).await?,
+    ))
 }
 
 async fn deletion_request(

@@ -8,7 +8,8 @@
 //! | `GET /operator/reports?status&limit&cursor` | reports, newest first |
 //! | `GET /operator/reports/{reportId}` | one report and its moderation actions |
 //! | `GET /operator/holds?status&limit&cursor` | legal holds (ACTIVE by default) |
-//! | `GET /operator/exports?limit&cursor` | MANAGED conversation exports |
+//! | `GET /operator/exports?limit&cursor` | MANAGED conversation exports (and their owner delivery) |
+//! | `GET /operator/exports/{exportId}` | one owner-delivered export's reference (state, size, digest, delivery) |
 //! | `GET /operator/deletion-requests?limit&cursor` | erasure / purge requests |
 //! | `GET /operator/audit?since&until&limit&cursor` | tenant audit (no detail) |
 //! | `GET /operator/switches` | emergency off-switches |
@@ -18,12 +19,13 @@
 //!
 //! Reports and holds carry their row `version` (what a bridge command names as
 //! `expectedVersion`, [`crate::operator_commands`]). `POST /operator/holds` and
-//! `POST /operator/deletion-requests` (commands) share their paths with reads and are
-//! registered here.
+//! `POST /operator/deletion-requests` and `POST /operator/exports` (commands) share their
+//! paths with reads and are registered here.
 //!
 //! Privacy (ADR 0068, design §12): ids, categories, states, counts and times only. Never
 //! message content, ciphertext, MLS state, keys, attachments, report evidence (sealed or
-//! referenced), audit `detail`, outbox payloads, export object keys or digests, legal case
+//! referenced), audit `detail`, outbox payloads, export object keys or URLs (an
+//! owner-delivered export's reference carries its size and digest, brief §1), legal case
 //! references, free-text summaries or error strings. Read-only.
 
 use axum::{
@@ -63,7 +65,11 @@ pub fn routes() -> Router<AppState> {
             "/operator/holds",
             get(holds).post(crate::operator_commands::compliance::place_hold),
         )
-        .route("/operator/exports", get(exports))
+        .route(
+            "/operator/exports",
+            get(exports).post(crate::operator_commands::compliance::request_export),
+        )
+        .route("/operator/exports/:exportId", get(export))
         .route(
             "/operator/deletion-requests",
             get(deletion_requests)
@@ -405,6 +411,9 @@ struct ExportRow {
     created_at: DateTime<Utc>,
     completed_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
+    delivery_channel: Option<String>,
+    delivery_ref: Option<Uuid>,
+    delivered_at: Option<DateTime<Utc>>,
 }
 
 fn no_filters(q: &PageQuery, what: &str) -> Result<(), ApiError> {
@@ -429,8 +438,8 @@ async fn exports(
     let rows: Vec<ExportRow> = db::all(
         &state.db,
         "SELECT id, tenant_id, application_id, environment_id, conversation_id, status, size, message_count, \
-         failure, attempts, created_at, completed_at, expires_at FROM messaging_exports \
-         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2)) ORDER BY created_at DESC, id DESC LIMIT $3",
+         failure, attempts, created_at, completed_at, expires_at, delivery_channel, delivery_ref, delivered_at \
+         FROM messaging_exports WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2)) ORDER BY created_at DESC, id DESC LIMIT $3",
         vec![at.into(), id.into(), ((limit + 1) as i64).into()],
     )
     .await?;
@@ -445,9 +454,31 @@ async fn exports(
                 "status": r.status, "size": r.size, "messageCount": r.message_count,
                 "failure": r.failure, "attempts": r.attempts, "createdAt": rfc(r.created_at),
                 "completedAt": opt_rfc(r.completed_at), "expiresAt": rfc(r.expires_at),
+                "delivery": if r.delivery_channel.is_some() { "OWNER_DELIVERED" } else { "TENANT" },
+                "deliveryChannel": r.delivery_channel, "deliveryRef": r.delivery_ref,
+                "deliveredAt": opt_rfc(r.delivered_at),
             })
         },
     )))
+}
+
+/// `GET /operator/exports/{exportId}`: an owner-delivered export's reference (404 for a
+/// tenant's own export and for an unknown id).
+async fn export(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    require_bridge(&caller)?;
+    let id = Uuid::parse_str(&id).map_err(|_| Error::code(ErrorCode::NotFound))?;
+    let e = crate::compliance::exports::load_owner_delivered(&state.db, id, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    let mut v = crate::compliance::exports::delivery_view(&e);
+    v["tenantId"] = json!(e.tenant_id);
+    v["applicationId"] = json!(e.application_id);
+    v["environmentId"] = json!(e.environment_id);
+    Ok(Json(v))
 }
 
 #[derive(Debug, FromQueryResult)]

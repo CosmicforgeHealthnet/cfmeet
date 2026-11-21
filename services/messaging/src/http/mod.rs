@@ -98,8 +98,13 @@ pub fn app(state: AppState) -> Router {
         .with_state(state.clone());
     // `/internal/v1/delegated/v1/...` mirrors the customer surface for first-party
     // backends acting through a peer service (`messaging-application.delegate`).
+    // Owner-delivered exports (ADR 0068) are claimed here only: the recipient signed in to
+    // CF Meet, relayed by a first-party backend, never a customer credential on `/v1`.
     let delegated = Router::new()
-        .nest("/v1/messaging", customer_routes())
+        .nest(
+            "/v1/messaging",
+            customer_routes().merge(crate::compliance::http::recipient_routes()),
+        )
         .nest("/v1/conversations", conversation_tree())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)

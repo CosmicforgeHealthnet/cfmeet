@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.4.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version."
+    "version": "1.5.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version. 1.5.0 (ADR 0068 final round, owner-delivered exports): POST /internal/v1/operator/exports (messaging.export.request, R4) registers an export of a MANAGED conversation delivered ONLY to the verified recipient it names (never the tenant), answered with a reference (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, exportState); GET /internal/v1/operator/exports/{exportId} reads its state; the A2 export list carries each export's delivery; the recipient lists and claims it once on the delegated mirror (GET /internal/v1/delegated/v1/messaging/export-deliveries, POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim)."
   },
   "tags": [
     {
@@ -33,6 +33,10 @@
     {
       "name": "Internal — HQ Admin Bridge",
       "description": "The admin bridge's operator reads and commands on CF Meet chats (ADR 0068): ids, categories, states, counts, versions and times only; never content, ciphertext, keys, evidence or payloads. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) plus X-CF-Operator; commands also take an Idempotency-Key and, when two-person, the approval headers."
+    },
+    {
+      "name": "Internal — Owner-Delivered Exports",
+      "description": "The recipient's side of owner-delivered exports (ADR 0068): listed and claimed once in the recipient's own CF Meet console, relayed by a first-party backend on the delegated mirror. References and one download grant only."
     }
   ],
   "paths": {
@@ -1144,6 +1148,80 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "operatorRequestExport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Request an owner-delivered export (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.export.request (R4): an OWNER-DELIVERED export of a MANAGED conversation for the verified requester named in the body (the data subject). Built by the existing export worker (MANAGED only: a PRIVATE_E2EE conversation is 409 E2EE_EXPORT_NOT_AVAILABLE; the conversation context's policy must allow exports), stored only when the store confirms encryption at rest (otherwise FAILED STORAGE_NOT_ENCRYPTED), kept 7 days after it is ready and then deleted. Delivered ONLY to the recipient: signed in to their own CF Meet console, relayed by a first-party backend, they claim it once (POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim); a second claim is refused and nothing is ever re-sent (re-issue the command). The tenant's routes never see it and no tenant event is published for it. Legal holds never block it (it reads, never deletes). The recipient must be an ACTIVE member and a CF Meet account (409 RECIPIENT_NOT_A_MEMBER / RECIPIENT_NOT_VERIFIED). The answer is a reference only. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key (id of the export). The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -2828,6 +2906,179 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetOwnerDeliveredExport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get an owner-delivered export (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The reference and state of an owner-delivered export (REQUESTED, READY, DELIVERED, EXPIRED, FAILED), its size and digest. 404 for a tenant's own export and for an unknown id. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOwnerDeliveredExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegated/v1/messaging/export-deliveries": {
+      "get": {
+        "operationId": "listExportDeliveries",
+        "tags": [
+          "Internal — Owner-Delivered Exports"
+        ],
+        "summary": "List the acting recipient's owner-delivered exports",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The acting principal's owner-delivered exports, newest first (at most 20), as references. Served ONLY on the delegated mirror (never on /v1): permission messaging-application.delegate, signed delegated scope of a FIRST_PARTY environment re-validated against Platform Access, the signed-in recipient as the (signed) acting principal; scope messages.read. Anyone but the export's recipient gets 404.",
+        "x-cfmeet-internal-permission": "messaging-application.delegate",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "May only repeat the signed initiating principal."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportDeliveryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegated/v1/messaging/exports/{exportId}/claim": {
+      "post": {
+        "operationId": "claimExportDelivery",
+        "tags": [
+          "Internal — Owner-Delivered Exports"
+        ],
+        "summary": "Claim an owner-delivered export once",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The single claim of a READY owner-delivered export by its recipient: one short-lived forced-download grant, and the export becomes DELIVERED in the same transaction (audited). 409 EXPORT_NOT_READY, EXPORT_ALREADY_DELIVERED (nothing is re-sent: HQ re-issues the command) or EXPORT_EXPIRED. Served ONLY on the delegated mirror (never on /v1): permission messaging-application.delegate, signed delegated scope of a FIRST_PARTY environment re-validated against Platform Access, the signed-in recipient as the (signed) acting principal; scope messages.read. Anyone but the export's recipient gets 404.",
+        "x-cfmeet-internal-permission": "messaging-application.delegate",
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "May only repeat the signed initiating principal."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportClaimGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3328,7 +3579,11 @@
           "attempts",
           "createdAt",
           "completedAt",
-          "expiresAt"
+          "expiresAt",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "deliveredAt"
         ],
         "properties": {
           "id": {
@@ -3398,9 +3653,39 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "delivery": {
+            "enum": [
+              "TENANT",
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "CONSOLE_REVEAL_ONCE",
+              null
+            ]
+          },
+          "deliveryRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         },
-        "description": "One MANAGED conversation export. The object key and digest are not included."
+        "description": "One MANAGED conversation export: the tenant's own (delivery TENANT) or an owner-delivered one (OWNER_DELIVERED). The object key and digest are not included."
       },
       "OperatorExportPage": {
         "type": "object",
@@ -5227,6 +5512,357 @@
           }
         },
         "description": "An environment's chat policy: its override document, version, baseline and effective policy (flags, limits, enums; no personal data)."
+      },
+      "ExportDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "conversationId",
+          "exportState",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientPrincipalId",
+          "recipientMasked",
+          "size",
+          "sha256",
+          "failure",
+          "createdAt",
+          "completedAt",
+          "deliveredAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportState": {
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "delivery": {
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null",
+            "description": "Always null: the export is delivered in the recipient's own CF Meet console and Messaging never holds an address."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "The reference of an owner-delivered export (ADR 0068, brief §1): ids, state, size, digest, delivery and times. Never the export, its object key, a URL, a token or an address."
+      },
+      "OperatorOwnerDeliveredExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "conversationId",
+          "exportState",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientPrincipalId",
+          "recipientMasked",
+          "size",
+          "sha256",
+          "failure",
+          "createdAt",
+          "completedAt",
+          "deliveredAt",
+          "expiresAt",
+          "tenantId",
+          "applicationId",
+          "environmentId"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportState": {
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "delivery": {
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null",
+            "description": "Always null: the export is delivered in the recipient's own CF Meet console and Messaging never holds an address."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "An owner-delivered export as HQ sees it (references only). exportState: REQUESTED (being built), READY (the recipient may claim it once), DELIVERED (claimed), EXPIRED (7 days after it was ready; the copy is deleted), FAILED."
+      },
+      "OperatorExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "conversationId",
+          "recipientPrincipalId",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the conversation must belong to; another tenant's conversation is 404 NOT_FOUND."
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The MANAGED conversation to export."
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The verified requester (the data subject): an ACTIVE member of the conversation who is a CF Meet account (NATIVE_CF_USER with a cfmeet-user reference). The export is delivered to this principal only."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "REQUESTED"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorOwnerDeliveredExport"
+          }
+        },
+        "description": "The export (id = the Idempotency-Key) is registered; the existing export worker builds it and the recipient claims it in their own CF Meet console."
+      },
+      "ExportDeliveryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/ExportDelivery"
+            }
+          }
+        }
+      },
+      "ExportClaimGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "deliveryRef",
+          "method",
+          "url",
+          "expiresAt",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "enum": [
+              "GET"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "A short-lived signed read with a forced download (application/json attachment)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "description": "The single download of an owner-delivered export, answered once to its recipient."
       }
     },
     "parameters": {
