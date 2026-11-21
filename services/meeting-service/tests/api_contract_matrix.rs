@@ -84,7 +84,9 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // list / revoke, conference apps, app-context token, app-context keys).
     // + 5 server-audit operations (conference extend; calendar feed read / create / delete and
     // the token-authenticated feed).
-    assert_eq!(probed, 284, "all v2 operations probed");
+    // + 3 admin bridge owner-delivered export operations (organization export download;
+    // Messaging export deliveries and the claim-once).
+    assert_eq!(probed, 287, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

@@ -114,6 +114,9 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/messaging/me"),
         ("get", "/api/v2/messaging/directory"),
         ("post", "/api/v2/messaging/directory/resolve"),
+        // Admin bridge: owner-delivered Messaging exports (HTTP API 1.11.0)
+        ("get", "/api/v2/messaging/export-deliveries"),
+        ("post", "/api/v2/messaging/exports/{exportId}/claim"),
         ("post", "/api/v2/messaging/principals/names"),
         ("get", "/api/v2/messaging/relay/{path}"),
         ("post", "/api/v2/messaging/relay/{path}"),
@@ -130,6 +133,11 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/organizations/{id}/members"),
         ("get", "/api/v2/organizations/{id}/meeting-spaces"),
         ("get", "/api/v2/organizations/{id}/export"),
+        // Admin bridge: owner-delivered organization export download (HTTP API 1.11.0)
+        (
+            "post",
+            "/api/v2/organizations/{id}/exports/{exportId}/download",
+        ),
         ("post", "/api/v2/meeting-spaces/{id}/members/team"),
         ("get", "/api/v2/organizations/{id}/meeting-profile-policy"),
         ("put", "/api/v2/organizations/{id}/meeting-profile-policy"),
