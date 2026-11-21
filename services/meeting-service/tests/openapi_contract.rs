@@ -501,6 +501,12 @@ fn every_v2_route_is_documented() {
         ),
         ("post", "/api/v2/admin/organizations/{id}/owners"),
         ("post", "/api/v2/registrations/cancel"),
+        // Optional phone accounts: removing the number requires a fresh step-up proof.
+        ("get", "/api/v2/me/phone"),
+        ("patch", "/api/v2/me/phone"),
+        ("delete", "/api/v2/me/phone"),
+        ("post", "/api/v2/me/phone/verification"),
+        ("post", "/api/v2/me/phone/confirm"),
         // ADR 0064 / 0065 — CF Meet Apps
         ("get", "/api/v2/oauth/authorize/context"),
         ("post", "/api/v2/oauth/authorize/approve"),
@@ -747,7 +753,8 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                 };
                 assert_eq!(types, expected, "{method} {path} request content");
                 assert!(
-                    method != "get" && method != "delete",
+                    // This explicitly defined DELETE payload carries the one-use security proof.
+                    method != "get" && (method != "delete" || path == "/api/v2/me/phone"),
                     "{method} {path} must not take a body"
                 );
             }

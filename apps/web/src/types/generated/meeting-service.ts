@@ -2702,12 +2702,53 @@ export type PendingLinkView = (DeviceLinkView & {
   keyThumbprint: string;
 });
 
+
+export interface PhoneBindRequest {
+  phoneNumber: string;
+  stepUpToken: string;
+}
+
+
+export interface PhoneChallenge {
+  challengeId: string;
+  expiresInSecs: number;
+  message: string;
+}
+
+
+export interface PhoneConfirm {
+  challengeId: string;
+  code: string;
+}
+
+
+export interface PhoneRemove {
+  stepUpToken: string;
+}
+
+
+export interface PhoneRequest {
+  phoneNumber: string;
+}
+
+
+export interface PhoneSettings {
+  discoverable: boolean;
+}
+
 /**
  * Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or
  * verification provider is approved, and never required.
  */
 export interface PhoneVerificationStatus {
   required: boolean;
+  status: string;
+}
+
+
+export interface PhoneView {
+  discoverable: boolean;
+  phoneNumber?: string | null;
   status: string;
 }
 
@@ -3622,7 +3663,7 @@ export interface StartTranscriptionRequest {
 }
 
 /** What the confirmation is for; a token for one purpose never authorizes another. */
-export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA";
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA" | "MANAGE_PHONE";
 
 
 export interface StepUpRequest {
@@ -4139,6 +4180,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/me/apps/{grantId}": "v2_revoke_my_app",
   "DELETE /api/v2/me/avatar": "v2_remove_my_avatar",
   "DELETE /api/v2/me/calendar-feed": "v2_delete_calendar_feed",
+  "DELETE /api/v2/me/phone": "v2_remove_phone",
   "DELETE /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_revoke_member",
   "DELETE /api/v2/meeting-spaces/{id}/recurrence": "v2_end_recurrence",
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
@@ -4213,6 +4255,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/me/mfa": "v2_get_my_mfa",
   "GET /api/v2/me/organization-invitations": "v2_my_organization_invitations",
   "GET /api/v2/me/organizations": "v2_my_organizations",
+  "GET /api/v2/me/phone": "v2_get_my_phone",
   "GET /api/v2/me/profile": "v2_get_my_profile",
   "GET /api/v2/me/security-events": "v2_list_my_security_events",
   "GET /api/v2/me/sessions": "v2_list_my_sessions",
@@ -4267,6 +4310,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/conferences/{id}/collaboration-policy": "v2_update_collaboration_policy",
   "PATCH /api/v2/conferences/{id}/messages/{messageId}": "v2_edit_message",
   "PATCH /api/v2/conferences/{id}/participants/{participantId}/role": "v2_change_role",
+  "PATCH /api/v2/me/phone": "v2_update_phone_privacy",
   "PATCH /api/v2/me/profile": "v2_update_my_profile",
   "PATCH /api/v2/meeting-spaces/{id}": "v2_update_meeting_space",
   "PATCH /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_update_member",
@@ -4291,6 +4335,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v1/auth/otp/request": "request_otp",
   "POST /api/v1/auth/otp/verify": "verify_otp",
   "POST /api/v1/auth/otp/verify-link": "verify_otp_link",
+  "POST /api/v1/auth/phone/request": "request_phone_otp",
+  "POST /api/v1/auth/phone/verify": "verify_phone_otp",
   "POST /api/v1/auth/refresh": "refresh_token",
   "POST /api/v1/meetings": "create_meeting",
   "POST /api/v1/meetings/instant": "create_instant_meeting",
@@ -4394,6 +4440,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/me/mfa/disable": "v2_disable_my_mfa",
   "POST /api/v2/me/mfa/totp/confirm": "v2_confirm_my_totp",
   "POST /api/v2/me/mfa/totp/setup": "v2_setup_my_totp",
+  "POST /api/v2/me/phone/confirm": "v2_confirm_phone_binding",
+  "POST /api/v2/me/phone/verification": "v2_request_phone_binding",
   "POST /api/v2/me/sessions/revoke-all": "v2_revoke_all_my_sessions",
   "POST /api/v2/me/sessions/revoke-others": "v2_revoke_other_account_sessions",
   "POST /api/v2/me/sessions/{sessionId}/revoke": "v2_revoke_my_session",

@@ -148,6 +148,25 @@ async fn main() -> anyhow::Result<()> {
     if personal.is_some() && !messaging_migration::communications_ready(&db).await? {
         anyhow::bail!("Communications integration migration is required");
     }
+    let local_send_policy = match std::env::var("MESSAGING_LOCAL_SEND_POLICY_ENABLED")
+        .ok()
+        .as_deref()
+    {
+        None | Some("false") => false,
+        Some("true") => true,
+        _ => anyhow::bail!("MESSAGING_LOCAL_SEND_POLICY_ENABLED must be true or false"),
+    };
+    let local_send_generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+        .ok()
+        .map(|v| uuid::Uuid::parse_str(&v))
+        .transpose()
+        .map_err(|_| anyhow!("invalid send policy generation"))?;
+    if local_send_policy && (personal.is_none() || local_send_generation.is_none()) {
+        anyhow::bail!("Local send policy requires its scope and generation");
+    }
+    if personal.is_some() && !messaging_migration::send_policy_projection_ready(&db).await? {
+        anyhow::bail!("Send policy projection migration is required");
+    }
     // CF Meet chat remediation M1: CF Meet's own personal application environment gets
     // the first-party policy baseline (attachments on, 25 MiB, every kind). No other
     // application environment is touched, and its own application policy still wins.
@@ -169,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let mut state = AppState::new(db.clone(), clock, authority, service_auth.clone())
         .with_communications(personal)
+        .with_local_send_policy(local_send_policy, local_send_generation)
         .with_principals(Arc::new(PlatformAccessPrincipals::new(
             service_auth.client(),
         )))

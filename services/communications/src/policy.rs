@@ -97,7 +97,7 @@ impl State {
     ) -> Result<bool> {
         // Fresh owner queries preserve legacy domain blocks and close propagation races.
         // These read-only adapters never call this policy endpoint recursively.
-        for service in [ServiceId::calling(), ServiceId::messaging()] {
+        let check = |service: ServiceId| async move {
             let req = OutboundServiceRequest::new_operation(service.clone())
                 .with_delegated_context(scope.clone());
             let r = self
@@ -114,13 +114,16 @@ impl State {
                 return Err(Error::Unavailable);
             }
             let v: Value = r.json().map_err(|_| Error::Unavailable)?;
-            match v["blocked"].as_bool() {
-                Some(true) => return Ok(true),
-                Some(false) => {}
-                None => return Err(Error::Unavailable),
-            }
+            v["blocked"].as_bool().ok_or(Error::Unavailable)
+        };
+        // B2: both authorities are read afresh, concurrently. An allow is never cached:
+        // a block must take effect on the next send, before its outbox event arrives.
+        let (calling, messaging) =
+            tokio::join!(check(ServiceId::calling()), check(ServiceId::messaging()));
+        if calling? {
+            return Ok(true);
         }
-        Ok(false)
+        messaging
     }
     pub async fn active_account(
         &self,
@@ -141,14 +144,12 @@ impl State {
     ) -> Result<Decision> {
         auth::validate_scope(self, scope).await?;
         let s = cf_communications_policy::Scope::of(scope);
-        let actor = self
-            .store
-            .principal(&self.store.db, s, check.actor_principal_id)
-            .await;
-        let target = self
-            .store
-            .principal(&self.store.db, s, check.target_principal_id)
-            .await;
+        let (actor, target) = tokio::join!(
+            self.store
+                .principal(&self.store.db, s, check.actor_principal_id),
+            self.store
+                .principal(&self.store.db, s, check.target_principal_id),
+        );
         let deny = |reason, version| Decision {
             schema_version: 1,
             allowed: false,
@@ -165,17 +166,29 @@ impl State {
         };
         let privacy = self.store.privacy(&self.store.db, target.id).await?;
         let version = actor.version.max(target.version).max(privacy.version);
-        if !auth::principals_active(self, scope, &[&actor, &target]).await? {
+        // The checks have independent owners. Start their reads together instead of
+        // making every message wait for five successive network/database round trips.
+        // Evaluate their answers in the same order as before (a refusal wins over a
+        // later owner's outage); none of the decisions outlives this request.
+        let profiles = [&actor, &target];
+        let (principals, actor_account, target_account, actor_held, target_held) = tokio::join!(
+            auth::principals_active(self, scope, &profiles),
+            self.active_account(scope, &actor),
+            self.active_account(scope, &target),
+            self.held(&actor),
+            self.held(&target),
+        );
+        if !principals? {
             return Ok(deny(DecisionReason::NotPermitted, version));
         }
         if actor.activation_state != Activation::Active
             || target.activation_state != Activation::Active
-            || !self.active_account(scope, &actor).await?
-            || !self.active_account(scope, &target).await?
+            || !actor_account?
+            || !target_account?
         {
             return Ok(deny(DecisionReason::AccountInactive, version));
         }
-        if self.held(&actor).await? || self.held(&target).await? {
+        if actor_held? || target_held? {
             return Ok(deny(DecisionReason::AccountInactive, version));
         }
         if let Some(issued) = check.credential_issued_at {

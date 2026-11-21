@@ -73,6 +73,20 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 
 ## Operations
 
+Server-audit follow-up: `activate-database-capacity` prepares the core PostgreSQL server
+for `activate-database-pools`. Its `confirm=restart-core-database` acknowledges a brief
+connection interruption. It rounds the live pool plan plus reserved/operator connections
+to the next 32, refuses more than 256 connections, and requires 16 MiB of available memory
+per additional backend plus 2 GiB of headroom. A health failure restores the previous
+setting. Roll application pools back before rolling capacity back. This operation changes
+only `cfmeet-core-db`; it never restarts the Meeting Service's separate database.
+
+Meeting Service releases and activation clones mount `/opt/cfmeet-core/logs/meeting-service`
+at `/var/log/cfmeet` and set `CFMEET_LOG_DIRECTORY`. The image retains fifteen daily log
+files, covering today and the previous fourteen days; replacement containers keep the same
+host directory. Existing logs inside old containers are retained with those rollback
+containers; the new retention window begins when this release starts writing to the mount.
+
 | Operation | Changes production | What it does |
 |---|---|---|
 | `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, image revision label (`revision`; the container's own, possibly stale, label is `containerLabelRevision`), limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |
@@ -295,3 +309,131 @@ the release they protect is accepted.
   release gate: it is reported as a warning and never blocks a first-party release (owner decision
   2026-11-13). The same holds for `backup-restore-drill.yml` and `cfmeet-offsite-backup.yml`.
 - Staging activation (runbook §9) before each production activation step.
+## Service log archive (M6)
+
+After the reviewed release is live, dispatch `activate-service-log-collector` with
+`confirm=retain-14-days`. It installs the owned `cfmeet-service-logs.service` host unit.
+The collector reads only running CF Meet containers from the release catalogue and
+known CF Meet infrastructure names; other applications, staging and old release
+containers are excluded. Logs stay under `/opt/cfmeet-core/logs/services/`, separated
+by container and UTC date, with private file permissions. Fourteen complete UTC days
+plus the current day are retained, independently of container replacement.
+
+The cursor is checkpointed only after archived bytes are durable. Restart may repeat
+the final timestamp boundary, but does not skip unflushed bytes. The collector reconnects
+to the current container name after replacement. Its systemd unit has no network
+address family, a read-only host filesystem apart from its archive, no capabilities,
+and a 512 MiB memory ceiling. Activation requires 2 GiB free disk and a fresh healthy
+collector heartbeat. Rollback restores the prior unit/configuration and preserves logs.
+
+This starts durable collection at activation; it can recover only history still held
+by Docker. It cannot reconstruct logs already removed before installation. Inspect
+`health.json` for collector failures and monitor host disk usage as part of operations.
+
+## Server audit follow-up: approval and activation order
+
+The owner instructed on 21 November 2026 that this work must stay off `main` until
+explicit approval. Keep the review pull request a draft. A feature branch and local
+validation do not authorize merging `main` or deploying the new images. Once approval
+arrives, retain the normal exact-main-SHA and green-CI release gate.
+
+### Local message block checks (B2)
+
+The independently versioned `messaging-send-policy-projection-migration` must run
+before the new Messaging image. It is included in the image, coordinated migrations,
+certification harness and backup catalogue. It never alters another owner's database.
+
+After the approved release, dispatch `activate-local-send-policy` twice, first with
+`confirm=prepare`, then `confirm=enable`. Preparation starts Messaging's receiver with
+the fast path off and a fresh rollout UUID, then configures Communications and Calling
+to synchronously acknowledge mutations in that same generation. Enabling refuses
+unless all three report protocol 1 and the matching generation. The prepared generation
+is consumed; after disabling or a source-image rollback, prepare a new one.
+
+Every warmed direct send checks the local block projection and invalidation sequence.
+The first eligibility check and checks after the 30-second eligibility expiry still
+ask Communications; pre-existing native/Hub blocks therefore cannot become a cached
+allow while a snapshot is missing. Block updates take exclusive principal locks in
+Messaging, while direct sends hold shared locks through their transaction. A successful
+block ACK therefore waits for an earlier send and a later send sees the local refusal.
+
+Hub updates and native Calling principal/application rules reach that projection before
+their public mutation returns success. A failed ACK leaves durable source data/outbox
+work and returns unavailable; an idempotent retry must deliver before confirming.
+Per-rule versions preserve unblock tombstones; contradictory equal versions are refused.
+Rollout UUIDs keep delayed events from an older activation from restoring stale blocks.
+
+Before releasing or rolling back a source image, dispatch this operation with
+`confirm=disable`. Source-image release/rollback refuses while the local fast path is
+on. Disabling restores fresh direct eligibility checks while preserving synchronous
+source ACKs. The normal background relay remains available for retry.
+
+### Meeting notification email cutover (M4)
+
+The current in-app-only path keeps email with the legacy Meeting sender. To move email
+as well, dispatch `activate-meeting-in-app-notices` with `confirm=disable`, keeping the
+producer fence in SHADOW. Then dispatch `activate-notifications-routing` with
+`confirm=meeting-notification-email-active`. The new gate checks that old non-shadow
+Meeting publications are settled and their receiving inbox has no PENDING/HELD rows;
+otherwise it refuses before changing routing. DEAD producer publications count as a
+backlog because a later replay must not turn one into a second email.
+
+Once drained and EMAIL/IN_APP are ACTIVE, dispatch `activate-notification-fence` with
+`confirm=meeting-service-meeting-notification-fenced-new`. It repeats the drain check.
+The existing per-notice routing decision then makes Notification Service authoritative
+and skips the legacy email path for that same notice. Existing OLD decisions retain
+their recorded path. Do not replay obsolete in-app-only events after this cutover.
+Verify one reminder, cancellation and time change in the bell and exactly one email
+for each controlled notice.
+
+### Meeting recording (M7)
+
+Dispatch `activate-meeting-recording` with `confirm=prepare`. This creates the separate
+private `cfmeet-meeting-artifacts` bucket on the existing MinIO/KMS, enables default
+SSE-S3 encryption, creates a bucket/prefix-scoped service identity and keeps its keys in
+root-protected files/recovery material on the VPS. The bucket has a 10 GiB hard quota;
+preparation requires 12 GiB free. It installs a signed GET/HEAD-only HTTPS route through
+the durable storage relay, verifies unsigned reads fail and a scoped signed round trip
+succeeds, and mounts the credentials read-only with recording still disabled. No root
+storage credential enters the Meeting container or test client.
+
+Meeting explicitly supplies its own S3 destination to each Egress request. It cannot
+silently use the shared worker's Calling bucket. Standard meeting policy retains a
+recording for 30 days; stricter meeting/profile rules continue to apply through the
+existing artifact retention worker. No bucket lifecycle rule bypasses that authority.
+Storage and its signed-read route survive an image rollback so old recording bytes
+remain accessible through authorized application access.
+
+Then dispatch `activate-meeting-recording` with `confirm=enable-30-days`. This requires
+prepared storage and 2 GiB available RAM and runs the controlled real API/RTC acceptance
+inside the activation's rollback boundary. A disposable client publishes generated
+audio/video, starts and stops its own meeting recording through the public API, waits
+for READY/object verification, checks default retention, downloads through an authorized
+signed URL, verifies the digest and playable audio/video, refuses another account and
+an unsigned storage request, deletes the recording and confirms byte absence. It ends
+and archives its own meeting. Only short-lived controlled user tokens enter that client;
+no LiveKit admin or MinIO key is mounted. The token file is removed even after failure.
+The protected receipt is under `/opt/cfmeet-core/meeting-recording/acceptance/<run>/`.
+Any failure restores the previous recording-disabled container; storage is preserved.
+
+This acceptance is prepared code, not evidence that production recording has passed it.
+It must actually pass on the approved release before recording is reported as live.
+
+References: [LiveKit storage outputs](https://docs.livekit.io/transport/media/ingress-egress/egress/outputs/),
+[MinIO bucket quotas](https://docs.min.io/aistor/administration/bucket-quotas/).
+
+### Email evidence and deferred external setup
+
+On 21 November, the authenticated Resend console showed SPF and DKIM verified and
+successful delivery to a real mailbox. Recent delayed acceptance messages used
+`example.invalid`; a delay event reported SMTP `421 4.4.1 Unable to connect to remote
+host`. They do not prove that all real recipients are undeliverable. A missing DMARC TXT
+record was added at Hostinger as `_dmarc = v=DMARC1; p=none;`, TTL 3600, and read back
+from the authoritative nameserver. The Resend adapters now permanently refuse `.invalid`
+recipients before a provider request, preventing fresh acceptance fixtures from generating
+hours of meaningless provider retries. Recording/test transports remain usable locally.
+
+The owner explicitly chose to leave M8 transcripts and AI notes disabled. No AI key was
+created and no provider was enabled. Independent witnessing and native phone push still
+need the external operator/keys and actual acceptance listed in
+[server-audit-external-setup.md](server-audit-external-setup.md).

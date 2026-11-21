@@ -34,7 +34,7 @@ COPY packages/notification-client packages/notification-client
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
-RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration --bin messaging-notification-fence-migration \
+RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration --bin messaging-notification-fence-migration --bin messaging-send-policy-projection-migration \
  && cargo build --release --locked -p messaging --bin messaging
 
 FROM debian:bookworm-slim
@@ -48,6 +48,7 @@ WORKDIR /app
 COPY --from=builder /src/services/messaging/target/release/messaging ./messaging
 COPY --from=builder /src/services/messaging/target/release/messaging-migration ./messaging-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-communications-migration ./messaging-communications-migration
+COPY --from=builder /src/services/messaging/target/release/messaging-send-policy-projection-migration ./messaging-send-policy-projection-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-notification-fence-migration ./messaging-notification-fence-migration
 USER messaging
 ENV MESSAGING_BIND_ADDRESS=0.0.0.0:8097 \

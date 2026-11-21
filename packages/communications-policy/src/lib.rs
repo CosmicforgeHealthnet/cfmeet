@@ -263,3 +263,37 @@ pub struct Dispatch {
     pub idempotency_key: Option<Uuid>,
     pub account: VerifiedAccount,
 }
+
+#[derive(Debug, Clone)]
+pub struct BlockRuleProjection {
+    pub rule_id: Uuid,
+    pub actor: Option<Uuid>,
+    pub target: Uuid,
+    pub version: i64,
+    pub active: bool,
+    pub generation: Uuid,
+}
+impl PolicyClient {
+    /// Calling's canonical rule reaches Messaging before its public mutation succeeds.
+    pub async fn project_block_rule(
+        &self,
+        scope: DelegatedPlatformContext,
+        rule: &BlockRuleProjection,
+    ) -> Result<(), PolicyError> {
+        let req = OutboundServiceRequest::new_operation(ServiceId::communications())
+            .with_delegated_context(scope);
+        let response = self.client.post_json(&req, "/internal/v1/communications/block-events", &serde_json::json!({
+            "eventId":Uuid::new_v4(),"actorPrincipalId":rule.actor.unwrap_or(rule.target),"targetPrincipalId":rule.target,
+            "sourceVersion":rule.version,"blocked":rule.active,"ruleId":rule.rule_id,"applicationBlock":rule.actor.is_none(),"projectionGeneration":rule.generation
+        })).await.map_err(|_| PolicyError::Unavailable)?;
+        if response.status() != 200
+            || response
+                .json::<serde_json::Value>()
+                .map_err(|_| PolicyError::Unavailable)?["sendPolicyProjection"]
+                != 1
+        {
+            return Err(PolicyError::Unavailable);
+        }
+        Ok(())
+    }
+}

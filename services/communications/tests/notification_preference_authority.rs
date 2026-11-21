@@ -718,6 +718,8 @@ async fn an_unavailable_service_is_a_clear_error_and_nothing_is_written_locally(
     let unconfigured = State {
         store: h.state.store.clone(),
         config: Arc::new(Config {
+            synchronous_policy_events: c.synchronous_policy_events,
+            send_policy_generation: c.send_policy_generation,
             bind: c.bind,
             database_url: c.database_url.clone(),
             public_app_url: c.public_app_url.clone(),

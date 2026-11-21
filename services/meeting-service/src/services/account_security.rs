@@ -39,6 +39,7 @@ pub enum AuthMethod {
     Password,
     /// Passwordless sign-in with an emailed one-time code or magic link.
     EmailOtp,
+    PhoneOtp,
     Google,
     LegacyRefresh,
 }
@@ -48,6 +49,7 @@ impl AuthMethod {
         match self {
             AuthMethod::Password => "PASSWORD",
             AuthMethod::EmailOtp => "EMAIL_OTP",
+            AuthMethod::PhoneOtp => "PHONE_OTP",
             AuthMethod::Google => "GOOGLE",
             AuthMethod::LegacyRefresh => "LEGACY_REFRESH",
         }

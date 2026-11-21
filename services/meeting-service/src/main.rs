@@ -251,6 +251,17 @@ async fn main() -> anyhow::Result<()> {
         panic!("Account-privacy migration is required (account-privacy-migration up)");
     }
     backend::services::account_privacy::spawn(state.db.clone(), std::time::Duration::from_secs(60));
+    if !migration::account_phone_ready(&state.db)
+        .await
+        .expect("Account-phone migration readiness")
+    {
+        panic!("Account-phone migration is required (account-phone-migration up)");
+    }
+    if std::env::var("PHONE_ACCOUNTS_ENABLED").ok().as_deref() == Some("true") {
+        backend::services::account_phone::TwilioVerify::from_env().unwrap_or_else(|_| {
+            panic!("Phone accounts enabled without a valid verification provider")
+        });
+    }
 
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration

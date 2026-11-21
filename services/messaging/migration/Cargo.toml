@@ -29,3 +29,7 @@ path = "src/communications-main.rs"
 [[bin]]
 name = "messaging-notification-fence-migration"
 path = "src/notification-fence-main.rs"
+
+[[bin]]
+name = "messaging-send-policy-projection-migration"
+path = "src/send-policy-projection-main.rs"

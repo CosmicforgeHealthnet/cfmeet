@@ -358,6 +358,12 @@ def activate_routing(cr, sha, run_id, confirm):
     refusal = gate(category, channel, mode, facts)
     if refusal:
         raise RuntimeError('Routing gate: ' + refusal + '; nothing changed')
+    if (category, channel, mode) == (MEETING_IN_APP_CATEGORY, 'EMAIL', 'ACTIVE') \
+            and fence_row(cr, 'meeting-service', category)['mode'] != 'FENCED_NEW':
+        # Earlier in-app-only publications were non-shadow even though their email
+        # remained with Meeting. Do not reinterpret a delayed copy as another email.
+        if meeting_in_app_backlog(cr):
+            raise RuntimeError('Routing gate: drain the old Meeting in-app-only publications and inbox first; nothing changed')
     before = routing_row(cr, category, channel)
     entry = cr.begin('activate-notifications-routing', sha, run_id)
     entry['notificationRouting'] = dict(category=category, channel=channel, before=before['mode'], after=mode)
@@ -796,6 +802,8 @@ def fence_gate(service, category, mode, before, facts):
         if (service, category) == ('meeting-service', MEETING_IN_APP_CATEGORY) and facts.get('meeting_in_app'):
             return ('FENCED_NEW while the Meeting in-app-only path is on; run activate-meeting-in-app-notices '
                     'disable first')
+        if (service, category) == ('meeting-service', MEETING_IN_APP_CATEGORY) and facts.get('meeting_in_app_backlog', 0):
+            return 'FENCED_NEW needs the old Meeting in-app-only publications and inbox drained first'
         missing = [op for op in spec.get('new_requires', ()) if op not in facts.get('done', ())]
         if missing:
             return 'FENCED_NEW needs %s first' % ', '.join(missing)
@@ -836,6 +844,9 @@ def activate_fence(cr, sha, run_id, confirm):
                  app_urls=app_urls(cr) if mode == 'FENCED_NEW' and spec.get('same_app_url') else {},
                  meeting_in_app=(service, category) == ('meeting-service', MEETING_IN_APP_CATEGORY)
                  and meeting_in_app_on(cr))
+    if (service, category, mode) == ('meeting-service', MEETING_IN_APP_CATEGORY, 'FENCED_NEW') \
+            and before['mode'] != 'FENCED_NEW' and not facts['meeting_in_app']:
+        facts['meeting_in_app_backlog'] = meeting_in_app_backlog(cr)
     refusal = fence_gate(service, category, mode, before['mode'], facts)
     if refusal:
         raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
@@ -865,6 +876,21 @@ MEETING_IN_APP_CATEGORY = 'MEETING_NOTIFICATION'
 MEETING_IN_APP_FLAG = 'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED'
 MEETING_IN_APP_OPERATION = 'activate-meeting-in-app-notices'
 MEETING_IN_APP_CONFIRM = {'enable': 'true', 'disable': 'false'}
+
+
+def meeting_in_app_backlog(cr):
+    """Called with the in-app-only producer stopped, before EMAIL becomes active.
+    ACKED publications must also finish processing at the receiving owner. DEAD
+    publications count too, so a later replay cannot turn one into a duplicate email.
+    """
+    publications = int(cr.meeting_psql(
+        "SELECT count(*) FROM meeting_notification_publications WHERE category='MEETING_NOTIFICATION' "
+        "AND NOT shadow AND state NOT IN ('ACKED','EXPIRED','SUPERSEDED');").strip())
+    inbox = int(cr.release.db_sql(cr.SERVICES['notifications']['db'],
+        "SELECT count(*) FROM notif_event_inbox WHERE producer='cfmeet.meeting-service' "
+        "AND route_category='MEETING_NOTIFICATION' AND NOT shadow AND state IN ('PENDING','HELD');").strip())
+    cr.emit('meetingInAppOnlyDrain', dict(publications=publications, inbox=inbox))
+    return publications + inbox
 
 
 def meeting_in_app_on(cr):

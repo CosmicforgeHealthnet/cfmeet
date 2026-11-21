@@ -136,6 +136,19 @@ pub fn spawn(state: &AppState) -> Workers {
 
 /// W4: deliveries whose notification expired are never sent late.
 pub async fn expire_overdue(db_conn: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
+    // A category held while its routing was OFF must not remain stuck forever after
+    // its explicit delivery deadline. Retire only expired, noncritical envelopes;
+    // live or undated holds still require the normal operator release decision.
+    db::exec(
+        db_conn,
+        "UPDATE notif_event_inbox SET state='PROCESSED', processed_at=now(),
+             last_error_class='DELIVERY_EXPIRED', lease_id=NULL, lease_until=NULL
+         WHERE state='HELD' AND lane <> 'CRITICAL' AND NOT shadow
+           AND envelope #>> '{delivery,expiresAt}' IS NOT NULL
+           AND (envelope #>> '{delivery,expiresAt}')::timestamptz <= now()",
+        vec![],
+    )
+    .await?;
     db::exec(
         db_conn,
         "UPDATE notif_deliveries d SET status = 'EXPIRED', completed_at = now()

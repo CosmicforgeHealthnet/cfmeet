@@ -753,6 +753,20 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         // Blueprint Section 9: the personal account profile
         .route(
+            "/me/phone",
+            get(crate::handlers::v2::account_phone::get_my_phone)
+                .patch(crate::handlers::v2::account_phone::update_privacy)
+                .delete(crate::handlers::v2::account_phone::remove_phone),
+        )
+        .route(
+            "/me/phone/verification",
+            post(crate::handlers::v2::account_phone::request_binding),
+        )
+        .route(
+            "/me/phone/confirm",
+            post(crate::handlers::v2::account_phone::confirm_binding),
+        )
+        .route(
             "/me/profile",
             get(crate::handlers::v2::account_profile::get_my_profile)
                 .patch(crate::handlers::v2::account_profile::update_my_profile),

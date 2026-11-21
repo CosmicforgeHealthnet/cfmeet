@@ -19,7 +19,7 @@ use crate::{
 
 /// Per-client-address limit, active only when the trusted proxy header is configured
 /// (`AUTH_CLIENT_IP_HEADER`); per-account limits apply regardless (ACC-015).
-async fn limit_by_client(
+pub(crate) async fn limit_by_client(
     state: &AppState,
     headers: &HeaderMap,
     action: &str,
@@ -38,6 +38,33 @@ async fn limit_by_client(
             .await?;
     }
     Ok(())
+}
+
+/// A phone proof never verifies email and never bypasses the account's second factor.
+pub(crate) async fn phone_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: uuid::Uuid,
+) -> ApiResult<OtpVerifyResponse> {
+    let user = Users::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired phone verification".into()))?;
+    if user.status != users::UserStatus::Active || blocked(state, &user).await? {
+        return Err(ApiError::BadRequest(
+            "Invalid or expired phone verification".into(),
+        ));
+    }
+    if crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: "PHONE".into(),
+            created: false,
+            test_account: false,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    finish_sign_in(state, headers, user, false, "PHONE", false).await
 }
 
 /// ACC-022: one rendering of the account status for every v1 sign-in response
@@ -310,6 +337,7 @@ pub async fn verify_mfa(
     let via: &'static str = match pending.via.as_str() {
         "LINK" => "LINK",
         "GOOGLE" => "GOOGLE",
+        "PHONE" => "PHONE",
         _ => "CODE",
     };
     finish_sign_in(
@@ -445,13 +473,17 @@ async fn finish_sign_in(
 ) -> ApiResult<OtpVerifyResponse> {
     let user = reactivate_if_deactivated(state, user, via).await?;
     let label = security::client_label(headers);
-    let issued =
-        security::start_session(state, &user, AuthMethod::EmailOtp, None, label.clone()).await?;
+    let method = if via == "PHONE" {
+        AuthMethod::PhoneOtp
+    } else {
+        AuthMethod::EmailOtp
+    };
+    let issued = security::start_session(state, &user, method, None, label.clone()).await?;
     let mut user_active: users::ActiveModel = user.clone().into();
     user_active.last_login = Set(Some(now_utc()));
     let user = user_active.update(&state.db).await?;
 
-    let mut detail = serde_json::json!({ "method": "EMAIL_OTP", "via": via });
+    let mut detail = serde_json::json!({ "method": if via == "PHONE" { "PHONE_OTP" } else { "EMAIL_OTP" }, "via": via });
     if test_account {
         detail["test_account"] = serde_json::Value::Bool(true);
         inc(&OM.auth_test_account_sign_in);

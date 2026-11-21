@@ -42,6 +42,12 @@ pub struct Account {
 /// Simulated canonical owners for the Sections 9-23 private routes.
 #[derive(Default)]
 pub struct World {
+    pub policy_events: Vec<Value>,
+    pub policy_ack_generation: Option<Uuid>,
+    pub policy_events_down: bool,
+    /// Rendezvous the two fresh account/block owner reads; a sequential policy
+    /// implementation times out instead of passing the overlap regression test.
+    pub policy_read_barrier: Option<Arc<tokio::sync::Barrier>>,
     pub conversations: BTreeMap<Uuid, MockConversation>,
     /// idempotency key -> (call id, initiator, targets, kind)
     pub launches: BTreeMap<String, (Uuid, Uuid, Vec<Uuid>, String)>,
@@ -75,6 +81,7 @@ pub struct World {
     pub access_calls: usize,
     /// The Account's verified email addresses (lower case) -> account reference.
     pub verified_emails: BTreeMap<String, String>,
+    pub discoverable_phones: BTreeMap<String, String>,
 }
 /// One account's preference document in the mock Notification Service (U6 / U7 rules:
 /// absent = everything enabled, one document version bumped by every write).
@@ -410,9 +417,9 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
             }
             // The Hub always names the caller for the callee's incoming-call screen.
-            if !body["initiatorDisplayName"]
+            if body["initiatorDisplayName"]
                 .as_str()
-                .is_some_and(|n| !n.trim().is_empty())
+                .is_none_or(|n| n.trim().is_empty())
             {
                 return Some(reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
             }
@@ -533,6 +540,20 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         .and_then(|d| d.initiating_principal().map(|p| p.principal_id))
         .unwrap_or_default();
     let path = request.uri().path().to_owned();
+    if matches!(
+        path.as_str(),
+        "/internal/v1/accounts/communications/status" | "/internal/v1/communications/blocks/check"
+    ) {
+        let barrier = s.world.read().unwrap().policy_read_barrier.clone();
+        if let Some(barrier) = barrier {
+            if tokio::time::timeout(Duration::from_secs(5), barrier.wait())
+                .await
+                .is_err()
+            {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+    }
     let b = to_bytes(request.into_body(), 16384).await.unwrap();
     let body: Value = if b.is_empty() {
         json!({})
@@ -568,8 +589,15 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         },
         // KF1: the Account's verified-email lookup.
         "/internal/v1/accounts/communications/email-lookup" => {
-            let email = body["email"].as_str().unwrap_or_default().to_owned();
-            match s.world.read().unwrap().verified_emails.get(&email) {
+            let world = s.world.read().unwrap();
+            let matched = if let Some(phone) = body["phoneNumber"].as_str() {
+                world.discoverable_phones.get(phone)
+            } else {
+                world
+                    .verified_emails
+                    .get(body["email"].as_str().unwrap_or_default())
+            };
+            match matched {
                 Some(r) => json!({"schemaVersion":1,"found":true,"accountReference":r}),
                 None => json!({"schemaVersion":1,"found":false}),
             }
@@ -600,7 +628,14 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             json!({"available":false,"reason":"DEVICE_SECURITY_SETUP_REQUIRED","securityReady":false,"privateField":"MUST_NOT_REACH_CONSUMER"})
         }
         "/internal/v1/communications/common-groups" => json!({"groups":[]}),
-        "/internal/v1/communications/events" => json!({"applied":true}),
+        "/internal/v1/communications/events" => {
+            let mut world = s.world.write().unwrap();
+            world.policy_events.push(body.clone());
+            if world.policy_events_down {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            json!({"applied":true,"sendPolicyProjection":1,"sendPolicyGeneration":world.policy_ack_generation})
+        }
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     Json(value).into_response()
@@ -832,6 +867,8 @@ impl Harness {
         let state = State {
             store: Store { db },
             config: Arc::new(Config {
+                synchronous_policy_events: false,
+                send_policy_generation: None,
                 bind: "127.0.0.1:0".parse().unwrap(),
                 database_url: "redacted-test-only".to_owned().into(),
                 public_app_url: "https://cfmeet.com".into(),

@@ -169,22 +169,23 @@ function AddContactDialog({ open, onOpenChange, areas }: { open: boolean; onOpen
   const [value, setValue] = useState("");
   // The box takes a CF Meet ID or an email address (people who allow it can be found by
   // their verified email, Hub 1.9.0).
-  const resolve = useMutation({ mutationFn: (q: { id: string } | { email: string }) => ("id" in q ? hub.resolvePublicId(q.id) : hub.resolveEmail(q.email)), retry: false });
+  const resolve = useMutation({ mutationFn: (q: { id: string } | { email: string } | { phone: string }) => ("id" in q ? hub.resolvePublicId(q.id) : "phone" in q ? hub.resolvePhone(q.phone) : hub.resolveEmail(q.email)), retry: false });
   const normalized = normalizeCfMeetId(value);
   const email = !normalized && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? value.trim() : null;
+  const phone = process.env.NEXT_PUBLIC_PHONE_ACCOUNTS_ENABLED === "true" && /^\+[1-9]\d{7,14}$/.test(value.trim()) ? value.trim() : null;
   return (
     <SidePage open={open} onOpenChange={onOpenChange} title="New contact" description="Find someone by their CF Meet ID or email, or share yours">
       <div className="space-y-6 px-4 py-5">
         <section className="space-y-3" aria-label="Find someone by CF Meet ID or email">
           <div>
             <h3 className="font-semibold">Find by CF Meet ID or email</h3>
-            <p className="text-sm text-muted-foreground">Ask them for their ID (it starts with CF-), or enter their email.</p>
+            <p className="text-sm text-muted-foreground">Ask them for their ID (it starts with CF-), or enter their email.{process.env.NEXT_PUBLIC_PHONE_ACCOUNTS_ENABLED === "true" ? " You can also enter a verified phone number with its country code, if they allow phone discovery." : ""}</p>
           </div>
-          <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (normalized) resolve.mutate({ id: normalized }); else if (email) resolve.mutate({ email }); }}>
+          <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (normalized) resolve.mutate({ id: normalized }); else if (email) resolve.mutate({ email }); else if (phone) resolve.mutate({ phone }); }}>
             <input autoFocus aria-label="CF Meet ID or email" placeholder="CF-… or email" value={value} maxLength={254} onChange={(e) => setValue(e.target.value)} data-testid="find-id"
               className="h-12 w-full rounded-xl border border-transparent bg-muted/70 px-4 focus:bg-background font-mono text-base outline-none placeholder:font-sans focus:border-primary focus:ring-2 focus:ring-primary/20" />
-            {value && !normalized && !email ? <p className="px-1 text-xs text-muted-foreground">Enter a CF Meet ID (CF- and 6 letters or numbers) or an email address.</p> : null}
-            <button type="submit" disabled={(!normalized && !email) || resolve.isPending} data-testid="find-submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {value && !normalized && !email && !phone ? <p className="px-1 text-xs text-muted-foreground">Enter a CF Meet ID (CF- and 6 letters or numbers) or an email address.</p> : null}
+            <button type="submit" disabled={(!normalized && !email && !phone) || resolve.isPending} data-testid="find-submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
               {resolve.isPending ? <Spinner /> : <Search className="size-4" />}Find
             </button>
           </form>

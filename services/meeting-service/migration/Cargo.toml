@@ -71,3 +71,7 @@ path = "src/meeting-audit-main.rs"
 [[bin]]
 name = "account-privacy-migration"
 path = "src/account-privacy-main.rs"
+
+[[bin]]
+name = "account-phone-migration"
+path = "src/account-phone-main.rs"

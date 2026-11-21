@@ -116,6 +116,7 @@ pub async fn account_event(
     let txn = s.store.begin().await?;
     if !inbox(&s, &txn, &source, event.event_id, &digest_body).await? {
         txn.commit().await?;
+        s.flush_scope_policy(&scope).await?;
         return Ok(Json(json!({"applied":false,"duplicate":true})));
     }
     let profile: Option<Profile> = one(&txn, &format!("{LOOKUP} FOR UPDATE"), values).await?;
@@ -194,6 +195,7 @@ pub async fn account_event(
         fan_out = "PRINCIPAL";
     }
     txn.commit().await?;
+    s.flush_scope_policy(&scope).await?;
     Ok(Json(
         json!({"applied":applied,"duplicate":false,"fanOut":fan_out}),
     ))
@@ -247,13 +249,17 @@ pub struct BlockEvent {
     pub target_principal_id: Uuid,
     pub source_version: i64,
     pub blocked: bool,
+    /// Canonical Calling rule identity (new send-policy projection protocol).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_generation: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub application_block: bool,
 }
-/// DEPRECATED (Blueprint v1.0 Section 14, MSG-016 / DATA-006). No service produces
-/// block events: Calling and Messaging stay the authorities for their own block rules and
-/// every policy decision reads them live (`State::domain_blocks`). The route is kept,
-/// unchanged, for contract compatibility and is removed with the next major version of
-/// `cfmeet.communications.communications-internal`; rows it wrote are never read for a
-/// decision (`GET /blocks` lists only the Hub's own COMMUNICATIONS blocks).
+/// Canonical Calling rules are projected per rule and rollout generation before
+/// confirmation. The older pair-only bridge remains deprecated compatibility input;
+/// its rows never authorize a policy decision.
 pub async fn block_event(
     HttpState(s): HttpState<State>,
     Extension(ctx): Extension<InternalServiceContext>,
@@ -269,10 +275,42 @@ pub async fn block_event(
     } else {
         return Err(Error::Forbidden);
     };
-    if event.source_version < 1 || event.actor_principal_id == event.target_principal_id {
+    if event.source_version < 1
+        || (!event.application_block && event.actor_principal_id == event.target_principal_id)
+        || (event.application_block && (source != "CALLING" || event.rule_id.is_none()))
+    {
         return Err(Error::Validation);
     }
     let txn = s.store.begin().await?;
+    if let Some(rule) = event.rule_id {
+        if source != "CALLING"
+            || !s.config.synchronous_policy_events
+            || event.projection_generation != s.config.send_policy_generation
+        {
+            return Err(Error::Unavailable);
+        }
+        let fresh = inbox(
+            &s,
+            &txn,
+            source,
+            event.event_id,
+            &serde_json::to_value(&event).map_err(|_| Error::Validation)?,
+        )
+        .await?;
+        if fresh {
+            // No lazy Hub profile is required. The native owner authenticated these
+            // principal ids; the receiver stores only the rule, version and scope.
+            s.store.messaging_event(&txn, scope, "communications.domain.block.changed", rule,
+                event.source_version, json!({"ruleId":rule,
+                    "actorPrincipalId":if event.application_block {None} else {Some(event.actor_principal_id)},
+                    "targetPrincipalId":event.target_principal_id,"blocked":event.blocked,"projectionGeneration":event.projection_generation})).await?;
+        }
+        txn.commit().await?;
+        s.flush_scope_policy(&delegated).await?;
+        return Ok(Json(
+            json!({"applied":fresh,"duplicate":!fresh,"sendPolicyProjection":1}),
+        ));
+    }
     if !inbox(
         &s,
         &txn,
@@ -423,6 +461,31 @@ pub async fn replay(
 }
 
 impl State {
+    /// Called after the source mutation commits, including idempotent retries. A
+    /// failure leaves the mutation and its outbox durable, but never confirms it.
+    /// The bounded high-water mark excludes concurrent later changes from this ACK.
+    pub async fn flush_scope_policy(&self, scope: &DelegatedPlatformContext) -> Result<()> {
+        if !self.config.synchronous_policy_events {
+            return Ok(());
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let values = store::scoped(Scope::of(scope));
+            let jobs: Vec<Value> = rows(&self.store.db,
+                "SELECT to_jsonb(o) doc FROM communication_outbox o WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND destination='MESSAGING' AND state<>'DELIVERED' AND event_type<>'communications.timeline.changed' ORDER BY seq LIMIT 33", values.clone()).await?;
+            let overflow = jobs.len() > 32;
+            for job in jobs.into_iter().take(32) {
+                let req = OutboundServiceRequest::new_operation(ServiceId::messaging()).with_delegated_context(scope.clone());
+                let payload = json!({"schemaVersion":1,"eventId":job["event_id"],"aggregateId":job["aggregate_id"],"version":job["aggregate_version"],"type":job["event_type"],"data":job["payload"]});
+                let response = self.config.client.post_json(&req, "/internal/v1/communications/events", &payload).await.map_err(|_| Error::Unavailable)?;
+                if response.status()!=200 || response.json::<Value>().map_err(|_| Error::Unavailable)?["sendPolicyGeneration"]!=json!(self.config.send_policy_generation) { return Err(Error::Unavailable); }
+                execute(&self.store.db,"UPDATE communication_outbox SET state='DELIVERED',delivered_at=now(),lease_id=NULL,lease_until=NULL WHERE seq=$1 AND state<>'DELIVERED'",vec![job["seq"].as_i64().ok_or(Error::Unavailable)?.into()]).await?;
+            }
+            if overflow { return Err(Error::Unavailable); }
+            Ok(())
+        }).await;
+        result.map_err(|_| Error::Unavailable)?
+    }
+
     pub async fn deliver_due(&self) -> Result<usize> {
         execute(&self.store.db,"UPDATE communication_outbox SET state='DEAD',lease_id=NULL,lease_until=NULL WHERE state='INFLIGHT' AND lease_until<=now() AND attempts>=12",vec![]).await?;
         let txn = self.store.begin().await?;
@@ -450,14 +513,23 @@ impl State {
                 kind,
                 uuid_field(&scope_value, "serviceAccountId")?,
             );
-            let req = OutboundServiceRequest::new_operation(service).with_delegated_context(scope);
+            let req = OutboundServiceRequest::new_operation(service.clone())
+                .with_delegated_context(scope);
             let payload = json!({"schemaVersion":1,"eventId":job["event_id"],"aggregateId":job["aggregate_id"],"version":job["aggregate_version"],"type":job["event_type"],"data":job["payload"]});
             let ok = self
                 .config
                 .client
                 .post_json(&req, "/internal/v1/communications/events", &payload)
                 .await
-                .is_ok_and(|r| r.status() == 200);
+                .is_ok_and(|r| {
+                    r.status() == 200
+                        && (service != ServiceId::messaging()
+                            || !self.config.synchronous_policy_events
+                            || r.json::<Value>().is_ok_and(|body| {
+                                body["sendPolicyGeneration"]
+                                    == json!(self.config.send_policy_generation)
+                            }))
+                });
             let attempts = job["attempts"].as_i64().unwrap_or(12);
             if ok {
                 execute(&self.store.db,"UPDATE communication_outbox SET state='DELIVERED',delivered_at=now(),lease_id=NULL,lease_until=NULL WHERE seq=$1 AND lease_id=$2",vec![seq.into(),lease.into()]).await?;

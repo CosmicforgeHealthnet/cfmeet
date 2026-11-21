@@ -24,7 +24,7 @@
 //!   not yet applied, configuration missing) leaves the job pending with an exponential
 //!   backoff capped at one hour; nothing is dropped. Each owner's operation is idempotent.
 //! * **Download** — [`export_elsewhere`] reads the same three owners back for the account's
-//!   single JSON document: Messaging conversations the person is in (as the person), the
+//!   single JSON document: Messaging conversations and every visible message (as the person), the
 //!   Hub's profile, CF Meet ID, contacts, lists and saved messages, and Calling's history.
 //!   An owner that cannot answer is reported as `unavailable` in the document instead of
 //!   failing the whole download.
@@ -56,6 +56,179 @@ const BATCH: i64 = 20;
 /// Conversations listed per page / pages read for the download.
 const CONVERSATION_PAGE: &str = "100";
 const CONVERSATION_PAGES: usize = 10;
+const MESSAGE_PAGE: &str = "100";
+const MESSAGE_PAGES: usize = 1000;
+const EXPORT_MAX_BYTES: usize = 50 * 1024 * 1024;
+
+#[async_trait::async_trait]
+trait MessagingExportSource: Sync {
+    async fn conversations(&self, cursor: Option<&str>) -> Result<Value, String>;
+    async fn messages(&self, conversation: Uuid, after: Option<i64>) -> Result<Value, String>;
+}
+
+struct MessagingExportClient<'a> {
+    clients: &'a PrivacyClients,
+    principal: Uuid,
+}
+
+#[async_trait::async_trait]
+impl MessagingExportSource for MessagingExportClient<'_> {
+    async fn conversations(&self, cursor: Option<&str>) -> Result<Value, String> {
+        let mut query = vec![("limit", CONVERSATION_PAGE)];
+        if let Some(cursor) = cursor {
+            query.push(("cursor", cursor));
+        }
+        self.clients
+            .client
+            .get_query(
+                &self
+                    .clients
+                    .request(ServiceId::messaging(), Some(self.principal)),
+                "/internal/v1/delegated/v1/conversations",
+                &query,
+            )
+            .await
+            .and_then(|r| r.json::<Value>())
+            .map_err(|e| e.to_string())
+    }
+
+    async fn messages(&self, conversation: Uuid, after: Option<i64>) -> Result<Value, String> {
+        let after = after.map(|n| n.to_string());
+        let mut query = vec![("limit", MESSAGE_PAGE)];
+        if let Some(after) = after.as_deref() {
+            query.push(("afterSequence", after));
+        }
+        self.clients
+            .client
+            .get_query(
+                &self
+                    .clients
+                    .request(ServiceId::messaging(), Some(self.principal)),
+                &format!("/internal/v1/delegated/v1/conversations/{conversation}/messages"),
+                &query,
+            )
+            .await
+            .and_then(|r| r.json::<Value>())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Read the same member-authorized history the person can see in the app, never an
+/// administrative view. A partial owner response, malformed cursor or safety limit is
+/// reported explicitly, including the continuation, instead of presenting a complete
+/// download that silently omits its messages.
+async fn messaging_export(source: &impl MessagingExportSource) -> Value {
+    let mut conversations = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut seen = std::collections::HashSet::new();
+    let mut errors = Vec::new();
+    let mut bytes = 0;
+    let mut complete = false;
+    let mut size_limited = false;
+    'pages: for _ in 0..CONVERSATION_PAGES {
+        let page = match source.conversations(cursor.as_deref()).await {
+            Ok(page) => page,
+            Err(why) => {
+                errors.push(why);
+                break;
+            }
+        };
+        let Some(items) = page["conversations"].as_array() else {
+            errors.push("Messaging returned an invalid conversation page".into());
+            break;
+        };
+        for item in items {
+            let Some(id) = item["conversationId"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok())
+            else {
+                errors.push("Messaging returned a conversation without a valid id".into());
+                continue;
+            };
+            if !seen.insert(id) {
+                errors.push("Messaging repeated a conversation".into());
+                continue;
+            }
+            let mut conversation = item.clone();
+            let mut messages = Vec::new();
+            let mut after = None;
+            let mut history_complete = false;
+            let mut failure = None;
+            for _ in 0..MESSAGE_PAGES {
+                let page = match source.messages(id, after).await {
+                    Ok(page) => page,
+                    Err(why) => {
+                        failure = Some(why);
+                        break;
+                    }
+                };
+                let Some(items) = page["messages"].as_array() else {
+                    failure = Some("Messaging returned an invalid message page".to_string());
+                    break;
+                };
+                let size = page.to_string().len();
+                if bytes + size > EXPORT_MAX_BYTES {
+                    failure = Some(
+                        "The download reached its size limit; history is incomplete".to_string(),
+                    );
+                    size_limited = true;
+                    break;
+                }
+                bytes += size;
+                // Do not accept a repeated/backwards cursor or silently truncate on a
+                // malformed non-null cursor. Both would otherwise look like success.
+                let Some(next) = page.get("nextAfterSequence") else {
+                    failure = Some("Messaging omitted the message continuation".to_string());
+                    break;
+                };
+                if !next.is_null() && next.as_i64().is_none_or(|n| n <= after.unwrap_or(0)) {
+                    failure = Some("Messaging returned a non-advancing message cursor".to_string());
+                    break;
+                }
+                messages.extend(items.iter().cloned());
+                after = next.as_i64();
+                if after.is_none() {
+                    history_complete = true;
+                    break;
+                }
+            }
+            conversation["messages"] = json!(messages);
+            conversation["historyComplete"] = json!(history_complete);
+            conversation["nextAfterSequence"] = json!(after);
+            if let Some(why) = failure {
+                conversation["historyError"] = json!(why);
+            }
+            if !history_complete {
+                errors.push(format!("History is incomplete for conversation {id}"));
+            }
+            conversations.push(conversation);
+            if size_limited {
+                break 'pages;
+            }
+        }
+        let Some(next) = page.get("nextCursor") else {
+            errors.push("Messaging omitted the conversation continuation".into());
+            break;
+        };
+        if !next.is_null()
+            && next
+                .as_str()
+                .is_none_or(|n| n.is_empty() || Some(n) == cursor.as_deref())
+        {
+            errors.push("Messaging returned an invalid conversation cursor".into());
+            break;
+        }
+        cursor = next.as_str().map(str::to_owned);
+        if cursor.is_none() {
+            complete = true;
+            break;
+        }
+    }
+    let truncated = !complete || !errors.is_empty();
+    json!({"status": if truncated {"partial"} else {"complete"}, "conversations": conversations,
+        "truncated": truncated, "nextCursor": cursor, "errors": errors,
+        "note": "Encrypted messages are exported as ciphertext. Their decryption keys remain on your devices."})
+}
 
 /// The signed client of the three owners (built once from the environment).
 pub struct PrivacyClients {
@@ -459,47 +632,11 @@ pub async fn export_elsewhere(db: &DatabaseConnection, user_id: Uuid) -> Value {
         (false, _) => unavailable("not configured"),
         (true, None) => json!({"conversations": []}),
         (true, Some(p)) => {
-            let mut conversations = Vec::new();
-            let mut cursor: Option<String> = None;
-            let mut failure = None;
-            for _ in 0..CONVERSATION_PAGES {
-                let mut query = vec![("limit", CONVERSATION_PAGE)];
-                if let Some(cur) = cursor.as_deref() {
-                    query.push(("cursor", cur));
-                }
-                match c
-                    .client
-                    .get_query(
-                        &c.request(ServiceId::messaging(), Some(p)),
-                        "/internal/v1/delegated/v1/conversations",
-                        &query,
-                    )
-                    .await
-                    .and_then(|r| r.json::<Value>())
-                {
-                    Ok(page) => {
-                        if let Some(items) = page["conversations"].as_array() {
-                            conversations.extend(items.iter().cloned());
-                        }
-                        cursor = page["nextCursor"].as_str().map(str::to_owned);
-                        if cursor.is_none() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        failure = Some(e.to_string());
-                        break;
-                    }
-                }
-            }
-            match failure {
-                Some(why) if conversations.is_empty() => unavailable(&why),
-                _ => json!({
-                    "conversations": conversations,
-                    "truncated": cursor.is_some(),
-                    "note": "Message contents of end-to-end encrypted chats exist only on your devices.",
-                }),
-            }
+            messaging_export(&MessagingExportClient {
+                clients: c,
+                principal: p,
+            })
+            .await
         }
     };
     json!({"messaging": messaging, "communications": communications, "calling": calling})
@@ -531,6 +668,143 @@ pub async fn erasure_state<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ExportPages {
+        conversations: std::sync::Mutex<std::collections::VecDeque<(Option<String>, Value)>>,
+        messages: std::sync::Mutex<
+            std::collections::VecDeque<(Uuid, Option<i64>, Result<Value, String>)>,
+        >,
+    }
+
+    #[async_trait::async_trait]
+    impl MessagingExportSource for ExportPages {
+        async fn conversations(&self, cursor: Option<&str>) -> Result<Value, String> {
+            let (expected, page) = self
+                .conversations
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected conversation request");
+            assert_eq!(cursor, expected.as_deref());
+            Ok(page)
+        }
+        async fn messages(&self, conversation: Uuid, after: Option<i64>) -> Result<Value, String> {
+            let (expected_id, expected_after, page) = self
+                .messages
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected history request");
+            assert_eq!((conversation, after), (expected_id, expected_after));
+            page
+        }
+    }
+
+    fn pages(id: Uuid, messages: Vec<(Option<i64>, Result<Value, String>)>) -> ExportPages {
+        ExportPages {
+            conversations: std::sync::Mutex::new(
+                [(
+                    None,
+                    json!({"conversations":[{"conversationId":id}],"nextCursor":null}),
+                )]
+                .into(),
+            ),
+            messages: std::sync::Mutex::new(
+                messages
+                    .into_iter()
+                    .map(|(after, page)| (id, after, page))
+                    .collect(),
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn account_download_includes_every_message_page_and_encrypted_content() {
+        let id = Uuid::new_v4();
+        let source = pages(
+            id,
+            vec![
+                (
+                    None,
+                    Ok(
+                        json!({"messages":[{"sequence":1,"text":"my history"}],"nextAfterSequence":1}),
+                    ),
+                ),
+                (
+                    Some(1),
+                    Ok(
+                        json!({"messages":[{"sequence":2,"ciphertext":"encrypted-history"}],"nextAfterSequence":null}),
+                    ),
+                ),
+            ],
+        );
+        let result = messaging_export(&source).await;
+        assert_eq!(result["status"], "complete");
+        assert_eq!(result["truncated"], false);
+        assert_eq!(
+            result["conversations"][0]["messages"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            result["conversations"][0]["messages"][1]["ciphertext"],
+            "encrypted-history"
+        );
+        assert_eq!(result["conversations"][0]["historyComplete"], true);
+        assert!(source.messages.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_history_outage_keeps_downloaded_messages_and_reports_the_continuation() {
+        let source = pages(
+            Uuid::new_v4(),
+            vec![
+                (
+                    None,
+                    Ok(json!({"messages":[{"sequence":7}],"nextAfterSequence":7})),
+                ),
+                (Some(7), Err("owner unavailable".into())),
+            ],
+        );
+        let result = messaging_export(&source).await;
+        assert_eq!(result["status"], "partial");
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["conversations"][0]["messages"][0]["sequence"], 7);
+        assert_eq!(result["conversations"][0]["nextAfterSequence"], 7);
+        assert_eq!(result["conversations"][0]["historyComplete"], false);
+    }
+
+    #[tokio::test]
+    async fn a_non_advancing_history_cursor_is_reported_instead_of_looping() {
+        let source = pages(
+            Uuid::new_v4(),
+            vec![
+                (
+                    None,
+                    Ok(json!({"messages":[{"sequence":7}],"nextAfterSequence":7})),
+                ),
+                (
+                    Some(7),
+                    Ok(json!({"messages":[{"sequence":7}],"nextAfterSequence":7})),
+                ),
+            ],
+        );
+        let result = messaging_export(&source).await;
+        assert_eq!(result["status"], "partial");
+        assert_eq!(
+            result["conversations"][0]["messages"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(result["conversations"][0]["historyError"]
+            .as_str()
+            .unwrap()
+            .contains("non-advancing"));
+    }
 
     #[test]
     fn backoff_grows_and_is_capped_at_an_hour() {

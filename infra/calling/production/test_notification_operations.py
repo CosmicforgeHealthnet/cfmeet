@@ -400,7 +400,8 @@ class Fence(unittest.TestCase):
 
     def test_release_tooling_runs_and_verifies_both_fence_histories(self):
         self.assertIn('notification-fence-migration', cr.SERVICES['meeting-service']['migrations'])
-        self.assertEqual(cr.SERVICES['messaging']['migrations'][-1], 'messaging-notification-fence-migration')
+        self.assertIn('messaging-notification-fence-migration', cr.SERVICES['messaging']['migrations'])
+        self.assertIn('messaging-send-policy-projection-migration', cr.SERVICES['messaging']['migrations'])
         catalog = (cr.Path(__file__).resolve().parents[3] / 'infra/deployment/backup/catalog.conf').read_text()
         self.assertIn('notification_fence_migrations', catalog)
         self.assertIn('messaging_notification_fence_seaql_migrations', catalog)

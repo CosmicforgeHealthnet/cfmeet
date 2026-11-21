@@ -1,26 +1,12 @@
-//! B2: cached "allowed" personal group send decisions.
-//!
-//! Every personal group message asks Communications whether the sender's account may still
-//! send (`require_send`, `PersonalActivity`, twice per E2EE send). One-to-one sends
-//! (`MessageSend`) are NOT cached: a block must refuse the very next message, and the
-//! events below reach Messaging through Communications' asynchronous outbox relay, so a
-//! cached allow could outlive a block by the relay delay. The answer changes only
-//! when a block, a contact, a privacy setting or an account's status changes — and
-//! Communications announces each of those to Messaging as a durable event
-//! (`communications.block.changed`, `communications.connection.*`,
-//! `communications.privacy.changed`, `communications.account.changed`, ...).
-//!
-//! An ALLOWED decision is therefore reused for at most [`ALLOW_TTL`] per (scope, action,
-//! sender, recipient, credential), and only while neither principal's invalidation
-//! sequence (`messaging_policy_invalidations`, bumped in the same transaction that applies
-//! such an event) moved since the decision was taken. The sequence lives in PostgreSQL, so
-//! every Messaging instance stops using a stale decision as soon as the event is applied,
-//! not only the one that received it. The sequence is read BEFORE Communications is
-//! asked, so an event that lands while the check is in flight still invalidates it.
-//!
-//! A DENIED decision (or an unavailable Communications) is never cached: the next send
-//! asks again. Causes Communications does not announce (a platform principal disabled, a
-//! legal hold) are bounded by [`ALLOW_TTL`].
+//! B2: allowed personal eligibility decisions, bounded to 30 seconds. Direct sends
+//! use this only after coordinated activation of the synchronous block projection.
+//! Every send still checks local blocks. Each source mutation waits for Messaging's
+//! durable invalidation before confirmation, including retry after a failed ACK.
+//! Cold/expired entries ask Communications (and its native block owners); no snapshot
+//! can accidentally turn a pre-existing block into an allowed cached decision.
+//! Each activation has a fresh generation, so delayed events from an older rollout
+//! cannot restore stale blocks. Other unannounced owner changes retain the existing
+//! 30-second eligibility bound. Denials and outages are never cached.
 
 use std::{
     collections::HashMap,
@@ -49,6 +35,7 @@ struct Key {
     actor: Uuid,
     target: Uuid,
     credential_issued_at: Option<i64>,
+    generation: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,9 +48,8 @@ static CACHE: LazyLock<Mutex<HashMap<Key, Entry>>> = LazyLock::new(Default::defa
 
 fn action_code(action: Action) -> Option<u8> {
     match action {
-        // A one-to-one send is never cached: a block takes effect at once (privacy
-        // guarantee), while the invalidating event reaches Messaging asynchronously.
         Action::PersonalActivity => Some(2),
+        Action::MessageSend => Some(1),
         _ => None,
     }
 }
@@ -77,6 +63,7 @@ fn key(ctx: &TrustedContext, action: u8, actor: Uuid, target: Uuid) -> Key {
         actor,
         target,
         credential_issued_at: ctx.personal_session_issued_at,
+        generation: None,
     }
 }
 
@@ -117,13 +104,19 @@ pub(super) async fn require_cached<C: ConnectionTrait>(
     actor: Uuid,
     target: Uuid,
 ) -> crate::error::Result<()> {
-    let Some(code) = action_code(action) else {
+    let code = if action == Action::MessageSend && !state.local_send_policy {
+        None
+    } else {
+        action_code(action)
+    };
+    let Some(code) = code else {
         return super::require(state, ctx, action, actor, target).await;
     };
     let Some(seq) = sequence(db, ctx, actor, target).await else {
         return super::require(state, ctx, action, actor, target).await;
     };
-    let k = key(ctx, code, actor, target);
+    let mut k = key(ctx, code, actor, target);
+    k.generation = state.local_send_generation;
     let hit = {
         let cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
         cache
@@ -212,7 +205,7 @@ mod tests {
 
     #[test]
     fn only_send_decisions_are_cacheable() {
-        assert_eq!(action_code(Action::MessageSend), None);
+        assert_eq!(action_code(Action::MessageSend), Some(1));
         assert_eq!(action_code(Action::PersonalActivity), Some(2));
         assert_eq!(action_code(Action::DirectCall), None);
         assert_eq!(action_code(Action::MessageNotification), None);

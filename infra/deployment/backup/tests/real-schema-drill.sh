@@ -85,7 +85,7 @@ migrations_for() {
     developer-platform) echo "developer-platform-migration" ;;
     platform-access) echo "platform-access-migration" ;;
     calling) echo "calling-migration calling-communications-migration" ;;
-    messaging) echo "messaging-migration messaging-communications-migration messaging-notification-fence-migration" ;;
+    messaging) echo "messaging-migration messaging-communications-migration messaging-notification-fence-migration messaging-send-policy-projection-migration" ;;
     numbering) echo "numbering-migration" ;;
     privacy-relay) echo "privacy-relay-migration" ;;
     telephony) echo "telephony-migration" ;;
