@@ -514,14 +514,17 @@ class Journey:
         offer = retry(invitation, 6, 2)
         self.check('calls %s: customer\'s device sees the invitation' % label, bool(offer),
                    invitationId=(offer or {}).get('invitationId'))
-        t.update(call=call['callId'], invitation=(offer or {}).get('invitationId'), customerSignaling=customer['signalingCredential'])
+        t.update(call=call['callId'], invitation=(offer or {}).get('invitationId'),
+                 invitationVersion=(offer or {}).get('callVersion'),
+                 customerSignaling=customer['signalingCredential'])
 
     def calls_isolation(self, a, b):
         status, _ = b['machine'].call('GET', '/v1/calls/%s' % a['call'], expected=(200, 403, 404))
         self.check('isolation calls: B\'s server reads A\'s call -> 404', status == 404)
         if a.get('invitation'):
             status, _ = Client(b['customerSignaling']).call(
-                'POST', '/v1/calling/invitations/%s/accept' % a['invitation'], {}, expected=(200, 403, 404, 409))
+                'POST', '/v1/calling/invitations/%s/accept' % a['invitation'],
+                {'expectedVersion': a['invitationVersion']}, expected=(200, 403, 404, 409))
             self.check('isolation calls: B\'s device accepts A\'s invitation -> 404/403', status in (403, 404))
 
     # --- push (B5) ---------------------------------------------------------------------------
@@ -864,6 +867,15 @@ class Journey:
         for method, path, client in self.cleanup:
             try:
                 body = {'origins': []} if method == 'PUT' else None
+                if method == 'POST' and path.startswith('/v1/calls/') and path.endswith('/cancel'):
+                    # Calling control routes require the current version; an empty
+                    # request is rejected before authorization or state handling.
+                    code, view = client.call('GET', path[:-7], expected=(200, 404))
+                    if code == 404:
+                        continue
+                    if view.get('state') in ('ENDED', 'DECLINED', 'BUSY', 'NO_ANSWER', 'FAILED', 'CANCELLED'):
+                        continue
+                    body = {'expectedVersion': view['version']}
                 client.call(method, path, body, expected=(200, 204, 404, 409))
             except (da.Failed, OSError) as error:
                 problems.append(str(error))
