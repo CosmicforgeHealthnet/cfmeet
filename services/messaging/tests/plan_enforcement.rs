@@ -147,11 +147,15 @@ async fn the_uploaders_plan_caps_attachment_size_in_cf_meets_environment() {
     assert_eq!(calls.iter().filter(|(_, id)| *id == account).count(), 1);
     assert!(calls.iter().all(|(kind, _)| kind == "USER"));
 
-    // Another environment (no CF Meet baseline) is never capped by a plan.
+    // Another environment (no CF Meet baseline) is never capped by a plan. Without the
+    // baseline it enables attachments in its own policy.
     let partner = h.customer(ALL_SCOPES);
     h.set_policy(
         &partner,
-        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } } }),
+        json!({
+            "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } },
+            "attachments": { "enabled": true },
+        }),
     )
     .await;
     let p = h.principal_of_kind(&partner, "NATIVE_CF_USER");

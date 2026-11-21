@@ -182,7 +182,8 @@ async fn removing_a_reported_message_tombstones_it_once_and_settles() {
             &format!("/v1/conversations/{}/messages/{message}", cid(&conv)),
         )
         .await;
-    assert_eq!(m.json["lifecycle"], "MODERATED", "{}", m.text);
+    assert_eq!(m.json["message"]["lifecycle"], "MODERATED", "{}", m.text);
+    assert_eq!(m.json["resolution"], "MODERATED", "{}", m.text);
 
     // A replay answers the first call and applies nothing again.
     let again = command(&h, &path, body.clone(), key, true).await;
