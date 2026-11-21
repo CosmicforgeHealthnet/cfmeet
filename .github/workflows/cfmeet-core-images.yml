@@ -12,12 +12,18 @@ on:
       - ".github/workflows/cfmeet-core-images.yml"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      services:
+        description: JSON array of required images for this coordinated release
+        required: false
+        type: string
+        default: '["platform-access","organizations","notifications","messaging","calling","communications","numbering","privacy-relay","sms-gateway","telephony","meeting-service","developer-platform","api-gateway","security-scan-gateway"]'
 
 permissions:
   contents: read
 
 concurrency:
-  group: cfmeet-core-images-${{ github.ref }}
+  group: cfmeet-core-images-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [platform-access, organizations, notifications, messaging, calling, communications, numbering, privacy-relay, sms-gateway, telephony, meeting-service, developer-platform, api-gateway, security-scan-gateway]
+        service: ${{ fromJSON(inputs.services || '["platform-access","organizations","notifications","messaging","calling","communications","numbering","privacy-relay","sms-gateway","telephony","meeting-service","developer-platform","api-gateway","security-scan-gateway"]') }}
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v4

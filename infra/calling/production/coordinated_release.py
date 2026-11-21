@@ -1393,14 +1393,31 @@ def running_envs():
 
 def release_all(sha, run_id):
     p.identity()
-    manifest = registry(sha)
-    images = {service: verify_image(service, sha, manifest) for service in IMAGES if service != 'security-scan-gateway'}
+    # Unchanged services retain their verified previous image and OCI revision.
+    # The manifest intentionally contains only the newly required images.
     scope, kept = release_scope(sha)
+    manifest = registry(sha)
+    required = {image_of(name) for name in ORDER if name not in kept}
+    required.update(scope - {'security-scan-gateway'})
+    missing = required - set(manifest)
+    if missing:
+        raise RuntimeError('Release plan lacks required images: ' + ', '.join(sorted(missing)))
+    images = {service: verify_image(service, sha, manifest) for service in required}
     emit('releaseScope', {'replaced': sorted(n for n in ORDER if n not in kept), 'kept': sorted(kept)})
     violations = safe_default_violations(running_envs())
     if violations:
         raise RuntimeError('Provider-dependent features are not at their safe defaults: ' + ', '.join(violations))
     emit('resourceGate', resource_gate(mem_available_mib(), required_mib(planned_new())))
+    # All services already deployed: attest the new main commit without repeat
+    # backups, provision, migrations or container replacements.
+    if not scope and len(kept) == len(ORDER):
+        entry = begin('release', sha, run_id)
+        entry['kept'] = kept
+        entry['status'] = 'done'
+        entry['scanGateway'] = 'kept (build inputs unchanged)'
+        commit(entry)
+        verify(sha, run_id)
+        return
     backup(sha, run_id)
     provision(sha, run_id)
     entry = begin('release', sha, run_id)
