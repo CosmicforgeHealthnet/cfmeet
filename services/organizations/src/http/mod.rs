@@ -14,6 +14,7 @@ pub mod admin_bridge;
 pub mod apps;
 pub mod authorization;
 pub mod bindings;
+pub mod exports;
 pub mod invitations;
 pub mod members;
 pub mod middleware;
@@ -129,6 +130,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/organizations/:id/export", get(authorization::export))
         .route(
+            "/organizations/:id/exports/:export_id/download",
+            post(exports::download),
+        )
+        .route(
             "/organizations/:id/provisioning",
             get(organizations::provisioning),
         )
@@ -193,6 +198,10 @@ pub fn app(state: AppState) -> Router {
             get(authorization::admin_export),
         )
         .route(
+            "/admin/organizations/:id/exports",
+            post(exports::admin_request_export),
+        )
+        .route(
             "/admin/organizations/:id/owners",
             post(members::admin_appoint_owner),
         )
@@ -235,6 +244,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/operator/organizations/:id/policies",
             get(operator::policies),
+        )
+        .route(
+            "/operator/organizations/:id/exports",
+            get(exports::operator_list),
+        )
+        .route(
+            "/operator/organizations/:id/exports/:export_id",
+            get(exports::operator_detail),
         )
         .route("/operator/audit-events", get(operator::audit_events))
         .route("/operator/operations/:key", get(operator::operation))

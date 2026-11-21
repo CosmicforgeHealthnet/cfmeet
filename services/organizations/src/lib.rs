@@ -8,6 +8,8 @@
 //! * [`outbox`] / [`worker`]: transactional outbox and the maintenance loop.
 //! * [`notification_publications`]: the Notification Service producer (roadmap N7), fed
 //!   from the committed outbox record rows; runs only with `CF_NOTIFICATIONS_BASE_URL`.
+//! * [`exports`]: owner-delivered organization exports (ADR 0068 A4): encrypted at rest,
+//!   delivered to the organization's owners, never to HQ.
 //! * [`policy`]: the typed organization policy (Section 6; restrictive only).
 //! * [`provisioning`]: the Organizations to Platform Access scope saga (Section 7).
 //!
@@ -18,6 +20,7 @@ pub mod config;
 pub mod db;
 pub mod domain;
 pub mod error;
+pub mod exports;
 pub mod http;
 pub mod idempotency;
 pub mod import;

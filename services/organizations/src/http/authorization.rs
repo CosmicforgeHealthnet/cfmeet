@@ -10,7 +10,7 @@ use axum::{
 };
 use cf_service_auth::InternalPermission;
 use chrono::{DateTime, Utc};
-use sea_orm::FromQueryResult;
+use sea_orm::{ConnectionTrait, FromQueryResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -602,9 +602,12 @@ pub const EXPORT_AUDIT_LIMIT: i64 = 10_000;
 /// history), teams and team memberships, invitations (never their token) and the newest
 /// audit events. Identifiers only for people: names and emails of accounts live with
 /// the Account service.
-async fn export_document(state: &AppState, id: Uuid) -> ApiResult<Value> {
+///
+/// Also the document of an owner-delivered export ([`crate::exports`]), built in that
+/// command's own transaction.
+pub(crate) async fn export_document<C: ConnectionTrait>(c: &C, id: Uuid) -> ApiResult<Value> {
     let row: Option<ExportDoc> = db::one(
-        &state.db,
+        c,
         "SELECT jsonb_build_object( \
            'schemaVersion', 1, \
            'exportedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
@@ -639,7 +642,7 @@ pub async fn export(
     caller.require(InternalPermission::OrganizationRead)?;
     let user = caller.user()?;
     authorize(&state.db, id, user, Capability::LifecycleManage, false).await?;
-    let doc = export_document(&state, id).await?;
+    let doc = export_document(&state.db, id).await?;
     let _ = user;
     store::audit(
         &state.db,
@@ -658,16 +661,26 @@ pub async fn export(
 /// `GET /internal/v1/admin/organizations/{id}/export` — gap audit G11: the operator's
 /// export of an organization in any lifecycle state, archived included
 /// (`organization.administer`). Audited.
+///
+/// Never for the HQ admin bridge (ADR 0068): the document carries invitation addresses,
+/// and HQ never receives exported personal data. The bridge asks for an owner-delivered
+/// export instead (`POST /internal/v1/admin/organizations/{id}/exports`).
 pub async fn admin_export(
     State(state): State<AppState>,
     caller: Caller,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
+    if caller.operator.is_some() {
+        return Err(ApiError::with_message(
+            ErrorCode::ActorNotAllowed,
+            "The admin bridge never receives an export document; request an owner-delivered export.",
+        ));
+    }
     store::org(&state.db, id, false)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
-    let doc = export_document(&state, id).await?;
+    let doc = export_document(&state.db, id).await?;
     store::audit(
         &state.db,
         &caller.as_operator(),

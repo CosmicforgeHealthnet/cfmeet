@@ -8,7 +8,7 @@
 //! * carries `expectedVersion` where the subject is versioned: the change happens only at
 //!   that version, checked under the subject's row lock (409 `VERSION_CONFLICT`, nothing
 //!   done);
-//! * of risk R3 carries the second person (`X-CF-Approver`, `X-CF-Approval-Ref`,
+//! * of risk R3 or R4 carries the second person (`X-CF-Approver`, `X-CF-Approval-Ref`,
 //!   `X-CF-Intent-Digest`, a different person; 403 `APPROVAL_REQUIRED` without them);
 //! * is recorded in `organization_admin_operations` in the SAME transaction as the change,
 //!   so the bridge settles an unknown outcome from that record
@@ -39,11 +39,13 @@ use crate::{
 /// HQ's command key (also the settlement key).
 pub const IDEMPOTENCY_KEY: &str = "idempotency-key";
 
-/// The capability's risk: R3 needs HQ's second person.
+/// The capability's risk: R3 and R4 need HQ's second person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
     R2,
     R3,
+    /// Data export (owner-delivered, [`crate::exports`]).
+    R4,
 }
 
 /// What a recorded command changed.
@@ -57,6 +59,8 @@ pub enum Subject {
     CallingBinding,
     MessagingBinding,
     EventDelivery,
+    /// An owner-delivered export ([`crate::exports`]).
+    OrganizationExport,
 }
 
 impl Subject {
@@ -70,6 +74,7 @@ impl Subject {
             Subject::CallingBinding => "CALLING_BINDING",
             Subject::MessagingBinding => "MESSAGING_BINDING",
             Subject::EventDelivery => "EVENT_DELIVERY",
+            Subject::OrganizationExport => "ORGANIZATION_EXPORT",
         }
     }
 }
@@ -87,6 +92,7 @@ pub mod command {
     pub const TEAM_CHANGE: &str = "team.change";
     pub const POLICIES_CHANGE: &str = "policies.change";
     pub const EVENTS_REPLAY: &str = "events.replay";
+    pub const EXPORT: &str = "organization.export";
 }
 
 /// One verified bridge command.
@@ -95,7 +101,7 @@ pub struct BridgeCommand {
     pub key: Uuid,
     /// `hq:<staff>`.
     pub operator: String,
-    /// `(hq:<approver>, approval ref)` of an R3 command.
+    /// `(hq:<approver>, approval ref)` of an R3 / R4 command.
     pub approval: Option<(String, String)>,
 }
 
@@ -119,7 +125,7 @@ impl BridgeCommand {
             .approval
             .as_ref()
             .map(|a| (a.approver.as_str().to_string(), a.approval_ref.clone()));
-        if risk == Risk::R3 && approval.is_none() {
+        if matches!(risk, Risk::R3 | Risk::R4) && approval.is_none() {
             return Err(ApiError::new(ErrorCode::ApprovalRequired));
         }
         Ok(Some(Self {
@@ -352,6 +358,7 @@ mod tests {
             Subject::CallingBinding,
             Subject::MessagingBinding,
             Subject::EventDelivery,
+            Subject::OrganizationExport,
         ] {
             let v = s.as_str();
             assert!(v.len() <= 24 && v.bytes().all(|b| b.is_ascii_uppercase() || b == b'_'));
@@ -368,6 +375,7 @@ mod tests {
             command::TEAM_CHANGE,
             command::POLICIES_CHANGE,
             command::EVENTS_REPLAY,
+            command::EXPORT,
         ] {
             assert!(
                 c.len() <= 48

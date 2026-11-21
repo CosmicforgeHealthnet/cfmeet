@@ -450,6 +450,21 @@ impl Harness {
         })
     }
 
+    /// A harness with owner-delivered exports configured (ADR 0068 A4): the at-rest keys
+    /// and the given notice builder.
+    pub async fn with_exports(
+        exports: Option<Arc<organizations::exports::ExportDelivery>>,
+    ) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_exports(exports);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
     pub fn by<'a>(&'a self, signer: &'a ServiceTokenSigner) -> Call<'a> {
         Call {
             h: self,
