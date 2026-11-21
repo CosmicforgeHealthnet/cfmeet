@@ -1106,3 +1106,62 @@ async fn one_to_one_send_decisions_are_never_cached_so_a_block_refuses_at_once()
     assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
     assert!(stub.calls.load(Ordering::SeqCst) > before);
 }
+
+/// Coordinated mode makes warmed direct sends local. A projected block refuses the
+/// next send without consulting Communications, and an unblock revalidates eligibility.
+#[tokio::test]
+async fn local_direct_send_checks_reuse_eligibility_but_never_a_blocked_pair() {
+    use messaging_migration::MigratorTrait as _;
+    use std::sync::atomic::Ordering;
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    messaging_migration::CommunicationsMigrator::up(h.conn(), None)
+        .await
+        .unwrap();
+    let c = h.first_party(true);
+    let (conv, mut alice, bob) = h.e2ee_direct(&c).await;
+    let stub = policy_stub(&mut h, &c).await;
+    let generation = Uuid::new_v4();
+    h.state.local_send_policy = true;
+    h.state.local_send_generation = Some(generation);
+    for text in ["cold eligibility", "warm local send", "another warm send"] {
+        let sent = h.send_e2ee(&c, &conv, &mut alice, text).await;
+        assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    }
+    assert_eq!(
+        stub.calls.load(Ordering::SeqCst),
+        1,
+        "warm sends must not make owner RPCs"
+    );
+    let aggregate = Uuid::new_v4();
+    let sender = alice.principal;
+    let event = |version, blocked| {
+        json!({"schemaVersion":1,"eventId":Uuid::new_v4(),"aggregateId":aggregate,
+        "version":version,"type":"communications.block.changed","data":{"actorPrincipalId":bob.principal,
+        "targetPrincipalId":sender,"blocked":blocked,"projectionGeneration":generation}})
+    };
+    let applied = hub(&h, &c, bob.principal, "events", event(1, true)).await;
+    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
+    conforms_internal("EventReceipt", &applied.json);
+    assert_eq!(applied.json["sendPolicyGeneration"], json!(generation));
+    let denied = h
+        .send_e2ee(&c, &conv, &mut alice, "must not pass the block")
+        .await;
+    assert_eq!(denied.code(), "DELIVERY_REFUSED", "{}", denied.text);
+    assert_eq!(
+        stub.calls.load(Ordering::SeqCst),
+        1,
+        "local block refuses even if the remote stub says allowed"
+    );
+    let applied = hub(&h, &c, bob.principal, "events", event(2, false)).await;
+    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
+    // A delayed block from before this unblock cannot restore the refusal.
+    let stale = hub(&h, &c, bob.principal, "events", event(1, true)).await;
+    assert_eq!(stale.status, StatusCode::OK, "{}", stale.text);
+    let sent = h
+        .send_e2ee(&c, &conv, &mut alice, "revalidated after unblock")
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+}

@@ -125,14 +125,15 @@ when quorum is lost. No independent witness has been supplied; production remain
 
 ## Other production dependencies
 
-- The new read-only `diagnose` output checks Resend's `cfmeet.com` domain and record
-  verification states. A send-only API key may not authorize this read; that is reported
-  without exposing the key. Correct failed SPF/DKIM/return-path records at the DNS owner,
-  then verify controlled recipient delivery. The permanent-bounce fix cannot make an
-  invalid recipient or remote mailbox accept mail.
-- Meeting recording, transcription and intelligence remain off until their own storage
-  and provider journeys pass. Recording needs an artifact bucket, scoped service
-  credentials, provider upload/finalization, playback/deletion and retention evidence.
-  Transcription/intelligence also need actual provider implementations and credentials.
-  Existing Calling recording storage is a separate owner and is not proof of Meeting
-  artifact readiness.
+- On 21 November, Resend showed verified SPF/DKIM and successful real-mailbox delivery.
+  Missing DMARC was added at the DNS owner and read back from an authoritative server.
+  Recent delayed acceptance messages targeted `example.invalid`; the Resend adapters now
+  refuse that reserved suffix before HTTP. See the coordinated release runbook for the
+  evidence and remaining controlled-recipient acceptance. Read-only `diagnose` reports
+  domain verification when the key permits it, without exposing the key.
+- Meeting recording storage, per-request Egress S3 targeting and a real capture/playback/
+  deletion acceptance operation are now prepared in the coordinated release runbook.
+  They remain inactive until the approved release and that actual acceptance pass.
+  Existing Calling storage is not substituted for Meeting's separate artifact bucket.
+- **M8 owner decision, 21 November 2026:** leave transcripts and AI notes disabled. No
+  OpenAI key was created and no AI-provider integration was activated in this pass.

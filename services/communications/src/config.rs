@@ -21,6 +21,8 @@ use secrecy::{ExposeSecret, SecretString};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub struct Config {
+    pub synchronous_policy_events: bool,
+    pub send_policy_generation: Option<uuid::Uuid>,
     pub bind: std::net::SocketAddr,
     pub database_url: SecretString,
     pub public_app_url: String,
@@ -132,7 +134,30 @@ impl Config {
         if !database_url.expose_secret().starts_with("postgres") {
             return Err("PostgreSQL is required".into());
         }
+        let synchronous_policy_events =
+            match std::env::var("COMMUNICATIONS_SYNCHRONOUS_POLICY_EVENTS_ENABLED")
+                .ok()
+                .as_deref()
+            {
+                None | Some("false") => false,
+                Some("true") if messaging_configured => true,
+                _ => {
+                    return Err(
+                        "Synchronous policy events require Messaging and a boolean flag".into(),
+                    )
+                }
+            };
+        let send_policy_generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+            .ok()
+            .map(|v| uuid::Uuid::parse_str(&v))
+            .transpose()
+            .map_err(|_| "invalid send policy generation")?;
+        if synchronous_policy_events && send_policy_generation.is_none() {
+            return Err("Synchronous policy events require a generation".into());
+        }
         Ok(Self {
+            send_policy_generation,
+            synchronous_policy_events,
             bind: std::env::var("COMMUNICATIONS_BIND_ADDRESS")
                 .unwrap_or_else(|_| "0.0.0.0:8080".into())
                 .parse()

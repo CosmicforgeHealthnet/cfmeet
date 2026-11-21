@@ -60,6 +60,8 @@ import notification_operations as notif_ops
 import key_rotation
 import platform_operations as platform_ops
 import integrate_operations as integrate_ops
+import meeting_recording_operations
+import send_policy_operations
 import audit_operations
 import provider_operations
 
@@ -133,7 +135,7 @@ SERVICES = {
         env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-2')),
     'messaging': _service('cfmeet-messaging', 8097, '/ready', tls=8444, db='cfmeet_messaging',
         role='messaging', migrations=['messaging-migration', 'messaging-communications-migration',
-                                      'messaging-notification-fence-migration'],
+                                      'messaging-notification-fence-migration', 'messaging-send-policy-projection-migration'],
         history=['messaging_seaql_migrations'], existing=True),
     'calling': _service('cfmeet-calling', 8090, '/health', tls=8445, db='cfmeet_calling', role='calling',
         migrations=['calling-migration', 'calling-communications-migration'],
@@ -1344,6 +1346,10 @@ def safe_defaults():
     if done('activate-notifications-push'):
         for name in ('notifications', 'notifications-2'):
             rules[name]['NOTIFICATIONS_PUSH_PROVIDER'] = (None, '', 'none', 'live')
+    rules.setdefault('meeting-service', {})[meeting_recording_operations.FLAG] = \
+        (None, '', 'false', 'true') if done(meeting_recording_operations.OPERATION) else (None, '', 'false')
+    for name, flag in dict(send_policy_operations.SOURCE_FLAGS, messaging=send_policy_operations.FAST).items():
+        rules.setdefault(name, {})[flag] = (None, '', 'false', 'true') if done(send_policy_operations.OPERATION) else (None, '', 'false')
     # Audit M4: the Meeting in-app-only path is on only after its gated activation.
     rules.setdefault('meeting-service', {})[notif_ops.MEETING_IN_APP_FLAG] = \
         (None, '', 'false', 'true') if done(notif_ops.MEETING_IN_APP_OPERATION) else (None, '', 'false')
@@ -1403,6 +1409,7 @@ def running_envs():
 
 
 def release_all(sha, run_id):
+    send_policy_operations.require_remote_path(sys.modules[__name__])
     p.identity()
     manifest = registry(sha)
     images = {service: verify_image(service, sha, manifest) for service in IMAGES if service != 'security-scan-gateway'}
@@ -1628,6 +1635,8 @@ def rollback(sha, run_id):
     if entry.get('irreversible'):
         raise RuntimeError('%s cannot be rolled back (organizations-cutover-runbook §7: never back to a stale writer)'
                            % entry['operation'])
+    if any(component['service'] in ('communications', 'calling') for component in entry['components']):
+        send_policy_operations.require_remote_path(sys.modules[__name__])
     # Routing fence rollback floor (Document 4 §9.6): checked for every producer before anything moves.
     for component in entry['components']:
         previous = component.get('previous')
@@ -2965,6 +2974,10 @@ ACTIVATIONS = {
     # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
     audit_operations.CAPACITY_OPERATION: ((), _platform(audit_operations.activate_database_capacity)),
+    send_policy_operations.OPERATION: ((), lambda sha, run_id, confirm:
+        send_policy_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
+    meeting_recording_operations.OPERATION: ((), lambda sha, run_id, confirm:
+        meeting_recording_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
     audit_operations.LOGS_OPERATION: ((), _platform(audit_operations.activate_service_logs)),
     provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
     provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),

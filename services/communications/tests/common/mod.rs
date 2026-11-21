@@ -42,6 +42,9 @@ pub struct Account {
 /// Simulated canonical owners for the Sections 9-23 private routes.
 #[derive(Default)]
 pub struct World {
+    pub policy_events: Vec<Value>,
+    pub policy_ack_generation: Option<Uuid>,
+    pub policy_events_down: bool,
     /// Rendezvous the two fresh account/block owner reads; a sequential policy
     /// implementation times out instead of passing the overlap regression test.
     pub policy_read_barrier: Option<Arc<tokio::sync::Barrier>>,
@@ -414,9 +417,9 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
             }
             // The Hub always names the caller for the callee's incoming-call screen.
-            if !body["initiatorDisplayName"]
+            if body["initiatorDisplayName"]
                 .as_str()
-                .is_some_and(|n| !n.trim().is_empty())
+                .is_none_or(|n| n.trim().is_empty())
             {
                 return Some(reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
             }
@@ -625,7 +628,14 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             json!({"available":false,"reason":"DEVICE_SECURITY_SETUP_REQUIRED","securityReady":false,"privateField":"MUST_NOT_REACH_CONSUMER"})
         }
         "/internal/v1/communications/common-groups" => json!({"groups":[]}),
-        "/internal/v1/communications/events" => json!({"applied":true}),
+        "/internal/v1/communications/events" => {
+            let mut world = s.world.write().unwrap();
+            world.policy_events.push(body.clone());
+            if world.policy_events_down {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            json!({"applied":true,"sendPolicyProjection":1,"sendPolicyGeneration":world.policy_ack_generation})
+        }
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     Json(value).into_response()
@@ -857,6 +867,8 @@ impl Harness {
         let state = State {
             store: Store { db },
             config: Arc::new(Config {
+                synchronous_policy_events: false,
+                send_policy_generation: None,
                 bind: "127.0.0.1:0".parse().unwrap(),
                 database_url: "redacted-test-only".to_owned().into(),
                 public_app_url: "https://cfmeet.com".into(),

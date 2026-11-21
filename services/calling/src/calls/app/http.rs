@@ -1366,6 +1366,7 @@ async fn create_block(
             },
         )
         .await?;
+    state.app.confirm_block_projection(&ctx, &view).await?;
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -1399,6 +1400,7 @@ async fn release_block(
 ) -> Result<Response, CallingError> {
     let id = uuid_path(&block_id)?;
     let view = state.app.release_block_rule(&ctx, id).await?;
+    state.app.confirm_block_projection(&ctx, &view).await?;
     Ok(respond(StatusCode::OK, view, false))
 }
 

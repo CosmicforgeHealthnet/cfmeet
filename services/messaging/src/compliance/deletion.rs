@@ -263,6 +263,9 @@ async fn process(state: &AppState, d: &DeletionRow) -> Result<Counts> {
         ] {
             db::exec(&state.db, sql, vec![d.environment_id.into(), p.into()]).await?;
         }
+        if db::scalar_i64(&state.db, "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename='messaging_send_block_projection'", vec![]).await? > 0 {
+            db::exec(&state.db, "DELETE FROM messaging_send_block_projection WHERE environment_id=$1 AND (actor_principal_id=$2 OR target_principal_id=$2)", vec![d.environment_id.into(),p.into()]).await?;
+        }
         erase_push(state, d.environment_id, p).await?;
     }
     Ok(counts)
