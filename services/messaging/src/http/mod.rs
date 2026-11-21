@@ -98,8 +98,13 @@ pub fn app(state: AppState) -> Router {
         .with_state(state.clone());
     // `/internal/v1/delegated/v1/...` mirrors the customer surface for first-party
     // backends acting through a peer service (`messaging-application.delegate`).
+    // Owner-delivered exports (ADR 0068) are claimed here only: the recipient signed in to
+    // CF Meet, relayed by a first-party backend, never a customer credential on `/v1`.
     let delegated = Router::new()
-        .nest("/v1/messaging", customer_routes())
+        .nest(
+            "/v1/messaging",
+            customer_routes().merge(crate::compliance::http::recipient_routes()),
+        )
         .nest("/v1/conversations", conversation_tree())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
@@ -131,6 +136,10 @@ pub fn app(state: AppState) -> Router {
                 .merge(crate::sms_bridge::http::internal_routes())
                 // ADR 0068: the admin bridge's operator reads (`messaging-firstparty.administer`).
                 .merge(crate::operator_reads::routes())
+                // ADR 0068: the admin bridge's operator commands and settlement read.
+                .merge(crate::operator_commands::routes())
+                // ADR 0068 A7: the admin bridge's daily dataset pull.
+                .merge(crate::operator_datasets::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

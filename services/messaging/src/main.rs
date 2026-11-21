@@ -557,6 +557,40 @@ async fn main() -> anyhow::Result<()> {
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
         );
     }
+    // ADR 0068 A7: owner events to the HQ admin bridge (abuse.report.changed.v1,
+    // incident.changed.v1). Off unless CF_ADMIN_BRIDGE_BASE_URL is set: then they are
+    // written in the change's transaction and relayed at least once.
+    if has_target(cf_service_auth::services::ADMIN_BRIDGE) {
+        messaging::bridge_events::install(true);
+        tokio::spawn(messaging::bridge_events::run(
+            state.clone(),
+            Arc::new(messaging::bridge_events::AdminBridgeEvents::new(
+                state.service_auth.client(),
+            )),
+            config.workers.interval,
+        ));
+        tracing::info!("owner events are published to the admin bridge");
+    } else {
+        tracing::info!(
+            "CF_ADMIN_BRIDGE_BASE_URL is not set: no owner events are stored or published"
+        );
+    }
+    // ADR 0068 A6: CF Meet user plan limits (default off; fail open to today's limits).
+    {
+        let plan = messaging::plans::PlanSettings::from_env(|k| std::env::var(k).ok())
+            .map_err(|e| anyhow!("plan enforcement configuration: {e}"))?;
+        if plan.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) {
+            state.plans = Some(Arc::new(messaging::plans::PlanEnforcement::new(
+                Arc::new(messaging::plans::DeveloperPlatformPlans::new(
+                    state.service_auth.client(),
+                )),
+                plan.cache_ttl,
+            )));
+            tracing::info!("CF Meet plan limits are enforced (MESSAGING_PLAN_ENFORCEMENT)");
+        } else if plan.enabled {
+            tracing::warn!("MESSAGING_PLAN_ENFORCEMENT=on needs CF_DEVELOPER_PLATFORM_BASE_URL: plan limits are not enforced (today's limits apply)");
+        }
+    }
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

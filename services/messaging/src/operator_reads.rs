@@ -8,7 +8,8 @@
 //! | `GET /operator/reports?status&limit&cursor` | reports, newest first |
 //! | `GET /operator/reports/{reportId}` | one report and its moderation actions |
 //! | `GET /operator/holds?status&limit&cursor` | legal holds (ACTIVE by default) |
-//! | `GET /operator/exports?limit&cursor` | MANAGED conversation exports |
+//! | `GET /operator/exports?limit&cursor` | MANAGED conversation exports (and their owner delivery) |
+//! | `GET /operator/exports/{exportId}` | one owner-delivered export's reference (state, size, digest, delivery) |
 //! | `GET /operator/deletion-requests?limit&cursor` | erasure / purge requests |
 //! | `GET /operator/audit?since&until&limit&cursor` | tenant audit (no detail) |
 //! | `GET /operator/switches` | emergency off-switches |
@@ -16,9 +17,15 @@
 //! | `GET /operator/failed-messages?since&until&limit&cursor` | outbox dead letters |
 //! | `GET /operator/key-transparency` | tree head and witness state |
 //!
+//! Reports and holds carry their row `version` (what a bridge command names as
+//! `expectedVersion`, [`crate::operator_commands`]). `POST /operator/holds` and
+//! `POST /operator/deletion-requests` and `POST /operator/exports` (commands) share their
+//! paths with reads and are registered here.
+//!
 //! Privacy (ADR 0068, design §12): ids, categories, states, counts and times only. Never
 //! message content, ciphertext, MLS state, keys, attachments, report evidence (sealed or
-//! referenced), audit `detail`, outbox payloads, export object keys or digests, legal case
+//! referenced), audit `detail`, outbox payloads, export object keys or URLs (an
+//! owner-delivered export's reference carries its size and digest, brief §1), legal case
 //! references, free-text summaries or error strings. Read-only.
 
 use axum::{
@@ -54,9 +61,20 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/operator/reports", get(reports))
         .route("/operator/reports/:reportId", get(report))
-        .route("/operator/holds", get(holds))
-        .route("/operator/exports", get(exports))
-        .route("/operator/deletion-requests", get(deletion_requests))
+        .route(
+            "/operator/holds",
+            get(holds).post(crate::operator_commands::compliance::place_hold),
+        )
+        .route(
+            "/operator/exports",
+            get(exports).post(crate::operator_commands::compliance::request_export),
+        )
+        .route("/operator/exports/:exportId", get(export))
+        .route(
+            "/operator/deletion-requests",
+            get(deletion_requests)
+                .post(crate::operator_commands::compliance::create_deletion_request),
+        )
         .route("/operator/audit", get(audit))
         .route("/operator/switches", get(switches))
         .route("/operator/incidents", get(incidents))
@@ -65,7 +83,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// The admin bridge with its grant and a named HQ operator, or 403.
-fn require_bridge(caller: &InternalCaller) -> Result<(), ApiError> {
+pub(crate) fn require_bridge(caller: &InternalCaller) -> Result<(), ApiError> {
     caller.require_permission(InternalPermission::MessagingFirstpartyAdminister)?;
     if caller.operator().is_none() {
         return Err(Error::code(ErrorCode::InternalPermissionDenied));
@@ -177,7 +195,7 @@ fn page<T>(
 
 const REPORT_COLUMNS: &str = "id, tenant_id, application_id, environment_id, conversation_id, security_profile, \
      reporter_principal_id, reported_principal_id, message_ids, category, evidence_kind, status, resolution, \
-     resolved_at, created_at";
+     resolved_at, created_at, version";
 
 #[derive(Debug, FromQueryResult)]
 struct ReportRow {
@@ -196,6 +214,7 @@ struct ReportRow {
     resolution: Option<String>,
     resolved_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    version: i64,
 }
 
 impl ReportRow {
@@ -218,6 +237,7 @@ impl ReportRow {
             "resolution": self.resolution,
             "resolvedAt": opt_rfc(self.resolved_at),
             "createdAt": rfc(self.created_at),
+            "version": self.version,
         })
     }
 }
@@ -328,6 +348,7 @@ struct HoldRow {
     expires_at: Option<DateTime<Utc>>,
     released_at: Option<DateTime<Utc>>,
     release_reason: Option<String>,
+    version: i64,
 }
 
 async fn holds(
@@ -351,7 +372,7 @@ async fn holds(
     let rows: Vec<HoldRow> = db::all(
         &state.db,
         "SELECT id, tenant_id, application_id, environment_id, scope_kind, conversation_id, principal_id, \
-         reason_category, status, created_at, expires_at, released_at, release_reason FROM messaging_legal_holds \
+         reason_category, status, created_at, expires_at, released_at, release_reason, version FROM messaging_legal_holds \
          WHERE status = $1 AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3)) \
          ORDER BY created_at DESC, id DESC LIMIT $4",
         vec![status.into(), at.into(), id.into(), ((limit + 1) as i64).into()],
@@ -369,6 +390,7 @@ async fn holds(
                 "reasonCategory": r.reason_category, "status": r.status,
                 "createdAt": rfc(r.created_at), "expiresAt": opt_rfc(r.expires_at),
                 "releasedAt": opt_rfc(r.released_at), "releaseReason": r.release_reason,
+                "version": r.version,
             })
         },
     )))
@@ -389,6 +411,9 @@ struct ExportRow {
     created_at: DateTime<Utc>,
     completed_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
+    delivery_channel: Option<String>,
+    delivery_ref: Option<Uuid>,
+    delivered_at: Option<DateTime<Utc>>,
 }
 
 fn no_filters(q: &PageQuery, what: &str) -> Result<(), ApiError> {
@@ -413,8 +438,8 @@ async fn exports(
     let rows: Vec<ExportRow> = db::all(
         &state.db,
         "SELECT id, tenant_id, application_id, environment_id, conversation_id, status, size, message_count, \
-         failure, attempts, created_at, completed_at, expires_at FROM messaging_exports \
-         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2)) ORDER BY created_at DESC, id DESC LIMIT $3",
+         failure, attempts, created_at, completed_at, expires_at, delivery_channel, delivery_ref, delivered_at \
+         FROM messaging_exports WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2)) ORDER BY created_at DESC, id DESC LIMIT $3",
         vec![at.into(), id.into(), ((limit + 1) as i64).into()],
     )
     .await?;
@@ -429,9 +454,31 @@ async fn exports(
                 "status": r.status, "size": r.size, "messageCount": r.message_count,
                 "failure": r.failure, "attempts": r.attempts, "createdAt": rfc(r.created_at),
                 "completedAt": opt_rfc(r.completed_at), "expiresAt": rfc(r.expires_at),
+                "delivery": if r.delivery_channel.is_some() { "OWNER_DELIVERED" } else { "TENANT" },
+                "deliveryChannel": r.delivery_channel, "deliveryRef": r.delivery_ref,
+                "deliveredAt": opt_rfc(r.delivered_at),
             })
         },
     )))
+}
+
+/// `GET /operator/exports/{exportId}`: an owner-delivered export's reference (404 for a
+/// tenant's own export and for an unknown id).
+async fn export(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    require_bridge(&caller)?;
+    let id = Uuid::parse_str(&id).map_err(|_| Error::code(ErrorCode::NotFound))?;
+    let e = crate::compliance::exports::load_owner_delivered(&state.db, id, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    let mut v = crate::compliance::exports::delivery_view(&e);
+    v["tenantId"] = json!(e.tenant_id);
+    v["applicationId"] = json!(e.application_id);
+    v["environmentId"] = json!(e.environment_id);
+    Ok(Json(v))
 }
 
 #[derive(Debug, FromQueryResult)]

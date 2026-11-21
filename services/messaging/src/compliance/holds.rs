@@ -151,8 +151,13 @@ pub struct CreateHold {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold) -> Result<Value> {
-    let now = state.now();
+/// Validates a hold request (no change).
+pub(crate) async fn check_create<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    request: &CreateHold,
+    now: DateTime<Utc>,
+) -> Result<()> {
     if !matches!(
         request.reason_category.as_str(),
         "LITIGATION" | "REGULATORY" | "INVESTIGATION" | "INTERNAL_POLICY"
@@ -177,7 +182,7 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
     }
     match (request.scope_kind.as_str(), request.conversation_id, request.principal_id) {
         ("CONVERSATION", Some(c), None) => {
-            crate::conversations::access::in_scope(&state.db, ctx, c).await?;
+            crate::conversations::access::in_scope(db, ctx, c).await?;
         }
         ("PRINCIPAL", None, Some(_)) | ("ENVIRONMENT", None, None) => {}
         _ => {
@@ -186,11 +191,22 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
             ))
         }
     }
-    let id = Uuid::new_v4();
-    let txn = state.db.begin().await?;
-    lock_for_new_hold(&txn, ctx.scope.environment_id).await?;
+    Ok(())
+}
+
+/// Records a [`check_create`]d hold inside the caller's transaction: the exclusive
+/// environment lock first (in-flight purges finish before the hold is acknowledged), the
+/// hold and its event. Also used by the admin bridge ([`crate::operator_commands`]).
+pub(crate) async fn create_in<C: ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    request: &CreateHold,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    lock_for_new_hold(txn, ctx.scope.environment_id).await?;
     db::exec(
-        &txn,
+        txn,
         "INSERT INTO messaging_legal_holds (id, tenant_id, application_id, environment_id, scope_kind, conversation_id, principal_id, \
            reason_category, case_reference, created_by_credential_id, created_at, expires_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
@@ -211,7 +227,7 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
     )
     .await?;
     crate::events::outbox::record(
-        &txn,
+        txn,
         "messaging.legal-hold.applied",
         "LEGAL_HOLD",
         id,
@@ -221,9 +237,19 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
         now,
     )
     .await?;
-    txn.commit().await?;
+    Ok(())
+}
+
+/// The audit entry of a created hold.
+pub(crate) async fn audit_created<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    request: &CreateHold,
+    now: DateTime<Utc>,
+) -> Result<()> {
     audit::record(
-        &state.db,
+        db,
         AuditEntry {
             ctx,
             principal_id: None,
@@ -235,7 +261,17 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
         &request_context(),
         now,
     )
-    .await?;
+    .await
+}
+
+pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold) -> Result<Value> {
+    let now = state.now();
+    check_create(&state.db, ctx, &request, now).await?;
+    let id = Uuid::new_v4();
+    let txn = state.db.begin().await?;
+    create_in(&txn, ctx, id, &request, now).await?;
+    txn.commit().await?;
+    audit_created(&state.db, ctx, id, &request, now).await?;
     crate::metrics::inc("messaging_legal_holds_created_total", &[]);
     get(state, ctx, id).await
 }
@@ -283,51 +319,76 @@ pub async fn release(
         ));
     }
     let now = state.now();
-    let hold = load(&state.db, ctx, id).await?;
+    load(&state.db, ctx, id).await?;
     let txn = state.db.begin().await?;
-    let n = db::exec(
-        &txn,
-        "UPDATE messaging_legal_holds SET status = 'RELEASED', released_at = $3, released_by_credential_id = $4, release_reason = $5 \
-         WHERE id = $1 AND environment_id = $2 AND status = 'ACTIVE'",
-        vec![id.into(), ctx.scope.environment_id.into(), now.into(), ctx.credential_id.into(), request.reason.clone().into()],
-    )
-    .await?;
-    if n == 1 {
-        // Deletions held by this hold are re-evaluated at once.
-        db::exec(
-            &txn,
-            "UPDATE messaging_object_deletions SET status = 'PENDING', next_attempt_at = $2 WHERE environment_id = $1 AND status = 'HELD'",
-            vec![ctx.scope.environment_id.into(), now.into()],
-        )
-        .await?;
-        crate::events::outbox::record(
-            &txn,
-            "messaging.legal-hold.released",
-            "LEGAL_HOLD",
-            id,
-            crate::conversations::service::scope_of(ctx),
-            json!({ "hold_id": id, "scope_kind": hold.scope_kind, "conversation_id": hold.conversation_id,
-                    "principal_id": hold.principal_id, "reason": request.reason }),
-            now,
-        )
-        .await?;
-    }
+    let released = release_in(&txn, ctx, id, &request.reason, now).await?;
     txn.commit().await?;
-    if n == 1 {
-        audit::record(
-            &state.db,
-            AuditEntry {
-                ctx,
-                principal_id: None,
-                action: "LEGAL_HOLD_RELEASED",
-                target_kind: "LEGAL_HOLD",
-                target_id: id,
-                detail: json!({ "reason": request.reason, "outcome": "RELEASED" }),
-            },
-            &request_context(),
-            now,
-        )
-        .await?;
+    if released {
+        audit_released(&state.db, ctx, id, &request.reason, now).await?;
     }
     get(state, ctx, id).await
+}
+
+/// Releases an ACTIVE hold inside the caller's transaction (its version advances by one)
+/// and re-queues the deletions it held; `Ok(false)` when it was not ACTIVE.
+pub(crate) async fn release_in<C: ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let hold = load(txn, ctx, id).await?;
+    let n = db::exec(
+        txn,
+        "UPDATE messaging_legal_holds SET status = 'RELEASED', released_at = $3, released_by_credential_id = $4, release_reason = $5,            version = version + 1 WHERE id = $1 AND environment_id = $2 AND status = 'ACTIVE'",
+        vec![id.into(), ctx.scope.environment_id.into(), now.into(), ctx.credential_id.into(), reason.into()],
+    )
+    .await?;
+    if n != 1 {
+        return Ok(false);
+    }
+    // Deletions held by this hold are re-evaluated at once.
+    db::exec(
+        txn,
+        "UPDATE messaging_object_deletions SET status = 'PENDING', next_attempt_at = $2 WHERE environment_id = $1 AND status = 'HELD'",
+        vec![ctx.scope.environment_id.into(), now.into()],
+    )
+    .await?;
+    crate::events::outbox::record(
+        txn,
+        "messaging.legal-hold.released",
+        "LEGAL_HOLD",
+        id,
+        crate::conversations::service::scope_of(ctx),
+        json!({ "hold_id": id, "scope_kind": hold.scope_kind, "conversation_id": hold.conversation_id,
+                "principal_id": hold.principal_id, "reason": reason }),
+        now,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// The audit entry of a released hold.
+pub(crate) async fn audit_released<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    audit::record(
+        db,
+        AuditEntry {
+            ctx,
+            principal_id: None,
+            action: "LEGAL_HOLD_RELEASED",
+            target_kind: "LEGAL_HOLD",
+            target_id: id,
+            detail: json!({ "reason": reason, "outcome": "RELEASED" }),
+        },
+        &request_context(),
+        now,
+    )
+    .await
 }

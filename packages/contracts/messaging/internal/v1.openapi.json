@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.3.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references."
+    "version": "1.6.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version. 1.5.0 (ADR 0068 final round, owner-delivered exports): POST /internal/v1/operator/exports (messaging.export.request, R4) registers an export of a MANAGED conversation delivered ONLY to the verified recipient it names (never the tenant), answered with a reference (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, exportState); GET /internal/v1/operator/exports/{exportId} reads its state; the A2 export list carries each export's delivery; the recipient lists and claims it once on the delegated mirror (GET /internal/v1/delegated/v1/messaging/export-deliveries, POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim). 1.6.0 (ADR 0068 A7, daily datasets): GET /internal/v1/operator/datasets/{datasetId}/days/{day} answers cfmeet.messaging_daily (messages_sent) and cfmeet.operations_health (failed_messages) for a UTC day: counts only, null when not computable."
   },
   "tags": [
     {
@@ -32,7 +32,11 @@
     },
     {
       "name": "Internal — HQ Admin Bridge",
-      "description": "The admin bridge's operator reads of CF Meet chats (ADR 0068): ids, categories, states, counts and times only; never content, ciphertext, keys, evidence or payloads. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) plus X-CF-Operator."
+      "description": "The admin bridge's operator reads and commands on CF Meet chats (ADR 0068): ids, categories, states, counts, versions and times only; never content, ciphertext, keys, evidence or payloads. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) plus X-CF-Operator; commands also take an Idempotency-Key and, when two-person, the approval headers."
+    },
+    {
+      "name": "Internal — Owner-Delivered Exports",
+      "description": "The recipient's side of owner-delivered exports (ADR 0068): listed and claimed once in the recipient's own CF Meet console, relayed by a first-party backend on the delegated mirror. References and one download grant only."
     }
   ],
   "paths": {
@@ -1007,6 +1011,80 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "post": {
+        "operationId": "operatorPlaceHold",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Place a legal hold (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.hold.place (R3): places a hold (id = the Idempotency-Key) under the environment's exclusive hold lock; it preserves what is stored and never creates a way to decrypt. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorPlaceHoldRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorPlaceHoldResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/internal/v1/operator/exports": {
@@ -1076,6 +1154,80 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "post": {
+        "operationId": "operatorRequestExport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Request an owner-delivered export (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.export.request (R4): an OWNER-DELIVERED export of a MANAGED conversation for the verified requester named in the body (the data subject). Built by the existing export worker (MANAGED only: a PRIVATE_E2EE conversation is 409 E2EE_EXPORT_NOT_AVAILABLE; the conversation context's policy must allow exports), stored only when the store confirms encryption at rest (otherwise FAILED STORAGE_NOT_ENCRYPTED), kept 7 days after it is ready and then deleted. Delivered ONLY to the recipient: signed in to their own CF Meet console, relayed by a first-party backend, they claim it once (POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim); a second claim is refused and nothing is ever re-sent (re-issue the command). The tenant's routes never see it and no tenant event is published for it. Legal holds never block it (it reads, never deletes). The recipient must be an ACTIVE member and a CF Meet account (409 RECIPIENT_NOT_A_MEMBER / RECIPIENT_NOT_VERIFIED). The answer is a reference only. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key (id of the export). The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/internal/v1/operator/deletion-requests": {
@@ -1139,6 +1291,80 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "operatorCreateDeletionRequest",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Register a deletion request (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.deletion-request.create (R4): registers a PRINCIPAL_ERASURE or CONVERSATION_PURGE request (id = the Idempotency-Key, PENDING). The existing deletion worker executes it later; legal holds win (held items are preserved, the request ends PARTIALLY_HELD). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorDeletionRequestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDeletionRequestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -1509,6 +1735,1417 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/reports/{reportId}/remove-message": {
+      "post": {
+        "operationId": "operatorRemoveReportedMessage",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Remove a reported message (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.message.remove (R3): tombstones one of an OPEN report's messages by id (MODERATED; never reads or returns its content) and resolves the report ACTIONED, at the report's version. 409 VERSION_CONFLICT / CONFLICT REPORT_NOT_OPEN; 409 CONFLICT KILL_SWITCH_ENGAGED or MODERATION_DISABLED. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRemoveMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorRemoveMessageResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/reports/{reportId}/dismiss": {
+      "post": {
+        "operationId": "operatorDismissReport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Dismiss a report (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.report.dismiss (R3): resolves an OPEN report DISMISSED at its version (the reason code is its resolution). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDismissReportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/conversations/{conversationId}/members/{principalId}/mute": {
+      "post": {
+        "operationId": "operatorMuteMember",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Mute a member (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.member.mute (R3): an ACTIVE member may not send for durationSeconds, at the member's version (409 CONFLICT MEMBER_NOT_ACTIVE). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorMuteMemberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorMuteMemberResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/conversations/{conversationId}/members/{principalId}/remove": {
+      "post": {
+        "operationId": "operatorRemoveMember",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Remove a member (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.member.remove (R3): removes an ACTIVE member at the member's version; never the owner (409 OWNER_CANNOT_BE_REMOVED) nor from a DIRECT conversation (409 INVALID_TRANSITION DIRECT_MEMBERSHIP_FIXED). In PRIVATE_E2EE the cryptographic removal follows by a member's MLS commit. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorRemoveMemberResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/conversations/{conversationId}/restrict": {
+      "post": {
+        "operationId": "operatorRestrictConversation",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Restrict a conversation (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.conversation.restrict (R3): locks an ACTIVE conversation (LOCKED: no new messages) at its version (409 INVALID_TRANSITION CONVERSATION_NOT_ACTIVE). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorRestrictConversationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/policy": {
+      "post": {
+        "operationId": "operatorChangePolicy",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Change an environment's chat policy (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.policy.change (R3): replaces the environment's override document at expectedVersion through the application's own policy path (validation 400, 409 POLICY_VERSION_CONFLICT). A change of any context's allowedProfiles, defaultProfile or centralArchiveRequired is refused (422 SECURITY_PROFILE_NOT_ALLOWED / SECURITY_POSTURE_OWNER_ONLY): the security posture stays the application's decision. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorPolicyChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorPolicyChangeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "operatorGetPolicy",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get an environment's chat policy (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.policy.read (R1): the environment's override document, version, baseline and effective policy; 404 for an environment Messaging does not know for the tenant. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "tenantId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The tenant."
+          },
+          {
+            "name": "environmentId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The application environment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/holds/{holdId}/release": {
+      "post": {
+        "operationId": "operatorReleaseHold",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Release a legal hold (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.hold.release (R3): releases an ACTIVE hold at its version (409 CONFLICT HOLD_NOT_ACTIVE); deletions it held are re-evaluated. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReleaseHoldResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/switches/{switchName}": {
+      "post": {
+        "operationId": "operatorChangeSwitch",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Engage or release an off-switch (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.switch.change (R3): engages (stops a capability) or releases a switch, globally or for one environment, at the switch row's version (0: never set). 409 CONFLICT SWITCH_ALREADY_IN_STATE; a switch the key-transparency monitor engaged (KT_CHECKPOINT_UNVERIFIABLE) is released only with messaging-admin (409 CONFLICT KT_INTEGRITY_CLI_ONLY). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "switchName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "MESSAGE_SEND",
+                "CONVERSATION_CREATE",
+                "E2EE_ONBOARDING",
+                "ATTACHMENT_UPLOAD",
+                "SMS_BRIDGE",
+                "WEBHOOK_RELAY",
+                "E2EE_CONVERSATION_CREATE",
+                "MANAGED_MESSAGING",
+                "REALTIME_CONNECT",
+                "SEARCH",
+                "EXPORTS",
+                "MODERATION_ACTIONS",
+                "BACKUPS",
+                "KT_PROOFS"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorSwitchChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSwitchChangeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/incidents/{incidentId}/resolve": {
+      "post": {
+        "operationId": "operatorResolveIncident",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Record an incident's resolution (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.incident.record (R2): records the resolution of an OPEN incident (409 CONFLICT INCIDENT_NOT_OPEN). A KT_ROLLBACK_DETECTED incident is resolved only with messaging-admin (409 CONFLICT KT_INTEGRITY_CLI_ONLY). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. No second person (R2).",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "incidentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorIncidentResolveResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/failed-messages/{eventId}/retry": {
+      "post": {
+        "operationId": "operatorRetryFailedMessage",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Retry a failed message (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.failed-message.retry (R2): re-queues one dead-lettered outbox event with a fresh retry budget (409 CONFLICT NOT_DEAD_LETTERED); publication stays idempotent by event id. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. No second person (R2).",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorFailedMessageRetryResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/key-transparency/checkpoint": {
+      "post": {
+        "operationId": "operatorKtCheckpoint",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Run a key-transparency checkpoint (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.key-transparency.checkpoint (R3): one key-transparency monitor pass now (verify the database log against the operator checkpoint file; advance the file only when consistent). 409 CONFLICT KT_CHECKPOINT_NOT_CONFIGURED without a configured checkpoint file. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorKtCheckpointResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "operationId": "operatorGetOperation",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a command's settlement record (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The record of an applied command (outcome APPLIED, the status and version it answered). 404 NOT_FOUND for an unknown key and for any caller other than cfmeet.admin-bridge with X-CF-Operator.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOperationRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/conversations/{conversationId}": {
+      "get": {
+        "operationId": "operatorGetConversation",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a conversation's state (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "A conversation's ids, class, profile, lifecycle and version (what restrict names). Never a title, avatar, member list or content. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/conversations/{conversationId}/members/{principalId}": {
+      "get": {
+        "operationId": "operatorGetMember",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a member's state (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "A member's role, state, send restriction and version (what mute / remove name). Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetOwnerDeliveredExport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get an owner-delivered export (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The reference and state of an owner-delivered export (REQUESTED, READY, DELIVERED, EXPIRED, FAILED), its size and digest. 404 for a tenant's own export and for an unknown id. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOwnerDeliveredExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegated/v1/messaging/export-deliveries": {
+      "get": {
+        "operationId": "listExportDeliveries",
+        "tags": [
+          "Internal — Owner-Delivered Exports"
+        ],
+        "summary": "List the acting recipient's owner-delivered exports",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The acting principal's owner-delivered exports, newest first (at most 20), as references. Served ONLY on the delegated mirror (never on /v1): permission messaging-application.delegate, signed delegated scope of a FIRST_PARTY environment re-validated against Platform Access, the signed-in recipient as the (signed) acting principal; scope messages.read. Anyone but the export's recipient gets 404.",
+        "x-cfmeet-internal-permission": "messaging-application.delegate",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "May only repeat the signed initiating principal."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportDeliveryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegated/v1/messaging/exports/{exportId}/claim": {
+      "post": {
+        "operationId": "claimExportDelivery",
+        "tags": [
+          "Internal — Owner-Delivered Exports"
+        ],
+        "summary": "Claim an owner-delivered export once",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The single claim of a READY owner-delivered export by its recipient: one short-lived forced-download grant, and the export becomes DELIVERED in the same transaction (audited). 409 EXPORT_NOT_READY, EXPORT_ALREADY_DELIVERED (nothing is re-sent: HQ re-issues the command) or EXPORT_EXPIRED. Served ONLY on the delegated mirror (never on /v1): permission messaging-application.delegate, signed delegated scope of a FIRST_PARTY environment re-validated against Platform Access, the signed-in recipient as the (signed) acting principal; scope messages.read. Anyone but the export's recipient gets 404.",
+        "x-cfmeet-internal-permission": "messaging-application.delegate",
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "May only repeat the signed initiating principal."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportClaimGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{day}": {
+      "get": {
+        "operationId": "operatorGetDatasetDay",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a dataset's daily counts (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The admin bridge's daily pull (ADR 0068 A7): cfmeet.messaging_daily (messages_sent) and cfmeet.operations_health (failed_messages; Messaging's part only). Counts only, from data Messaging keeps. 404 for any other dataset; 400 for a malformed day or one in the future. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator (the bridge sends hq:dataset-sync); otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "datasetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet\\.[a-z_]{1,64}$"
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "The UTC day, yyyy-mm-dd."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1551,7 +3188,8 @@
           "status",
           "resolution",
           "resolvedAt",
-          "createdAt"
+          "createdAt",
+          "version"
         ],
         "properties": {
           "id": {
@@ -1644,6 +3282,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Row version (a command's expectedVersion)."
           }
         },
         "description": "One report: ids, category, states and times. The evidence (a sealed reporter disclosure or a MANAGED message reference) is never included; evidenceKind only says which kind was given."
@@ -1875,7 +3518,8 @@
           "createdAt",
           "expiresAt",
           "releasedAt",
-          "releaseReason"
+          "releaseReason",
+          "version"
         ],
         "properties": {
           "id": {
@@ -1953,6 +3597,11 @@
               "null"
             ],
             "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Row version (a command's expectedVersion)."
           }
         },
         "description": "One legal hold. The case reference is not included."
@@ -1997,7 +3646,11 @@
           "attempts",
           "createdAt",
           "completedAt",
-          "expiresAt"
+          "expiresAt",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "deliveredAt"
         ],
         "properties": {
           "id": {
@@ -2067,9 +3720,39 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "delivery": {
+            "enum": [
+              "TENANT",
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "CONSOLE_REVEAL_ONCE",
+              null
+            ]
+          },
+          "deliveryRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         },
-        "description": "One MANAGED conversation export. The object key and digest are not included."
+        "description": "One MANAGED conversation export: the tenant's own (delivery TENANT) or an owner-delivered one (OWNER_DELIVERED). The object key and digest are not included."
       },
       "OperatorExportPage": {
         "type": "object",
@@ -2622,6 +4305,1676 @@
           }
         },
         "description": "The key-transparency tree head and each witness state. No key material."
+      },
+      "OperatorRemoveMessageResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "REMOVED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reportId",
+              "reportStatus",
+              "conversationId",
+              "messageId",
+              "messageLifecycle",
+              "actionId",
+              "actedAt"
+            ],
+            "properties": {
+              "reportId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "reportStatus": {
+                "enum": [
+                  "ACTIONED"
+                ]
+              },
+              "conversationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "messageId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "messageLifecycle": {
+                "enum": [
+                  "MODERATED"
+                ]
+              },
+              "actionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "actedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The message is tombstoned (MODERATED) by id and the report ACTIONED; version is the report's."
+      },
+      "OperatorDismissReportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "DISMISSED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reportId",
+              "reportStatus",
+              "resolution",
+              "actionId",
+              "actedAt"
+            ],
+            "properties": {
+              "reportId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "reportStatus": {
+                "enum": [
+                  "DISMISSED"
+                ]
+              },
+              "resolution": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              "actionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "actedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The report is DISMISSED; version is the report's."
+      },
+      "OperatorMuteMemberResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "MUTED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversationId",
+              "principalId",
+              "memberState",
+              "sendRestrictedUntil",
+              "actionId",
+              "actedAt"
+            ],
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "principalId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "memberState": {
+                "enum": [
+                  "ACTIVE"
+                ]
+              },
+              "sendRestrictedUntil": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "actionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "actedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The member may not send until sendRestrictedUntil; version is the member's."
+      },
+      "OperatorRemoveMemberResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "REMOVED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversationId",
+              "principalId",
+              "memberState",
+              "actionId",
+              "actedAt"
+            ],
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "principalId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "memberState": {
+                "enum": [
+                  "REMOVED"
+                ]
+              },
+              "actionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "actedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The member is REMOVED; version is the member's."
+      },
+      "OperatorRestrictConversationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "LOCKED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversationId",
+              "lifecycleState",
+              "lifecycleReason",
+              "stateChangedAt"
+            ],
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lifecycleState": {
+                "enum": [
+                  "LOCKED"
+                ]
+              },
+              "lifecycleReason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              "stateChangedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The conversation is LOCKED (no new messages); version is the conversation's."
+      },
+      "OperatorPolicyChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "UPDATED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenantId",
+              "applicationId",
+              "environmentId",
+              "digest",
+              "platformPolicyVersion",
+              "updatedAt"
+            ],
+            "properties": {
+              "tenantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "applicationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environmentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "platformPolicyVersion": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The override document is replaced; version is the policy's."
+      },
+      "OperatorPlaceHoldResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ACTIVE"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "holdId",
+              "tenantId",
+              "applicationId",
+              "environmentId",
+              "scopeKind",
+              "conversationId",
+              "principalId",
+              "reasonCategory",
+              "holdStatus",
+              "createdAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "holdId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tenantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "applicationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environmentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "scopeKind": {
+                "enum": [
+                  "CONVERSATION",
+                  "PRINCIPAL",
+                  "ENVIRONMENT"
+                ]
+              },
+              "conversationId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "principalId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "reasonCategory": {
+                "enum": [
+                  "LITIGATION",
+                  "REGULATORY",
+                  "INVESTIGATION",
+                  "INTERNAL_POLICY"
+                ]
+              },
+              "holdStatus": {
+                "enum": [
+                  "ACTIVE"
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The hold (id = the Idempotency-Key) is ACTIVE at version 1. The case reference is never returned."
+      },
+      "OperatorReleaseHoldResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "RELEASED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "holdId",
+              "holdStatus",
+              "releaseReason",
+              "releasedAt"
+            ],
+            "properties": {
+              "holdId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "holdStatus": {
+                "enum": [
+                  "RELEASED"
+                ]
+              },
+              "releaseReason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              "releasedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The hold is RELEASED; version is the hold's."
+      },
+      "OperatorDeletionRequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "PENDING"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestId",
+              "tenantId",
+              "applicationId",
+              "environmentId",
+              "kind",
+              "principalId",
+              "conversationId",
+              "requestStatus",
+              "createdAt"
+            ],
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tenantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "applicationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environmentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "enum": [
+                  "PRINCIPAL_ERASURE",
+                  "CONVERSATION_PURGE"
+                ]
+              },
+              "principalId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "conversationId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "requestStatus": {
+                "enum": [
+                  "PENDING"
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The request (id = the Idempotency-Key) is registered PENDING; the deletion worker executes it later and legal holds win."
+      },
+      "OperatorSwitchChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ENGAGED",
+              "RELEASED"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version (a string of the integer)."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "switchName",
+              "scopeKey",
+              "engaged",
+              "reason",
+              "changedAt"
+            ],
+            "properties": {
+              "switchName": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+              },
+              "scopeKey": {
+                "type": "string"
+              },
+              "engaged": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              "changedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The switch changed; version is the switch row's."
+      },
+      "OperatorIncidentResolveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "RESOLVED"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "incidentId",
+              "category",
+              "incidentStatus",
+              "resolvedAt"
+            ],
+            "properties": {
+              "incidentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              "incidentStatus": {
+                "enum": [
+                  "RESOLVED"
+                ]
+              },
+              "resolvedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The incident's resolution is recorded."
+      },
+      "OperatorFailedMessageRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "RETRIED"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "eventId",
+              "eventType",
+              "aggregateType",
+              "aggregateId",
+              "queueState",
+              "retriedAt"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "aggregateType": {
+                "type": "string"
+              },
+              "aggregateId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "queueState": {
+                "enum": [
+                  "PENDING"
+                ]
+              },
+              "retriedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "The dead-lettered outbox event is re-queued with a fresh retry budget (payload never returned)."
+      },
+      "OperatorKtCheckpointResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "CHECKPOINTED",
+              "ROLLBACK_DETECTED",
+              "UNVERIFIABLE"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "treeSize",
+              "rootHash",
+              "verdict",
+              "checkedAt"
+            ],
+            "properties": {
+              "treeSize": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rootHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "verdict": {
+                "enum": [
+                  "CHECKPOINTED",
+                  "ROLLBACK_DETECTED",
+                  "UNVERIFIABLE"
+                ]
+              },
+              "checkedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "description": "One key-transparency monitor pass: the checkpoint file advanced (consistent), a rollback / fork incident raised, or the protective switches engaged (unverifiable)."
+      },
+      "OperatorRemoveMessageRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "messageId",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The report's version."
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "One of the report's messages."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorVersionedReasonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource row's version; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorMuteMemberRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "reasonCode",
+          "durationSeconds"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The member's version."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 2592000
+          }
+        }
+      },
+      "OperatorPolicyChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "environmentId",
+          "expectedVersion",
+          "reasonCode",
+          "policy"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The policy's version (0 when none is stored); 409 POLICY_VERSION_CONFLICT otherwise."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          },
+          "policy": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ApplicationPolicy"
+          }
+        }
+      },
+      "OperatorPlaceHoldRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "environmentId",
+          "scopeKind",
+          "reasonCategory"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scopeKind": {
+            "enum": [
+              "CONVERSATION",
+              "PRINCIPAL",
+              "ENVIRONMENT"
+            ]
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCategory": {
+            "enum": [
+              "LITIGATION",
+              "REGULATORY",
+              "INVESTIGATION",
+              "INTERNAL_POLICY"
+            ]
+          },
+          "caseReference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,128}$",
+            "description": "Stored for the record, never returned."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "CONVERSATION needs conversationId (in environmentId), PRINCIPAL needs principalId, ENVIRONMENT neither."
+      },
+      "OperatorDeletionRequestRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "environmentId",
+          "kind",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the resource must belong to; another tenant's resource is 404 NOT_FOUND."
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "PRINCIPAL_ERASURE",
+              "CONVERSATION_PURGE"
+            ]
+          },
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        },
+        "description": "PRINCIPAL_ERASURE needs principalId; CONVERSATION_PURGE needs conversationId (in environmentId)."
+      },
+      "OperatorSwitchChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "engaged",
+          "expectedVersion",
+          "reasonCode"
+        ],
+        "properties": {
+          "environmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "null / absent: the GLOBAL switch."
+          },
+          "engaged": {
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The switch row's version; 0 when it was never set (absent from the switch list)."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorReasonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reasonCode"
+        ],
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "enum": [
+              "APPLIED"
+            ]
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,19}$"
+          }
+        },
+        "description": "The settlement record of an applied command: the same status and version the command answered."
+      },
+      "OperatorConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "contextClass",
+          "securityProfile",
+          "lifecycleState",
+          "version",
+          "createdAt",
+          "stateChangedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contextClass": {
+            "type": "string"
+          },
+          "securityProfile": {
+            "enum": [
+              "MANAGED",
+              "PRIVATE_E2EE"
+            ]
+          },
+          "lifecycleState": {
+            "enum": [
+              "ACTIVE",
+              "LOCKED",
+              "CLOSED",
+              "ARCHIVED",
+              "EXPIRED",
+              "DELETED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stateChangedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "A conversation's ids, class, profile, lifecycle and version. Never a title, avatar, member list or content."
+      },
+      "OperatorMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "principalId",
+          "role",
+          "state",
+          "sendRestrictedUntil",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "REMOVED",
+              "LEFT"
+            ]
+          },
+          "sendRestrictedUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "A member's role, state, send restriction and version."
+      },
+      "OperatorPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "version",
+          "policy",
+          "applicationBaseline",
+          "effective",
+          "digest",
+          "platformPolicyVersion"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The override document's version (0: none stored)."
+          },
+          "policy": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ApplicationPolicy"
+          },
+          "applicationBaseline": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/EffectivePolicy"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "platformPolicyVersion": {
+            "type": "integer"
+          }
+        },
+        "description": "An environment's chat policy: its override document, version, baseline and effective policy (flags, limits, enums; no personal data)."
+      },
+      "ExportDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "conversationId",
+          "exportState",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientPrincipalId",
+          "recipientMasked",
+          "size",
+          "sha256",
+          "failure",
+          "createdAt",
+          "completedAt",
+          "deliveredAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportState": {
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "delivery": {
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null",
+            "description": "Always null: the export is delivered in the recipient's own CF Meet console and Messaging never holds an address."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "The reference of an owner-delivered export (ADR 0068, brief §1): ids, state, size, digest, delivery and times. Never the export, its object key, a URL, a token or an address."
+      },
+      "OperatorOwnerDeliveredExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "conversationId",
+          "exportState",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientPrincipalId",
+          "recipientMasked",
+          "size",
+          "sha256",
+          "failure",
+          "createdAt",
+          "completedAt",
+          "deliveredAt",
+          "expiresAt",
+          "tenantId",
+          "applicationId",
+          "environmentId"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportState": {
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "delivery": {
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null",
+            "description": "Always null: the export is delivered in the recipient's own CF Meet console and Messaging never holds an address."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "An owner-delivered export as HQ sees it (references only). exportState: REQUESTED (being built), READY (the recipient may claim it once), DELIVERED (claimed), EXPIRED (7 days after it was ready; the copy is deleted), FAILED."
+      },
+      "OperatorExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "conversationId",
+          "recipientPrincipalId",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tenant (Platform Access tenant id) the conversation must belong to; another tenant's conversation is 404 NOT_FOUND."
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The MANAGED conversation to export."
+          },
+          "recipientPrincipalId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The verified requester (the data subject): an ACTIVE member of the conversation who is a CF Meet account (NATIVE_CF_USER with a cfmeet-user reference). The export is delivered to this principal only."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$",
+            "description": "UPPER_SNAKE_CASE reason code (2-48 characters)."
+          }
+        }
+      },
+      "OperatorExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "REQUESTED"
+            ]
+          },
+          "version": {
+            "type": "null",
+            "description": "The resource has no row version."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorOwnerDeliveredExport"
+          }
+        },
+        "description": "The export (id = the Idempotency-Key) is registered; the existing export worker builds it and the recipient claims it in their own CF Meet console."
+      },
+      "ExportDeliveryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/ExportDelivery"
+            }
+          }
+        }
+      },
+      "ExportClaimGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportId",
+          "deliveryRef",
+          "method",
+          "url",
+          "expiresAt",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "enum": [
+              "GET"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "A short-lived signed read with a forced download (application/json attachment)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "description": "The single download of an owner-delivered export, answered once to its recipient."
+      },
+      "OperatorDatasetDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "date",
+          "metrics"
+        ],
+        "properties": {
+          "datasetId": {
+            "enum": [
+              "cfmeet.messaging_daily",
+              "cfmeet.operations_health"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "messages_sent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "cfmeet.messaging_daily: accepted application messages of the UTC day, every environment (usage facts; never content)."
+              },
+              "failed_messages": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "cfmeet.operations_health: committed events of the UTC day that are dead letters now."
+              }
+            }
+          }
+        },
+        "description": "Counts for one UTC day. A metric is null, never a guessed 0, when the day has not ended or its source did not exist for the whole day."
       }
     },
     "parameters": {
@@ -2633,6 +5986,46 @@
         "schema": {
           "type": "string",
           "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "HQ's operation id (UUID). A repeated key for the same command and subject answers what the first call answered and applies nothing; the same key for anything else is 409 CONFLICT (IDEMPOTENCY_KEY_REUSED). Missing: 400 IDEMPOTENCY_KEY_REQUIRED.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Approver": {
+        "name": "X-CF-Approver",
+        "in": "header",
+        "required": false,
+        "description": "The approving HQ staff member (a different person than X-CF-Operator). Required, with X-CF-Approval-Ref and X-CF-Intent-Digest, by every two-person (R3 / R4) command: without them 403 INTERNAL_PERMISSION_DENIED (reason SECOND_PERSON_REQUIRED).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "ApprovalRef": {
+        "name": "X-CF-Approval-Ref",
+        "in": "header",
+        "required": false,
+        "description": "HQ's reference of the single-use two-person approval (sent with X-CF-Approver).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        }
+      },
+      "IntentDigest": {
+        "name": "X-CF-Intent-Digest",
+        "in": "header",
+        "required": false,
+        "description": "Hex SHA-256 of the approved intent (sent with X-CF-Approver).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     }

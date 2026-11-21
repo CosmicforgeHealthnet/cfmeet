@@ -50,6 +50,9 @@ mod m20261209_000037_app_messages;
 mod m20261210_000038_mls_group_infos;
 mod m20261211_000039_member_notifications;
 mod m20261212_000040_inbox_and_chat_controls;
+mod m20261213_000041_admin_operations;
+mod m20261214_000042_owner_delivered_exports;
+mod m20261215_000043_admin_bridge_events;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -156,6 +159,7 @@ where
     pending.extend(mls_join_pending(db).await?);
     pending.extend(member_notifications_pending(db).await?);
     pending.extend(chat_controls_pending(db).await?);
+    pending.extend(admin_operations_pending(db).await?);
     Ok(pending)
 }
 
@@ -343,6 +347,74 @@ where
     if applied.iter().any(|v| !known.contains(v)) {
         return Err(sea_orm_migration::sea_orm::DbErr::Custom(
             "a chat-controls migration is applied but unknown to this binary".into(),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
+}
+
+/// Name of the table recording the admin-operations history ([`AdminOperationsMigrator`]).
+pub const ADMIN_OPERATIONS_MIGRATION_TABLE: &str = "messaging_admin_operations_seaql_migrations";
+
+/// HQ admin bridge commands (ADR 0068: the operations ledger and the report / legal-hold
+/// row versions): a SEPARATE, additive history applied by `messaging-migration up` after
+/// [`ChatControlsMigrator`]. The previous image fails closed on unknown migrations of the
+/// histories it knows, so appending to one of them would stop it after a rollback; it
+/// never reads this table. This image requires it: [`pending_migrations`] includes it.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(self::m20261213_000041_admin_operations::Migration),
+            Box::new(self::m20261214_000042_owner_delivered_exports::Migration),
+            Box::new(self::m20261215_000043_admin_bridge_events::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(ADMIN_OPERATIONS_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// The admin-operations migrations not yet applied (read-only; fails closed on unknown
+/// ones).
+pub async fn admin_operations_pending<C>(
+    db: &C,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = AdminOperationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!(
+                "SELECT to_regclass('{ADMIN_OPERATIONS_MIGRATION_TABLE}') IS NOT NULL AS present"
+            ),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {ADMIN_OPERATIONS_MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if applied.iter().any(|v| !known.contains(v)) {
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            "an admin-operations migration is applied but unknown to this binary".into(),
         ));
     }
     Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
