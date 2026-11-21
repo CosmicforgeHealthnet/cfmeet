@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use super::translate::{self as t, obj, T};
 use crate::chain::{Answer, Authorized, Bridge};
 use crate::contract::model::Owner;
+use crate::contract::schemas_messaging::{CONTEXT_CLASSES, EFFECTIVE_POLICY, POLICY_CONTEXT};
 use crate::errors::ErrorCode;
 use crate::owners::OwnerError;
 
@@ -283,6 +284,91 @@ fn time_cursor(auth: &Authorized) -> Result<Option<String>, ErrorCode> {
     }
 }
 
+fn conversation(c: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("conversation_id", t::uuid(c, "id")?),
+        ("tenant_id", t::uuid(c, "tenantId")?),
+        ("application_id", t::uuid(c, "applicationId")?),
+        ("environment_id", t::uuid(c, "environmentId")?),
+        ("context_class", t::string(c, "contextClass")?),
+        ("security_profile", t::string(c, "securityProfile")?),
+        ("lifecycle_state", t::string(c, "lifecycleState")?),
+        ("version", t::int(c, "version")?),
+        ("created_at", t::time(c, "createdAt")?),
+        ("state_changed_at", t::time(c, "stateChangedAt")?),
+    ]))
+}
+
+fn member(m: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("conversation_id", t::uuid(m, "conversationId")?),
+        ("principal_id", t::uuid(m, "principalId")?),
+        ("role", t::string(m, "role")?),
+        ("member_state", t::string(m, "state")?),
+        (
+            "send_restricted_until",
+            t::opt_time(m, "sendRestrictedUntil")?,
+        ),
+        ("version", t::int(m, "version")?),
+        ("updated_at", t::time(m, "updatedAt")?),
+    ]))
+}
+
+/// The effective policy, closed: its sections from the data tables, its contexts map as a
+/// list of `{context_class, ...}` (known classes only).
+fn effective_policy(e: &Value) -> T<Value> {
+    let mut out = super::owner_commands::extract(EFFECTIVE_POLICY, e)?;
+    let contexts = e
+        .get("contexts")
+        .and_then(Value::as_object)
+        .filter(|c| c.len() <= CONTEXT_CLASSES.len())
+        .ok_or(OwnerError::Contract)?;
+    let mut list = Vec::new();
+    for class in CONTEXT_CLASSES {
+        if let Some(c) = contexts.get(*class) {
+            let mut v = super::owner_commands::extract(POLICY_CONTEXT, c)?;
+            v["context_class"] = Value::from(*class);
+            list.push(v);
+        }
+    }
+    if list.len() != contexts.len() {
+        return Err(OwnerError::Contract);
+    }
+    out["contexts"] = Value::Array(list);
+    Ok(out)
+}
+
+fn environment_policy(p: &Value) -> T<Value> {
+    let digest = t::string(p, "digest")?;
+    let hex = digest.as_str().is_some_and(|d| {
+        d.len() == 64 && d.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    });
+    if !hex {
+        return Err(OwnerError::Contract);
+    }
+    Ok(obj(vec![
+        ("tenant_id", t::uuid(p, "tenantId")?),
+        ("application_id", t::uuid(p, "applicationId")?),
+        ("environment_id", t::uuid(p, "environmentId")?),
+        ("version", t::int(p, "version")?),
+        ("digest", digest),
+        (
+            "platform_policy_version",
+            t::int(p, "platformPolicyVersion")?,
+        ),
+        (
+            "effective",
+            effective_policy(p.get("effective").ok_or(OwnerError::Contract)?)?,
+        ),
+    ]))
+}
+
+/// A lowercase hyphenated UUID, or `None` (an id that names nothing at the owner).
+fn canonical_uuid(raw: Option<&String>) -> Option<String> {
+    raw.and_then(|r| uuid::Uuid::parse_str(r).ok())
+        .map(|u| u.hyphenated().to_string())
+}
+
 fn rfc(t: chrono::DateTime<chrono::Utc>) -> String {
     t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
@@ -335,6 +421,43 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
             }
             match read(format!("{BASE}/reports/{id}"), vec![]).await {
                 Ok(v) => answer(report_detail(&v)),
+                Err(e) => Err(e.into()),
+            }
+        }
+        "messaging.conversations.read" => {
+            let Some(id) = canonical_uuid(auth.params.get("conversation_id")) else {
+                return Some(Err(ErrorCode::ResourceNotFound));
+            };
+            match read(format!("{BASE}/conversations/{id}"), vec![]).await {
+                Ok(v) => answer(conversation(&v)),
+                Err(e) => Err(e.into()),
+            }
+        }
+        "messaging.members.read" => {
+            // HQ's member reference is `<conversation_id>:<principal_id>`; Messaging's
+            // principals are Platform Access UUIDs: any other principal names nothing.
+            let (Some(c), Some(p)) = (
+                canonical_uuid(auth.params.get("conversation_id")),
+                canonical_uuid(auth.params.get("principal_id")),
+            ) else {
+                return Some(Err(ErrorCode::ResourceNotFound));
+            };
+            match read(format!("{BASE}/conversations/{c}/members/{p}"), vec![]).await {
+                Ok(v) => answer(member(&v)),
+                Err(e) => Err(e.into()),
+            }
+        }
+        "messaging.environment-policy.read" => {
+            // Tenant-scoped like the commands: the tenant is the request's scope.
+            let (Some(tenant), Some(env)) = (
+                canonical_uuid(Some(&auth.query.tenant)),
+                canonical_uuid(auth.params.get("environment_id")),
+            ) else {
+                return Some(Err(ErrorCode::ResourceNotFound));
+            };
+            let query = vec![("tenantId", tenant), ("environmentId", env)];
+            match read(format!("{BASE}/policy"), query).await {
+                Ok(v) => answer(environment_policy(&v)),
                 Err(e) => Err(e.into()),
             }
         }

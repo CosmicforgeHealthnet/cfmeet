@@ -1,0 +1,73 @@
+{
+  "description": "One email delivery's status (no recipient, subject or body).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delivery_id",
+    "category",
+    "status",
+    "provider",
+    "attempts",
+    "last_error_class",
+    "last_error_status",
+    "created_at",
+    "accepted_at",
+    "delivered_at"
+  ],
+  "properties": {
+    "delivery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "category": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 32
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_error_class": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "last_error_status": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "delivered_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

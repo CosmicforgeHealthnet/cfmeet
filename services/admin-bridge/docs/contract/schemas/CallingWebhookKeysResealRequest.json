@@ -1,5 +1,5 @@
 {
-  "description": "Request of calling.webhook-key.reseal (POST /internal/v1/operator/webhook-keys/reseal). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+  "description": "Request of calling.webhook-keys.reseal (POST /internal/v1/operator/webhook-keys/reseal). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
   "type": "object",
   "additionalProperties": false,
   "required": [

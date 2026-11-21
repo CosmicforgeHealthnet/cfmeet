@@ -366,6 +366,39 @@ pub fn chat_migration(r: &Value) -> T<Value> {
     ]))
 }
 
+pub fn artifact(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("artifact_id", t::uuid(r, "artifactId")?),
+        ("meeting_id", t::uuid(r, "conferenceId")?),
+        ("space_id", t::uuid(r, "spaceId")?),
+        ("artifact_state", code(r, "artifactStatus")?),
+        ("size_bytes", t::opt_int(r, "sizeBytes")?),
+        ("created_at", t::time(r, "createdAt")?),
+        ("available_at", t::opt_time(r, "availableAt")?),
+        ("retention_at", t::opt_time(r, "retentionAt")?),
+        ("delete_requested_at", t::opt_time(r, "deleteRequestedAt")?),
+        ("deleted_at", t::opt_time(r, "deletedAt")?),
+        // The artifact's version (expected_version of its delete command).
+        ("version", t::int(r, "version")?),
+    ]))
+}
+
+/// One email delivery's status: category, state, provider, attempts, error class, times.
+pub fn email_delivery(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("delivery_id", t::uuid(r, "id")?),
+        ("category", code(r, "category")?),
+        ("status", code(r, "status")?),
+        ("provider", t::opt_string(r, "provider")?),
+        ("attempts", t::int(r, "attempts")?),
+        ("last_error_class", opt_code(r, "lastErrorClass")?),
+        ("last_error_status", t::opt_int(r, "lastErrorStatus")?),
+        ("created_at", t::time(r, "createdAt")?),
+        ("accepted_at", t::opt_time(r, "acceptedAt")?),
+        ("delivered_at", t::opt_time(r, "deliveredAt")?),
+    ]))
+}
+
 pub fn critical_lane(r: &Value) -> T<Value> {
     let leased = r
         .get("leasedUncompletedDecisions")
@@ -528,6 +561,25 @@ fn plan(auth: &Authorized) -> Option<Result<Plan, ErrorCode>> {
             vec![],
             Cursor::None,
             Shape::One(live_health),
+        ),
+        "meetings.meeting-recordings.list" => p(
+            conf_path("/recordings"),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(artifact),
+        ),
+        "meetings.meeting-transcripts.list" => p(
+            conf_path("/transcripts"),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(artifact),
+        ),
+        "meetings.email-deliveries.read" => p(
+            uuid_param(auth, "delivery_id")
+                .map(|id| format!("{BASE}/meetings/email-deliveries/{id}")),
+            vec![],
+            Cursor::None,
+            Shape::One(email_delivery),
         ),
         "meetings.webinars.list" => p(
             Ok(format!("{BASE}/meetings/webinars")),

@@ -6,6 +6,189 @@
 use serde_json::{json, Map, Value};
 
 use super::model::CURSOR_PATTERN;
+use super::owner_commands::{o, Out, OutField};
+
+// ---- The effective chat policy of an environment (flags, limits, enums) ----------------
+// Described as data: the translation (`routes::messaging`) and the schema come from the
+// same tables, so they cannot drift apart. The owner's override document is not relayed.
+
+/// One context class's effective policy (`context_class` is added by the translation).
+pub const POLICY_CONTEXT: &[OutField] = &[
+    o("enabled", "enabled", Out::Bool, false),
+    o("allowed_profiles", "allowedProfiles", Out::StrList, false),
+    o("default_profile", "defaultProfile", Out::Code, true),
+    o("max_members", "maxMembers", Out::Int, true),
+    o("max_lifetime_seconds", "maxLifetimeSeconds", Out::Int, true),
+    o("reopen_allowed", "reopenAllowed", Out::Bool, false),
+    o("legal_hold_eligible", "legalHoldEligible", Out::Bool, false),
+    o("sms_bridge_eligible", "smsBridgeEligible", Out::Bool, true),
+    o("regulated", "regulated", Out::Bool, false),
+    o(
+        "central_archive_required",
+        "centralArchiveRequired",
+        Out::Bool,
+        false,
+    ),
+    o("reporting_enabled", "reportingEnabled", Out::Bool, false),
+    o("exports_enabled", "exportsEnabled", Out::Bool, false),
+    o("attachments_enabled", "attachmentsEnabled", Out::Bool, true),
+    o("retention_days", "retentionDays", Out::Int, true),
+    o(
+        "requests_require_acceptance",
+        "requestsRequireAcceptance",
+        Out::Bool,
+        true,
+    ),
+];
+const POLICY_MESSAGES: &[OutField] = &[
+    o("replies", "replies", Out::Bool, false),
+    o("threads", "threads", Out::Bool, false),
+    o("reactions", "reactions", Out::Bool, false),
+    o("pins", "pins", Out::Bool, false),
+    o("forwarding", "forwarding", Out::Bool, true),
+    o(
+        "forward_shows_original_sender",
+        "forwardShowsOriginalSender",
+        Out::Bool,
+        true,
+    ),
+];
+const POLICY_ATTACHMENTS: &[OutField] = &[
+    o("enabled", "enabled", Out::Bool, false),
+    o("max_bytes", "maxBytes", Out::Int, false),
+    o("max_per_message", "maxPerMessage", Out::Int, false),
+    o("allowed_kinds", "allowedKinds", Out::StrList, false),
+    o(
+        "managed_scan_required",
+        "managedScanRequired",
+        Out::Bool,
+        false,
+    ),
+    o(
+        "max_voice_note_seconds",
+        "maxVoiceNoteSeconds",
+        Out::Int,
+        false,
+    ),
+    o("max_video_seconds", "maxVideoSeconds", Out::Int, false),
+    o("storage_budget_bytes", "storageBudgetBytes", Out::Int, true),
+    o("daily_upload_bytes", "dailyUploadBytes", Out::Int, true),
+    o(
+        "max_concurrent_uploads",
+        "maxConcurrentUploads",
+        Out::Int,
+        false,
+    ),
+];
+const POLICY_PRIVACY: &[OutField] = &[
+    o("presence", "presence", Out::Bool, false),
+    o("typing_indicators", "typingIndicators", Out::Bool, false),
+    o("read_receipts", "readReceipts", Out::Bool, false),
+    o("last_seen", "lastSeen", Out::Bool, false),
+    o("delivery_receipts", "deliveryReceipts", Out::Bool, false),
+];
+const POLICY_RETENTION: &[OutField] = &[
+    o("message_days", "messageDays", Out::Int, true),
+    o(
+        "deleted_purge_grace_seconds",
+        "deletedPurgeGraceSeconds",
+        Out::Int,
+        false,
+    ),
+];
+const POLICY_MODERATION: &[OutField] = &[
+    o("enabled", "enabled", Out::Bool, false),
+    o("reports_enabled", "reportsEnabled", Out::Bool, false),
+    o(
+        "managed_evidence_allowed",
+        "managedEvidenceAllowed",
+        Out::Bool,
+        false,
+    ),
+];
+const POLICY_EDITING: &[OutField] = &[
+    o("edit_window_seconds", "editWindowSeconds", Out::Int, true),
+    o(
+        "delete_window_seconds",
+        "deleteWindowSeconds",
+        Out::Int,
+        true,
+    ),
+    o(
+        "revision_history_visible",
+        "revisionHistoryVisible",
+        Out::Bool,
+        false,
+    ),
+];
+const POLICY_ABUSE: &[OutField] = &[
+    o("messages_per_minute", "messagesPerMinute", Out::Int, false),
+    o(
+        "new_direct_contacts_per_hour",
+        "newDirectContactsPerHour",
+        Out::Int,
+        false,
+    ),
+    o("reports_per_hour", "reportsPerHour", Out::Int, false),
+    o("uploads_per_hour", "uploadsPerHour", Out::Int, false),
+    o(
+        "managed_links_per_hour",
+        "managedLinksPerHour",
+        Out::Int,
+        false,
+    ),
+];
+const POLICY_BACKUPS: &[OutField] = &[
+    o("enabled", "enabled", Out::Bool, false),
+    o("max_bytes", "maxBytes", Out::Int, false),
+    o("retain_count", "retainCount", Out::Int, false),
+];
+/// The effective policy without its contexts (translated separately into a list).
+pub const EFFECTIVE_POLICY: &[OutField] = &[
+    o("schema_version", "schemaVersion", Out::Int, false),
+    o(
+        "platform_policy_version",
+        "platformPolicyVersion",
+        Out::Int,
+        false,
+    ),
+    o(
+        "application_policy_version",
+        "applicationPolicyVersion",
+        Out::Int,
+        false,
+    ),
+    o("sending_enabled", "sendingEnabled", Out::Bool, false),
+    o("messages", "messages", Out::Obj(POLICY_MESSAGES), true),
+    o(
+        "attachments",
+        "attachments",
+        Out::Obj(POLICY_ATTACHMENTS),
+        true,
+    ),
+    o("privacy", "privacy", Out::Obj(POLICY_PRIVACY), true),
+    o("retention", "retention", Out::Obj(POLICY_RETENTION), true),
+    o(
+        "moderation",
+        "moderation",
+        Out::Obj(POLICY_MODERATION),
+        true,
+    ),
+    o("editing", "editing", Out::Obj(POLICY_EDITING), true),
+    o("abuse", "abuse", Out::Obj(POLICY_ABUSE), true),
+    o("backups", "backups", Out::Obj(POLICY_BACKUPS), false),
+];
+/// Context classes (the keys of the owner's `contexts` map).
+pub const CONTEXT_CLASSES: &[&str] = &[
+    "DIRECT",
+    "GROUP",
+    "MEETING",
+    "TRANSACTION",
+    "CONSULTATION",
+    "SUPPORT",
+    "ENTERPRISE",
+    "DEVELOPER_DEFINED",
+];
 
 pub fn insert(m: &mut Map<String, Value>) {
     let uuid = json!({"type": "string", "format": "uuid"});
@@ -208,6 +391,58 @@ pub fn insert(m: &mut Map<String, Value>) {
             json!({
                 "head": {"anyOf": [{"type": "null"}, head]},
                 "witnesses": {"type": "array", "maxItems": 32, "items": witness}
+            }),
+        ),
+    );
+
+    m.insert(
+        "MessagingConversation".into(),
+        closed(
+            "One conversation: ids, context class, security profile, lifecycle state, version and times. No title, no members, no content.",
+            json!({
+                "conversation_id": uuid, "tenant_id": uuid, "application_id": uuid, "environment_id": uuid,
+                "context_class": {"enum": CONTEXT_CLASSES},
+                "security_profile": {"enum": ["MANAGED", "PRIVATE_E2EE"]},
+                "lifecycle_state": {"enum": ["ACTIVE", "LOCKED", "CLOSED", "ARCHIVED", "EXPIRED", "DELETED"]},
+                "version": {"type": "integer", "minimum": 1, "description": "The conversation's version (expected_version of messaging.conversation.restrict)."},
+                "created_at": ts, "state_changed_at": ts
+            }),
+        ),
+    );
+    m.insert(
+        "MessagingMember".into(),
+        closed(
+            "One membership: role, state, send restriction, version and time.",
+            json!({
+                "conversation_id": uuid, "principal_id": uuid, "role": code,
+                "member_state": {"enum": ["ACTIVE", "REMOVED", "LEFT"]},
+                "send_restricted_until": nullable_ts,
+                "version": {"type": "integer", "minimum": 1, "description": "The membership's version (expected_version of messaging.member.mute / remove)."},
+                "updated_at": ts
+            }),
+        ),
+    );
+    let mut context = super::schemas_commands::object(POLICY_CONTEXT);
+    context["properties"]["context_class"] = json!({"enum": CONTEXT_CLASSES});
+    context["required"]
+        .as_array_mut()
+        .expect("required")
+        .insert(0, json!("context_class"));
+    let mut effective = super::schemas_commands::object(EFFECTIVE_POLICY);
+    effective["properties"]["contexts"] = json!({"type": "array", "maxItems": 8, "items": context});
+    effective["required"]
+        .as_array_mut()
+        .expect("required")
+        .push(json!("contexts"));
+    effective["description"] =
+        json!("The policy in force (flags, limits, enums; no personal data).");
+    m.insert(
+        "MessagingEnvironmentPolicy".into(),
+        closed(
+            "An environment's chat policy as it applies: the override version (expected_version of messaging.policy.change; 0 while none is stored), the effective policy and its digest. The override document itself is not relayed.",
+            json!({
+                "tenant_id": uuid, "application_id": uuid, "environment_id": uuid,
+                "version": count, "digest": hex, "platform_policy_version": count, "effective": effective
             }),
         ),
     );

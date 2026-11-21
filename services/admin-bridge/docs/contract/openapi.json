@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.15.0",
+    "version": "1.16.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -5238,7 +5238,7 @@
                       ]
                     },
                     "result": {
-                      "$ref": "#/components/schemas/AccountDuplicatesEnforceResult"
+                      "not": {}
                     },
                     "error": {
                       "type": "null"
@@ -5364,6 +5364,258 @@
         "x-cfmeet-permission": "accounts.duplicates.enforce",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
+        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-owner": "meeting-service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "not": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/cfmeet-admin/v1/accounts/duplicates/enforce": {
+      "post": {
+        "operationId": "accounts.duplicates.enforce-all",
+        "summary": "accounts.duplicates.enforce-all",
+        "tags": [
+          "accounts"
+        ],
+        "parameters": [
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "abuse-review",
+                "privacy-request"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountDuplicatesEnforceResult"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "COMMAND",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "accounts.duplicates.enforce-all",
+        "x-cfmeet-risk": "R3",
+        "x-cfmeet-approval": "TWO_PERSON",
         "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
@@ -5371,7 +5623,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AccountDuplicatesEnforceRequest"
+                "$ref": "#/components/schemas/AccountDuplicatesEnforceAllRequest"
               }
             }
           }
@@ -9001,6 +9253,269 @@
         }
       }
     },
+    "/internal/cfmeet-admin/v1/meetings/meetings/{meeting_id}/recordings": {
+      "get": {
+        "operationId": "meetings.meeting-recordings.list",
+        "summary": "meetings.meeting-recordings.list",
+        "tags": [
+          "meetings"
+        ],
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MeetingArtifactPage"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED_PAGE",
+        "x-cfmeet-permission": "meetings.meeting-recordings.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "meeting-service"
+      }
+    },
     "/internal/cfmeet-admin/v1/meetings/transcripts": {
       "get": {
         "operationId": "meetings.transcripts.list",
@@ -9533,6 +10048,269 @@
             }
           }
         }
+      }
+    },
+    "/internal/cfmeet-admin/v1/meetings/meetings/{meeting_id}/transcripts": {
+      "get": {
+        "operationId": "meetings.meeting-transcripts.list",
+        "summary": "meetings.meeting-transcripts.list",
+        "tags": [
+          "meetings"
+        ],
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MeetingArtifactPage"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED_PAGE",
+        "x-cfmeet-permission": "meetings.meeting-transcripts.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "meeting-service"
       }
     },
     "/internal/cfmeet-admin/v1/meetings/webinars": {
@@ -11614,6 +12392,249 @@
         "x-cfmeet-owner": "meeting-service"
       }
     },
+    "/internal/cfmeet-admin/v1/meetings/email-deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "meetings.email-deliveries.read",
+        "summary": "meetings.email-deliveries.read",
+        "tags": [
+          "meetings"
+        ],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MeetingEmailDelivery"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "meetings.email-deliveries.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "meeting-service"
+      }
+    },
     "/internal/cfmeet-admin/v1/meetings/critical-lane": {
       "get": {
         "operationId": "meetings.critical-lane.read",
@@ -12590,6 +13611,500 @@
         "x-cfmeet-kind": "READ",
         "x-cfmeet-query-shape": "SCOPED",
         "x-cfmeet-permission": "messaging.reports.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "messaging"
+      }
+    },
+    "/internal/cfmeet-admin/v1/messaging/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "messaging.conversations.read",
+        "summary": "messaging.conversations.read",
+        "tags": [
+          "messaging"
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MessagingConversation"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "messaging.conversations.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "messaging"
+      }
+    },
+    "/internal/cfmeet-admin/v1/messaging/conversations/{conversation_id}/members/{principal_id}": {
+      "get": {
+        "operationId": "messaging.members.read",
+        "summary": "messaging.members.read",
+        "tags": [
+          "messaging"
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MessagingMember"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "messaging.members.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "READ_ONLY",
@@ -14407,6 +15922,248 @@
             }
           }
         }
+      }
+    },
+    "/internal/cfmeet-admin/v1/messaging/environments/{environment_id}/policy": {
+      "get": {
+        "operationId": "messaging.environment-policy.read",
+        "summary": "messaging.environment-policy.read",
+        "tags": [
+          "messaging"
+        ],
+        "parameters": [
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/MessagingEnvironmentPolicy"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "messaging.environment-policy.read",
+        "x-cfmeet-risk": "R1",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "messaging"
       }
     },
     "/internal/cfmeet-admin/v1/messaging/holds": {
@@ -24669,7 +26426,7 @@
                       ]
                     },
                     "result": {
-                      "$ref": "#/components/schemas/CallingWebhookKeyResealResult"
+                      "not": {}
                     },
                     "error": {
                       "type": "null"
@@ -24795,6 +26552,258 @@
         "x-cfmeet-permission": "calling.webhook-key.reseal",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
+        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-owner": "calling",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "not": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/cfmeet-admin/v1/calling/webhook-keys/reseal": {
+      "post": {
+        "operationId": "calling.webhook-keys.reseal",
+        "summary": "calling.webhook-keys.reseal",
+        "tags": [
+          "calling"
+        ],
+        "parameters": [
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "abuse-review",
+                "ops-incident",
+                "privacy-request"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/CallingWebhookKeysResealResult"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "COMMAND",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "calling.webhook-keys.reseal",
+        "x-cfmeet-risk": "R3",
+        "x-cfmeet-approval": "TWO_PERSON",
         "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "calling",
         "requestBody": {
@@ -24802,7 +26811,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CallingWebhookKeyResealRequest"
+                "$ref": "#/components/schemas/CallingWebhookKeysResealRequest"
               }
             }
           }
@@ -68259,6 +70268,7 @@
           "from",
           "to",
           "price_book_id",
+          "price_book_version",
           "version_id",
           "currency",
           "estimate"
@@ -68292,6 +70302,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "price_book_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The chosen price book's version when the bridge chose it."
+          },
           "version_id": {
             "type": [
               "string",
@@ -68307,7 +70322,7 @@
             "const": true
           }
         },
-        "description": "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market, over the window's UTC days [from, to]."
+        "description": "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market (price_book_id at price_book_version; no such book: RESOURCE_NOT_FOUND, never another market's book), over the window's UTC days [from, to]."
       },
       "FinancePlanSpread": {
         "description": "Holders on one plan, and those assigned to it in the window.",
@@ -71210,6 +73225,183 @@
           }
         }
       },
+      "MeetingArtifact": {
+        "description": "One recording or transcript of a meeting: state, size, times and version. Never an object key or media URL.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "meeting_id",
+          "space_id",
+          "artifact_state",
+          "size_bytes",
+          "created_at",
+          "available_at",
+          "retention_at",
+          "delete_requested_at",
+          "deleted_at",
+          "version"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meeting_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "artifact_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "available_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "retention_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delete_requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The artifact's version (expected_version of its delete command)."
+          }
+        }
+      },
+      "MeetingArtifactPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingArtifact"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingEmailDelivery": {
+        "description": "One email delivery's status (no recipient, subject or body).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "delivery_id",
+          "category",
+          "status",
+          "provider",
+          "attempts",
+          "last_error_class",
+          "last_error_status",
+          "created_at",
+          "accepted_at",
+          "delivered_at"
+        ],
+        "properties": {
+          "delivery_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_error_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "last_error_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "accepted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "MessagingReport": {
         "description": "One chat report: ids, category, states and times. The evidence itself (a sealed reporter disclosure or a MANAGED message reference) is never relayed; evidence_kind only says which kind was given.",
         "type": "object",
@@ -72312,6 +74504,578 @@
                 }
               }
             }
+          }
+        }
+      },
+      "MessagingConversation": {
+        "description": "One conversation: ids, context class, security profile, lifecycle state, version and times. No title, no members, no content.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "context_class",
+          "security_profile",
+          "lifecycle_state",
+          "version",
+          "created_at",
+          "state_changed_at"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "context_class": {
+            "enum": [
+              "DIRECT",
+              "GROUP",
+              "MEETING",
+              "TRANSACTION",
+              "CONSULTATION",
+              "SUPPORT",
+              "ENTERPRISE",
+              "DEVELOPER_DEFINED"
+            ]
+          },
+          "security_profile": {
+            "enum": [
+              "MANAGED",
+              "PRIVATE_E2EE"
+            ]
+          },
+          "lifecycle_state": {
+            "enum": [
+              "ACTIVE",
+              "LOCKED",
+              "CLOSED",
+              "ARCHIVED",
+              "EXPIRED",
+              "DELETED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The conversation's version (expected_version of messaging.conversation.restrict)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state_changed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingMember": {
+        "description": "One membership: role, state, send restriction, version and time.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_id",
+          "principal_id",
+          "role",
+          "member_state",
+          "send_restricted_until",
+          "version",
+          "updated_at"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "member_state": {
+            "enum": [
+              "ACTIVE",
+              "REMOVED",
+              "LEFT"
+            ]
+          },
+          "send_restricted_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The membership's version (expected_version of messaging.member.mute / remove)."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingEnvironmentPolicy": {
+        "description": "An environment's chat policy as it applies: the override version (expected_version of messaging.policy.change; 0 while none is stored), the effective policy and its digest. The override document itself is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "version",
+          "digest",
+          "platform_policy_version",
+          "effective"
+        ],
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "platform_policy_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "effective": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema_version",
+              "platform_policy_version",
+              "application_policy_version",
+              "sending_enabled",
+              "messages",
+              "attachments",
+              "privacy",
+              "retention",
+              "moderation",
+              "editing",
+              "abuse",
+              "backups",
+              "contexts"
+            ],
+            "properties": {
+              "schema_version": {
+                "type": "integer"
+              },
+              "platform_policy_version": {
+                "type": "integer"
+              },
+              "application_policy_version": {
+                "type": "integer"
+              },
+              "sending_enabled": {
+                "type": "boolean"
+              },
+              "messages": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "replies",
+                  "threads",
+                  "reactions",
+                  "pins",
+                  "forwarding",
+                  "forward_shows_original_sender"
+                ],
+                "properties": {
+                  "replies": {
+                    "type": "boolean"
+                  },
+                  "threads": {
+                    "type": "boolean"
+                  },
+                  "reactions": {
+                    "type": "boolean"
+                  },
+                  "pins": {
+                    "type": "boolean"
+                  },
+                  "forwarding": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "forward_shows_original_sender": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "attachments": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "enabled",
+                  "max_bytes",
+                  "max_per_message",
+                  "allowed_kinds",
+                  "managed_scan_required",
+                  "max_voice_note_seconds",
+                  "max_video_seconds",
+                  "storage_budget_bytes",
+                  "daily_upload_bytes",
+                  "max_concurrent_uploads"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "max_bytes": {
+                    "type": "integer"
+                  },
+                  "max_per_message": {
+                    "type": "integer"
+                  },
+                  "allowed_kinds": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+                    }
+                  },
+                  "managed_scan_required": {
+                    "type": "boolean"
+                  },
+                  "max_voice_note_seconds": {
+                    "type": "integer"
+                  },
+                  "max_video_seconds": {
+                    "type": "integer"
+                  },
+                  "storage_budget_bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "daily_upload_bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "max_concurrent_uploads": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "privacy": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "presence",
+                  "typing_indicators",
+                  "read_receipts",
+                  "last_seen",
+                  "delivery_receipts"
+                ],
+                "properties": {
+                  "presence": {
+                    "type": "boolean"
+                  },
+                  "typing_indicators": {
+                    "type": "boolean"
+                  },
+                  "read_receipts": {
+                    "type": "boolean"
+                  },
+                  "last_seen": {
+                    "type": "boolean"
+                  },
+                  "delivery_receipts": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "retention": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "message_days",
+                  "deleted_purge_grace_seconds"
+                ],
+                "properties": {
+                  "message_days": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "deleted_purge_grace_seconds": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "moderation": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "enabled",
+                  "reports_enabled",
+                  "managed_evidence_allowed"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "reports_enabled": {
+                    "type": "boolean"
+                  },
+                  "managed_evidence_allowed": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "editing": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "edit_window_seconds",
+                  "delete_window_seconds",
+                  "revision_history_visible"
+                ],
+                "properties": {
+                  "edit_window_seconds": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "delete_window_seconds": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "revision_history_visible": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "abuse": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "messages_per_minute",
+                  "new_direct_contacts_per_hour",
+                  "reports_per_hour",
+                  "uploads_per_hour",
+                  "managed_links_per_hour"
+                ],
+                "properties": {
+                  "messages_per_minute": {
+                    "type": "integer"
+                  },
+                  "new_direct_contacts_per_hour": {
+                    "type": "integer"
+                  },
+                  "reports_per_hour": {
+                    "type": "integer"
+                  },
+                  "uploads_per_hour": {
+                    "type": "integer"
+                  },
+                  "managed_links_per_hour": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "backups": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled",
+                  "max_bytes",
+                  "retain_count"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "max_bytes": {
+                    "type": "integer"
+                  },
+                  "retain_count": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "contexts": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "context_class",
+                    "enabled",
+                    "allowed_profiles",
+                    "default_profile",
+                    "max_members",
+                    "max_lifetime_seconds",
+                    "reopen_allowed",
+                    "legal_hold_eligible",
+                    "sms_bridge_eligible",
+                    "regulated",
+                    "central_archive_required",
+                    "reporting_enabled",
+                    "exports_enabled",
+                    "attachments_enabled",
+                    "retention_days",
+                    "requests_require_acceptance"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "allowed_profiles": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+                      }
+                    },
+                    "default_profile": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                    },
+                    "max_members": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "max_lifetime_seconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "reopen_allowed": {
+                      "type": "boolean"
+                    },
+                    "legal_hold_eligible": {
+                      "type": "boolean"
+                    },
+                    "sms_bridge_eligible": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "regulated": {
+                      "type": "boolean"
+                    },
+                    "central_archive_required": {
+                      "type": "boolean"
+                    },
+                    "reporting_enabled": {
+                      "type": "boolean"
+                    },
+                    "exports_enabled": {
+                      "type": "boolean"
+                    },
+                    "attachments_enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "retention_days": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "requests_require_acceptance": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "context_class": {
+                      "enum": [
+                        "DIRECT",
+                        "GROUP",
+                        "MEETING",
+                        "TRANSACTION",
+                        "CONSULTATION",
+                        "SUPPORT",
+                        "ENTERPRISE",
+                        "DEVELOPER_DEFINED"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "description": "The policy in force (flags, limits, enums; no personal data)."
           }
         }
       },
@@ -80064,8 +82828,8 @@
           }
         }
       },
-      "CallingWebhookKeyResealRequest": {
-        "description": "Request of calling.webhook-key.reseal (POST /internal/v1/operator/webhook-keys/reseal). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+      "CallingWebhookKeysResealRequest": {
+        "description": "Request of calling.webhook-keys.reseal (POST /internal/v1/operator/webhook-keys/reseal). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -80089,7 +82853,7 @@
           }
         }
       },
-      "CallingWebhookKeyResealResult": {
+      "CallingWebhookKeysResealResult": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -80137,7 +82901,7 @@
                 }
               }
             },
-            "description": "The resource after calling.webhook-key.reseal; status: RESEALED."
+            "description": "The resource after calling.webhook-keys.reseal; status: RESEALED."
           }
         }
       },
@@ -80427,8 +83191,8 @@
           }
         }
       },
-      "AccountDuplicatesEnforceRequest": {
-        "description": "Request of accounts.duplicates.enforce (POST /internal/v1/operator/accounts/duplicates/enforce).",
+      "AccountDuplicatesEnforceAllRequest": {
+        "description": "Request of accounts.duplicates.enforce-all (POST /internal/v1/operator/accounts/duplicates/enforce).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -80521,7 +83285,7 @@
                 }
               }
             },
-            "description": "The resource after accounts.duplicates.enforce; status: ENFORCED, PARTIALLY_ENFORCED, NOT_ENFORCED."
+            "description": "The resource after accounts.duplicates.enforce-all; status: ENFORCED, PARTIALLY_ENFORCED, NOT_ENFORCED."
           }
         }
       },

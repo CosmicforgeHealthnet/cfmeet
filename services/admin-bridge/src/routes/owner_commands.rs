@@ -169,7 +169,8 @@ fn string_ok(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'@' | b'-'))
 }
 
-fn extract(fields: &[OutField], v: &Value) -> Result<Value, OwnerError> {
+/// A closed object of `fields`, extracted strictly (also used by data-described reads).
+pub fn extract(fields: &[OutField], v: &Value) -> Result<Value, OwnerError> {
     let mut out = Map::new();
     for f in fields {
         let raw = v.get(f.owner);

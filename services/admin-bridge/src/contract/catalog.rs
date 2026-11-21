@@ -531,6 +531,20 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R3, V::Personal)
         .roles(&[L::SecurityAdmin, L::TrustSafety]),
     );
+    // The owner enforces uniqueness across every group at once: the group-less command
+    // says so (an approval binds the exact target).
+    c.push(
+        ms(
+            cmd(
+                "accounts.duplicates.enforce-all",
+                "/accounts/duplicates/enforce",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .risk(R::R3, V::Personal)
+        .roles(&[L::SecurityAdmin, L::TrustSafety]),
+    );
     c.push(
         ms(
             cmd("accounts.user.export", "/accounts/users/{user_id}/export"),
@@ -694,6 +708,18 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
+                "meetings.meeting-recordings.list",
+                "/meetings/meetings/{meeting_id}/recordings",
+                Q::ScopedPage,
+            ),
+            S::New,
+            P::A4,
+        )
+        .risk(R::R1, V::Personal),
+    );
+    c.push(
+        ms(
+            get(
                 "meetings.transcripts.list",
                 "/meetings/transcripts",
                 Q::ScopedWindow,
@@ -713,6 +739,18 @@ pub fn catalog() -> Vec<Capability> {
             P::A4,
         )
         .risk(R::R4, V::Personal),
+    );
+    c.push(
+        ms(
+            get(
+                "meetings.meeting-transcripts.list",
+                "/meetings/meetings/{meeting_id}/transcripts",
+                Q::ScopedPage,
+            ),
+            S::New,
+            P::A4,
+        )
+        .risk(R::R1, V::Personal),
     );
     c.push(
         ms(
@@ -805,6 +843,19 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
+                "meetings.email-deliveries.read",
+                "/meetings/email-deliveries/{delivery_id}",
+                Q::Scoped,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("delivery_id")
+        .risk(R::R1, V::OperationsMinimized),
+    );
+    c.push(
+        ms(
+            get(
                 "meetings.critical-lane.read",
                 "/meetings/critical-lane",
                 Q::Scoped,
@@ -852,6 +903,32 @@ pub fn catalog() -> Vec<Capability> {
             P::A2,
         )
         .risk(R::R1, V::SafetyEvidence),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.conversations.read",
+                "/messaging/conversations/{conversation_id}",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A4,
+        )
+        .uuid("conversation_id")
+        .risk(R::R1, V::OperationsMinimized),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.members.read",
+                "/messaging/conversations/{conversation_id}/members/{principal_id}",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A4,
+        )
+        .uuid("conversation_id")
+        .risk(R::R1, V::OperationsMinimized),
     );
     c.push(
         mg(
@@ -919,6 +996,19 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A2,
         )
+        .risk(R::R1, V::Internal),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.environment-policy.read",
+                "/messaging/environments/{environment_id}/policy",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A5,
+        )
+        .uuid("environment_id")
         .risk(R::R1, V::Internal),
     );
     c.push(
@@ -1367,6 +1457,20 @@ pub fn catalog() -> Vec<Capability> {
             cmd(
                 "calling.webhook-key.reseal",
                 "/calling/webhook-keys/{key_id}/reseal",
+            ),
+            S::CliToApi,
+            P::A5,
+        )
+        .risk(R::R3, V::Internal)
+        .roles(&[L::PlatformOps]),
+    );
+    // The owner reseals every webhook subscription of the tenant: the tenant-wide command
+    // says so (an approval binds the exact target).
+    c.push(
+        cl(
+            cmd(
+                "calling.webhook-keys.reseal",
+                "/calling/webhook-keys/reseal",
             ),
             S::CliToApi,
             P::A5,
@@ -3440,6 +3544,21 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "MeetingCriticalLane",
         &["meetings_operator_reads_translate_strictly"],
     ),
+    (
+        "meetings.meeting-recordings.list",
+        "MeetingArtifactPage",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
+    (
+        "meetings.meeting-transcripts.list",
+        "MeetingArtifactPage",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
+    (
+        "meetings.email-deliveries.read",
+        "MeetingEmailDelivery",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
     // A2.6 Messaging.
     (
         "messaging.reports.list",
@@ -3450,6 +3569,21 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "messaging.reports.read",
         "MessagingReportDetail",
         &["messaging_report_detail_carries_actions_not_evidence"],
+    ),
+    (
+        "messaging.conversations.read",
+        "MessagingConversation",
+        &["messaging_conversation_and_member_carry_versions"],
+    ),
+    (
+        "messaging.members.read",
+        "MessagingMember",
+        &["messaging_conversation_and_member_carry_versions"],
+    ),
+    (
+        "messaging.environment-policy.read",
+        "MessagingEnvironmentPolicy",
+        &["messaging_environment_policy_is_tenant_scoped_and_closed"],
     ),
     (
         "messaging.holds.list",

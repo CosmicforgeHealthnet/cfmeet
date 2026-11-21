@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.15.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.16.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -182,7 +182,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `accounts.mfa.reset`
 - `accounts.security-history.list`
 - `accounts.duplicates.list`
-- `accounts.duplicates.enforce`
+- `accounts.duplicates.enforce-all`
 - `accounts.user.delete`
 - `accounts.test-accounts.list`
 - `meetings.spaces.search`
@@ -195,21 +195,27 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `meetings.space.archive`
 - `meetings.space.transfer`
 - `meetings.recording.delete`
+- `meetings.meeting-recordings.list`
 - `meetings.transcript.delete`
+- `meetings.meeting-transcripts.list`
 - `meetings.webinars.list`
 - `meetings.webinar-registrations.list`
 - `meetings.audit.list`
 - `meetings.chat-migration.read`
 - `meetings.chat-migration.change`
+- `meetings.email-deliveries.read`
 - `meetings.critical-lane.read`
 - `meetings.critical-lane.change`
 - `messaging.reports.list`
 - `messaging.reports.read`
+- `messaging.conversations.read`
+- `messaging.members.read`
 - `messaging.message.remove`
 - `messaging.member.mute`
 - `messaging.member.remove`
 - `messaging.conversation.restrict`
 - `messaging.report.dismiss`
+- `messaging.environment-policy.read`
 - `messaging.policy.change`
 - `messaging.holds.list`
 - `messaging.hold.place`
@@ -250,7 +256,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `calling.incidents.list`
 - `calling.incident.record`
 - `calling.webhook-keys.list`
-- `calling.webhook-key.reseal`
+- `calling.webhook-keys.reseal`
 - `calling.audit.list`
 - `communications.profiles.read`
 - `communications.profile.suspend`
