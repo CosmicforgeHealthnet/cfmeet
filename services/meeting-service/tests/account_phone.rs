@@ -11,6 +11,114 @@ use uuid::Uuid;
 struct Provider;
 
 #[tokio::test]
+async fn phone_http_binding_signin_and_removal_require_real_session_proofs() {
+    let Some(mut app) = TestApp::new().await else {
+        return;
+    };
+    app.state.phone_verification = Some(std::sync::Arc::new(Provider));
+    app.router = backend::routes::create_routes(app.state.clone())
+        .route_layer(axum::middleware::from_fn(common::route_coverage::record));
+    let mut user = app.user("phone-http-owner").await;
+    app.trust_device(&mut user).await;
+    let step = app
+        .step_up_token(&user.token, user.id, "MANAGE_PHONE")
+        .await;
+    let (status, challenge) = app
+        .post(
+            "/api/v2/me/phone/verification",
+            Auth::Bearer(&user.token),
+            serde_json::json!({"phoneNumber":"+393331234568","stepUpToken":step}),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{challenge}");
+    let confirm = serde_json::json!({"challengeId":challenge["challengeId"],"code":"123456"});
+    let (status, rejected) = app
+        .post(
+            "/api/v2/me/phone/confirm",
+            Auth::Bearer(&user.token),
+            serde_json::json!({"challengeId":challenge["challengeId"],"code":"000000"}),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{rejected}");
+    let (status, verified) = app
+        .post(
+            "/api/v2/me/phone/confirm",
+            Auth::Bearer(&user.token),
+            confirm.clone(),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{verified}");
+    assert_eq!(verified["status"], "VERIFIED");
+    assert_eq!(verified["discoverable"], false);
+    assert_eq!(
+        app.post(
+            "/api/v2/me/phone/confirm",
+            Auth::Bearer(&user.token),
+            confirm
+        )
+        .await
+        .0,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+    let (status, visible) = app
+        .patch(
+            "/api/v2/me/phone",
+            Auth::Bearer(&user.token),
+            serde_json::json!({"discoverable":true}),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{visible}");
+    assert_eq!(visible["discoverable"], true);
+    let (status, current) = app.get("/api/v2/me/phone", Auth::Bearer(&user.token)).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(current["phoneNumber"], "+393331234568");
+    let (status, signin) = app
+        .post(
+            "/api/v1/auth/phone/request",
+            Auth::None,
+            serde_json::json!({"phoneNumber":"+393331234568"}),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{signin}");
+    let proof = serde_json::json!({"challengeId":signin["challengeId"],"code":"123456"});
+    let (status, session) = app
+        .post("/api/v1/auth/phone/verify", Auth::None, proof.clone())
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{session}");
+    let signed_in = session["access_token"]
+        .as_str()
+        .expect("phone sign-in token");
+    assert_eq!(
+        app.post("/api/v1/auth/phone/verify", Auth::None, proof)
+            .await
+            .0,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+    let step = app
+        .step_up_token(&user.token, user.id, "MANAGE_PHONE")
+        .await;
+    let (status, result) = app
+        .call(
+            axum::http::Method::DELETE,
+            "/api/v2/me/phone",
+            Auth::Bearer(&user.token),
+            Some(serde_json::json!({"stepUpToken":step})),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::NO_CONTENT, "{result}");
+    assert!(phone::find(&app.db.conn, "+393331234568", false)
+        .await
+        .unwrap()
+        .is_none());
+    for token in [&user.token[..], signed_in] {
+        assert_eq!(
+            app.get("/api/v2/me/phone", Auth::Bearer(token)).await.0,
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+    }
+}
+
+#[tokio::test]
 async fn phone_routes_require_an_account_and_stay_disabled_without_provider_credentials() {
     let Some(app) = TestApp::new().await else {
         return;

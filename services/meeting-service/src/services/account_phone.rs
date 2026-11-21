@@ -44,6 +44,19 @@ pub trait VerificationProvider: Send + Sync {
     async fn approved(&self, number: &str, verification: &str, code: &str) -> ApiResult<bool>;
 }
 
+pub fn provider(
+    state: &crate::state::AppState,
+) -> ApiResult<std::sync::Arc<dyn VerificationProvider>> {
+    match &state.phone_verification {
+        Some(provider) => Ok(provider.clone()),
+        None => Ok(std::sync::Arc::new(TwilioVerify::from_env()?)),
+    }
+}
+
+pub fn available(state: &crate::state::AppState) -> bool {
+    state.phone_verification.is_some() || TwilioVerify::from_env().is_ok()
+}
+
 pub struct TwilioVerify {
     client: reqwest::Client,
     account: String,
@@ -146,7 +159,15 @@ pub struct PhoneView {
 }
 
 pub async fn view(db: &DatabaseConnection, user: Uuid) -> ApiResult<PhoneView> {
-    if std::env::var("PHONE_ACCOUNTS_ENABLED").ok().as_deref() != Some("true") {
+    view_with_availability(db, user, TwilioVerify::from_env().is_ok()).await
+}
+
+pub async fn view_with_availability(
+    db: &DatabaseConnection,
+    user: Uuid,
+    available: bool,
+) -> ApiResult<PhoneView> {
+    if !available {
         return Ok(PhoneView {
             status: "PROVIDER_BLOCKED".into(),
             phone_number: None,
@@ -175,7 +196,7 @@ pub async fn view(db: &DatabaseConnection, user: Uuid) -> ApiResult<PhoneView> {
 
 pub async fn start(
     db: &DatabaseConnection,
-    provider: &impl VerificationProvider,
+    provider: &(impl VerificationProvider + ?Sized),
     user: Uuid,
     session: Option<Uuid>,
     phone: &str,
@@ -213,7 +234,7 @@ pub async fn start(
 /// nor a second browser can bind the number or mint a second sign-in from that proof.
 pub async fn verify(
     db: &DatabaseConnection,
-    provider: &impl VerificationProvider,
+    provider: &(impl VerificationProvider + ?Sized),
     challenge: Uuid,
     binding: Option<(Uuid, Uuid)>,
     code: &str,

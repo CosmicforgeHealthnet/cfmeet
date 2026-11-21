@@ -1051,64 +1051,74 @@
         },
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PhoneChallenge"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         }
       }
@@ -1133,64 +1143,74 @@
         },
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OtpVerifyResponse"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         }
       }
@@ -13812,64 +13832,74 @@
         "operationId": "v2_get_my_phone",
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PhoneView"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         },
         "security": [
@@ -13900,54 +13930,64 @@
             "description": ""
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         },
         "security": [
@@ -13975,64 +14015,74 @@
         },
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PhoneView"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         },
         "security": [
@@ -14062,64 +14112,74 @@
         },
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PhoneView"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         },
         "security": [
@@ -14149,64 +14209,74 @@
         },
         "responses": {
           "200": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PhoneChallenge"
                 }
               }
-            },
-            "description": ""
+            }
           },
           "400": {
+            "description": "Invalid phone request or verification",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Invalid phone request or verification"
+            }
           },
           "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "AUTHENTICATION_REQUIRED"
+            }
           },
           "403": {
+            "description": "Recent authentication required",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Recent authentication required"
+            }
+          },
+          "404": {
+            "description": "Phone feature disabled or binding unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Too many attempts"
+            }
           },
           "503": {
+            "description": "Phone provider unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
-            },
-            "description": "Phone provider unavailable"
+            }
           }
         },
         "security": [

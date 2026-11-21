@@ -13,6 +13,8 @@ use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlackli
 
 #[derive(Clone)]
 pub struct AppState {
+    /// Explicit provider dependency; production uses the configured Twilio adapter.
+    pub phone_verification: Option<Arc<dyn crate::services::account_phone::VerificationProvider>>,
     pub communications: Option<Arc<crate::services::communications::Bridge>>,
     pub db: DatabaseConnection,
     pub jwt_service: Arc<JwtService>,
@@ -103,6 +105,7 @@ impl AppState {
             Arc::new(crate::services::notifications::NoPreferenceStore),
         ));
         Self {
+            phone_verification: None,
             communications: None,
             db,
             jwt_service: Arc::new(

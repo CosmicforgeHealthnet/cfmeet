@@ -76,11 +76,11 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v2/me/mfa/disable` | account session | Turn two-step sign-in off | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_disable_my_mfa` |
 | POST | `/api/v2/me/mfa/totp/confirm` | account session | Enable the authenticator app | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_my_totp` |
 | POST | `/api/v2/me/mfa/totp/setup` | account session | Start enrolling an authenticator app | 200, 401, 403, 409 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_setup_my_totp` |
-| DELETE | `/api/v2/me/phone` | account session | Remove my phone | 204, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_phone` |
-| GET | `/api/v2/me/phone` | account session | Get my linked phone | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_phone` |
-| PATCH | `/api/v2/me/phone` | account session | Update phone discovery | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_update_phone_privacy` |
-| POST | `/api/v2/me/phone/confirm` | account session | Confirm phone binding | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_phone_binding` |
-| POST | `/api/v2/me/phone/verification` | account session | Request phone binding | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_phone_binding` |
+| DELETE | `/api/v2/me/phone` | account session | Remove my phone | 204, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_phone` |
+| GET | `/api/v2/me/phone` | account session | Get my linked phone | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_phone` |
+| PATCH | `/api/v2/me/phone` | account session | Update phone discovery | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_update_phone_privacy` |
+| POST | `/api/v2/me/phone/confirm` | account session | Confirm phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_phone_binding` |
+| POST | `/api/v2/me/phone/verification` | account session | Request phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_phone_binding` |
 | POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |
 | POST | `/api/v2/me/step-up/verify` | account session | Verify a step-up code | 200, 400, 401, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_verify_step_up` |
 
@@ -133,8 +133,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v1/auth/otp/request` | none (public) | Request a sign-in code | 200, 400, 429 | — | `openapi/meeting-service.json#request_otp` |
 | POST | `/api/v1/auth/otp/verify` | none (public) | Verify a sign-in code | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp` |
 | POST | `/api/v1/auth/otp/verify-link` | none (public) | Verify a sign-in link | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp_link` |
-| POST | `/api/v1/auth/phone/request` | none (public) | Request phone sign-in code | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#request_phone_otp` |
-| POST | `/api/v1/auth/phone/verify` | none (public) | Verify phone sign-in code | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#verify_phone_otp` |
+| POST | `/api/v1/auth/phone/request` | none (public) | Request phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#request_phone_otp` |
+| POST | `/api/v1/auth/phone/verify` | none (public) | Verify phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#verify_phone_otp` |
 | POST | `/api/v1/auth/refresh` | none (public) | Refresh access token | 200, 401 | — | `openapi/meeting-service.json#refresh_token` |
 
 ### Backstage (v2)
