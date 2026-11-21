@@ -42,6 +42,36 @@ class FakePlatform:
         self.scopes = {}
         self.apps, self.codes, self.grants, self.oauth_tokens, self.app_spaces = {}, {}, {}, {}, {}
         self.issued_codes = []
+        self.secrets = {}
+        # Sign-in: OTP requests per client address in the current window, sessions.
+        self.otp_limit, self.otp_window, self.otp_requests = 20, 0, 0
+        self.sign_ins, self.refreshes, self.refresh_tokens, self.expired = {}, {}, {}, set()
+        self.orgs_created = {}
+        self.slept = []
+
+    def new_refresh(self, owner):
+        token = '%s-refresh-%s' % (owner, self.id('r'))
+        self.refresh_tokens[token] = owner
+        return token
+
+    def sleep(self, seconds):
+        """The patched time.sleep: waiting out the reported time ends the OTP window."""
+        self.slept.append(seconds)
+        if seconds >= 7:
+            self.otp_window = 0
+
+    def create_accounts(self, namespace):
+        """app_acceptance.accounts(namespace, count=2, keep_sessions=True): two new accounts,
+        each created by one OTP sign-in whose refresh token it keeps (in memory)."""
+        made = []
+        for _ in range(2):
+            owner = 'p' + 'abcdefghijklmnopqrstuvwxyz'[len(self.sign_ins) % 26]
+            self.otp_requests += 1
+            self.otp_window += 1
+            self.sign_ins[owner] = self.sign_ins.get(owner, 0) + 1
+            made.append({'email': owner + '@example.invalid', 'userId': 'acct-' + owner,
+                         'refreshToken': self.new_refresh(owner)})
+        return made
 
     def id(self, prefix='id'):
         self.n += 1
@@ -54,6 +84,8 @@ class FakePlatform:
         self.calls.append((method, path.split('?')[0], client.base, bearer))
         client.last_headers = {'cache-control': 'no-store'}
         status, value = self.route(client, method, path, body, bearer, headers)
+        if status == 401 and 401 not in expected and client.account and not token:
+            raise da.Expired()  # as the real _call: a session client renews its session
         if status not in expected:
             raise da.Failed('%s %s answered %d' % (method, path.split('?')[0], status))
         return status, value
@@ -64,7 +96,7 @@ class FakePlatform:
         return stage in self.stages
 
     def machine_env(self, bearer):
-        m = re.fullmatch(r'cfmk_sbx_(\w+)_s', bearer or '')
+        m = re.fullmatch(r'cfmk_sbx_([a-z]+env)(?:_\d+)?_s', bearer or '')
         return m.group(1) if m and bearer not in self.revoked else None
 
     def session(self, bearer):
@@ -115,9 +147,27 @@ class FakePlatform:
         if client.base == pa.RELAY:
             return self.relay(method, bare, body, bearer, headers)
         if path == '/api/v1/auth/otp/request':
+            self.otp_requests += 1
+            self.otp_window += 1
+            if self.otp_window > self.otp_limit:  # Meeting Service limit_by_client (fixed window)
+                return 429, {'error': {'code': 'TOO_MANY_REQUESTS',
+                                       'message': 'Too many requests. Please try again in 7 seconds.'}}
             return 200, {}
         if path == '/api/v1/auth/otp/verify':
-            return 200, {'access_token': body['email'].split('@')[0] + '-tok'}
+            owner = body['email'].split('@')[0]
+            self.sign_ins[owner] = self.sign_ins.get(owner, 0) + 1
+            return 200, {'access_token': owner + '-tok', 'refresh_token': self.new_refresh(owner)}
+        if path == '/api/v1/auth/refresh':
+            owner = self.refresh_tokens.get(body.get('refresh_token'))
+            if not owner or 'refresh-refused' in self.broken:
+                return 401, {'error': {'code': 'UNAUTHORIZED'}}
+            del self.refresh_tokens[body['refresh_token']]  # single use (rotated)
+            self.refreshes[owner] = self.refreshes.get(owner, 0) + 1
+            self.expired.discard(owner)
+            return 200, {'access_token': owner + '-tok', 'refresh_token': self.new_refresh(owner)}
+        owner = self.session(bearer)
+        if owner in self.expired:
+            return 401, {'error': {'code': 'UNAUTHORIZED'}}
         if method == 'OPTIONS':
             return self.preflight(client, bare, headers)
         if bare.startswith(('/v1/oauth/', '/v1/app-directory')) or bare == '/api/v2/app-context-keys':
@@ -163,6 +213,9 @@ class FakePlatform:
     def console(self, owner, method, path, body):
         env = owner + 'env'
         if method == 'POST' and path == '/v1/organizations':
+            self.orgs_created[owner] = self.orgs_created.get(owner, 0) + 1
+            if self.orgs_created[owner] > 5:  # Organizations CREATION_LIMIT_PER_DAY
+                return 429, {'error': {'code': 'RATE_LIMITED'}}
             return 201, {'id': owner + 'org', 'myRole': 'OWNER', 'state': 'ACTIVE'}
         if re.fullmatch(r'/v1/organizations/\w+/projects', path):
             return 201, {'id': owner + 'proj'}
@@ -176,10 +229,13 @@ class FakePlatform:
         if path.endswith('/service-accounts'):
             return 201, {'id': self.id('sa')}
         if path.endswith('/credentials') and method == 'POST':
-            return 201, {'secret': 'cfmk_sbx_%s_s' % env, 'credential': {'id': self.id('cr'), 'scopes': body['scopes']}}
+            secret = 'cfmk_sbx_%s_s' % env if not self.secrets.get(env) else 'cfmk_sbx_%s_%d_s' % (env, self.n)
+            self.n += 1
+            self.secrets.setdefault(env, []).append(secret)
+            return 201, {'secret': secret, 'credential': {'id': self.id('cr'), 'scopes': body['scopes']}}
         m = re.fullmatch(r'/v1/environments/(\w+)/credentials/\w+/revoke', path)
         if m:
-            self.revoked.add('cfmk_sbx_%s_s' % m.group(1))
+            self.revoked.update(self.secrets.get(m.group(1), []))
             return 200, {}
         if re.fullmatch(r'/v1/(projects/\w+/archive|organizations/\w+/close)', path):
             return 200, {}
@@ -582,8 +638,8 @@ class FakePlatform:
         return 404, {}
 
 
-def run_flow(api, stages=ALL, apps=None):
-    accounts = [{'email': 'pa@example.invalid', 'userId': 'acct-pa'}, {'email': 'pb@example.invalid', 'userId': 'acct-pb'}]
+def run_flow(api, stages=ALL, apps=None, pool=None, run_id='77-1'):
+    pool = pool or pa.AccountPool(create=api.create_accounts)
     out = io.StringIO()
     emitted = []
 
@@ -591,12 +647,13 @@ def run_flow(api, stages=ALL, apps=None):
         emitted.append((kind, value))
         print(json.dumps({kind: value}, default=str))
 
-    with patch.object(pa.app_acceptance, 'accounts', lambda ns, count: accounts), \
+    with patch.object(pa, 'POOL', pool), \
+            patch.object(pa.app_acceptance, 'accounts', side_effect=AssertionError('accounts come from the pool')), \
             patch.object(pa.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
             patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
-            patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out), \
+            patch.object(pa.time, 'sleep', api.sleep), contextlib.redirect_stdout(out), \
             patch.object(pa.urllib.request, 'urlopen', side_effect=AssertionError('no network in tests')):
-        checks = pa.run('77-1', stages, emit, apps=apps)
+        checks = pa.run(run_id, stages, emit, apps=apps)
     return checks, out.getvalue(), emitted
 
 
@@ -892,7 +949,8 @@ class Apps(unittest.TestCase):
     def test_an_account_without_a_recorded_user_id_fails_registration_only(self):
         api = FakePlatform(stages=BUILD[:2] + ('apps',), apps=('register',))
         out = io.StringIO()
-        with patch.object(pa.app_acceptance, 'accounts', lambda ns, count: [{'email': 'pa@x'}, {'email': 'pb@x'}]), \
+        pool = pa.AccountPool(create=lambda ns: [{'email': 'pa@x'}, {'email': 'pb@x'}])  # no refresh token: signs in
+        with patch.object(pa, 'POOL', pool), \
                 patch.object(pa.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
                 patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
                 patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out):
@@ -914,3 +972,125 @@ class Apps(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CampaignSignIn(unittest.TestCase):
+    """One campaign runs many acceptances in one process: accounts are created once and their
+    sessions reused, within the per-address code limit, the per-client-address OTP limit
+    (20 / 15 min) and the per-account organization limit (5 / 24 h)."""
+
+    STAGES = BUILD  # every Build stage; apps state is per project and covered by Apps
+
+    def campaign(self, api, runs, pool=None):
+        pool = pool or pa.AccountPool(create=api.create_accounts)
+        results = []
+        for n in range(runs):
+            checks, _, _ = run_flow(api, self.STAGES, pool=pool, run_id='77-%d' % (n + 1))
+            results.append({k: v for k, v in checks.items() if v != 'PASS'})
+        return pool, results
+
+    def test_a_campaign_creates_each_account_once_and_reuses_its_session(self):
+        api = FakePlatform(stages=self.STAGES)
+        pool, results = self.campaign(api, 9)  # steps 6-13 and the final acceptance
+        self.assertEqual(results, [{}] * 9)
+        # Four acceptances per account pair (organization budget), so 3 pairs for 9 runs.
+        self.assertEqual(len(pool.accounts), 6)
+        self.assertTrue(all(a['orgs'] <= pa.ORG_BUDGET for a in pool.accounts))
+        self.assertTrue(all(n <= pa.ORG_BUDGET for n in api.orgs_created.values()), api.orgs_created)
+        # The only codes are the six creations: no account signs in again.
+        self.assertEqual(api.otp_requests, 6)
+        self.assertEqual(set(api.sign_ins.values()), {1})
+        self.assertEqual(api.slept, [])
+        # The old flow (fresh accounts, then a console sign-in) needed 4 codes per run.
+        self.assertGreater(9 * 4, api.otp_limit)
+
+    def test_an_expired_session_is_renewed_with_the_refresh_token_not_a_new_code(self):
+        api = FakePlatform(stages=self.STAGES)
+        pool, _ = self.campaign(api, 1)
+        api.expired.update(a['email'].split('@')[0] for a in pool.accounts)
+        before = (api.otp_requests, dict(api.refreshes))
+        pool, results = self.campaign(api, 1, pool)
+        self.assertEqual(results, [{}])
+        self.assertEqual(api.otp_requests, before[0])
+        for owner in ('pa', 'pb'):
+            self.assertEqual(api.refreshes[owner], before[1][owner] + 1)
+            self.assertEqual(api.sign_ins[owner], 1)
+
+    def test_a_refused_refresh_signs_in_once_and_the_session_is_then_reused(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        pool, results = self.campaign(api, 3)
+        self.assertEqual(results, [{}] * 3)
+        self.assertEqual(api.sign_ins, {'pa': 2, 'pb': 2})  # creation + one sign-in each, then reuse
+        self.assertEqual(api.otp_requests, 4)
+
+    def test_an_otp_429_is_waited_out_once_for_the_reported_time(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        pool = pa.AccountPool(create=api.create_accounts)
+        api.otp_limit = 2  # the two creations fill the window; the first sign-in is refused
+        _, results = self.campaign(api, 1, pool)
+        self.assertEqual(results, [{}])
+        self.assertEqual(api.slept, [7 + 5])  # "try again in 7 seconds" plus the margin, once
+
+    def test_a_429_that_persists_after_the_wait_fails_the_run_without_looping(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        api.otp_limit = 0
+        checks, _, _ = run_flow(api, self.STAGES)
+        self.assertTrue(checks and all(v == 'FAIL' for v in checks.values()), checks)
+        self.assertEqual(api.slept, [12])  # one wait, then the run stops
+        self.assertLessEqual(api.otp_requests, 4)
+        self.assertEqual(api.users, {})
+
+    def test_an_account_retires_at_the_organization_budget(self):
+        made = []
+
+        def create(namespace):
+            pair = [{'email': '%s-%d@x' % (namespace, i)} for i in range(2)]
+            made.extend(pair)
+            return pair
+        pool = pa.AccountPool(create=create)
+        first = pool.pair('t1')
+        for a in first:
+            a['orgs'] = pa.ORG_BUDGET - 1
+        self.assertEqual(pool.pair('t2'), first)
+        for a in first:
+            a['orgs'] = pa.ORG_BUDGET
+        second = pool.pair('t3')
+        self.assertTrue(set(map(id, second)).isdisjoint(map(id, first)))
+        self.assertEqual(len(made), 4)
+        self.assertLess(pa.ORG_BUDGET, 5)  # one below Organizations CREATION_LIMIT_PER_DAY
+
+
+class SignInRateLimit(unittest.TestCase):
+    def test_the_wait_follows_what_the_server_reports_and_never_exceeds_the_window(self):
+        wait = pa.app_acceptance.rate_limit_wait
+        self.assertEqual(wait({'retry-after': '30'}, {}), 35)
+        self.assertEqual(wait({}, {'error': {'retryAfterSeconds': 40}}), 45)
+        self.assertEqual(wait({}, {'error': {'message': 'Too many requests. Please try again in 612 seconds.'}}), 617)
+        self.assertEqual(wait({}, {}), 905)
+        self.assertEqual(wait({'retry-after': '99999'}, {}), 905)
+        self.assertEqual(wait({}, {'error': {'message': 'try again in 0 seconds'}}), 6)
+
+    def http_429(self):
+        body = io.BytesIO(json.dumps({'error': {'code': 'TOO_MANY_REQUESTS',
+                                                'message': 'Too many requests. Please try again in 9 seconds.'}}).encode())
+        return pa.urllib.error.HTTPError('https://api.cfmeet.com/api/v1/auth/otp/request', 429,
+                                         'Too Many Requests', {}, body)
+
+    def test_account_creation_waits_out_one_429_then_continues(self):
+        ok = contextlib.nullcontext(io.BytesIO(b'{"message": "sent"}'))
+        slept = []
+        with patch.object(pa.app_acceptance.urllib.request, 'urlopen', side_effect=[self.http_429(), ok]), \
+                patch.object(pa.app_acceptance.time, 'sleep', slept.append), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(pa.app_acceptance.api('otp/request', {'email': 'a@x'}), {'message': 'sent'})
+        self.assertEqual(slept, [14])
+        self.assertIn('signInRateLimitWait', out.getvalue())
+
+    def test_account_creation_fails_on_a_second_429(self):
+        slept = []
+        with patch.object(pa.app_acceptance.urllib.request, 'urlopen', side_effect=[self.http_429(), self.http_429()]), \
+                patch.object(pa.app_acceptance.time, 'sleep', slept.append), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(pa.urllib.error.HTTPError):
+                pa.app_acceptance.api('otp/request', {'email': 'a@x'})
+        self.assertEqual(slept, [14])

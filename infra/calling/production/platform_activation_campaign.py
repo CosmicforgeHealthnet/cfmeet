@@ -142,20 +142,23 @@ def prerequisite_evidence(operation):
             raise RuntimeError("Activation prerequisite not completed: " + " or ".join(choices))
 
 
-# Owner-approved ONE-TIME repair retries, each for one exact failed attempt whose cause
-# was a defect in the acceptance probe (not in the service) and whose activation was
-# rolled back. (operation, release that failed it, repair attempts already consumed)
+# Owner-approved ONE-TIME repair retries, each for one exact failed attempt whose cause was
+# investigated and fixed and whose activation was rolled back. (operation, release that
+# failed it, repair attempts already consumed, class of the recorded error)
 #  * Partner Calls: the acceptance sent {} instead of the required expectedVersion.
 #  * Platform Meetings: the acceptance joined a conference it never started (join is
 #    admitted only while LIVE: 409 CONFERENCE_NOT_LIVE); it now starts it first.
-#  * Platform Meetings (owner-approved second recovery): the acceptance read partner
-#    meeting chat through the first-party participant-token route, which by design fails
-#    closed for environment-owned meetings (503 CHAT_UNAVAILABLE). It now uses the
-#    partner's Messaging session devices, as ADR 0062 section 8 specifies.
+#  * Platform Meetings (second recovery): the acceptance read partner meeting chat through
+#    the first-party participant-token route, which fails closed for environment-owned
+#    meetings. It now uses the partner's Messaging session devices (ADR 0062 section 8).
+#  * App Events: consecutive acceptances each created and signed in fresh accounts (4 codes
+#    per run) and exhausted the per-client-address OTP limit (20 / 15 min): HTTP 429 before
+#    any check ran. Accounts are now created once per campaign and their sessions reused.
 REPAIRS = (
-    ("activate-partner-calls", "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab", 0),
-    ("activate-platform-meetings", "745f1525d3d1f9d9080f846214bd989e334eccff", 1),
-    ("activate-platform-meetings", "7000d8a57c05e4c1952d18a014a7c9ebdb5cf28d", 2),
+    ("activate-partner-calls", "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab", 0, "RuntimeError"),
+    ("activate-platform-meetings", "745f1525d3d1f9d9080f846214bd989e334eccff", 1, "RuntimeError"),
+    ("activate-platform-meetings", "7000d8a57c05e4c1952d18a014a7c9ebdb5cf28d", 2, "RuntimeError"),
+    ("activate-app-events", "b11cec2a19be26504404026d84f594ba181636ad", 3, "HTTPError"),
 )
 
 
@@ -167,8 +170,7 @@ def authorize_repair(record, sha, run_id):
     operation = record.get("failedOperation")
     known = (
         record.get("status") == "failed"
-        and record.get("errorClass") == "RuntimeError"
-        and (operation, failed_sha, attempts) in REPAIRS
+        and (operation, failed_sha, attempts, record.get("errorClass")) in REPAIRS
         and sha != failed_sha
     )
     if not known:

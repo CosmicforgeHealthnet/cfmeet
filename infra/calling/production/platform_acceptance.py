@@ -110,7 +110,7 @@ class Client(da.Client):
         try:
             return self._call(method, path, body, expected, token, idempotent, headers)
         except da.Expired:
-            self.token = login(self.account)
+            self.token = login(self.account, renew=True)
             return self._call(method, path, body, expected, token, idempotent, headers)
 
     def _call(self, method, path, body, expected, token, idempotent, headers=None):
@@ -148,10 +148,69 @@ class Client(da.Client):
         return status, value
 
 
-def login(account):
-    """Passwordless sign-in of a controlled account (code replaced in Redis, VPS only)."""
+# Self-service organizations an account may create per 24 hours (Organizations
+# CREATION_LIMIT_PER_DAY = 5). Every acceptance creates one per tenant account; a pooled
+# account is retired after this many, one below the limit.
+ORG_BUDGET = 4
+
+
+class AccountPool:
+    """The controlled accounts of every acceptance in this process (one campaign run).
+
+    An account is created once (its first sign-in creates it) and its session is reused by
+    every later acceptance: an expired access token is renewed with the refresh token, and
+    only a refused refresh signs in again with a code. This keeps a campaign far below the
+    per-address code limit (5 per 15 minutes) and the per-client-address OTP limit (20 per 15
+    minutes) that consecutive acceptances used to exhaust. Sessions live in memory only."""
+
+    def __init__(self, create=None):
+        self.accounts = []
+        self.create = create or (lambda namespace: app_acceptance.accounts(namespace, count=2, keep_sessions=True))
+
+    def pair(self, tag):
+        free = [a for a in self.accounts if a.get('orgs', 0) < ORG_BUDGET]
+        if len(free) < 2:
+            self.accounts.extend(self.create('platform-' + tag))
+            free = [a for a in self.accounts if a.get('orgs', 0) < ORG_BUDGET]
+        return free[:2]
+
+
+POOL = AccountPool()
+
+
+def sign_in_post(path, body):
+    """One sign-in call; a 429 is waited out once for the time the server reports."""
     client = Client()
-    return app_acceptance.sign_in_via(lambda path, body: client.call('POST', path, body)[1], account)['access_token']
+    for attempt in (1, 2):
+        status, value = client.call('POST', path, body, expected=(200, 201, 429))
+        if status != 429:
+            return value
+        if attempt == 2:
+            break
+        seconds = app_acceptance.rate_limit_wait(client.last_headers, value)
+        app_acceptance.note_wait(path, seconds)
+        time.sleep(seconds)
+    raise da.Failed('%s is still rate limited after waiting out the window' % path)
+
+
+def login(account, renew=False):
+    """The account's access token: the current one, else renewed with its refresh token, else
+    (refresh refused or absent) a passwordless sign-in (code replaced in Redis, VPS only)."""
+    if account.get('accessToken') and not renew:
+        return account['accessToken']
+    if account.get('refreshToken'):
+        status, value = Client().call('POST', '/api/v1/auth/refresh', {'refresh_token': account['refreshToken']},
+                                      expected=(200, 400, 401, 403))
+        value = data(value)
+        if status == 200 and value.get('access_token'):
+            account.update(accessToken=value['access_token'],
+                           refreshToken=value.get('refresh_token') or account['refreshToken'])
+            return account['accessToken']
+        account.pop('refreshToken', None)
+    value = data(app_acceptance.sign_in_via(sign_in_post, account))
+    account.update(accessToken=value['access_token'], refreshToken=value.get('refresh_token'),
+                   signIns=account.get('signIns', 0) + 1)
+    return account['accessToken']
 
 
 def data(value):
@@ -271,6 +330,7 @@ class Journey:
 
     def tenant(self, label, account):
         console = Client(login(account), account)
+        account['orgs'] = account.get('orgs', 0) + 1  # counted before the attempt (see ORG_BUDGET)
         _, org = console.call('POST', '/v1/organizations', {'displayName': 'Platform acceptance %s %s' % (label, self.run_id)},
                               expected=(201,), idempotent=True)
         self.cleanup.append(('POST', '/v1/organizations/%s/close' % org['id'], console))
@@ -974,7 +1034,7 @@ def run(run_id, stages, emit, apps=None):
     """{check: PASS|FAIL}. `stages` ⊆ STAGES, the phases that are on; `apps` ⊆ APP_FEATURES,
     the CF Meet Apps features on (with the `apps` stage; default: all)."""
     journey = Journey(run_id, stages, emit, apps)
-    accounts = app_acceptance.accounts('platform-' + journey.tag, count=2)
+    accounts = POOL.pair(journey.tag)
     try:
         a = journey.tenant('A', accounts[0])
         b = journey.tenant('B', accounts[1])
