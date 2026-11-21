@@ -577,6 +577,24 @@ async fn main() -> anyhow::Result<()> {
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
         );
     }
+    // ADR 0068 A7: owner events to the HQ admin bridge (abuse.report.changed.v1,
+    // incident.changed.v1). Off unless CF_ADMIN_BRIDGE_BASE_URL is set: then they are
+    // written in the change's transaction and relayed at least once.
+    if has_target(cf_service_auth::services::ADMIN_BRIDGE) {
+        messaging::bridge_events::install(true);
+        tokio::spawn(messaging::bridge_events::run(
+            state.clone(),
+            Arc::new(messaging::bridge_events::AdminBridgeEvents::new(
+                state.service_auth.client(),
+            )),
+            config.workers.interval,
+        ));
+        tracing::info!("owner events are published to the admin bridge");
+    } else {
+        tracing::info!(
+            "CF_ADMIN_BRIDGE_BASE_URL is not set: no owner events are stored or published"
+        );
+    }
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

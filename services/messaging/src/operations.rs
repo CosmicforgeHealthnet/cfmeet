@@ -330,14 +330,33 @@ pub async fn raise(
         category.as_str(),
         dedupe_key.chars().take(96).collect::<String>()
     );
-    let r = db::exec(
-        db,
-        "INSERT INTO messaging_incidents (id, category, severity, dedupe_key, summary, first_seen_at, last_seen_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $6) \
-         ON CONFLICT (dedupe_key) WHERE status = 'OPEN' DO UPDATE SET occurrences = messaging_incidents.occurrences + 1, \
-           last_seen_at = EXCLUDED.last_seen_at",
-        vec![Uuid::new_v4().into(), category.as_str().into(), category.severity().into(), key.into(), category.summary().into(), now.into()],
-    )
+    // A NEW incident is published to the admin bridge (ADR 0068 A7) in the same
+    // transaction; a bump of an OPEN one changes neither its state nor its version.
+    #[derive(FromQueryResult)]
+    struct Raised {
+        id: Uuid,
+        version: i64,
+        inserted: bool,
+    }
+    let r: std::result::Result<(), sea_orm::DbErr> = async {
+        let txn = db.begin().await?;
+        let raised: Option<Raised> = db::one(
+            &txn,
+            "INSERT INTO messaging_incidents (id, category, severity, dedupe_key, summary, first_seen_at, last_seen_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $6) \
+             ON CONFLICT (dedupe_key) WHERE status = 'OPEN' DO UPDATE SET occurrences = messaging_incidents.occurrences + 1, \
+               last_seen_at = EXCLUDED.last_seen_at \
+             RETURNING id, version, (xmax = 0) AS inserted",
+            vec![Uuid::new_v4().into(), category.as_str().into(), category.severity().into(), key.into(), category.summary().into(), now.into()],
+        )
+        .await?;
+        if let Some(r) = raised.filter(|r| r.inserted) {
+            crate::bridge_events::record(&txn, crate::bridge_events::INCIDENT_CHANGED, r.id, "OPEN", r.version, now)
+                .await
+                .map_err(|e| sea_orm::DbErr::Custom(e.to_string()))?;
+        }
+        txn.commit().await
+    }
     .await;
     match r {
         Ok(_) => crate::metrics::inc(
@@ -392,6 +411,39 @@ pub async fn incidents<C: ConnectionTrait>(db: &C, all: bool) -> Result<Vec<Inci
     .map_err(Error::from)
 }
 
+/// Marks an OPEN incident RESOLVED in `txn` (its version advances) and records its
+/// `incident.changed.v1` event for the admin bridge. `Some(version)`: resolved now.
+pub(crate) async fn resolve_in<C: ConnectionTrait>(
+    txn: &C,
+    id: Uuid,
+    resolved_by: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<i64>> {
+    #[derive(FromQueryResult)]
+    struct V {
+        version: i64,
+    }
+    let v: Option<V> = db::one(
+        txn,
+        "UPDATE messaging_incidents SET status = 'RESOLVED', resolved_at = $2, resolved_by = $3, version = version + 1 \
+         WHERE id = $1 AND status = 'OPEN' RETURNING version",
+        vec![id.into(), now.into(), resolved_by.into()],
+    )
+    .await?;
+    if let Some(v) = &v {
+        crate::bridge_events::record(
+            txn,
+            crate::bridge_events::INCIDENT_CHANGED,
+            id,
+            "RESOLVED",
+            v.version,
+            now,
+        )
+        .await?;
+    }
+    Ok(v.map(|v| v.version))
+}
+
 /// Resolves an OPEN incident (operator action, audited in the same transaction).
 pub async fn resolve(
     db: &DatabaseConnection,
@@ -405,13 +457,8 @@ pub async fn resolve(
         ));
     }
     let txn = db.begin().await?;
-    let done = db::exec(
-        &txn,
-        "UPDATE messaging_incidents SET status = 'RESOLVED', resolved_at = $2, resolved_by = $3 WHERE id = $1 AND status = 'OPEN'",
-        vec![id.into(), now.into(), operator.into()],
-    )
-    .await?
-        == 1;
+    let version = resolve_in(&txn, id, operator, now).await?;
+    let done = version.is_some();
     if done {
         audit(
             &txn,

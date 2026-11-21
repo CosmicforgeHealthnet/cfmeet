@@ -14,6 +14,7 @@
 //! | `CF_CALLING_BASE_URL` | no | Calling's platform-event ingress (customer webhooks); unset: relayed events wait PENDING |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `MESSAGING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service's I1 (`notifications-event.publish`, roadmap N7): the relay of `messaging_notification_publications` runs only when set; unset: nothing is sent |
+//! | `CF_ADMIN_BRIDGE_BASE_URL` | no | the HQ admin bridge's private event listener (`hq-bridge-events.publish`, ADR 0068 A7): owner events (`abuse.report.changed.v1`, `incident.changed.v1`) are stored and relayed only when set; unset: nothing is stored or sent |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
 //! own trust bundle grants the route's permission. The internal operations (Part V H) are
@@ -128,6 +129,9 @@ const TARGETS: &[(&str, &str)] = &[
     // Notification Service N7: I1 (`notifications-event.publish`) for the publication
     // relay; unset: the relay does not run and nothing is sent.
     ("CF_NOTIFICATIONS_BASE_URL", services::NOTIFICATIONS),
+    // ADR 0068 A7: the admin bridge's event listener (`hq-bridge-events.publish`); unset:
+    // owner events are neither stored nor sent.
+    ("CF_ADMIN_BRIDGE_BASE_URL", services::ADMIN_BRIDGE),
 ];
 
 #[derive(Debug, Clone)]

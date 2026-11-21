@@ -19,6 +19,7 @@ pub mod apps;
 pub mod attachments;
 pub mod audit;
 pub mod backups;
+pub mod bridge_events;
 pub mod compliance;
 pub mod config;
 pub mod conversations;
