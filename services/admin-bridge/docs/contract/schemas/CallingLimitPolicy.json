@@ -7,7 +7,8 @@
     "max_concurrent_communications",
     "telecom_spend_daily_limit_minor",
     "telecom_spend_monthly_limit_minor",
-    "updated_at"
+    "updated_at",
+    "version"
   ],
   "properties": {
     "requests_per_minute": {
@@ -37,6 +38,11 @@
     "updated_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The level's limits version (expected_version of calling.limits.change)."
     }
   }
 }

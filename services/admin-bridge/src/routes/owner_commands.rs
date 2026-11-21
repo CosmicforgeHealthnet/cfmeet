@@ -26,6 +26,7 @@ fn valid(kind: In, v: &Value) -> bool {
         In::Enum(allowed) => v.as_str().is_some_and(|s| allowed.contains(&s)),
         In::Bool => v.is_boolean(),
         In::Int(min, max) => v.as_i64().is_some_and(|n| (min..=max).contains(&n)),
+        In::NullableInt(min, max) => v.is_null() || valid(In::Int(min, max), v),
         In::Uuid => v
             .as_str()
             .and_then(|s| {

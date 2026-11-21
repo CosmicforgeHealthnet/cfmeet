@@ -8660,7 +8660,8 @@
           "max_concurrent_communications",
           "telecom_spend_daily_limit_minor",
           "telecom_spend_monthly_limit_minor",
-          "updated_at"
+          "updated_at",
+          "version"
         ],
         "properties": {
           "requests_per_minute": {
@@ -8690,6 +8691,11 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The level's limits version (expected_version of calling.limits.change)."
           }
         }
       },
@@ -8703,7 +8709,8 @@
           "max_concurrent_communications",
           "telecom_spend_daily_limit_minor",
           "telecom_spend_monthly_limit_minor",
-          "updated_at"
+          "updated_at",
+          "version"
         ],
         "properties": {
           "application_id": {
@@ -8737,6 +8744,11 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The level's limits version (expected_version of calling.limits.change)."
           }
         }
       },
@@ -9121,7 +9133,8 @@
           "size_bytes",
           "retention_until",
           "created_at",
-          "deleted_at"
+          "deleted_at",
+          "version"
         ],
         "properties": {
           "recording_id": {
@@ -9175,6 +9188,10 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -14866,6 +14883,1109 @@
               }
             },
             "description": "The resource after messaging.deletion-request.create; status: PENDING."
+          }
+        }
+      },
+      "CallingAbuseReportResolveRequest": {
+        "description": "Request of calling.abuse-report.resolve (POST /internal/v1/operator/abuse-reports/{report_id}/resolve). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "report_state"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "report_state": {
+            "enum": [
+              "REVIEWED",
+              "DISMISSED",
+              "OPEN"
+            ]
+          }
+        }
+      },
+      "CallingAbuseReportResolveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "abuse_report_id",
+              "application_id",
+              "environment_id",
+              "call_id",
+              "category",
+              "report_state",
+              "reviewed_at",
+              "version"
+            ],
+            "properties": {
+              "abuse_report_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "call_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "report_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "reviewed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after calling.abuse-report.resolve; status: REVIEWED, DISMISSED, OPEN."
+          }
+        }
+      },
+      "CallingBlockReleaseRequest": {
+        "description": "Request of calling.block.release (POST /internal/v1/operator/blocks/{block_id}/release). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "CallingBlockReleaseResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "block_rule_id",
+              "application_id",
+              "environment_id",
+              "block_state",
+              "released_at",
+              "version"
+            ],
+            "properties": {
+              "block_rule_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "block_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "released_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after calling.block.release; status: RELEASED."
+          }
+        }
+      },
+      "CallingLimitsChangeRequest": {
+        "description": "Request of calling.limits.change (POST /internal/v1/operator/limits). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "application_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_concurrent_communications": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000000
+          }
+        }
+      },
+      "CallingLimitsChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant_id",
+              "application_id",
+              "requests_per_minute",
+              "max_concurrent_communications",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "requests_per_minute": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_concurrent_communications": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after calling.limits.change; status: CONFIGURED."
+          }
+        }
+      },
+      "CallingRoutingChangeRequest": {
+        "description": "Request of calling.routing.change (POST /internal/v1/operator/routing-policies/{environment_id}). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "environment_id",
+          "policy"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "type": "object",
+            "description": "Validated by the owning service."
+          }
+        }
+      },
+      "CallingRoutingChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environment_id",
+              "application_id",
+              "revision",
+              "updated_at"
+            ],
+            "properties": {
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after calling.routing.change; status: CONFIGURED."
+          }
+        }
+      },
+      "CallingEnterpriseFeaturesChangeRequest": {
+        "description": "Request of calling.enterprise-features.change (POST /internal/v1/operator/enterprise-policies/{environment_id}/capabilities). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "environment_id",
+          "capabilities"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "MANAGE_ROUTING",
+                "MANAGE_PUBLIC_FORWARDING",
+                "MANAGE_VOICEMAIL",
+                "MANAGE_RECORDING"
+              ]
+            }
+          }
+        }
+      },
+      "CallingEnterpriseFeaturesChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environment_id",
+              "application_id",
+              "policy_id",
+              "admin_capabilities",
+              "version",
+              "updated_at"
+            ],
+            "properties": {
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "policy_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "admin_capabilities": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+                }
+              },
+              "version": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after calling.enterprise-features.change; status: CONFIGURED."
+          }
+        }
+      },
+      "CallingSpendLimitsChangeRequest": {
+        "description": "Request of calling.spend-limits.change (POST /internal/v1/operator/spend-policies/{environment_id}). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "environment_id",
+          "currency",
+          "leg_allowance_minor",
+          "max_leg_seconds",
+          "daily_limit_minor",
+          "monthly_limit_minor",
+          "max_concurrent_legs",
+          "max_originations_per_minute",
+          "max_per_party_per_hour",
+          "enabled"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "leg_allowance_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000000
+          },
+          "max_leg_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "daily_limit_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000000
+          },
+          "monthly_limit_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000000
+          },
+          "max_concurrent_legs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_originations_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_per_party_per_hour": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_per_principal_per_hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_per_service_account_per_hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "max_per_context_per_hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000000000
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingSpendLimitsChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environment_id",
+              "application_id",
+              "currency",
+              "enabled",
+              "daily_limit_minor",
+              "monthly_limit_minor",
+              "revision",
+              "updated_at"
+            ],
+            "properties": {
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "currency": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "daily_limit_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "monthly_limit_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after calling.spend-limits.change; status: ENABLED, DISABLED."
+          }
+        }
+      },
+      "CallingRecordingDeleteRequest": {
+        "description": "Request of calling.recording.delete (POST /internal/v1/operator/recordings/{recording_id}/delete). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "CallingRecordingDeleteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "recording_id",
+              "call_id",
+              "environment_id",
+              "recording_state",
+              "deleted_at",
+              "version"
+            ],
+            "properties": {
+              "recording_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "call_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "recording_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "deleted_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after calling.recording.delete; status: DELETING."
+          }
+        }
+      },
+      "CallingRetentionHoldPlaceRequest": {
+        "description": "Request of calling.retention-hold.place (POST /internal/v1/operator/retention-holds). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "application_id",
+          "environment_id",
+          "data_class",
+          "reason"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "data_class": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "enum": [
+              "POLICY_REVIEW",
+              "DISPUTE",
+              "SECURITY_INVESTIGATION",
+              "OTHER"
+            ]
+          }
+        }
+      },
+      "CallingRetentionHoldResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "hold_id",
+              "data_class",
+              "resource_id",
+              "application_id",
+              "environment_id",
+              "reason_code",
+              "active",
+              "created_at",
+              "released_at"
+            ],
+            "properties": {
+              "hold_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "data_class": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "resource_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "reason_code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "released_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after calling.retention-hold.release; status: RELEASED."
+          }
+        }
+      },
+      "CallingRetentionHoldReleaseRequest": {
+        "description": "Request of calling.retention-hold.release (POST /internal/v1/operator/retention-holds/{hold_id}/release). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "CallingIncidentRecordRequest": {
+        "description": "Request of calling.incident.record (POST /internal/v1/operator/incidents/{incident_id}/resolve). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "incident_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CallingIncidentRecordResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "incident_id",
+              "application_id",
+              "environment_id",
+              "category",
+              "severity",
+              "incident_status",
+              "resolved_at"
+            ],
+            "properties": {
+              "incident_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "severity": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "incident_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "resolved_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after calling.incident.record; status: RESOLVED."
+          }
+        }
+      },
+      "CallingWebhookKeyResealRequest": {
+        "description": "Request of calling.webhook-key.reseal (POST /internal/v1/operator/webhook-keys/reseal). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "CallingWebhookKeyResealResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant_id",
+              "keys"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "keys": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "key_id",
+                    "subscriptions"
+                  ],
+                  "properties": {
+                    "key_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+                    },
+                    "subscriptions": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "The resource after calling.webhook-key.reseal; status: RESEALED."
           }
         }
       },

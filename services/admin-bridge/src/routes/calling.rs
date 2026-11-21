@@ -182,6 +182,7 @@ fn limit_fields(l: &Value) -> T<Vec<(&'static str, Value)>> {
             t::opt_int(l, "telecomSpendMonthlyLimitMinor")?,
         ),
         ("updated_at", t::time(l, "updatedAt")?),
+        ("version", t::int(l, "version")?),
     ])
 }
 
@@ -314,6 +315,7 @@ fn recording(r: &Value) -> T<Value> {
         ("retention_until", t::opt_time(r, "retentionUntil")?),
         ("created_at", t::time(r, "createdAt")?),
         ("deleted_at", t::opt_time(r, "deletedAt")?),
+        ("version", t::int(r, "version")?),
     ]))
 }
 

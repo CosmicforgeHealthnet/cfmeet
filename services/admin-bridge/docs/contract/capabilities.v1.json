@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "9abdb415a4caa5418f36ba009f048057f6ffce323d8191f480a6f8dc69335184",
-    "capability_matrix_sha256": "d1bd61962bd62d914df4d9b611585cd6dfc614847b0ec62d428893815047c1fc"
+    "openapi_sha256": "e6a56a3471fee1d319e7236562bad8c88773627fa0e9e1e841fe89f78a6df813",
+    "capability_matrix_sha256": "1381ea18db85ee1574c88d8b6916f5e1e839560454ed280da20af23f2c6a36c9"
   },
   "query_shapes": {
     "SCOPED": [
@@ -52,8 +52,8 @@
     "capabilities": 247,
     "by_state": {
       "READ_ONLY": 110,
-      "AVAILABLE": 76,
-      "DISABLED": 38,
+      "AVAILABLE": 87,
+      "DISABLED": 27,
       "BLOCKED_DEPENDENCY": 23
     }
   },
@@ -4143,11 +4143,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "EXISTS_NOT_GRANTED",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/calling/abuse-reports/{report_id}/resolve",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/abuse-reports/{report_id}/resolve",
       "path_params": [
         {
           "name": "report_id",
@@ -4172,14 +4172,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingAbuseReportResolveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingAbuseReportResolveResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.abuse-report.resolve",
       "risk": "R2",
       "privacy": "SAFETY_EVIDENCE",
@@ -4188,8 +4188,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: calling endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4248,11 +4250,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/blocks/{block_id}/release",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/blocks/{block_id}/release",
       "path_params": [
         {
           "name": "block_id",
@@ -4277,14 +4279,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingBlockReleaseRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingBlockReleaseResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.block.release",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -4293,8 +4295,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4353,11 +4357,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/limits",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/limits",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -4376,14 +4380,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingLimitsChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingLimitsChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.limits.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -4392,8 +4396,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4452,11 +4458,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/routing",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/routing-policies/{environment_id}",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -4475,14 +4481,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRoutingChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRoutingChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.routing.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -4491,8 +4497,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4551,11 +4559,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/enterprise-features",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/enterprise-policies/{environment_id}/capabilities",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -4574,14 +4582,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingEnterpriseFeaturesChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingEnterpriseFeaturesChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.enterprise-features.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -4590,8 +4598,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4650,11 +4660,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/spend-limits",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/spend-policies/{environment_id}",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -4672,14 +4682,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingSpendLimitsChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingSpendLimitsChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.spend-limits.change",
       "risk": "R4",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -4688,8 +4698,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4802,11 +4814,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/recordings/{recording_id}/delete",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/recordings/{recording_id}/delete",
       "path_params": [
         {
           "name": "recording_id",
@@ -4831,14 +4843,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRecordingDeleteRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRecordingDeleteResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.recording.delete",
       "risk": "R4",
       "privacy": "PERSONAL",
@@ -4847,8 +4859,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: new calling operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4907,11 +4921,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/retention-holds",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/retention-holds",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -4930,14 +4944,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRetentionHoldPlaceRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRetentionHoldResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.retention-hold.place",
       "risk": "R4",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -4946,8 +4960,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -4956,11 +4972,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/retention-holds/{hold_id}/release",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/retention-holds/{hold_id}/release",
       "path_params": [
         {
           "name": "hold_id",
@@ -4985,14 +5001,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRetentionHoldReleaseRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRetentionHoldResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.retention-hold.release",
       "risk": "R4",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -5001,8 +5017,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -5063,11 +5081,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/incidents",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/incidents/{incident_id}/resolve",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -5084,14 +5102,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingIncidentRecordRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingIncidentRecordResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.incident.record",
       "risk": "R2",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -5100,8 +5118,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -5160,11 +5180,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/webhook-keys/{key_id}/reseal",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/webhook-keys/reseal",
       "path_params": [
         {
           "name": "key_id",
@@ -5189,14 +5209,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingWebhookKeyResealRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingWebhookKeyResealResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "calling.webhook-key.reseal",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -5205,8 +5225,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
