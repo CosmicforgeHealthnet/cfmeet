@@ -22,7 +22,13 @@
 //!
 //! Versions: the subject row's `revision`, except a credential, whose version is
 //! `revision + suspension changes` (a suspension lives outside the credential row). Scope
-//! grants, principal registration and partner-user sign-out have no version.
+//! grants, principal registration and partner-user sign-out have no version. A key issue
+//! is checked at the service account's version and a key rotation at the rotated key's;
+//! both answer the NEW key's version.
+//!
+//! API keys issued or rotated here are OWNER-DELIVERED (brief §1): the answer and the
+//! record carry the delivery reference only; the secret is sealed for one reveal in the
+//! partner's own console ([`super::credential_delivery`]).
 //!
 //! Answers and records carry ids, codes, states, counts and timestamps only — never a
 //! secret, verifier, external reference, display name or free text.
@@ -53,6 +59,13 @@ pub enum Subject {
     PrincipalRegistration,
     /// A partner user's sessions (subject id: the principal).
     PrincipalSessions,
+    /// A new API key of a service account (subject id: the service account; the new key
+    /// is the record's `resulting_id`). Owner-delivered: the secret never leaves Platform
+    /// Access through the bridge ([`super::credential_delivery`]).
+    KeyIssue,
+    /// The rotation of an API key (subject id: the rotated key; the successor is the
+    /// record's `resulting_id`). Owner-delivered like [`Subject::KeyIssue`].
+    KeyRotation,
 }
 
 impl Subject {
@@ -68,6 +81,8 @@ impl Subject {
         Subject::ApplicationScope,
         Subject::PrincipalRegistration,
         Subject::PrincipalSessions,
+        Subject::KeyIssue,
+        Subject::KeyRotation,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -83,6 +98,8 @@ impl Subject {
             Subject::ApplicationScope => "APPLICATION_SCOPE",
             Subject::PrincipalRegistration => "PRINCIPAL_REGISTRATION",
             Subject::PrincipalSessions => "PRINCIPAL_SESSIONS",
+            Subject::KeyIssue => "KEY_ISSUE",
+            Subject::KeyRotation => "KEY_ROTATION",
         }
     }
 
@@ -100,10 +117,10 @@ impl Subject {
             Subject::Environment => {
                 "SELECT revision AS version FROM platform_environments WHERE id = $1 FOR UPDATE"
             }
-            Subject::ServiceAccount => {
+            Subject::ServiceAccount | Subject::KeyIssue => {
                 "SELECT revision AS version FROM platform_service_accounts WHERE id = $1 FOR UPDATE"
             }
-            Subject::Credential => {
+            Subject::Credential | Subject::KeyRotation => {
                 "SELECT c.revision + COALESCE((SELECT x.changes FROM platform_credential_suspension_changes x \
                    WHERE x.credential_id = c.id), 0) AS version \
                  FROM platform_api_credentials c WHERE c.id = $1 FOR UPDATE"
@@ -124,8 +141,21 @@ impl Subject {
         })
     }
 
+    /// The subject that answers for a command creating a new resource, with the state
+    /// the command answers: a registration answers the registered principal, a key issue
+    /// or rotation the new key with its delivery reference (`None`: the subject itself).
+    const fn result(self) -> Option<(Subject, &'static str)> {
+        match self {
+            Subject::PrincipalRegistration => Some((Subject::Principal, "REGISTERED")),
+            Subject::KeyIssue => Some((Subject::KeyIssue, "ISSUED")),
+            Subject::KeyRotation => Some((Subject::KeyRotation, "ROTATED")),
+            _ => None,
+        }
+    }
+
     /// The subject's `state`, `version` (NULL: unversioned), `tenant_id` and closed
-    /// resource `v`; `$1` = the subject id, `$2` = the detail (scope subjects only).
+    /// resource `v`; `$1` = the subject id (for a key issue or rotation: the NEW key, see
+    /// [`Subject::result`]), `$2` = the detail (scope subjects only).
     const fn current_sql(self) -> &'static str {
         match self {
             Subject::Tenant => {
@@ -220,6 +250,7 @@ impl Subject {
                  LEFT JOIN platform_end_user_profiles f ON f.principal_id = p.id \
                  WHERE p.id = $1"
             }
+            Subject::KeyIssue | Subject::KeyRotation => DELIVERED_KEY_SQL,
         }
     }
 
@@ -227,6 +258,27 @@ impl Subject {
         matches!(self, Subject::ApplicationScope)
     }
 }
+
+/// A key issued or rotated through the bridge, as HQ sees it: ids, last four, state,
+/// version and the delivery REFERENCE (channel, ref, state, expiry) — never the secret,
+/// the sealed copy or anything that would open it.
+const DELIVERED_KEY_SQL: &str = "SELECT CASE WHEN c.status = 'REVOKED' THEN 'REVOKED' \
+                 WHEN s.credential_id IS NOT NULL THEN 'SUSPENDED' ELSE c.status END AS state, \
+       c.revision + COALESCE(x.changes, 0) AS version, c.tenant_id, \
+       json_build_object('id', c.id, 'publicId', c.public_id, 'last4', c.last_four, \
+         'tenantId', c.tenant_id, 'applicationId', c.application_id, \
+         'environmentId', c.environment_id, 'serviceAccountId', c.service_account_id, \
+         'state', CASE WHEN c.status = 'REVOKED' THEN 'REVOKED' \
+                       WHEN s.credential_id IS NOT NULL THEN 'SUSPENDED' ELSE c.status END, \
+         'version', c.revision + COALESCE(x.changes, 0), 'credentialExpiresAt', c.expires_at, \
+         'rotatedFromCredentialId', c.rotated_from_credential_id, \
+         'delivery', 'OWNER_DELIVERED', 'deliveryChannel', d.channel, 'deliveryRef', d.id, \
+         'deliveryState', d.state, 'expiresAt', d.expires_at, 'revealedAt', d.revealed_at) AS v \
+     FROM platform_api_credentials c \
+     JOIN platform_credential_deliveries d ON d.credential_id = c.id \
+     LEFT JOIN platform_credential_suspensions s ON s.credential_id = c.id \
+     LEFT JOIN platform_credential_suspension_changes x ON x.credential_id = c.id \
+     WHERE c.id = $1";
 
 /// The bridge identity written as the audit actor of a bridge command.
 pub const AUDIT_ACTOR: &str = "cfmeet.admin-bridge";
@@ -306,8 +358,8 @@ fn subject_noun(subject: Subject) -> &'static str {
         Subject::Tenant => "tenant",
         Subject::Application | Subject::ApplicationScope => "application",
         Subject::Environment | Subject::PrincipalRegistration => "environment",
-        Subject::ServiceAccount => "service account",
-        Subject::Credential => "credential",
+        Subject::ServiceAccount | Subject::KeyIssue => "service account",
+        Subject::Credential | Subject::KeyRotation => "credential",
         Subject::Principal | Subject::PrincipalSessions => "principal",
         Subject::AppGrant => "grant",
         Subject::EnvironmentOrigins => "allowed websites",
@@ -315,8 +367,8 @@ fn subject_noun(subject: Subject) -> &'static str {
 }
 
 /// Records the applied command (same transaction as the change). `resulting_id` is the
-/// registered principal of a registration; `state` overrides the subject's own state
-/// (a website removal answers `REMOVED`).
+/// registered principal of a registration and the new key of a key issue / rotation;
+/// `state` overrides the subject's own state (a website removal answers `REMOVED`).
 pub async fn record<C: ConnectionTrait>(
     txn: &C,
     cmd: &BridgeCommand,
@@ -324,25 +376,30 @@ pub async fn record<C: ConnectionTrait>(
     state: Option<&str>,
     now: DateTime<Utc>,
 ) -> PlatformResult<()> {
-    let (resulting_id, now_state) = match cmd.subject {
-        Subject::PrincipalRegistration => {
-            let id = resulting_id.ok_or_else(|| internal("registration without a principal"))?;
-            let p = current(txn, Subject::Principal, id, None)
+    let (resulting_id, now_state) = match cmd.subject.result() {
+        Some((read_as, answered)) => {
+            let id = resulting_id.ok_or_else(|| internal("a created resource without its id"))?;
+            let p = current(txn, read_as, id, None)
                 .await?
-                .ok_or_else(|| internal("registered principal missing"))?;
+                .ok_or_else(|| internal("created resource missing"))?;
             (
                 Some(id),
                 Current {
-                    state: "REGISTERED".to_string(),
+                    state: answered.to_string(),
                     ..p
                 },
             )
         }
-        subject => (
+        None => (
             None,
-            current(txn, subject, cmd.subject_id, cmd.subject_detail.as_deref())
-                .await?
-                .ok_or(PlatformError::NotFound(subject_noun(subject)))?,
+            current(
+                txn,
+                cmd.subject,
+                cmd.subject_id,
+                cmd.subject_detail.as_deref(),
+            )
+            .await?
+            .ok_or(PlatformError::NotFound(subject_noun(cmd.subject)))?,
         ),
     };
     let resulting_state = state.map(str::to_string).unwrap_or(now_state.state);
@@ -449,9 +506,9 @@ pub async fn answer<C: ConnectionTrait>(db: &C, key: Uuid) -> PlatformResult<Opt
     let Some(r) = recorded(db, key).await? else {
         return Ok(None);
     };
-    let (subject, id) = match (r.subject, r.resulting_id) {
-        (Subject::PrincipalRegistration, Some(p)) => (Subject::Principal, p),
-        (s, _) => (s, r.subject_id),
+    let (subject, id) = match (r.subject.result(), r.resulting_id) {
+        (Some((read_as, _)), Some(created)) => (read_as, created),
+        _ => (r.subject, r.subject_id),
     };
     let resource = current(db, subject, id, r.subject_detail.as_deref())
         .await?
@@ -492,7 +549,7 @@ mod tests {
                 .bytes()
                 .all(|b| b.is_ascii_uppercase() || b == b'_'));
         }
-        assert_eq!(Subject::ALL.len(), 11);
+        assert_eq!(Subject::ALL.len(), 13);
         assert!(Subject::parse("tenant").is_none());
         for unversioned in [
             Subject::ApplicationScope,
@@ -514,6 +571,8 @@ mod tests {
                 "label",
                 "description",
                 "secret",
+                "sealed",
+                "nonce",
             ] {
                 assert!(!sql.contains(banned), "{s:?} selects {banned}");
             }

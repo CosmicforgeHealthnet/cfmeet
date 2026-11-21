@@ -20,8 +20,12 @@
 //!   (ids, codes, states, timestamps — never a secret, verifier, external reference,
 //!   display name or free text).
 //!
-//! API keys are never ISSUED or ROTATED here: Platform Access hands a new secret out only
-//! in the response of that request, and HQ staff must never see a partner secret.
+//! API keys ISSUED or ROTATED here are OWNER-DELIVERED (brief §1): HQ staff never see a
+//! partner secret, so the answer carries the delivery REFERENCE only (`delivery`,
+//! `deliveryChannel` `CONSOLE_REVEAL_ONCE`, `deliveryRef`, `expiresAt`, the key's id,
+//! public id, last four and version). The secret is sealed for one reveal in the
+//! partner's own Developer Platform console ([`crate::identity::credential_delivery`]);
+//! it is in no answer, record, audit row or log line of this module.
 
 use std::future::Future;
 
@@ -33,6 +37,7 @@ use axum::{
     Json, Router,
 };
 use cf_service_auth::InternalPermission;
+use chrono::{DateTime, Duration, Utc};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_json::Value;
@@ -44,10 +49,12 @@ use crate::{
     domain::{
         ApplicationId, ApplicationStatus, CredentialId, EnvironmentId, EnvironmentKind,
         EnvironmentStatus, PrincipalId, PrincipalKind, PrincipalStatus, ServiceAccountId,
-        ServiceAccountStatus, TenantId, TenantStatus,
+        ServiceAccountStatus, TenantClassification, TenantId, TenantStatus,
     },
     identity::{
         bridge::{self, BridgeCommand, Subject},
+        credential_delivery::DELIVERY_TTL_DAYS,
+        credentials::{IssueCredential, RotateCredential},
         end_users::{self, EndUserError, EndUserScope},
         environment_origins::MAX_ORIGIN_LEN,
         operator::OperatorContext,
@@ -80,6 +87,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/operator/applications/:application_id/privileged-scope-grants",
             post(privileged_scope_grant),
+        )
+        .route(
+            "/operator/service-accounts/:service_account_id/credentials",
+            post(issue_credential),
+        )
+        .route(
+            "/operator/credentials/:credential_id/rotate",
+            post(rotate_credential),
         )
         .route(
             "/operator/credentials/:credential_id/revoke",
@@ -128,6 +143,8 @@ pub mod capability {
     pub const STATUS_CHANGE: &str = "identity.status.change";
     pub const SCOPE_GRANT_CHANGE: &str = "identity.scope-grant.change";
     pub const PRIVILEGED_SCOPE_GRANT_CHANGE: &str = "identity.privileged-scope-grant.change";
+    pub const KEY_ISSUE: &str = "identity.key.issue";
+    pub const KEY_ROTATE: &str = "identity.key.rotate";
     pub const KEY_REVOKE: &str = "identity.key.revoke";
     pub const KEY_SUSPEND: &str = "identity.key.suspend";
     pub const KEY_RESUME: &str = "identity.key.resume";
@@ -466,6 +483,173 @@ async fn change_scope(
                     .await,
             ),
         }
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// identity.key.issue / identity.key.rotate (R4): OWNER-DELIVERED
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IssueKeyBody {
+    /// The service account's version (`revision`).
+    expected_version: i64,
+    /// The tenant HQ acts in: the owner re-checks it (another tenant's account: 404).
+    tenant_id: Uuid,
+    scopes: Vec<String>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RotateKeyBody {
+    /// The rotated key's version (`revision` + suspension changes).
+    expected_version: i64,
+    tenant_id: Uuid,
+    /// How long the predecessor keeps working (default: the delivery window, so the
+    /// partner can reveal and deploy the successor first; capped by the platform maximum).
+    #[serde(default)]
+    overlap_minutes: Option<i64>,
+    #[serde(default)]
+    scopes: Option<Vec<String>>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+}
+
+/// An owner-delivered key can only go to a partner who has a console: an EXTERNAL tenant
+/// (in `tenant_id`, else 404) and an environment the Developer Platform reaches (SANDBOX
+/// / TEST, or a PRODUCTION environment activated through production access).
+async fn deliverable(
+    s: &AppState,
+    tenant_id: Uuid,
+    owner_tenant: TenantId,
+    environment_id: EnvironmentId,
+) -> AccessResult<()> {
+    if owner_tenant.as_uuid() != tenant_id {
+        return Err(AccessError::Refused(ErrorCode::NotFound));
+    }
+    let tenant = s.platform.tenant(owner_tenant).await.map_err(op_err)?;
+    if tenant.classification != TenantClassification::External {
+        return Err(AccessError::Operator(
+            ErrorCode::PolicyViolation,
+            "an owner-delivered API key needs an EXTERNAL tenant (a partner console)".to_string(),
+        ));
+    }
+    let environment = s
+        .platform
+        .environment(environment_id)
+        .await
+        .map_err(op_err)?;
+    if environment.kind == EnvironmentKind::Production
+        && !s
+            .platform
+            .is_activated_production(environment_id)
+            .await
+            .map_err(op_err)?
+    {
+        return Err(AccessError::Operator(
+            ErrorCode::PolicyViolation,
+            "the partner console cannot reach an operator-created PRODUCTION environment"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// `identity.key.issue`: a new key of an ACTIVE service account, checked at the account's
+/// version; answers `ISSUED` with the NEW key's version and its delivery reference.
+async fn issue_credential(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<IssueKeyBody>,
+) -> AccessResult<impl IntoResponse> {
+    let t = Target::versioned(
+        capability::KEY_ISSUE,
+        Subject::KeyIssue,
+        id,
+        b.expected_version,
+    );
+    let cmd = command(&caller, &headers, t)?;
+    let sa = s
+        .platform
+        .service_account(ServiceAccountId::from_uuid(id))
+        .await
+        .map_err(op_err)?;
+    deliverable(&s, b.tenant_id, sa.tenant_id, sa.environment_id).await?;
+    run(s.platform.db().clone(), cmd, |op| async move {
+        done(
+            s.platform
+                .bridge_issue_credential(
+                    &op,
+                    sa.id,
+                    IssueCredential {
+                        scopes: b.scopes,
+                        label: None,
+                        not_before: None,
+                        expires_at: b.expires_at,
+                    },
+                )
+                .await,
+        )
+    })
+    .await
+}
+
+/// `identity.key.rotate`: an independent successor of an ACTIVE key, checked at the
+/// rotated key's version; answers `ROTATED` with the successor's version and delivery
+/// reference (`rotatedFromCredentialId`: the rotated key).
+async fn rotate_credential(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<RotateKeyBody>,
+) -> AccessResult<impl IntoResponse> {
+    let t = Target::versioned(
+        capability::KEY_ROTATE,
+        Subject::KeyRotation,
+        id,
+        b.expected_version,
+    );
+    let cmd = command(&caller, &headers, t)?;
+    if b.overlap_minutes.is_some_and(|m| m < 0) {
+        return Err(invalid("overlapMinutes must not be negative"));
+    }
+    let credential = s
+        .platform
+        .credential(CredentialId::from_uuid(id))
+        .await
+        .map_err(op_err)?;
+    deliverable(
+        &s,
+        b.tenant_id,
+        credential.tenant_id,
+        credential.environment_id,
+    )
+    .await?;
+    let overlap = b.overlap_minutes.map(Duration::minutes).unwrap_or_else(|| {
+        Duration::days(DELIVERY_TTL_DAYS).min(s.platform.credential_policy().max_rotation_overlap)
+    });
+    run(s.platform.db().clone(), cmd, |op| async move {
+        done(
+            s.platform
+                .bridge_rotate_credential(
+                    &op,
+                    credential.id,
+                    RotateCredential {
+                        overlap: Some(overlap),
+                        scopes: b.scopes,
+                        label: None,
+                        expires_at: b.expires_at,
+                    },
+                )
+                .await,
+        )
     })
     .await
 }

@@ -45,6 +45,10 @@ sha2 = "0.10"
 hex = "0.4"
 secrecy = "0.10"
 zeroize = "1.8"
+# ADR 0068 (owner-delivered API keys): the sealed copy of a bridge-issued key awaiting its
+# one reveal in the partner's console (XChaCha20-Poly1305, as Meeting's sealed legacy
+# email; `aes-gcm` is reserved to the Contact Vault by the service boundary guard).
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
 async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # ADR 0062: CF Meet user tokens (Ed25519 compact JWS), the same crates the shared

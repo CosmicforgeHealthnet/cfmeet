@@ -78,6 +78,8 @@ text_enum!(
         UserTokenTestIssued = "USER_TOKEN_TEST_ISSUED",
         // ADR 0068 (migration 000011): a staff revocation of a CF Meet Apps grant.
         AppGrantRevoked = "APP_GRANT_REVOKED",
+        // ADR 0068 (migration 000012): the partner's one reveal of an owner-delivered key.
+        CredentialDeliveryRevealed = "CREDENTIAL_DELIVERY_REVEALED",
     }
 );
 
@@ -911,7 +913,7 @@ fn service_account_entry(action: OperatorAction, sa: &ServiceAccountView) -> Aud
     )
 }
 
-fn credential_entry(action: OperatorAction, c: &CredentialView) -> AuditEntry {
+pub(crate) fn credential_entry(action: OperatorAction, c: &CredentialView) -> AuditEntry {
     AuditEntry::new(action, AuditTargetKind::Credential, c.id.as_uuid())
         .scope(
             Some(c.tenant_id.as_uuid()),
@@ -965,8 +967,8 @@ mod tests {
     #[test]
     fn the_action_vocabulary_is_the_tables() {
         // Kept in step with migrations 000003 / 000004 / 000005 / 000006 / 000008 / 000011
-        // (an unknown code is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 30);
+        // / 000012 (an unknown code is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 31);
         assert_eq!(AuditTargetKind::ALL.len(), 8);
     }
 }

@@ -146,6 +146,16 @@ async fn main() -> anyhow::Result<()> {
                 {
                     tracing::warn!(summary = %summarize_db_error(&e), "OAuth code pruning failed");
                 }
+                // ADR 0068: an owner-delivered key's sealed copy never outlives its window
+                // (or its key's revocation).
+                if let Err(e) = platform_access::identity::credential_delivery::purge_expired(
+                    state.platform.db(),
+                    clock.now(),
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "credential delivery purge failed");
+                }
             }
         });
     }
