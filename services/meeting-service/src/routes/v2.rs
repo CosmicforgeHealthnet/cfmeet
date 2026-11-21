@@ -508,6 +508,15 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/messaging/principals/names",
             post(crate::handlers::v2::unified_messaging::principal_names),
         )
+        // ADR 0068: owner-delivered Messaging exports, claimed by their recipient.
+        .route(
+            "/messaging/export-deliveries",
+            get(crate::handlers::v2::unified_messaging::export_deliveries),
+        )
+        .route(
+            "/messaging/exports/:export_id/claim",
+            post(crate::handlers::v2::unified_messaging::claim_export),
+        )
         .route(
             "/messaging/relay/*path",
             get(crate::handlers::v2::unified_messaging::relay_get)
@@ -585,6 +594,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/organizations/:id/export",
             get(organizations::export_organization),
+        )
+        .route(
+            "/organizations/:id/exports/:export_id/download",
+            post(organizations::download_organization_export),
         )
         .route(
             "/organizations/:id/meeting-profile-policy",

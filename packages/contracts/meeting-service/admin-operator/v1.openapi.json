@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet Meeting Service / Account — admin bridge operator reads",
-    "version": "1.0.0",
-    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media."
+    "title": "CF Meet Meeting Service / Account — admin bridge operator reads and commands",
+    "version": "1.3.0",
+    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media. 1.1.0 (A4-A7): R3 / R4 COMMANDS (POST, Idempotency-Key required, expectedVersion where the subject is versioned, X-CF-Approver / X-CF-Approval-Ref / X-CF-Intent-Digest required) recorded in meeting_admin_operations in the same transaction and answered {status, version, resource}; the settlement read GET /internal/v1/operator/operations/{idempotencyKey}; further reads (duplicates, test accounts, conference health, recordings, transcripts, webinars and registrations, chat migration, email deliveries, CRITICAL lane). Account reads answer `version` (users.account_version). 1.2.0 (A7): accounts.user.export, owner-delivered (POST .../accounts/users/{userId}/export, R4; the data goes only to the owner's verified address as a single-use, sign-in-protected download link, sealed at rest for at most 7 days; HQ gets a reference) and its state (GET .../accounts/users/{userId}/exports, GET .../accounts/exports/{exportId}). 1.3.0 (A7): the daily dataset pull GET /internal/v1/operator/datasets/{datasetId}/days/{date} (cfmeet.engagement_daily: dau, mau, signups; cfmeet.meetings_daily: meetings, participant_minutes, peak_live_meetings)."
   },
   "tags": [
     {
@@ -13,6 +13,14 @@
     {
       "name": "Meetings",
       "description": "Meeting and conference reads (meeting.administer)."
+    },
+    {
+      "name": "Operations",
+      "description": "The settlement record of applied bridge commands (account.administer or meeting.administer)."
+    },
+    {
+      "name": "Datasets",
+      "description": "The admin bridge's daily dataset pull (counts only)."
     }
   ],
   "paths": {
@@ -1057,6 +1065,3195 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/status": {
+      "post": {
+        "operationId": "operatorChangeUserStatus",
+        "summary": "Change account status (admin bridge)",
+        "description": "accounts.user.status.change. Disabling ends every credential everywhere; any change is mirrored to the Platform Access principal. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorStatusCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserStatusResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/role": {
+      "post": {
+        "operationId": "operatorChangeUserRole",
+        "summary": "Change account role (admin bridge)",
+        "description": "accounts.user.role.change. Test accounts can never be ADMIN (422 NOT_ALLOWED). Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRoleCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserRoleResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/email": {
+      "post": {
+        "operationId": "operatorChangeUserEmail",
+        "summary": "Support email change (admin bridge)",
+        "description": "accounts.user.email.change: the support-assisted change (every session and device ends; both addresses notified). The new address is never answered, logged or recorded; an address of another account is 422 STATE_CONFLICT. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorEmailCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserEmailResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/sessions/revoke-all": {
+      "post": {
+        "operationId": "operatorRevokeUserSessions",
+        "summary": "End every session (admin bridge)",
+        "description": "accounts.sessions.revoke-all: every sign-in and every credential issued before now ends (Hub, Messaging, Calling too); the account stays usable. Unversioned. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSessionsRevokeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/devices/{deviceId}/revoke": {
+      "post": {
+        "operationId": "operatorRevokeUserDevice",
+        "summary": "Revoke a device (admin bridge)",
+        "description": "accounts.device.revoke: every sign-in of the device (and the account's undeclared sign-ins) ends, reason ADMIN_REVOKED; a revoked device stays revoked. Unversioned. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/DeviceId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDeviceRevokeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/mfa/reset": {
+      "post": {
+        "operationId": "operatorResetUserMfa",
+        "summary": "Reset two-step sign-in (admin bridge)",
+        "description": "accounts.mfa.reset: the authenticator and every recovery code are removed; the owner gets the security email. Unversioned. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorMfaResetResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/delete": {
+      "post": {
+        "operationId": "operatorDeleteUser",
+        "summary": "Delete an account (admin bridge)",
+        "description": "accounts.user.delete: the same deletion every owner gets (anonymized; sign-ins and devices end; durable erasure jobs for Messaging, the Hub and Calling). The confirmation goes to the address the person knew once the deletion committed. An already deleted account is 422 STATE_CONFLICT. Risk R4: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R4",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserDeleteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/duplicates/enforce": {
+      "post": {
+        "operationId": "operatorEnforceIdentityUniqueness",
+        "summary": "Enforce case-insensitive uniqueness (admin bridge)",
+        "description": "accounts.duplicates.enforce: creates each unique index whose field has no case-only duplicates left. Unversioned. Risk R3: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReasonCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDuplicatesEnforceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/end": {
+      "post": {
+        "operationId": "operatorEndConference",
+        "summary": "End a live meeting (admin bridge)",
+        "description": "meetings.meeting.end: LIVE -> ENDING as a host end (recordings stopped, provider room terminated), termination reason ADMIN; ENDED follows once the provider confirms. expectedVersion is the conference version. Risk R3: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConferenceEndResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/spaces/{spaceId}/archive": {
+      "post": {
+        "operationId": "operatorArchiveSpace",
+        "summary": "Archive a meeting space (admin bridge)",
+        "description": "meetings.space.archive: soft archive; every LIVE conference of the space ends with it. expectedVersion is the space version. Risk R3: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/SpaceId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSpaceArchiveResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/spaces/{spaceId}/owner-transfer": {
+      "post": {
+        "operationId": "operatorTransferSpace",
+        "summary": "Transfer a meeting space (admin bridge)",
+        "description": "meetings.space.transfer: to an active registered user; the previous owner stays HOST unless retainPreviousOwner is false. expectedVersion is the space version. Risk R3: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/SpaceId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorTransferCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSpaceTransferResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/recordings/{artifactId}/delete": {
+      "post": {
+        "operationId": "operatorDeleteRecording",
+        "summary": "Delete a recording (admin bridge)",
+        "description": "meetings.recording.delete: the manual-deletion path (meeting profile policy still applies; a capture in progress or an artifact already deleted is refused); DELETED once the object is confirmed gone. expectedVersion is the artifact version. Risk R4: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R4",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          },
+          {
+            "$ref": "#/components/parameters/ArtifactId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorArtifactDeleteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/transcripts/{artifactId}/delete": {
+      "post": {
+        "operationId": "operatorDeleteTranscript",
+        "summary": "Delete a transcript (admin bridge)",
+        "description": "meetings.transcript.delete: the manual-deletion path (meeting profile policy still applies; a capture in progress or an artifact already deleted is refused); DELETED once the object is confirmed gone. expectedVersion is the artifact version. Risk R4: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R4",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          },
+          {
+            "$ref": "#/components/parameters/ArtifactId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorArtifactDeleteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/chat-migration/transitions": {
+      "post": {
+        "operationId": "operatorChatMigrationTransition",
+        "summary": "Move the meeting-chat migration (admin bridge)",
+        "description": "meetings.chat-migration.change: gated as the console's transition; HQ's approver is the second operator of a cutover or retirement. expectedVersion is the migration version. Risk R3: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorChatMigrationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChatMigrationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/critical-lane/decisions/{decisionId}/reroute": {
+      "post": {
+        "operationId": "operatorCriticalReroute",
+        "summary": "Reroute a CRITICAL decision (admin bridge)",
+        "description": "meetings.critical-lane.change: the operator reroute of one CRITICAL decision to the legacy path. expectedVersion is the decision_version. Risk R3: two people decide it.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "x-cfmeet-risk": "R3",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/DecisionId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCriticalRerouteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/duplicates": {
+      "get": {
+        "operationId": "operatorIdentityDuplicates",
+        "summary": "Duplicate accounts (admin bridge)",
+        "description": "accounts.duplicates.list: case-only duplicate account ids and whether each rule is enforced.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDuplicates"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/test-accounts": {
+      "get": {
+        "operationId": "operatorListTestAccounts",
+        "summary": "Test accounts (admin bridge)",
+        "description": "accounts.test-accounts.list: the fixed-code review accounts of this deployment, masked, with their account state. Never the code.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorTestAccountPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/health": {
+      "get": {
+        "operationId": "operatorConferenceHealth",
+        "summary": "Conference health (admin bridge)",
+        "description": "meetings.live-health.read.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConferenceHealth"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/recordings": {
+      "get": {
+        "operationId": "operatorListRecordings",
+        "summary": "Recordings of a conference (admin bridge)",
+        "description": "meetings.recordings.list: ids, states, sizes and times (no storage key or URL).",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorArtifactPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/transcripts": {
+      "get": {
+        "operationId": "operatorListTranscripts",
+        "summary": "Transcripts of a conference (admin bridge)",
+        "description": "meetings.transcripts.list: ids, states, sizes and times (no content).",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorArtifactPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/webinars": {
+      "get": {
+        "operationId": "operatorListWebinars",
+        "summary": "Webinars (admin bridge)",
+        "description": "meetings.webinars.list: WEBINAR and TOWN_HALL spaces with registration counts (no title).",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorWebinarPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/webinars/{spaceId}/registrations": {
+      "get": {
+        "operationId": "operatorListWebinarRegistrations",
+        "summary": "Webinar registrations (admin bridge)",
+        "description": "meetings.webinar-registrations.list: ids, states and times; never a registrant's address, name or fields.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/SpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorRegistrationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/chat-migration": {
+      "get": {
+        "operationId": "operatorChatMigration",
+        "summary": "Meeting-chat migration (admin bridge)",
+        "description": "meetings.chat-migration.read: state, version and gate counts; 404 FEATURE_DISABLED without Unified Messaging.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChatMigration"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/email-deliveries/{deliveryId}": {
+      "get": {
+        "operationId": "operatorEmailDelivery",
+        "summary": "Email delivery (admin bridge)",
+        "description": "meetings.email-delivery.read: one delivery, PII-free.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/DeliveryId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorEmailDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (unknown parent) or FEATURE_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/critical-lane": {
+      "get": {
+        "operationId": "operatorCriticalLane",
+        "summary": "CRITICAL lane (admin bridge)",
+        "description": "meetings.critical-lane.read.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCriticalLane"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "operationId": "operatorOperationRecord",
+        "summary": "Operation record (admin bridge)",
+        "description": "The settlement read of an applied bridge command (design 17.6). Only cfmeet.admin-bridge with X-CF-Operator and account.administer or meeting.administer; anyone else, and an unknown key, gets 404.",
+        "tags": [
+          "Operations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer | meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOperationRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: not applied, or not the bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/export": {
+      "post": {
+        "operationId": "operatorExportUser",
+        "summary": "Export an account owner’s data, owner-delivered (admin bridge)",
+        "description": "accounts.user.export: the owner's personal-data export (the document GET /api/v2/me/data-export answers), OWNER-DELIVERED: the Meeting Service builds it after the commit, stores it only sealed (XChaCha20-Poly1305) for at most 7 days, and emails the owner's VERIFIED address a single-use download link that needs the owner's own recent CF Meet sign-in (GET /api/v2/me/data-export?exportId=… with the link's token in X-CF-Data-Export-Token). HQ never receives the data, a token, the link or the address: the answer is a reference (REQUESTED; follow resource.state with GET /internal/v1/operator/accounts/exports/{exportId}). Expiry means the command is re-issued; nothing is ever resent. A deleted, disabled or guest account, or one without a verified address, is 422 STATE_CONFLICT. Risk R4: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R4",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserExportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/exports": {
+      "get": {
+        "operationId": "operatorListUserExports",
+        "summary": "Owner-delivered exports of an account (admin bridge)",
+        "description": "accounts.user.export (state): the account's exports, newest first: state, delivery channel, masked recipient, size, SHA-256 and times. References only.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetExport",
+        "summary": "One owner-delivered export (admin bridge)",
+        "description": "accounts.user.export (state): one export, the same reference the command answered.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{date}": {
+      "get": {
+        "operationId": "operatorGetDatasetDay",
+        "summary": "One UTC day of a dataset (admin bridge dataset pull)",
+        "description": "bridge.datasets.read source (design §17.3): counts for one UTC day computed from the Meeting Service's own data; a metric that cannot be computed is null, never a guessed 0. cfmeet.engagement_daily needs account.administer, cfmeet.meetings_daily meeting.administer. The bridge sends X-CF-Operator: hq:dataset-sync. Today answers the counts so far.",
+        "tags": [
+          "Datasets"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer (cfmeet.engagement_daily) or meeting.administer (cfmeet.meetings_daily)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/DatasetId"
+          },
+          {
+            "$ref": "#/components/parameters/DatasetDate"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: the date is not a UTC day or is after today.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no permission for the dataset), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown dataset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: no metric could be computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1144,6 +4341,142 @@
           "type": "string",
           "format": "date-time"
         }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "HQ's operation id (= the bridge body's operation_id and the readback key). A repeated key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Approver": {
+        "name": "X-CF-Approver",
+        "in": "header",
+        "required": true,
+        "description": "The second person of the R3 / R4 approval (a different hq: staff member).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "ApprovalRef": {
+        "name": "X-CF-Approval-Ref",
+        "in": "header",
+        "required": true,
+        "description": "HQ's approval reference.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        }
+      },
+      "IntentDigest": {
+        "name": "X-CF-Intent-Digest",
+        "in": "header",
+        "required": true,
+        "description": "HQ's intent digest (64 lower-case hex).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "OperatorUserId": {
+        "name": "x-cf-operator-user-id",
+        "in": "header",
+        "required": false,
+        "description": "The staff member's linked CF Meet account, if any: an account command on that account is refused (422 SELF_ACTION_REFUSED).",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "DeviceId": {
+        "name": "deviceId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "SpaceId": {
+        "name": "spaceId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ArtifactId": {
+        "name": "artifactId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "DecisionId": {
+        "name": "decisionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "DeliveryId": {
+        "name": "deliveryId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "IdempotencyKeyPath": {
+        "name": "idempotencyKey",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ExportId": {
+        "name": "exportId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "DatasetId": {
+        "name": "datasetId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "cfmeet.engagement_daily",
+            "cfmeet.meetings_daily"
+          ]
+        }
+      },
+      "DatasetDate": {
+        "name": "date",
+        "in": "path",
+        "required": true,
+        "description": "A UTC day (yyyy-mm-dd), not after today.",
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
       }
     },
     "schemas": {
@@ -1189,7 +4522,8 @@
           "role",
           "status",
           "createdAt",
-          "lastLoginAt"
+          "lastLoginAt",
+          "version"
         ],
         "properties": {
           "userId": {
@@ -1225,6 +4559,11 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The account's administration version (users.account_version): moves forward whenever status, role or the sign-in address changes. The expectedVersion of the account commands."
           }
         }
       },
@@ -1243,7 +4582,8 @@
           "emailVerified",
           "authType",
           "locale",
-          "timezone"
+          "timezone",
+          "version"
         ],
         "properties": {
           "userId": {
@@ -1305,6 +4645,11 @@
               "null"
             ],
             "maxLength": 64
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The account's administration version (users.account_version): moves forward whenever status, role or the sign-in address changes. The expectedVersion of the account commands."
           }
         }
       },
@@ -2046,6 +5391,1648 @@
               "null"
             ],
             "description": "<micros>.<uuid> of the last item; the next page is older."
+          }
+        }
+      },
+      "OperatorReasonCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        },
+        "description": "A command on an unversioned subject (no expectedVersion)."
+      },
+      "OperatorVersionedCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorStatusCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "status"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorRoleCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "role"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ADMIN",
+              "GUEST"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorEmailCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "newEmail"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "newEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 255,
+            "description": "The new sign-in address. Never answered, logged or recorded."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorTransferCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "newOwnerUserId"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "newOwnerUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retainPreviousOwner": {
+            "type": "boolean",
+            "default": true
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorChatMigrationCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "targetState"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's row version HQ looked at; the change happens only at that version (409 VERSION_CONFLICT otherwise)."
+          },
+          "targetState": {
+            "type": "string",
+            "enum": [
+              "LEGACY_PRIMARY",
+              "SHADOW_VALIDATION",
+              "MESSAGING_PRIMARY",
+              "LEGACY_RETIRED"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Why (audited). UPPER_SNAKE; free text is never accepted."
+          }
+        }
+      },
+      "OperatorUserResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "accountStatus",
+          "role",
+          "emailVerified",
+          "openSessions",
+          "mfaEnabled"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountStatus": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "openSessions": {
+            "type": "integer"
+          },
+          "mfaEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OperatorDeviceResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "deviceId",
+          "state",
+          "revokedAt",
+          "revokeReason"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "OperatorIdentityUniqueness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enforced",
+          "duplicateGroups"
+        ],
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "duplicateGroups": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      },
+      "OperatorDuplicates": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "username"
+        ],
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/OperatorIdentityUniqueness"
+          },
+          "username": {
+            "$ref": "#/components/schemas/OperatorIdentityUniqueness"
+          }
+        },
+        "description": "Case-only duplicate accounts (account ids grouped, at most 100 groups per field; never an address)."
+      },
+      "OperatorConferenceResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conferenceId",
+          "spaceId",
+          "conferenceStatus",
+          "terminationReason",
+          "endingRequestedAt",
+          "endedAt"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceStatus": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "terminationReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "endingRequestedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorSpaceResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "spaceId",
+          "spaceStatus",
+          "ownerUserId",
+          "archivedAt"
+        ],
+        "properties": {
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceStatus": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "ownerUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorArtifactResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactId",
+          "conferenceId",
+          "artifactType",
+          "artifactStatus",
+          "deleteRequestedAt",
+          "deletedAt"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "artifactType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "artifactStatus": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "deleteRequestedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorChatMigrationResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "migrationState",
+          "migrationVersion",
+          "changedAt"
+        ],
+        "properties": {
+          "migrationState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "migrationVersion": {
+            "type": "integer"
+          },
+          "changedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorDecisionResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decisionId",
+          "category",
+          "route",
+          "reason"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "route": {
+            "type": "string",
+            "maxLength": 4
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 32
+          }
+        }
+      },
+      "OperatorUserStatusResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "SUSPENDED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorUserRoleResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ADMIN",
+              "GUEST"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorUserEmailResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "EMAIL_CHANGED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorUserDeleteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "DELETED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorSessionsRevokeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REVOKED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "null",
+            "description": "The subject is unversioned."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorMfaResetResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NOT_ENROLLED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "null",
+            "description": "The subject is unversioned."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorUserResource"
+          }
+        }
+      },
+      "OperatorDeviceRevokeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REVOKED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "null",
+            "description": "The subject is unversioned."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorDeviceResource"
+          }
+        }
+      },
+      "OperatorDuplicatesEnforceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ENFORCED",
+              "PARTIALLY_ENFORCED",
+              "NOT_ENFORCED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "null",
+            "description": "The subject is unversioned."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorDuplicates"
+          }
+        }
+      },
+      "OperatorConferenceEndResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ENDING"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorConferenceResource"
+          }
+        }
+      },
+      "OperatorSpaceArchiveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ARCHIVED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorSpaceResource"
+          }
+        }
+      },
+      "OperatorSpaceTransferResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "TRANSFERRED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorSpaceResource"
+          }
+        }
+      },
+      "OperatorArtifactDeleteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "DELETE_REQUESTED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorArtifactResource"
+          }
+        }
+      },
+      "OperatorChatMigrationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "LEGACY_PRIMARY",
+              "SHADOW_VALIDATION",
+              "MESSAGING_PRIMARY",
+              "LEGACY_RETIRED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorChatMigrationResource"
+          }
+        }
+      },
+      "OperatorCriticalRerouteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REROUTED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version, as a string."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorDecisionResource"
+          }
+        }
+      },
+      "OperatorOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "APPLIED"
+            ]
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[1-9][0-9]*$"
+          }
+        },
+        "description": "The record of an applied bridge command: the same status and version the command answered."
+      },
+      "OperatorTestAccount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "emailMasked",
+          "registered",
+          "userId",
+          "accountStatus",
+          "role"
+        ],
+        "properties": {
+          "emailMasked": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "accountStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "OperatorTestAccountPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorTestAccount"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Position of the next entry (address order)."
+          }
+        }
+      },
+      "OperatorArtifact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactId",
+          "conferenceId",
+          "spaceId",
+          "artifactStatus",
+          "sizeBytes",
+          "createdAt",
+          "availableAt",
+          "retentionAt",
+          "deleteRequestedAt",
+          "deletedAt",
+          "version"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "artifactStatus": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "availableAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "retentionAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deleteRequestedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "OperatorArtifactPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorArtifact"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next artifact id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorWebinar": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "spaceId",
+          "meetingCode",
+          "meetingType",
+          "status",
+          "ownerUserId",
+          "organizationId",
+          "registrationsActive",
+          "registrationsCancelled",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingCode": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "meetingType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "ownerUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "registrationsActive": {
+            "type": "integer"
+          },
+          "registrationsCancelled": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "OperatorWebinarPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorWebinar"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next space id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorRegistration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "registrationId",
+          "spaceId",
+          "conferenceId",
+          "status",
+          "userId",
+          "createdAt",
+          "cancelledAt"
+        ],
+        "properties": {
+          "registrationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorRegistrationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorRegistration"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next registration id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorConferenceHealth": {
+        "type": "object",
+        "description": "The operations view's conference health (Part I): conferenceId, meetingSpaceId, lifecycleState, healthState, reasons, session / join counters, latency and quality averages, sanitized providerRegions / providerNodes, incident and recording / transcription counters, evaluatedAt. States, counts and labels only.",
+        "required": [
+          "conferenceId",
+          "meetingSpaceId",
+          "lifecycleState",
+          "healthState",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycleState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "healthState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorParityRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "parityRunId",
+          "status",
+          "startedAt",
+          "finishedAt",
+          "conferencesChecked",
+          "messagesChecked",
+          "mismatches"
+        ],
+        "properties": {
+          "parityRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "startedAt": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 40
+          },
+          "conferencesChecked": {
+            "type": "integer"
+          },
+          "messagesChecked": {
+            "type": "integer"
+          },
+          "mismatches": {
+            "type": "integer"
+          }
+        }
+      },
+      "OperatorChatMigration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "version",
+          "changedAt",
+          "pendingMirror",
+          "pendingRollbackCopies",
+          "pendingSessionRevocations",
+          "linkedConferences",
+          "latestParityRun"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "version": {
+            "type": "integer"
+          },
+          "changedAt": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "pendingMirror": {
+            "type": "integer"
+          },
+          "pendingRollbackCopies": {
+            "type": "integer"
+          },
+          "pendingSessionRevocations": {
+            "type": "integer"
+          },
+          "linkedConferences": {
+            "type": "integer"
+          },
+          "latestParityRun": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OperatorParityRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "OperatorEmailDelivery": {
+        "type": "object",
+        "description": "PII-free delivery status: id, category, status, provider, attempts, lastErrorClass, lastErrorStatus, createdAt, acceptedAt, deliveredAt and later state times. Never an address or content.",
+        "required": [
+          "id",
+          "category",
+          "status",
+          "attempts",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorCriticalLane": {
+        "type": "object",
+        "description": "The Account CRITICAL lane: fallbackKey readiness, pending / acked / neverLeased / leasedLive / leasedUncompleted / dead counts, oldestOpenSeconds and the leasedUncompletedDecisions ids.",
+        "required": [
+          "fallbackKey",
+          "pending",
+          "dead",
+          "leasedUncompletedDecisions"
+        ],
+        "properties": {
+          "fallbackKey": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "dead": {
+            "type": "integer"
+          },
+          "leasedUncompletedDecisions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "OperatorExportResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An owner-delivered personal-data export as HQ sees it: a REFERENCE only. Never the document, a token, a download link, a sealed blob or the clear address.",
+        "required": [
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientMasked",
+          "expiresAt",
+          "exportId",
+          "userId",
+          "state",
+          "sizeBytes",
+          "sha256",
+          "emailDeliveryId",
+          "failureCode",
+          "requestedAt",
+          "readyAt",
+          "deliveredAt",
+          "purgedAt",
+          "version"
+        ],
+        "properties": {
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "DOWNLOAD_LINK_EMAIL"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The export's delivery reference (the email ledger key account-export:<deliveryRef>)."
+          },
+          "recipientMasked": {
+            "type": "string",
+            "maxLength": 160,
+            "pattern": "^[^@\\s]\\*\\*\\*@[^@\\s.]\\*\\*\\*(\\.[A-Za-z0-9-]+)?$|^\\*\\*\\*$",
+            "description": "The owner's verified address, masked (a***@e***.com)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The end of retention (7 days after the request): the copy and the link are purged then."
+          },
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ],
+            "description": "REQUESTED: recorded, being built. READY: sealed and the single-use link queued to the owner. DELIVERED: the owner downloaded it once (copy purged). EXPIRED: retention over (copy purged). FAILED: see failureCode (copy purged)."
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Size of the document (from READY)."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the document the owner downloads (from READY)."
+          },
+          "emailDeliveryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The queued email (GET /internal/v1/operator/meetings/email-deliveries/{deliveryId})."
+          },
+          "failureCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 48,
+            "description": "ACCOUNT_NOT_FOUND, ACCOUNT_UNAVAILABLE, ACCOUNT_DELETED, RECIPIENT_UNVERIFIED, RECIPIENT_UNUSABLE, BUILD_FAILED or UNSEALABLE."
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readyAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The export row's version (moves with every state change)."
+          }
+        }
+      },
+      "OperatorUserExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REQUESTED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The new export row's version, as a string (\"1\")."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorExportResource"
+          }
+        }
+      },
+      "OperatorExportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorExportResource"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "<micros>.<exportId> of the last item (newest first)."
+          }
+        }
+      },
+      "OperatorDatasetDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "date",
+          "metrics"
+        ],
+        "description": "One UTC day of a dataset. Counts only; a metric that cannot be computed is null, never a guessed 0.",
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "enum": [
+              "cfmeet.engagement_daily",
+              "cfmeet.meetings_daily"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "cfmeet.engagement_daily: dau, mau, signups. cfmeet.meetings_daily: meetings, participant_minutes, peak_live_meetings.",
+            "properties": {
+              "dau": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Distinct registered (non-guest) accounts that signed in or were connected to a conference during the day."
+              },
+              "mau": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "The same over the 30 UTC days ending with the day."
+              },
+              "signups": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Non-guest accounts created during the day."
+              },
+              "meetings": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Conferences started during the day."
+              },
+              "participant_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Connected participant time within the day, whole minutes."
+              },
+              "peak_live_meetings": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "The most conferences live at the same instant during the day."
+              }
+            }
           }
         }
       }

@@ -1,6 +1,7 @@
 pub mod account_avatar;
 pub mod account_devices;
 pub mod account_erasure;
+pub mod account_export;
 pub mod account_privacy;
 pub mod account_profile;
 pub mod account_security;
@@ -22,6 +23,7 @@ pub mod token_blacklist;
 
 // Phase 2 meeting domain (spec v1.1 Parts A–D)
 pub mod actor;
+pub mod admin_operations;
 pub mod admin_operator;
 pub mod admission;
 pub mod appointment_authorization;
@@ -61,6 +63,7 @@ pub mod organization_policy;
 pub mod organizations;
 pub mod organizations_authority;
 pub mod outbox;
+pub mod plan_limits;
 pub mod platform;
 pub mod profiles;
 pub mod quality;

@@ -139,6 +139,9 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     // organization.policies.manage and every team-role rule.
     // Gap audit G11: the OWNER's export of the organization's data.
     ("GET", "/internal/v1/organizations/{}/export"),
+    // ADR 0068: an owner-delivered organization export, downloaded once by the OWNER the
+    // emailed link was sent to (the single-use token travels only in the body).
+    ("POST", "/internal/v1/organizations/{}/exports/{}/download"),
     ("GET", "/internal/v1/organizations/{}/teams"),
     ("POST", "/internal/v1/organizations/{}/teams"),
     ("GET", "/internal/v1/organizations/{}/teams/{}"),

@@ -595,7 +595,21 @@ async fn main() -> anyhow::Result<()> {
     let operator_router = admin_operator
         .map(|verifier| backend::services::admin_operator::router(state.clone(), verifier));
     if operator_router.is_some() {
-        tracing::info!("admin bridge operator reads enabled");
+        // A4–A7: the bridge's commands record themselves in `meeting_admin_operations` and
+        // lock accounts by `users.account_version` (`admin-operations-migration up`).
+        if !migration::admin_operations_ready(&state.db)
+            .await
+            .expect("Admin-operations migration readiness")
+        {
+            panic!("Admin-operations migration is required (admin-operations-migration up)");
+        }
+        tracing::info!("admin bridge operator reads and commands enabled");
+        // A7: owner-delivered exports: builds that lapsed are retried, copies past their
+        // 7-day retention (or of a deleted account) are purged.
+        let _account_export_worker = backend::services::account_export::spawn_worker(
+            state.clone(),
+            std::time::Duration::from_secs(60),
+        );
     }
 
     // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables

@@ -320,7 +320,12 @@ export function invitationTokenFromHash(hash: string | null | undefined): string
 }
 
 /** Same-origin return paths the sign-in page may follow (open-redirect safe). */
-const RETURN_PATHS = [/^\/organizations\/invitations$/, /^\/dashboard(\/[A-Za-z0-9_\-/]*)?$/];
+const RETURN_PATHS = [
+  /^\/organizations\/invitations$/,
+  /^\/organizations\/exports\/download$/,
+  /^\/settings\/data-export\/download$/,
+  /^\/dashboard(\/[A-Za-z0-9_\-/]*)?$/,
+];
 
 export function safeReturnPath(value: string | null | undefined): string | null {
   if (!value || value.length > 200 || !value.startsWith("/") || value.startsWith("//")) return null;

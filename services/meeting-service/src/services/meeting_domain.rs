@@ -53,6 +53,8 @@ pub struct MeetingDomainDeps {
     pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
     /// Part V H: signed gateway to Platform Access / Messaging (`None` = integration off).
     pub unified_messaging: Option<crate::services::unified_messaging::SharedGateway>,
+    /// ADR 0068 A6: CF Meet user plan enforcement (`None` = off: today's limits only).
+    pub plan_limits: Option<Arc<crate::services::plan_limits::PlanEnforcement>>,
 }
 
 impl MeetingDomainDeps {
@@ -86,6 +88,23 @@ impl MeetingDomainDeps {
             artifacts: artifact_backends_from_env(livekit),
             telemetry: Arc::new(crate::services::quality::sink::PrometheusSink::new()),
             unified_messaging: unified_messaging_from_env(),
+            plan_limits: plan_limits_from_env(),
+        }
+    }
+}
+
+/// ADR 0068 A6: plan enforcement (`MEETING_PLAN_ENFORCEMENT=on`, default off). FAIL
+/// OPEN: off, unconfigured or misconfigured, today's limits stay the only limits.
+fn plan_limits_from_env() -> Option<Arc<crate::services::plan_limits::PlanEnforcement>> {
+    match crate::services::plan_limits::PlanEnforcement::from_env() {
+        Ok(Some(p)) => {
+            tracing::info!("CF Meet user plan limits enforced (Developer Platform plan read)");
+            Some(Arc::new(p))
+        }
+        Ok(None) => None,
+        Err(e) => {
+            tracing::error!("plan enforcement is misconfigured and stays off (fail open): {e}");
+            None
         }
     }
 }
@@ -209,6 +228,7 @@ impl MeetingDomain {
             telemetry: deps.telemetry,
             unified,
             redis,
+            plan_limits: deps.plan_limits,
         });
         Self {
             spaces: MeetingSpaceService::new(core.clone()),

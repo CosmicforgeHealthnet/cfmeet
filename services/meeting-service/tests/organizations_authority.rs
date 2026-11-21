@@ -5503,6 +5503,79 @@ async fn g11_the_organization_export_is_relayed_for_the_owner() {
     assert_eq!(sent.acting_user, Some(owner.id.to_string()));
 }
 
+/// ADR 0068: an owner-delivered organization export is downloaded once by the signed-in
+/// OWNER; the token travels only in the body to Organizations, with the verified acting user.
+#[tokio::test]
+async fn an_owner_delivered_organization_export_is_relayed_for_the_signed_in_owner() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("export-owner").await;
+    let org = fake.add_org("exported", &[(owner.id, "OWNER")]);
+    let export = Uuid::new_v4();
+    let path = format!("/internal/v1/organizations/{org}/exports/{export}/download");
+    fake.script(
+        "POST",
+        &path,
+        200,
+        json!({ "schemaVersion": 1, "organization": { "id": org } }),
+    );
+    let token = "tok_0123456789abcdefABCDEF";
+    let uri = format!("/api/v2/organizations/{org}/exports/{export}/download");
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["schemaVersion"], 1);
+    let sent = fake.last("POST", &path);
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+    assert_eq!(sent.body, json!({ "token": token }));
+    // A malformed token or an unknown field is refused here; no sign-in is refused.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "token": "short" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "token": token, "userId": owner.id }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app.post(&uri, Auth::None, json!({ "token": token })).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Organizations' refusal is relayed.
+    fake.script(
+        "POST",
+        &path,
+        404,
+        json!({ "error": { "code": "EXPORT_LINK_INVALID", "message": "invalid" } }),
+    );
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    assert_eq!(v["error"]["code"], "EXPORT_LINK_INVALID");
+    fake.script(
+        "POST",
+        &path,
+        410,
+        json!({ "error": { "code": "EXPORT_LINK_EXPIRED", "message": "expired" } }),
+    );
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::GONE, Some("EXPORT_LINK_EXPIRED"))
+    );
+}
+
 /// Team chats follow their team: `team.member_added` / `team.member_removed` /
 /// `team.archived` from Organizations re-run the chat sync as the manager who created it.
 #[tokio::test]

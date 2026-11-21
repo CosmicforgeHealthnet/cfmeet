@@ -35,8 +35,9 @@ fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
     Statement::from_sql_and_values(DbBackend::Postgres, sql, values)
 }
 
-/// The sealing key: `MFA_ENCRYPTION_KEY`, else `JWT_SECRET`.
-fn key() -> String {
+/// The sealing key: `MFA_ENCRYPTION_KEY`, else `JWT_SECRET` (also the root of the
+/// account-export key, [`crate::services::account_export`]).
+pub(crate) fn key() -> String {
     std::env::var("MFA_ENCRYPTION_KEY")
         .or_else(|_| std::env::var("JWT_SECRET"))
         .unwrap_or_default()
@@ -44,7 +45,7 @@ fn key() -> String {
 
 /// Keys still accepted for unsealing after a rotation (gap audit A15):
 /// `MFA_PREVIOUS_ENCRYPTION_KEYS`, else `JWT_PREVIOUS_SECRETS` (comma-separated).
-fn previous_keys() -> Vec<String> {
+pub(crate) fn previous_keys() -> Vec<String> {
     std::env::var("MFA_PREVIOUS_ENCRYPTION_KEYS")
         .or_else(|_| std::env::var("JWT_PREVIOUS_SECRETS"))
         .unwrap_or_default()

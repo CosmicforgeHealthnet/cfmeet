@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +286,10 @@ function YourData() {
       <div className="space-y-1">
         <p className="font-semibold">Your data</p>
         <p className="text-sm text-muted-foreground">Download a copy of what CF Meet keeps about you.</p>
+        <p className="text-sm text-muted-foreground">
+          Copies CF Meet support requested for you wait in{" "}
+          <Link className="underline" href="/dashboard/data-exports">Data exports</Link>.
+        </p>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </div>
       <Button variant="outline" className="w-full rounded-xl sm:w-auto" loading={busy} onClick={() => void download()}>Download my data</Button>

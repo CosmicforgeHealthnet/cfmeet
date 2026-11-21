@@ -26,6 +26,7 @@ use crate::services::account_security::{
     self as security, find_user_by_email, normalize_email, ActorKind, Outcome, RevokeReason,
     SecurityEvent,
 };
+use crate::services::admin_operations::{self, BridgeCommand};
 use crate::services::email::{email_changed_notices_on, EMAIL_CHANGE_UNDO_WINDOW};
 use crate::services::ops_metrics::{inc, OPS_METRICS as OM};
 use crate::services::otp::{generate_code, generate_link_token, OtpCheck, OtpType};
@@ -280,12 +281,35 @@ pub async fn admin_change(
     new_email: &str,
     reason: &str,
 ) -> ApiResult<users::Model> {
+    admin_change_with(state, Some(admin_id), user_id, new_email, reason, None).await
+}
+
+/// [`admin_change`] by a platform administrator (`admin_id`) or (ADR 0068,
+/// `accounts.user.email.change`) by an HQ staff member through the admin bridge
+/// (`bridge`): then the key is claimed and the account locked at HQ's expected
+/// `account_version` in the change's transaction, and the command is recorded there
+/// (`EMAIL_CHANGED`). The new address is never logged or recorded by this path.
+pub async fn admin_change_with(
+    state: &AppState,
+    admin_id: Option<Uuid>,
+    user_id: Uuid,
+    new_email: &str,
+    reason: &str,
+    bridge: Option<&BridgeCommand>,
+) -> ApiResult<users::Model> {
     let new_email = normalize_email(new_email);
     if !valid_address(&new_email) {
         return Err(ApiError::BadRequest("Invalid email address".into()));
     }
     let txn = state.db.begin().await?;
     lock_address(&txn, &new_email).await?;
+    if let Some(cmd) = bridge {
+        admin_operations::claim(&txn, cmd).await?;
+        let version = admin_operations::account_version(&txn, user_id, true)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
+        admin_operations::check_version(cmd, version)?;
+    }
     let user = users::Entity::find_by_id(user_id)
         .one(&txn)
         .await?
@@ -323,16 +347,41 @@ pub async fn admin_change(
         "email-changed-by-support",
     )?;
     security::revoke_all(&txn, user_id, RevokeReason::LogoutAll).await?;
+    if let Some(cmd) = bridge {
+        security::record_event(
+            &txn,
+            SecurityEvent::new("EMAIL_CHANGED_BY_ADMIN", Outcome::Success)
+                .user(user_id)
+                .actor(ActorKind::Admin, None)
+                .detail(serde_json::json!({
+                    "reason": reason, "changeId": change_id,
+                    "operator": cmd.operator(), "approver": cmd.approver(),
+                })),
+        )
+        .await?;
+        let version = admin_operations::account_version(&txn, user_id, false).await?;
+        admin_operations::record(
+            &txn,
+            cmd,
+            admin_operations::subject::USER,
+            user_id,
+            "EMAIL_CHANGED",
+            version,
+        )
+        .await?;
+    }
     txn.commit().await?;
     end_everything(state, user_id).await;
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("EMAIL_CHANGED_BY_ADMIN", Outcome::Success)
-            .user(user_id)
-            .actor(ActorKind::Admin, Some(admin_id))
-            .detail(serde_json::json!({ "reason": reason, "changeId": change_id })),
-    )
-    .await;
+    if bridge.is_none() {
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("EMAIL_CHANGED_BY_ADMIN", Outcome::Success)
+                .user(user_id)
+                .actor(ActorKind::Admin, admin_id)
+                .detail(serde_json::json!({ "reason": reason, "changeId": change_id })),
+        )
+        .await;
+    }
     inc(&OM.auth_admin_email_changed);
     Ok(updated)
 }

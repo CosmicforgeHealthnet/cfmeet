@@ -50,6 +50,9 @@ mod m20261118_000006_team_channel_sync;
 mod m20261118_000007_platform_user_participants;
 mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
+mod m20261120_000001_admin_operations;
+mod m20261121_000001_account_data_exports;
+mod m20261121_000002_admin_account_suspension;
 
 pub mod phase2_backfill;
 
@@ -566,6 +569,34 @@ pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrai
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<AccountPrivacyMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0068, phases A4–A7: the admin bridge's operations ledger (`meeting_admin_operations`),
+/// the account administration version (`users.account_version`), the owner-delivered
+/// personal-data exports (`account_data_exports`, A7) and the `suspended` account status
+/// the bridge may set (A4), in their own
+/// additive history so the previous image still starts after a rollback.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261120_000001_admin_operations::Migration),
+            Box::new(m20261121_000001_account_data_exports::Migration),
+            Box::new(m20261121_000002_admin_account_suspension::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_admin_operations_migrations").into_iden()
+    }
+}
+
+pub async fn admin_operations_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AdminOperationsMigrator, _>(db)
         .await?
         .is_empty())
 }

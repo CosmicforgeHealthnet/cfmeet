@@ -188,6 +188,9 @@ async fn template(admin: &str) -> String {
             migration::AccountPrivacyMigrator::up(&tmpl, None)
                 .await
                 .expect("account-privacy migrations apply");
+            migration::AdminOperationsMigrator::up(&tmpl, None)
+                .await
+                .expect("admin-operations migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -488,6 +491,8 @@ pub struct TestOptions {
         Option<backend::services::organization_calling::SharedOrganizationCalling>,
     /// ADR 0064 / 0065: CF Meet Apps (`None` = every Apps flag off).
     pub apps: Option<backend::services::apps::Apps>,
+    /// ADR 0068 A6: CF Meet user plan enforcement (`None` = off).
+    pub plan_limits: Option<Arc<backend::services::plan_limits::PlanEnforcement>>,
 }
 
 impl Default for TestOptions {
@@ -514,6 +519,7 @@ impl Default for TestOptions {
             organizations_authority: None,
             organization_calling: None,
             apps: None,
+            plan_limits: None,
         }
     }
 }
@@ -841,6 +847,7 @@ impl TestApp {
                 Arc::new(backend::services::appointment_authorization::UnconfiguredAppointmentAuthorization)
             }),
             unified_messaging: opts.unified_messaging.clone(),
+            plan_limits: opts.plan_limits.clone(),
         };
         let mut state = AppState::with_meeting_deps(
             db.conn.clone(),

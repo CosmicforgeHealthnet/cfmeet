@@ -207,6 +207,11 @@ pub enum ErrorCode {
     OauthRequestInvalid,
     /// Audit MF2: unknown, replaced or revoked calendar feed token.
     CalendarFeedNotFound,
+    /// ADR 0068: an owner-delivered export's download link is wrong, used or not the
+    /// caller's.
+    ExportLinkInvalid,
+    /// ADR 0068: an owner-delivered export's download link has expired.
+    ExportLinkExpired,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -339,6 +344,8 @@ impl ErrorCode {
             ErrorCode::AppNotFound => "APP_NOT_FOUND",
             ErrorCode::OauthRequestInvalid => "OAUTH_REQUEST_INVALID",
             ErrorCode::CalendarFeedNotFound => "CALENDAR_FEED_NOT_FOUND",
+            ErrorCode::ExportLinkInvalid => "EXPORT_LINK_INVALID",
+            ErrorCode::ExportLinkExpired => "EXPORT_LINK_EXPIRED",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -466,6 +473,8 @@ impl ErrorCode {
             ErrorCode::AppNotFound => StatusCode::NOT_FOUND,
             ErrorCode::OauthRequestInvalid => StatusCode::BAD_REQUEST,
             ErrorCode::CalendarFeedNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::ExportLinkInvalid => StatusCode::NOT_FOUND,
+            ErrorCode::ExportLinkExpired => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -836,6 +845,8 @@ mod tests {
             ErrorCode::AppNotFound,
             ErrorCode::OauthRequestInvalid,
             ErrorCode::CalendarFeedNotFound,
+            ErrorCode::ExportLinkInvalid,
+            ErrorCode::ExportLinkExpired,
             ErrorCode::UserNotFound,
             ErrorCode::MfaRequired,
         ];
