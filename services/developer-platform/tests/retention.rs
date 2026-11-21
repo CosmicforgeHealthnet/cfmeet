@@ -309,8 +309,8 @@ async fn the_gap_closure_migration_rolls_back_to_the_original_guards() {
         .is_empty());
     // Rolls back the later gap-closure migrations too (ADR 0062 platform build, ADR 0064
     // apps, ADR 0068 admin operations, the A4 partner commands, A6 pricing and the
-    // owner-delivered secrets).
-    GapClosureMigrator::down(conn, Some(7)).await.unwrap();
+    // owner-delivered secrets and the owner events outbox).
+    GapClosureMigrator::down(conn, Some(8)).await.unwrap();
     assert_eq!(
         developer_platform_migration::pending_migrations(conn)
             .await
@@ -322,7 +322,8 @@ async fn the_gap_closure_migration_rolls_back_to_the_original_guards() {
             "m20261209_000004_admin_operations",
             "m20261210_000005_admin_bridge_partners",
             "m20261211_000006_pricing",
-            "m20261212_000007_owner_deliveries"
+            "m20261212_000007_owner_deliveries",
+            "m20261213_000008_bridge_events"
         ]
     );
     // Back to the original guards: even the retention flag cannot delete.

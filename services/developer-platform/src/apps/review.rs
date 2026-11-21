@@ -334,6 +334,7 @@ pub async fn operator_decide(
     };
     record_transition(
         &txn,
+        state.bridge_events,
         app_id,
         row.tenant_id,
         Some(&row.status),

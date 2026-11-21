@@ -188,7 +188,9 @@ async fn draft(
     Json(body): Json<pricing::DraftBody>,
 ) -> Result<Json<Value>, ApiError> {
     let (ctx, cmd) = command(&caller, &headers, body.expected_version, false)?;
-    Ok(Json(pricing::draft(&s.db, &ctx, book, body, &cmd).await?))
+    Ok(Json(
+        pricing::draft(&s.db, s.bridge_events, &ctx, book, body, &cmd).await?,
+    ))
 }
 
 fn parse<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, ApiError> {
@@ -239,7 +241,7 @@ async fn version_command(
     };
     let (ctx, cmd) = command(&caller, &headers, expected, false)?;
     Ok(Json(
-        pricing::version_command(&s.db, &ctx, id, c, &cmd).await?,
+        pricing::version_command(&s.db, s.bridge_events, &ctx, id, c, &cmd).await?,
     ))
 }
 
@@ -252,7 +254,7 @@ async fn rollback(
 ) -> Result<Json<Value>, ApiError> {
     let (ctx, cmd) = command(&caller, &headers, body.expected_version, false)?;
     Ok(Json(
-        pricing::rollback(&s.db, &ctx, book, body, &cmd).await?,
+        pricing::rollback(&s.db, s.bridge_events, &ctx, book, body, &cmd).await?,
     ))
 }
 

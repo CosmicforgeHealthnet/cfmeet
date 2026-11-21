@@ -46,11 +46,15 @@ async fn main() -> anyhow::Result<()> {
     // Section 15: with Platform Access configured the worker also settles organization
     // creations and renames that did not complete there (ORG-014 / ORG-013).
     let notifications_configured = settings.has_target(cf_service_auth::services::NOTIFICATIONS);
-    let runtime_auth = (settings.has_platform_access() || notifications_configured).then(|| {
-        settings
-            .load(std::sync::Arc::new(cf_service_auth::SystemClock))
-            .unwrap_or_else(|e| fatal("service authentication configuration error", e))
-    });
+    let bridge_configured = settings.has_target(cf_service_auth::services::ADMIN_BRIDGE);
+    let runtime_auth = (settings.has_platform_access()
+        || notifications_configured
+        || bridge_configured)
+        .then(|| {
+            settings
+                .load(std::sync::Arc::new(cf_service_auth::SystemClock))
+                .unwrap_or_else(|e| fatal("service authentication configuration error", e))
+        });
     let platform: Option<
         std::sync::Arc<dyn developer_platform::platform_access::PlatformAccessPort>,
     > = if let Some(runtime_auth) = runtime_auth
@@ -120,6 +124,20 @@ async fn main() -> anyhow::Result<()> {
             }
             (false, _) => None,
         },
+        // ADR 0068 A7: owner events to the admin bridge (off unless CF_ADMIN_BRIDGE_BASE_URL).
+        bridge_events: runtime_auth
+            .as_ref()
+            .filter(|_| bridge_configured)
+            .map(|runtime_auth| {
+                tracing::info!("owner events are posted to the admin bridge");
+                developer_platform::worker::BridgeEventJobs {
+                    sink: std::sync::Arc::new(
+                        developer_platform::bridge_events::HttpBridgeEvents::new(
+                            runtime_auth.client(),
+                        ),
+                    ),
+                }
+            }),
         retention: match developer_platform::retention::RetentionSettings::from_lookup(
             &|k: &str| std::env::var(k).ok(),
         ) {

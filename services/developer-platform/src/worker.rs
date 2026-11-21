@@ -38,6 +38,32 @@ pub struct PeriodicJobs {
     /// ADR 0064 (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`, None: off): the Platform
     /// Access `APP_GRANT` projection and the app lifecycle events.
     pub app_grants: Option<AppGrantJobs>,
+    /// ADR 0068 A7 (`CF_ADMIN_BRIDGE_BASE_URL`, None: off): owner events to the admin
+    /// bridge (the worker's own state changes are recorded too, and the outbox is posted).
+    pub bridge_events: Option<BridgeEventJobs>,
+}
+
+/// The admin bridge's events listener.
+#[derive(Clone)]
+pub struct BridgeEventJobs {
+    pub sink: Arc<dyn crate::bridge_events::BridgeEventSink>,
+}
+
+impl std::fmt::Debug for BridgeEventJobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BridgeEventJobs").finish_non_exhaustive()
+    }
+}
+
+impl PeriodicJobs {
+    /// Whether this worker records owner events with its own state changes.
+    pub fn bridge_events(&self) -> crate::bridge_events::BridgeEvents {
+        if self.bridge_events.is_some() {
+            crate::bridge_events::BridgeEvents::ON
+        } else {
+            crate::bridge_events::BridgeEvents::OFF
+        }
+    }
 }
 
 /// The install projection's Platform Access port.
@@ -61,6 +87,7 @@ impl Default for PeriodicJobs {
             notifications: None,
             retention: crate::retention::RetentionSettings::disabled(),
             app_grants: None,
+            bridge_events: None,
         }
     }
 }
@@ -187,6 +214,50 @@ pub async fn notification_publication_pass(
         }
         Err(e) => {
             tracing::warn!(summary = %crate::db::summarize_db_error(&e), "notification publication relay pass failed");
+            None
+        }
+    }
+}
+
+/// ADR 0068 A7: one publisher pass of the owner events outbox, and its purge at most
+/// hourly across worker instances.
+pub async fn bridge_event_pass(
+    db: &DatabaseConnection,
+    sink: &dyn crate::bridge_events::BridgeEventSink,
+    now: DateTime<Utc>,
+) -> Option<crate::bridge_events::PublishReport> {
+    use crate::bridge_events as be;
+    if let Ok(true) = claim_schedule(db, be::MAINTENANCE_JOB, Duration::from_secs(3600), now).await
+    {
+        let outcome = match be::purge(db, now, 5_000).await {
+            Ok(purged) => {
+                if purged > 0 {
+                    tracing::info!(purged, "owner events purged");
+                }
+                "SUCCEEDED"
+            }
+            Err(e) => {
+                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner event purge failed");
+                "FAILED"
+            }
+        };
+        let _ = complete_schedule(db, be::MAINTENANCE_JOB, outcome, Utc::now()).await;
+    }
+    match be::publish_due(db, sink, be::BATCH, now).await {
+        Ok(r) => {
+            if r != be::PublishReport::default() {
+                tracing::info!(
+                    sent = r.sent,
+                    retried = r.retried,
+                    dead = r.dead,
+                    expired = r.expired,
+                    "owner events posted to the admin bridge"
+                );
+            }
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner event pass failed");
             None
         }
     }
@@ -522,10 +593,14 @@ pub async fn run_pass_with_jobs(
     // P9: bounded retention purge (at most once per hour across instances).
     crate::retention::retention_pass(db, &jobs.retention, Utc::now()).await;
     // Section 55: approvals not activated in time.
-    match crate::control::production::expire_due(db).await {
+    match crate::control::production::expire_due(db, jobs.bridge_events()).await {
         Ok(0) => {}
         Ok(n) => tracing::info!(expired = n, "production-access approvals expired"),
         Err(e) => tracing::warn!(error = ?e, "production-access expiry sweep failed"),
+    }
+    // ADR 0068 A7: owner events to the admin bridge.
+    if let Some(b) = &jobs.bridge_events {
+        bridge_event_pass(db, b.sink.as_ref(), Utc::now()).await;
     }
     if let Some(w) = webhooks.filter(|w| w.settings().enabled) {
         let r = w.deliver_due_once(WEBHOOK_BATCH).await?;

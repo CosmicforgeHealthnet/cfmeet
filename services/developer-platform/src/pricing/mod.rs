@@ -38,6 +38,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::{
+    bridge_events::{self, BridgeEvents, Source},
     control::{
         bridge_command::{self as bc, BridgeCommand, Subject},
         operator::{audit_command, valid_reason},
@@ -237,6 +238,7 @@ pub struct DraftBody {
 /// version. Its id is the command's Idempotency-Key.
 pub async fn draft(
     db: &DatabaseConnection,
+    ev: BridgeEvents,
     request: &RequestContext,
     book_id: Uuid,
     body: DraftBody,
@@ -293,6 +295,7 @@ pub async fn draft(
     if inserted != 1 {
         return Err(ApiError(ErrorCode::VersionConflict));
     }
+    bridge_events::record(&txn, ev, Source::PriceVersion(id)).await?;
     bump_book(&txn, book_id, now).await?;
     finish(
         &txn,
@@ -437,6 +440,7 @@ impl VersionCommand {
 /// Runs a version command at the version's row version.
 pub async fn version_command(
     db: &DatabaseConnection,
+    ev: BridgeEvents,
     request: &RequestContext,
     id: Uuid,
     command: VersionCommand,
@@ -576,6 +580,8 @@ pub async fn version_command(
             }
         }
     };
+    // ADR 0068 A7: the version (and any version it superseded) changed.
+    bridge_events::record_price_versions_at(&txn, ev, b.id, now).await?;
     bump_book(&txn, b.id, now).await?;
     finish(
         &txn,
@@ -665,6 +671,7 @@ async fn book_resource<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(Value, i
 /// version. The history stays append-only (a ROLLED_BACK activation).
 pub async fn rollback(
     db: &DatabaseConnection,
+    ev: BridgeEvents,
     request: &RequestContext,
     book_id: Uuid,
     body: RollbackBody,
@@ -706,6 +713,7 @@ pub async fn rollback(
     ))
     .await?;
     supersede_others(&txn, book_id, target.id, now).await?;
+    bridge_events::record_price_versions_at(&txn, ev, book_id, now).await?;
     bump_book(&txn, book_id, now).await?;
     finish(
         &txn,

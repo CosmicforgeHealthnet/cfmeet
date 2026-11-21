@@ -303,6 +303,7 @@ pub async fn sync<C: ConnectionTrait>(
 #[allow(clippy::too_many_arguments)]
 pub async fn record_transition<C: ConnectionTrait>(
     db: &C,
+    ev: crate::bridge_events::BridgeEvents,
     app_id: Uuid,
     tenant_id: Uuid,
     from: Option<&str>,
@@ -329,6 +330,8 @@ pub async fn record_transition<C: ConnectionTrait>(
         ],
     ))
     .await?;
+    // ADR 0068 A7: the app's review status (and its verification case) changed.
+    crate::bridge_events::record(db, ev, crate::bridge_events::Source::App(app_id)).await?;
     Ok(())
 }
 
@@ -411,6 +414,7 @@ pub async fn put(
         insert_version(&txn, project_id, 1, &manifest, caller, now).await?;
         record_transition(
             &txn,
+            state.bridge_events,
             project_id,
             tenant_id,
             None,
@@ -447,6 +451,7 @@ pub async fn put(
         if status != row.status {
             record_transition(
                 &txn,
+                state.bridge_events,
                 project_id,
                 tenant_id,
                 Some(&row.status),
@@ -629,6 +634,7 @@ pub async fn submit(
     .await?;
     record_transition(
         &txn,
+        state.bridge_events,
         project_id,
         row.tenant_id,
         Some(&row.status),

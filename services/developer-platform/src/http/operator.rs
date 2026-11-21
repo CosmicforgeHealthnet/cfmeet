@@ -243,7 +243,8 @@ async fn list_production_requests(
 ) -> Result<Json<Value>, ApiError> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
     Ok(Json(
-        crate::control::production::operator_list(&s.db, q.state.as_deref()).await?,
+        crate::control::production::operator_list(&s.db, s.bridge_events, q.state.as_deref())
+            .await?,
     ))
 }
 
