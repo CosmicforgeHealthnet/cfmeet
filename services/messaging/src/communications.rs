@@ -464,9 +464,14 @@ async fn event(
     if announced == Some(true) {
         s.realtime.outbox_wakeup.notify_one();
     }
-    Ok(Json(
-        json!({"applied":n==1,"duplicate":n==0,"sendPolicyProjection":1,"sendPolicyGeneration":s.local_send_generation}),
-    ))
+    let mut acknowledgment = json!({"applied":n==1,"duplicate":n==0});
+    // Unprepared receivers retain the legacy wire response. A synchronous producer
+    // requires its matching generation, so this cannot acknowledge an unprepared rollout.
+    if let Some(generation) = s.local_send_generation {
+        acknowledgment["sendPolicyProjection"] = json!(1);
+        acknowledgment["sendPolicyGeneration"] = json!(generation);
+    }
+    Ok(Json(acknowledgment))
 }
 
 /// MSG-009: the Hub's realtime nudge for a conversation's call / meeting timeline.
