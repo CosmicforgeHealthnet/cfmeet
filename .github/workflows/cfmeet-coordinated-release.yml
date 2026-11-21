@@ -3,8 +3,8 @@ name: CF Meet coordinated production release
 # The single production release path for every CF Meet backend service (Meeting Service,
 # Platform Access, Organizations, Messaging, Calling, Communications, Numbering, Privacy
 # Relay, SMS Gateway, Telephony, Developer Platform, API Gateway; the shared scan gateway
-# is upgraded only where it is already deployed). Dispatch only, main only, and the
-# dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
+# is upgraded only where it is already deployed). Reusable automatic release or manual
+# dispatch, main only, and the dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
 # for that SHA, their revision label is verified, and they are transferred to the VPS over
 # SSH; infra/calling/production/coordinated_release.py then performs the operation there.
 # `certify` is the read-only live-production certification: it changes nothing on the VPS,
@@ -12,6 +12,28 @@ name: CF Meet coordinated production release
 # public API from the runner and writes the verdict (certification_report.py).
 # Runbook: docs/operations/coordinated-production-release.md.
 on:
+  workflow_call:
+    inputs:
+      operation:
+        description: Production operation (automatic caller always selects release)
+        required: true
+        type: string
+      release_sha:
+        description: Full SHA of the main head
+        required: true
+        type: string
+      confirm:
+        required: false
+        type: string
+        default: ''
+      request_id:
+        required: false
+        type: string
+        default: ''
+      reason_code:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       operation:
@@ -111,7 +133,10 @@ jobs:
               });
               const pushed = all.filter(r => r.head_sha === sha && r.event === 'push' &&
                 r.head_branch === 'main' && !ignored.has(r.name));
-              const runs = pushed.filter(r => !advisory.has(r.path.split('/').pop()));
+              // Gate only the named backend/contract/security CI checks; unrelated
+              // frontend or Vercel workflows are intentionally non-blocking.
+              // The automatic caller itself is also excluded to prevent a deadlock.
+              const runs = pushed.filter(r => required.includes(r.path.split('/').pop()));
               for (const r of pushed.filter(r => advisory.has(r.path.split('/').pop()) && r.status === 'completed' &&
                   !['success', 'skipped', 'neutral'].includes(r.conclusion))) {
                 core.warning('Advisory (external telecom / backup, not blocking): ' + r.name + ': ' + r.conclusion);
@@ -149,7 +174,8 @@ jobs:
 
   images:
     name: Build or reuse release images
-    needs: gate
+    # Image preparation overlaps the main CI gate. The production job itself
+    # still requires both gate and images to succeed before touching the VPS.
     if: inputs.operation == 'release'
     permissions:
       contents: read
