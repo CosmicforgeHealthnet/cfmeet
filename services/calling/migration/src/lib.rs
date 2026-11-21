@@ -374,7 +374,7 @@ mod admin_operations;
 pub const ADMIN_OPERATIONS_MIGRATION_TABLE: &str = "calling_admin_operations_seaql_migrations";
 
 /// ADR 0068 phase A4 (the commands the HQ admin bridge relays, and the limit row
-/// versions they lock to): its OWN history, for the same rollback-safety reason as
+/// versions they lock to) and A7 (the owner event outbox): its OWN history, for the same rollback-safety reason as
 /// [`CallKindOfferMigrator`]. The previous image fails closed on a migration of the main,
 /// gap-closure or call-kind-offer history it does not know, and never reads this table,
 /// so it keeps starting (and reporting ready) after a rollback; this image requires it
@@ -384,9 +384,10 @@ pub struct AdminOperationsMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for AdminOperationsMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            admin_operations::m20261210_000058_calling_admin_operations::Migration,
-        )]
+        vec![
+            Box::new(admin_operations::m20261210_000058_calling_admin_operations::Migration),
+            Box::new(admin_operations::m20261211_000059_calling_admin_bridge_events::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new(ADMIN_OPERATIONS_MIGRATION_TABLE).into_iden()

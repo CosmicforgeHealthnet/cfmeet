@@ -26,6 +26,9 @@ pub mod domain;
 
 /// S2: account deletion / data download (Meeting Service only).
 pub mod account_privacy;
+/// ADR 0068 A7: owner events to the HQ admin bridge (abuse reports, incidents), only while
+/// `CF_ADMIN_BRIDGE_BASE_URL` is configured.
+pub mod admin_bridge_events;
 pub mod calls;
 pub mod config;
 pub mod endpoints;

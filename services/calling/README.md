@@ -677,6 +677,21 @@ with the variable set the service refuses to start until it is applied. Details:
 [`src/notification_publications.rs`](src/notification_publications.rs) and the
 [Notification Service runbook](../../docs/operations/notification-service-runbook.md).
 
+### Owner events to the HQ admin bridge (ADR 0068 A7)
+
+`CF_ADMIN_BRIDGE_BASE_URL` (optional; unset by default = nothing written or sent): the
+admin bridge's private event listener. Set, Calling writes `abuse.report.changed.v1` (a
+report filed or reviewed: subject `abuse_report`, state `OPEN` / `REVIEWED` / `DISMISSED`,
+the report's row version) and `incident.changed.v1` (a tenant's incident opened or
+resolved: subject `incident`, state `OPEN` / `RESOLVED`, version 1 / 2) to
+`calling_admin_bridge_events` in the same transaction as the change — also from
+`platform_admin` when the variable is set there — and relays them every second to
+`POST /internal/v1/hq-bridge/events`, signed as `cfmeet.calling` for audience
+`cfmeet.admin-bridge` (the bridge's trust bundle must grant `hq-bridge-events.publish`).
+Ids, states, versions and times only; platform-wide incidents are not published. Delivery
+is at least once (the bridge dedupes on the event id); details in
+[`src/admin_bridge_events.rs`](src/admin_bridge_events.rs).
+
 ### Feature switches (§95)
 
 Every Calling switch is server-side and stops NEW calls of its capability only. Live
@@ -803,7 +818,8 @@ call-kind-offer history (`calling_call_kind_offer_seaql_migrations`,
 `migration/src/kind_offer/`: CF2, a voice call switched to video while it rings) and the
 admin-operations history (`calling_admin_operations_seaql_migrations`,
 `migration/src/admin_operations/`: ADR 0068 A4, the record of every command the HQ admin
-bridge relays — `calling_admin_operations` — and the limit row versions). The
+bridge relays — `calling_admin_operations` — the limit row versions, and the A7 owner
+event outbox `calling_admin_bridge_events`). The
 gap-closure history is fail-closed too in every image that reads it, so a change that must
 stay rollback-safe gets a history of its own that the previous image never reads; this
 image refuses to start until all of them are applied

@@ -105,6 +105,18 @@ async fn main() -> anyhow::Result<()> {
         notification_publications = notifications_configured,
         "notification service publications (CF_NOTIFICATIONS_BASE_URL)"
     );
+    // ADR 0068 A7: owner events to the HQ admin bridge only with CF_ADMIN_BRIDGE_BASE_URL;
+    // unset, nothing is written or sent (the outbox table is in the admin-operations
+    // history, which `pending_migrations` already requires).
+    let admin_bridge_events = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::ADMIN_BRIDGE);
+    calling::admin_bridge_events::set_enabled(admin_bridge_events);
+    tracing::info!(
+        admin_bridge_events,
+        "owner events to the HQ admin bridge (CF_ADMIN_BRIDGE_BASE_URL)"
+    );
 
     // Application calling (Part C §20–§25): no fallback signaling key or provider
     // credential exists; an invalid configuration stops the service before it serves.
@@ -643,6 +655,14 @@ async fn main() -> anyhow::Result<()> {
             state.db.clone(),
             sink,
         ));
+    }
+
+    // ADR 0068 A7: the owner event relay to the admin bridge (SKIP LOCKED: every instance).
+    if admin_bridge_events {
+        let sink: Arc<dyn calling::admin_bridge_events::AdminBridgeEventSink> = Arc::new(
+            calling::admin_bridge_events::AdminBridgeEvents::new(state.service_auth.client_arc()),
+        );
+        tokio::spawn(calling::admin_bridge_events::run(state.db.clone(), sink));
     }
 
     // The identity projection follows the Platform Access change feed (every instance;
