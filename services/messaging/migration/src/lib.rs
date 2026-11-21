@@ -52,6 +52,7 @@ mod m20261211_000039_member_notifications;
 mod m20261212_000040_inbox_and_chat_controls;
 mod m20261213_000041_admin_operations;
 mod m20261214_000042_owner_delivered_exports;
+mod m20261215_000043_admin_bridge_events;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -366,6 +367,7 @@ impl MigratorTrait for AdminOperationsMigrator {
         vec![
             Box::new(self::m20261213_000041_admin_operations::Migration),
             Box::new(self::m20261214_000042_owner_delivered_exports::Migration),
+            Box::new(self::m20261215_000043_admin_bridge_events::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

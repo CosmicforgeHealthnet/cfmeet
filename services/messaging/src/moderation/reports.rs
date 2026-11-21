@@ -275,6 +275,16 @@ pub async fn create(
         now,
     )
     .await?;
+    // ADR 0068 A7: the admin bridge learns the report's state (id, state, version only).
+    crate::bridge_events::record(
+        &txn,
+        crate::bridge_events::ABUSE_REPORT_CHANGED,
+        id,
+        "OPEN",
+        1,
+        now,
+    )
+    .await?;
     txn.commit().await?;
     audit::record(
         &state.db,
@@ -529,7 +539,8 @@ pub async fn get(
     Ok(v)
 }
 
-/// Marks an OPEN report resolved inside the caller's transaction.
+/// Marks an OPEN report resolved inside the caller's transaction (its version advances)
+/// and records its `abuse.report.changed.v1` event for the admin bridge.
 pub async fn resolve<C: sea_orm::ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
@@ -538,10 +549,14 @@ pub async fn resolve<C: sea_orm::ConnectionTrait>(
     resolution: &str,
     now: DateTime<Utc>,
 ) -> Result<()> {
-    let n = db::exec(
+    #[derive(sea_orm::FromQueryResult)]
+    struct V {
+        version: i64,
+    }
+    let v: Option<V> = db::one(
         db,
         "UPDATE messaging_reports SET status = $2, resolution = $3, resolved_at = $4, resolved_by_credential_id = $5, \
-           version = version + 1 WHERE id = $1 AND status = 'OPEN' AND environment_id = $6",
+           version = version + 1 WHERE id = $1 AND status = 'OPEN' AND environment_id = $6 RETURNING version",
         vec![
             report.into(),
             status.into(),
@@ -552,8 +567,17 @@ pub async fn resolve<C: sea_orm::ConnectionTrait>(
         ],
     )
     .await?;
-    if n != 1 {
+    let Some(v) = v else {
         return Err(Error::reason(ErrorCode::Conflict, "REPORT_NOT_OPEN"));
-    }
+    };
+    crate::bridge_events::record(
+        db,
+        crate::bridge_events::ABUSE_REPORT_CHANGED,
+        report,
+        status,
+        v.version,
+        now,
+    )
+    .await?;
     Ok(())
 }

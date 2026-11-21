@@ -222,12 +222,7 @@ pub async fn resolve_incident(
     if incident.category == operations::IncidentCategory::KtRollbackDetected.as_str() {
         return Err(Error::reason(ErrorCode::Conflict, "KT_INTEGRITY_CLI_ONLY"));
     }
-    db::exec(
-        &txn,
-        "UPDATE messaging_incidents SET status = 'RESOLVED', resolved_at = $2, resolved_by = $3 WHERE id = $1 AND status = 'OPEN'",
-        vec![incident_id.into(), now.into(), ADMIN_BRIDGE.into()],
-    )
-    .await?;
+    operations::resolve_in(&txn, incident_id, ADMIN_BRIDGE, now).await?;
     operations::audit(
         &txn,
         ADMIN_BRIDGE,
