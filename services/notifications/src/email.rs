@@ -1178,7 +1178,8 @@ fn rank(status: &str) -> i32 {
         "ACCEPTED" => 1,
         "DELAYED" => 2,
         "DELIVERED" => 3,
-        "BOUNCED" | "COMPLAINED" | "FAILED" => 4,
+        "BOUNCED" | "FAILED" => 4,
+        "COMPLAINED" => 5,
         _ => 0,
     }
 }

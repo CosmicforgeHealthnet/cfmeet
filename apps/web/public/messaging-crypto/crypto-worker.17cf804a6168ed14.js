@@ -248,6 +248,19 @@ function view(r) {
   return out;
 }
 
+/** Deliberate plaintext export; never export the stored MLS state or file descriptor. */
+function exportRecord(conversationId, r) {
+  const visible = view(r);
+  return {
+    conversationId, sequence: r.sequence, messageId: r.messageId ?? null,
+    clientMessageId: r.clientMessageId ?? null, senderPrincipalId: r.senderPrincipalId ?? null,
+    senderDeviceId: r.senderDeviceId ?? null, createdAt: r.createdAt ?? null,
+    status: r.status, content: ["SENT", "DECRYPTED"].includes(r.status) ? visible.payload ?? null : null,
+    attachmentId: r.attachmentId ?? null, fileName: r.fileName ?? null,
+    mediaType: r.mediaType ?? null, size: r.size ?? null,
+  };
+}
+
 async function loadRecord(conversationId, sequence) {
   const d = await db();
   const sealed = await req(d.transaction("records").objectStore("records").get([ctx.account, conversationId, sequence]));
@@ -587,6 +600,34 @@ const ops = {
 
   async cursor({ conversationId }) {
     return ctx?.meta?.cursors?.[uuid(conversationId)] ?? 0;
+  },
+
+  /** Stored history of a conversation, newest last (at most `limit`). */
+  async exportLocalHistory({ account, after = null }) {
+    // Read-only: no device registration, key creation, MLS state export or network call.
+    uuid(account);
+    const d = await db();
+    const key = await req(d.transaction("keys").objectStore("keys").get(account));
+    if (!key) return { records: [], next: null };
+    let lower = [account, "", 0];
+    if (after) {
+      uuid(after.conversationId);
+      if (!Number.isSafeInteger(after.sequence) || after.sequence < 0) fail("BAD_CURSOR");
+      lower = [account, after.conversationId, after.sequence];
+    }
+    const range = IDBKeyRange.bound(lower, [account, "\uffff", Number.MAX_SAFE_INTEGER], !!after);
+    const store = d.transaction("records").objectStore("records");
+    const keysPromise = req(store.getAllKeys(range, 101));
+    const valuesPromise = req(store.getAll(range, 101));
+    const [keys, values] = await Promise.all([keysPromise, valuesPromise]);
+    const records = [];
+    for (let i = 0; i < Math.min(values.length, 100); i++) {
+      const [, conversationId, sequence] = keys[i];
+      const record = JSON.parse(dec.decode(await unseal(key, recordAad(account, conversationId, sequence), values[i])));
+      records.push(exportRecord(conversationId, record));
+    }
+    const last = keys[Math.min(keys.length, 100) - 1];
+    return { records, next: keys.length > 100 ? { conversationId: last[1], sequence: last[2] } : null };
   },
 
   /** Stored history of a conversation, newest last (at most `limit`). */

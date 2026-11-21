@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "CosmicForge RTC API",
-    "description": "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace \u2192 ConferenceSession \u2192 ConferenceParticipant \u2192 ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
+    "description": "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
     "contact": {
       "name": "CosmicForge Team",
       "email": "support@cosmicforge.com"
@@ -39,7 +39,7 @@
           "Admin"
         ],
         "summary": "List session logs (admin only)",
-        "description": "Paged meeting session event log, most recent event first (`page` from 1, `limit` 1\u2013100,\ndefault 20), optionally filtered by `meeting_id` and `event_type`. Requires the admin role.",
+        "description": "Paged meeting session event log, most recent event first (`page` from 1, `limit` 1–100,\ndefault 20), optionally filtered by `meeting_id` and `event_type`. Requires the admin role.",
         "operationId": "list_logs",
         "parameters": [
           {
@@ -119,7 +119,7 @@
           "Admin"
         ],
         "summary": "List all meetings (admin only)",
-        "description": "Paged list of every legacy meeting, newest first (`page` from 1, `limit` 1\u2013100, default 20),\noptionally filtered by `status` and `host_id`. Requires the admin role.",
+        "description": "Paged list of every legacy meeting, newest first (`page` from 1, `limit` 1–100, default 20),\noptionally filtered by `status` and `host_id`. Requires the admin role.",
         "operationId": "admin_list_meetings",
         "parameters": [
           {
@@ -199,7 +199,7 @@
           "Admin"
         ],
         "summary": "List all users (admin only)",
-        "description": "Paged list of every user account, newest first (`page` from 1, `limit` 1\u2013100, default 20),\noptionally filtered by `status` and `role`. Requires the admin role.",
+        "description": "Paged list of every user account, newest first (`page` from 1, `limit` 1–100, default 20),\noptionally filtered by `status` and `role`. Requires the admin role.",
         "operationId": "list_users",
         "parameters": [
           {
@@ -565,7 +565,7 @@
           "API Keys"
         ],
         "summary": "Create a new meeting via API key",
-        "description": "Third-party integrations can use this endpoint with Api-Key authentication\nto create meetings on behalf of the key owner.\n\nDEPRECATED (Sections 15\u201316, PLT-004 / MTG-017): use a Platform Access credential with\n`meetings.write` through the API Gateway and the v2 meeting-space operations\n(`docs/api/legacy-api-keys-deprecation.md`). Same create policy and headers as\n`POST /api/v1/meetings`.",
+        "description": "Third-party integrations can use this endpoint with Api-Key authentication\nto create meetings on behalf of the key owner.\n\nDEPRECATED (Sections 15–16, PLT-004 / MTG-017): use a Platform Access credential with\n`meetings.write` through the API Gateway and the v2 meeting-space operations\n(`docs/api/legacy-api-keys-deprecation.md`). Same create policy and headers as\n`POST /api/v1/meetings`.",
         "operationId": "api_create_meeting",
         "requestBody": {
           "content": {
@@ -996,7 +996,7 @@
           "Authentication"
         ],
         "summary": "Verify a sign-in link",
-        "description": "Finishes a passwordless sign-in with the one-click link from the same email as the code. The\nlink opens the web app (`/auth/magic?email=\u2026&token=\u2026`), which POSTs both values here; the link\nitself never signs in on a GET, so email scanners that open links cannot use it up. Same\nanswers, limits and response as `POST /api/v1/auth/otp/verify`; the link and the code are one\nchallenge, so using either consumes both.",
+        "description": "Finishes a passwordless sign-in with the one-click link from the same email as the code. The\nlink opens the web app (`/auth/magic?email=…&token=…`), which POSTs both values here; the link\nitself never signs in on a GET, so email scanners that open links cannot use it up. Same\nanswers, limits and response as `POST /api/v1/auth/otp/verify`; the link and the code are one\nchallenge, so using either consumes both.",
         "operationId": "verify_otp_link",
         "requestBody": {
           "content": {
@@ -2551,7 +2551,7 @@
           "Account sessions (v2)"
         ],
         "summary": "Read the account security audit (platform administrators)",
-        "description": "Append-only account security events \u2014 sign-ins, sign-outs, email changes,\nGoogle linking, refresh-token reuse \u2014 newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
+        "description": "Append-only account security events — sign-ins, sign-outs, email changes,\nGoogle linking, refresh-token reuse — newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
         "operationId": "v2_admin_list_account_audit_events",
         "parameters": [
           {
@@ -2727,7 +2727,7 @@
           "Messaging (v2)"
         ],
         "summary": "Request a migration transition (gated, version-checked, audited).",
-        "description": "Moves the meeting-chat migration to `targetState`; platform administrators only.\n`expectedVersion` must equal the current version (MEETING_VERSION_CONFLICT otherwise) and\n`reason` (3\u2013500 characters) is recorded with the transition. Allowed steps are LEGACY_PRIMARY \u2194\nSHADOW_VALIDATION \u2194 MESSAGING_PRIMARY \u2192 LEGACY_RETIRED, and gates are enforced: cutover to\nMESSAGING_PRIMARY needs a different operator in `approvedBy`, no messages left to mirror and a\nPASSED parity run newer than the current shadow period; LEGACY_RETIRED also needs `approvedBy`;\nreturning to LEGACY_PRIMARY needs every message copied back. A refused step returns\nCHAT_MIGRATION_REFUSED; on success the new status is returned.",
+        "description": "Moves the meeting-chat migration to `targetState`; platform administrators only.\n`expectedVersion` must equal the current version (MEETING_VERSION_CONFLICT otherwise) and\n`reason` (3–500 characters) is recorded with the transition. Allowed steps are LEGACY_PRIMARY ↔\nSHADOW_VALIDATION ↔ MESSAGING_PRIMARY → LEGACY_RETIRED, and gates are enforced: cutover to\nMESSAGING_PRIMARY needs a different operator in `approvedBy`, no messages left to mirror and a\nPASSED parity run newer than the current shadow period; LEGACY_RETIRED also needs `approvedBy`;\nreturning to LEGACY_PRIMARY needs every message copied back. A refused step returns\nCHAT_MIGRATION_REFUSED; on success the new status is returned.",
         "operationId": "v2_chat_migration_transition",
         "requestBody": {
           "content": {
@@ -2783,7 +2783,7 @@
         "tags": [
           "Compatibility (v2)"
         ],
-        "summary": "Run the idempotent legacy \u2192 v2 backfill and return migration evidence.",
+        "summary": "Run the idempotent legacy → v2 backfill and return migration evidence.",
         "description": "Maps legacy meetings, sessions and participants into the v2 domain, inserting only what is\nmissing, and returns row counts, inserted records and any unmapped ids. Safe to repeat;\nrequires a platform administrator.",
         "operationId": "v2_run_backfill",
         "responses": {
@@ -3098,7 +3098,7 @@
           "Organizations (v2)"
         ],
         "summary": "List all business organizations (platform administrators).",
-        "description": "Returns every first-party organization in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1\u2013200, default 50), optionally filtered by `status` (ACTIVE, SUSPENDED or\nARCHIVED). Requires a platform administrator bearer token. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "description": "Returns every first-party organization in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1–200, default 50), optionally filtered by `status` (ACTIVE, SUSPENDED or\nARCHIVED). Requires a platform administrator bearer token. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
         "operationId": "v2_admin_list_organizations",
         "parameters": [
           {
@@ -3115,7 +3115,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "1\u2013200 (default 50)",
+            "description": "1–200 (default 50)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -3187,7 +3187,7 @@
           "Organizations (v2)"
         ],
         "summary": "Create an organization (platform administrators).",
-        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1\u2013200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator create (creation source PLATFORM_ADMIN, the administrator recorded as creator)\nand the response keeps this shape.",
+        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator create (creation source PLATFORM_ADMIN, the administrator recorded as creator)\nand the response keeps this shape.",
         "operationId": "v2_create_organization",
         "requestBody": {
           "content": {
@@ -3889,7 +3889,7 @@
           "Conferences (v2)"
         ],
         "summary": "Read a calendar feed (audit MF2).",
-        "description": "The iCalendar (RFC 5545, `METHOD:PUBLISH`, UTC times) of the account the feed token belongs\nto. No sign-in: the token in the path is the credential (`calf_\u2026`, followed by `.ics`). An\nunknown or revoked token, or an account that is no longer active, is 404. Served with\n`Cache-Control: no-store`; it never contains passcodes, invitation tokens or provider\nidentifiers.",
+        "description": "The iCalendar (RFC 5545, `METHOD:PUBLISH`, UTC times) of the account the feed token belongs\nto. No sign-in: the token in the path is the credential (`calf_…`, followed by `.ics`). An\nunknown or revoked token, or an account that is no longer active, is 404. Served with\n`Cache-Control: no-store`; it never contains passcodes, invitation tokens or provider\nidentifiers.",
         "operationId": "v2_read_calendar_feed",
         "parameters": [
           {
@@ -3935,7 +3935,7 @@
           "Conferences (v2)"
         ],
         "summary": "Read a conference. Callers without authority get the SUMMARY view.",
-        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and \u2014 except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings \u2014 the scheduled start and end (pre-join countdown).",
+        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings — the scheduled start and end (pre-join countdown).",
         "operationId": "v2_get_conference",
         "parameters": [
           {
@@ -4780,7 +4780,7 @@
           "Breakouts (v2)"
         ],
         "summary": "Create named or numbered breakout rooms.",
-        "description": "Creates rooms from either a list of unique `names` or a `count` of automatically numbered rooms\n(\"Room N\"), optionally with a per-room `capacity` (1\u20131000) and recording policy. Rooms start in\nCREATED state; open them with the `open` endpoint. Requires the breakout-create permission\n(owner, host or co-host by default) and a conference that has not finished; the meeting policy\ncaps the number of active rooms.",
+        "description": "Creates rooms from either a list of unique `names` or a `count` of automatically numbered rooms\n(\"Room N\"), optionally with a per-room `capacity` (1–1000) and recording policy. Rooms start in\nCREATED state; open them with the `open` endpoint. Requires the breakout-create permission\n(owner, host or co-host by default) and a conference that has not finished; the meeting policy\ncaps the number of active rooms.",
         "operationId": "v2_create_breakouts",
         "parameters": [
           {
@@ -4862,7 +4862,7 @@
           "Breakouts (v2)"
         ],
         "summary": "Announcement to every open breakout room.",
-        "description": "Sends a host announcement (1\u20131000 characters) to participants of every open or closing breakout\nroom and returns how many rooms received it. Requires the breakout-announce permission and a\nlive conference, and is rate limited per sender. Fails with `BREAKOUT_CLOSED` when no room is\nopen.",
+        "description": "Sends a host announcement (1–1000 characters) to participants of every open or closing breakout\nroom and returns how many rooms received it. Requires the breakout-announce permission and a\nlive conference, and is rate limited per sender. Fails with `BREAKOUT_CLOSED` when no room is\nopen.",
         "operationId": "v2_breakout_announcement_all",
         "parameters": [
           {
@@ -5139,7 +5139,7 @@
         "tags": [
           "Breakouts (v2)"
         ],
-        "summary": "Move a participant: main \u2192 breakout, breakout \u2192 breakout, breakout \u2192 main.",
+        "summary": "Move a participant: main → breakout, breakout → breakout, breakout → main.",
         "description": "Moves one admitted participant into a breakout room, between rooms, or back to the main room\n(`toBreakoutId` null). Requires the breakout-move permission and a live conference; the target\nroom must not be closing, closed or full. Moving a participant to where they already are is a\nno-op (`changed` is false).",
         "operationId": "v2_move_participant",
         "parameters": [
@@ -5222,7 +5222,7 @@
           "Breakouts (v2)"
         ],
         "summary": "Announcement to one open breakout room.",
-        "description": "Sends a host announcement (1\u20131000 characters) to the participants of this breakout room, which\nmust be open or closing. Requires the breakout-announce permission and a live conference, and is\nrate limited per sender.",
+        "description": "Sends a host announcement (1–1000 characters) to the participants of this breakout room, which\nmust be open or closing. Requires the breakout-announce permission and a live conference, and is\nrate limited per sender.",
         "operationId": "v2_breakout_announcement",
         "parameters": [
           {
@@ -6197,7 +6197,7 @@
         "tags": [
           "Conferences (v2)"
         ],
-        "summary": "LIVE \u2192 ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).",
+        "summary": "LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).",
         "description": "Ends a LIVE conference for everyone: active recordings are stopped and the media room is\nterminated with the RTC provider. Requires `conference.end`; a conference that never went live\nreturns CONFERENCE_NOT_LIVE (cancel it instead). Repeating the call while ENDING or ENDED is a\nno-op (`changed: false`); while ENDING it retries provider termination. `providerEnforcement`\nis ENFORCED once the conference is ENDED.",
         "operationId": "v2_end_conference",
         "parameters": [
@@ -6751,7 +6751,7 @@
           "Conferences (v2)"
         ],
         "summary": "Join (or reconnect to) a conference.",
-        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.\n\nPartner users (CF Meet Platform, `userToken`) present their CF Meet user token as\n`Authorization: Bearer cfut_\u2026` (accepted only here, while the deployment enables it). They join\nonly conferences of meetings owned by the token's application environment (any other conference\nis CONFERENCE_NOT_FOUND) whose id the token's effective meeting grants name\n(MEETING_ACCESS_DENIED otherwise). The role comes from the grant, limited to what the meeting's\nowner may grant; the display name comes from the user profile (a `displayName` in the body is\nignored); invitation tokens and passcodes do not apply. A re-join keeps the same participant and\nreturns a fresh `participantToken`, which the device uses for every other participant\noperation. A refused, expired or revoked user token is AUTHENTICATION_REQUIRED.",
+        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.\n\nPartner users (CF Meet Platform, `userToken`) present their CF Meet user token as\n`Authorization: Bearer cfut_…` (accepted only here, while the deployment enables it). They join\nonly conferences of meetings owned by the token's application environment (any other conference\nis CONFERENCE_NOT_FOUND) whose id the token's effective meeting grants name\n(MEETING_ACCESS_DENIED otherwise). The role comes from the grant, limited to what the meeting's\nowner may grant; the display name comes from the user profile (a `displayName` in the body is\nignored); invitation tokens and passcodes do not apply. A re-join keeps the same participant and\nreturns a fresh `participantToken`, which the device uses for every other participant\noperation. A refused, expired or revoked user token is AUTHENTICATION_REQUIRED.",
         "operationId": "v2_join_conference",
         "parameters": [
           {
@@ -7187,7 +7187,7 @@
           "Chat (v2)"
         ],
         "summary": "Send a message (sender is always the caller's own participant).",
-        "description": "Posts a message (1\u20134000 characters) to the main room, to a breakout room (`breakoutId`, normally\nthe caller's own) or privately to one admitted participant (`recipientParticipantId`). The\ncaller must be an admitted participant with `chat.send` (private messages also need\n`chat.private`) in a LIVE conference, subject to the chat policy, per-participant restrictions\nand rate limits. Moderators (`chat.moderate`) are not blocked by disabled chat and may post\n`announcement`s.",
+        "description": "Posts a message (1–4000 characters) to the main room, to a breakout room (`breakoutId`, normally\nthe caller's own) or privately to one admitted participant (`recipientParticipantId`). The\ncaller must be an admitted participant with `chat.send` (private messages also need\n`chat.private`) in a LIVE conference, subject to the chat policy, per-participant restrictions\nand rate limits. Moderators (`chat.moderate`) are not blocked by disabled chat and may post\n`announcement`s.",
         "operationId": "v2_send_message",
         "parameters": [
           {
@@ -7359,7 +7359,7 @@
           "Chat (v2)"
         ],
         "summary": "Edit my message.",
-        "description": "The sender replaces the text of their own message (1\u20134000 characters) within 15 minutes of\nsending, while the conference is live; the message then shows `editedAt`. Deleted messages\ncannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone\nwho can see the message gets a `chat.message_edited` event.",
+        "description": "The sender replaces the text of their own message (1–4000 characters) within 15 minutes of\nsending, while the conference is live; the message then shows `editedAt`. Deleted messages\ncannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone\nwho can see the message gets a `chat.message_edited` event.",
         "operationId": "v2_edit_message",
         "parameters": [
           {
@@ -8730,7 +8730,7 @@
           "Polls (v2)"
         ],
         "summary": "Create a poll or quiz (DRAFT).",
-        "description": "Creates a poll (or a scored quiz when `quizMode` is true) in DRAFT state; open it with\n`POST .../open`. Requires the poll-create permission (host, co-host or moderator by default),\npolls enabled for the meeting and a conference that is not ended or cancelled. Title is 1\u2013300\ncharacters; `resultsVisibility` defaults to AFTER_CLOSE. Accepts a bearer user token or a\nparticipant token.",
+        "description": "Creates a poll (or a scored quiz when `quizMode` is true) in DRAFT state; open it with\n`POST .../open`. Requires the poll-create permission (host, co-host or moderator by default),\npolls enabled for the meeting and a conference that is not ended or cancelled. Title is 1–300\ncharacters; `resultsVisibility` defaults to AFTER_CLOSE. Accepts a bearer user token or a\nparticipant token.",
         "operationId": "v2_create_poll",
         "parameters": [
           {
@@ -8863,7 +8863,7 @@
         "tags": [
           "Polls (v2)"
         ],
-        "summary": "Archive a closed poll or cancel a draft (CLOSED or DRAFT \u2192 ARCHIVED).",
+        "summary": "Archive a closed poll or cancel a draft (CLOSED or DRAFT → ARCHIVED).",
         "description": "Removes the poll from active use. Requires the poll-close permission. Repeating the call on an archived poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_archive_poll",
         "parameters": [
@@ -8945,7 +8945,7 @@
         "tags": [
           "Polls (v2)"
         ],
-        "summary": "Close an open poll (OPEN \u2192 CLOSED; never reopened).",
+        "summary": "Close an open poll (OPEN → CLOSED; never reopened).",
         "description": "Stops accepting responses. A closed poll is never reopened. Requires the poll-close permission. Repeating the call on a closed poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_close_poll",
         "parameters": [
@@ -9027,7 +9027,7 @@
         "tags": [
           "Polls (v2)"
         ],
-        "summary": "Open a draft poll for responses (DRAFT \u2192 OPEN).",
+        "summary": "Open a draft poll for responses (DRAFT → OPEN).",
         "description": "Starts collecting responses. Allowed only from DRAFT, on a LIVE conference with polls enabled, for a caller with the poll-open permission. Repeating the call on an open poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_open_poll",
         "parameters": [
@@ -9336,7 +9336,7 @@
         "tags": [
           "Conferences (v2)"
         ],
-        "summary": "CREATED \u2192 PREPARING \u2192 (provider room confirmed) \u2192 WAITING.",
+        "summary": "CREATED → PREPARING → (provider room confirmed) → WAITING.",
         "description": "Prepares a CREATED conference: it moves to PREPARING, the media room is requested from the RTC\nprovider, and it becomes WAITING once the provider confirms the room. Requires\n`conference.start`. Calling it on a PREPARING or WAITING conference is a no-op that may retry\nprovider confirmation; `providerEnforcement` is PENDING_PROVIDER_CONTROL while the room is not\nyet confirmed.",
         "operationId": "v2_prepare_conference",
         "parameters": [
@@ -9603,7 +9603,7 @@
           "Q&A (v2)"
         ],
         "summary": "Ask a question (optionally anonymous).",
-        "description": "Submits a new OPEN question to the conference Q&A. The caller must be an admitted participant\nallowed to ask questions, the conference must be LIVE and Q&A enabled; the body is 1\u20131000\ncharacters. `anonymous: true` is accepted only when the meeting allows anonymous questions, and\nthe author's identity is then never returned to hosts or other participants. Rate-limited per\nparticipant.",
+        "description": "Submits a new OPEN question to the conference Q&A. The caller must be an admitted participant\nallowed to ask questions, the conference must be LIVE and Q&A enabled; the body is 1–1000\ncharacters. `anonymous: true` is accepted only when the meeting allows anonymous questions, and\nthe author's identity is then never returned to hosts or other participants. Rate-limited per\nparticipant.",
         "operationId": "v2_submit_question",
         "parameters": [
           {
@@ -10089,7 +10089,7 @@
             }
           },
           "403": {
-            "description": "PERMISSION_DENIED \u2014 caller lacks qna.dismiss",
+            "description": "PERMISSION_DENIED — caller lacks qna.dismiss",
             "content": {
               "application/json": {
                 "schema": {
@@ -10099,7 +10099,7 @@
             }
           },
           "404": {
-            "description": "QUESTION_NOT_FOUND \u2014 unknown question or not in this conference",
+            "description": "QUESTION_NOT_FOUND — unknown question or not in this conference",
             "content": {
               "application/json": {
                 "schema": {
@@ -10109,7 +10109,7 @@
             }
           },
           "409": {
-            "description": "CONFERENCE_STATE_CONFLICT \u2014 question is ARCHIVED, or the conference has ended",
+            "description": "CONFERENCE_STATE_CONFLICT — question is ARCHIVED, or the conference has ended",
             "content": {
               "application/json": {
                 "schema": {
@@ -13167,7 +13167,7 @@
           "Account devices (v2)"
         ],
         "summary": "Revoke a device",
-        "description": "Ends every sign-in of the device and every credential it holds downstream (Messaging\nE2EE device \u2014 removed from its MLS groups at the next commit \u2014, push registration,\nCalling endpoint and live invitations, realtime connections, its meeting media\nsessions). Other devices are untouched; revoking the primary mobile leaves the account\n`WEB_ONLY`. Revoking another device needs a trusted calling device and a `REVOKE` proof.",
+        "description": "Ends every sign-in of the device and every credential it holds downstream (Messaging\nE2EE device — removed from its MLS groups at the next commit —, push registration,\nCalling endpoint and live invitations, realtime connections, its meeting media\nsessions). Other devices are untouched; revoking the primary mobile leaves the account\n`WEB_ONLY`. Revoking another device needs a trusted calling device and a `REVOKE` proof.",
         "operationId": "v2_revoke_my_device",
         "parameters": [
           {
@@ -14462,7 +14462,7 @@
           "Organizations (v2)"
         ],
         "summary": "Capabilities of one workspace, derived by the server.",
-        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` \u2014 `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
+        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` — `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
         "operationId": "v2_my_workspace_capabilities",
         "parameters": [
           {
@@ -15306,7 +15306,7 @@
           "Invitations (v2)"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1\u201310000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -16039,7 +16039,7 @@
           "Scheduling (v2)"
         ],
         "summary": "Create or edit the space's recurrence (RFC 5545 RRULE in the space timezone).",
-        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone; it must exist and be unambiguous there) and a duration of 1\u20131440\nminutes. Editing an active series keeps the same rule id and occurrence keys: future\noccurrences that are still occurrences of the edited rule are kept (with the new duration;\nrescheduled ones keep their own time) together with their exceptions, while occurrences that\nno longer match are removed or cancelled and their exceptions dropped; past occurrences are\nnever touched. Occurrences within the scheduling horizon are created right away. Requires\npermission to schedule conferences (owner and host; co-host by default) and v2 meetings enabled\nfor the account. Archived spaces cannot recur.",
+        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone; it must exist and be unambiguous there) and a duration of 1–1440\nminutes. Editing an active series keeps the same rule id and occurrence keys: future\noccurrences that are still occurrences of the edited rule are kept (with the new duration;\nrescheduled ones keep their own time) together with their exceptions, while occurrences that\nno longer match are removed or cancelled and their exceptions dropped; past occurrences are\nnever touched. Occurrences within the scheduling horizon are created right away. Requires\npermission to schedule conferences (owner and host; co-host by default) and v2 meetings enabled\nfor the account. Archived spaces cannot recur.",
         "operationId": "v2_set_recurrence",
         "parameters": [
           {
@@ -17018,7 +17018,7 @@
           "Messaging (v2)"
         ],
         "summary": "The Messaging principals of directory colleagues (so they can be added).",
-        "description": "Returns the Messaging principal id of each user in `userIds` (1\u2013100), creating principals on\nfirst use, so the client can add those people to a conversation. Every user must be an active\nmember of one of the caller's verified organizations and not the caller; otherwise the request\nfails with NOT_FOUND, exactly as for an unknown user. Requires a bearer user token whose\nrevocation status could be checked and the Messaging integration enabled.",
+        "description": "Returns the Messaging principal id of each user in `userIds` (1–100), creating principals on\nfirst use, so the client can add those people to a conversation. Every user must be an active\nmember of one of the caller's verified organizations and not the caller; otherwise the request\nfails with NOT_FOUND, exactly as for an unknown user. Requires a bearer user token whose\nrevocation status could be checked and the Messaging integration enabled.",
         "operationId": "v2_messaging_directory_resolve",
         "requestBody": {
           "content": {
@@ -17698,7 +17698,7 @@
           "Notifications (v2)"
         ],
         "summary": "Register my push endpoint for an Account device (U8).",
-        "description": "`{platform: APNS | APNS_VOIP | FCM | WEB_PUSH, handle}` for one of the caller's ACTIVE\nAccount devices \u2192 `{pushTargetRef, platform, enabled}`; the handle is never echoed.\nRequires an `Idempotency-Key`.",
+        "description": "`{platform: APNS | APNS_VOIP | FCM | WEB_PUSH, handle}` for one of the caller's ACTIVE\nAccount devices → `{pushTargetRef, platform, enabled}`; the handle is never echoed.\nRequires an `Idempotency-Key`.",
         "operationId": "v2_notifications_push_register",
         "parameters": [
           {
@@ -17914,7 +17914,7 @@
           "Notifications (v2)"
         ],
         "summary": "Dismiss my notifications (U5).",
-        "description": "`{ids (at most 100) | upTo, category?}` \u2192 `{dismissed, unreadCount}`. Requires an\n`Idempotency-Key`.",
+        "description": "`{ids (at most 100) | upTo, category?}` → `{dismissed, unreadCount}`. Requires an\n`Idempotency-Key`.",
         "operationId": "v2_notifications_dismiss",
         "parameters": [
           {
@@ -18165,7 +18165,7 @@
           "Notifications (v2)"
         ],
         "summary": "Mark my notifications read (U4).",
-        "description": "`{ids (at most 100) | upTo}` \u2192 `{updated, unreadCount}`. Requires an `Idempotency-Key`.",
+        "description": "`{ids (at most 100) | upTo}` → `{updated, unreadCount}`. Requires an `Idempotency-Key`.",
         "operationId": "v2_notifications_mark_read",
         "parameters": [
           {
@@ -18452,7 +18452,7 @@
           "Apps (v2)"
         ],
         "summary": "Approve or deny an app's authorization request.",
-        "description": "`APPROVE` creates (or extends) the grant at Platform Access \u2014 for a workspace install\nonly if the organization's app policy allows this account \u2014 and returns\n`redirect_uri?code=\u2026&state=\u2026`; `DENY` returns `redirect_uri?error=access_denied&state=\u2026`.\nThe browser navigates to `redirectTo`.",
+        "description": "`APPROVE` creates (or extends) the grant at Platform Access — for a workspace install\nonly if the organization's app policy allows this account — and returns\n`redirect_uri?code=…&state=…`; `DENY` returns `redirect_uri?error=access_denied&state=…`.\nThe browser navigates to `redirectTo`.",
         "operationId": "v2_oauth_authorize_decide",
         "requestBody": {
           "content": {
@@ -18539,7 +18539,7 @@
           "Apps (v2)"
         ],
         "summary": "Consent data for an app's authorization request.",
-        "description": "The CF Meet consent page (`https://cfmeet.com/oauth/authorize`) forwards the app's\nauthorization request unchanged. The signed-in account is required; Platform Access\nvalidates the client, the exact redirect URI, the scopes and PKCE (S256 only) for that\naccount. A workspace install (`install=organization&organization_id=\u2026`) also reports\nwhether the organization allows this account to install the app.",
+        "description": "The CF Meet consent page (`https://cfmeet.com/oauth/authorize`) forwards the app's\nauthorization request unchanged. The signed-in account is required; Platform Access\nvalidates the client, the exact redirect URI, the scopes and PKCE (S256 only) for that\naccount. A workspace install (`install=organization&organization_id=…`) also reports\nwhether the organization allows this account to install the app.",
         "operationId": "v2_oauth_authorize_context",
         "parameters": [
           {
@@ -18565,7 +18565,7 @@
           {
             "name": "scope",
             "in": "query",
-            "description": "Space-separated OAuth scopes (`profile:read meetings:write \u2026`).",
+            "description": "Space-separated OAuth scopes (`profile:read meetings:write …`).",
             "required": false,
             "schema": {
               "type": "string",
@@ -19536,7 +19536,7 @@
           "Organizations (v2)"
         ],
         "summary": "An organization's audit history.",
-        "description": "Returns the organization's audit events, newest first (`before` = the `seq` of the oldest\nevent already seen; `limit` 1\u2013200, default 50): who changed what, when, and through which\nservice. Requires the `organization.audit.read` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "description": "Returns the organization's audit events, newest first (`before` = the `seq` of the oldest\nevent already seen; `limit` 1–200, default 50): who changed what, when, and through which\nservice. Requires the `organization.audit.read` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
         "operationId": "v2_list_organization_audit_events",
         "parameters": [
           {
@@ -19563,7 +19563,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "1\u2013200 (default 50)",
+            "description": "1–200 (default 50)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -19668,7 +19668,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Enterprise Calling read (allowlisted path, e.g. `v1/enterprise/extensions`).",
-        "description": "Reads the organization's own Enterprise Calling configuration (extensions, ring groups,\nqueues, IVR flows, business hours, policies, voicemail, recordings, audit, webhooks,\nusage and limits) in the organization's provisioned Calling scope \u2014 never the shared\nCF Meet scope. The caller must hold `calling.enterprise.manage` in the organization and\nthe organization must not have turned Calling off (the decision\n`GET /api/v2/me/workspaces/{id}/capabilities` reports). The path must match the\nallowlist exactly with lowercase canonical UUIDs; anything else is ENDPOINT_NOT_FOUND\nand is not forwarded. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
+        "description": "Reads the organization's own Enterprise Calling configuration (extensions, ring groups,\nqueues, IVR flows, business hours, policies, voicemail, recordings, audit, webhooks,\nusage and limits) in the organization's provisioned Calling scope — never the shared\nCF Meet scope. The caller must hold `calling.enterprise.manage` in the organization and\nthe organization must not have turned Calling off (the decision\n`GET /api/v2/me/workspaces/{id}/capabilities` reports). The path must match the\nallowlist exactly with lowercase canonical UUIDs; anything else is ENDPOINT_NOT_FOUND\nand is not forwarded. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
         "operationId": "v2_organization_calling_get",
         "parameters": [
           {
@@ -19763,7 +19763,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Enterprise Calling create / action (allowlisted path).",
-        "description": "Creates an Enterprise Calling resource (extension, queue, IVR version, webhook\u2026) or runs\nan action (recording media access, business-hours evaluation, delivery replay) in the\norganization's provisioned Calling scope, acting for the caller: Calling's enterprise\naudit records the caller's own principal. Requires `calling.enterprise.manage` in the\norganization and Calling not turned off by its policy. The JSON object body (at most\n1 MiB) and an `Idempotency-Key` are forwarded. Calling's status and JSON body are\nreturned. Disabled by default (`409 ORGANIZATION_CALLING_DISABLED`).",
+        "description": "Creates an Enterprise Calling resource (extension, queue, IVR version, webhook…) or runs\nan action (recording media access, business-hours evaluation, delivery replay) in the\norganization's provisioned Calling scope, acting for the caller: Calling's enterprise\naudit records the caller's own principal. Requires `calling.enterprise.manage` in the\norganization and Calling not turned off by its policy. The JSON object body (at most\n1 MiB) and an `Idempotency-Key` are forwarded. Calling's status and JSON body are\nreturned. Disabled by default (`409 ORGANIZATION_CALLING_DISABLED`).",
         "operationId": "v2_organization_calling_post",
         "parameters": [
           {
@@ -19973,7 +19973,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Enterprise Calling removal (allowlisted path).",
-        "description": "Disables or deletes an Enterprise Calling resource (a recording or voicemail message, a\nforwarding rule, a webhook\u2026) in the organization's provisioned Calling scope, acting for\nthe caller; Calling's enterprise audit records the caller's own principal. Requires\n`calling.enterprise.manage` and Calling not turned off by the organization. No body is\nsent. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
+        "description": "Disables or deletes an Enterprise Calling resource (a recording or voicemail message, a\nforwarding rule, a webhook…) in the organization's provisioned Calling scope, acting for\nthe caller; Calling's enterprise audit records the caller's own principal. Requires\n`calling.enterprise.manage` and Calling not turned off by the organization. No body is\nsent. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
         "operationId": "v2_organization_calling_delete",
         "parameters": [
           {
@@ -20290,7 +20290,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size 1\u2013200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)",
+            "description": "Page size 1–200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -21248,7 +21248,7 @@
           "Organizations (v2)"
         ],
         "summary": "List members (platform admins, organization OWNER/ADMIN).",
-        "description": "Returns the organization's memberships, oldest first, each with the member's display identity\n(`displayName` and `username` from the account authority; never an email address). Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list, following the organization's\nmember-directory policy) and each item also carries `organizationRole` and `version`.\n\nPaging (ORG-006): without `limit` or `cursor` every membership is returned, as before. With\n`limit` (1\u2013200) and/or `cursor`, one page is returned (50 items when only `cursor` is given)\nand, while more remain, the `X-Next-Cursor` response header holds the opaque cursor of the\nnext page. The body stays a JSON array in both cases.",
+        "description": "Returns the organization's memberships, oldest first, each with the member's display identity\n(`displayName` and `username` from the account authority; never an email address). Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list, following the organization's\nmember-directory policy) and each item also carries `organizationRole` and `version`.\n\nPaging (ORG-006): without `limit` or `cursor` every membership is returned, as before. With\n`limit` (1–200) and/or `cursor`, one page is returned (50 items when only `cursor` is given)\nand, while more remain, the `X-Next-Cursor` response header holds the opaque cursor of the\nnext page. The body stays a JSON array in both cases.",
         "operationId": "v2_list_organization_members",
         "parameters": [
           {
@@ -21264,7 +21264,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size 1\u2013200; omit both `limit` and `cursor` for the whole list",
+            "description": "Page size 1–200; omit both `limit` and `cursor` for the whole list",
             "required": false,
             "schema": {
               "type": "integer",
@@ -23072,7 +23072,7 @@
           "Organizations (v2)"
         ],
         "summary": "List an organization's teams.",
-        "description": "Returns the organization's teams in id order (`cursor` = the previous page's `nextCursor`;\n`limit` 1\u2013200, default 50), optionally filtered by `status` (ACTIVE or ARCHIVED). Requires an\nactive membership allowed to read the member directory (`organization.members.read` under the\norganization policy). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "description": "Returns the organization's teams in id order (`cursor` = the previous page's `nextCursor`;\n`limit` 1–200, default 50), optionally filtered by `status` (ACTIVE or ARCHIVED). Requires an\nactive membership allowed to read the member directory (`organization.members.read` under the\norganization policy). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
         "operationId": "v2_list_organization_teams",
         "parameters": [
           {
@@ -23109,7 +23109,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "1\u2013200 (default 50)",
+            "description": "1–200 (default 50)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -23201,7 +23201,7 @@
           "Organizations (v2)"
         ],
         "summary": "Create a team.",
-        "description": "Creates an ACTIVE team (`name` 1\u2013120 characters, unique among the organization's ACTIVE teams;\noptional `description` and `parentTeamId`, nesting bounded). Requires the\n`organization.teams.manage` capability (OWNER, ADMIN; MANAGERs only when the organization\npolicy lets them create teams, and they become the new team's TEAM_MANAGER). Send an\n`Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "description": "Creates an ACTIVE team (`name` 1–120 characters, unique among the organization's ACTIVE teams;\noptional `description` and `parentTeamId`, nesting bounded). Requires the\n`organization.teams.manage` capability (OWNER, ADMIN; MANAGERs only when the organization\npolicy lets them create teams, and they become the new team's TEAM_MANAGER). Send an\n`Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
         "operationId": "v2_create_organization_team",
         "parameters": [
           {
@@ -23645,7 +23645,7 @@
           "Organizations (v2)"
         ],
         "summary": "List a team's members.",
-        "description": "Returns the team's ACTIVE memberships in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1\u2013200, default 50), each with the member's display identity\n(`displayName`, `username`; never an email address). Requires the same access as the team\nlist. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "description": "Returns the team's ACTIVE memberships in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1–200, default 50), each with the member's display identity\n(`displayName`, `username`; never an email address). Requires the same access as the team\nlist. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
         "operationId": "v2_list_organization_team_members",
         "parameters": [
           {
@@ -23682,7 +23682,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "1\u2013200 (default 50)",
+            "description": "1–200 (default 50)",
             "required": false,
             "schema": {
               "type": "integer",
@@ -24607,7 +24607,7 @@
       },
       "AddOrganizationTeamMemberRequest": {
         "type": "object",
-        "description": "`POST /api/v2/organizations/{id}/teams/{teamId}/members` \u2014 exactly one of\n`membershipId` and `userId`.",
+        "description": "`POST /api/v2/organizations/{id}/teams/{teamId}/members` — exactly one of\n`membershipId` and `userId`.",
         "required": [
           "role"
         ],
@@ -25426,7 +25426,7 @@
         "properties": {
           "reason": {
             "type": "string",
-            "description": "Why the administrator intervenes (1\u2013500 characters; recorded in the organization's\naudit history)."
+            "description": "Why the administrator intervenes (1–500 characters; recorded in the organization's\naudit history)."
           },
           "userId": {
             "type": "string",
@@ -25646,7 +25646,7 @@
             "items": {
               "$ref": "#/components/schemas/ManualAssignment"
             },
-            "description": "MANUAL: explicit participant \u2192 breakout mapping.",
+            "description": "MANUAL: explicit participant → breakout mapping.",
             "nullable": true
           },
           "breakoutIds": {
@@ -25919,7 +25919,7 @@
         "properties": {
           "redirectTo": {
             "type": "string",
-            "description": "Where the browser goes next: `redirect_uri?code=\u2026&state=\u2026` on approval,\n`redirect_uri?error=access_denied&state=\u2026` on denial."
+            "description": "Where the browser goes next: `redirect_uri?code=…&state=…` on approval,\n`redirect_uri?error=access_denied&state=…` on denial."
           }
         }
       },
@@ -26132,7 +26132,7 @@
       },
       "BreakoutRecordingPolicy": {
         "type": "string",
-        "description": "Breakout recording metadata only \u2014 recording itself is Part G.",
+        "description": "Breakout recording metadata only — recording itself is Part G.",
         "enum": [
           "INHERIT_MAIN_POLICY",
           "DISABLED",
@@ -26202,7 +26202,7 @@
           "durationSeconds": {
             "type": "integer",
             "format": "int32",
-            "description": "Gap audit M17: timed rooms only \u2014 the length set at creation, and once open, when\nthe room closes by itself.",
+            "description": "Gap audit M17: timed rooms only — the length set at creation, and once open, when\nthe room closes by itself.",
             "nullable": true,
             "minimum": 0
           },
@@ -26233,7 +26233,7 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "Assigned participant ids \u2014 only for roles that manage breakouts.",
+            "description": "Assigned participant ids — only for roles that manage breakouts.",
             "nullable": true
           },
           "position": {
@@ -26499,7 +26499,7 @@
         "properties": {
           "token": {
             "type": "string",
-            "description": "The admission token returned when registering (`reg_\u2026`)."
+            "description": "The admission token returned when registering (`reg_…`)."
           }
         },
         "additionalProperties": false
@@ -27215,7 +27215,7 @@
           },
           "recordingState": {
             "type": "string",
-            "description": "Part G: recording indicator (`OFF` / `REQUESTED` / `RECORDING` / `STOPPING`) \u2014\nthe authoritative recovery source after a reconnect.",
+            "description": "Part G: recording indicator (`OFF` / `REQUESTED` / `RECORDING` / `STOPPING`) —\nthe authoritative recovery source after a reconnect.",
             "nullable": true
           },
           "scheduledEndAt": {
@@ -27628,7 +27628,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "1\u2013200 characters."
+            "description": "1–200 characters."
           },
           "profile": {
             "allOf": [
@@ -27640,7 +27640,7 @@
           },
           "slug": {
             "type": "string",
-            "description": "3\u201363 lowercase letters, digits and `-`, starting and ending with a letter or digit."
+            "description": "3–63 lowercase letters, digits and `-`, starting and ending with a letter or digit."
           }
         }
       },
@@ -27967,7 +27967,7 @@
           },
           "name": {
             "type": "string",
-            "description": "1\u2013120 characters."
+            "description": "1–120 characters."
           },
           "parentTeamId": {
             "type": "string",
@@ -28208,7 +28208,7 @@
           },
           "internalNote": {
             "type": "string",
-            "description": "Administrative note \u2014 stored, never shown to the participant.",
+            "description": "Administrative note — stored, never shown to the participant.",
             "nullable": true
           },
           "message": {
@@ -28745,7 +28745,7 @@
       },
       "ErrorCode": {
         "type": "string",
-        "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 \u00a75).",
+        "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
           "SESSION_NOT_FOUND",
@@ -29316,7 +29316,7 @@
           },
           "displayName": {
             "type": "string",
-            "description": "Presentation name only \u2014 never identity. Required for guests.",
+            "description": "Presentation name only — never identity. Required for guests.",
             "nullable": true
           },
           "externalContext": {
@@ -29556,7 +29556,7 @@
         "properties": {
           "conferencePath": {
             "type": "string",
-            "description": "Canonical conference state \u2014 the primary recovery resource."
+            "description": "Canonical conference state — the primary recovery resource."
           },
           "enabled": {
             "type": "boolean",
@@ -29573,12 +29573,12 @@
           },
           "streamPath": {
             "type": "string",
-            "description": "WebSocket stream (`?ticket=\u2026&cursor=\u2026`; present when `enabled`).",
+            "description": "WebSocket stream (`?ticket=…&cursor=…`; present when `enabled`).",
             "nullable": true
           },
           "ticketPath": {
             "type": "string",
-            "description": "`POST` \u2192 one-shot WebSocket ticket (present when `enabled`).",
+            "description": "`POST` → one-shot WebSocket ticket (present when `enabled`).",
             "nullable": true
           }
         }
@@ -31536,7 +31536,7 @@
           "hintDays": {
             "type": "integer",
             "format": "int64",
-            "description": "1\u20133650 days, or `null` for no hint.",
+            "description": "1–3650 days, or `null` for no hint.",
             "nullable": true
           }
         }
@@ -31815,7 +31815,7 @@
           },
           "name": {
             "type": "string",
-            "description": "1\u2013120 characters, unique among the organization's ACTIVE teams."
+            "description": "1–120 characters, unique among the organization's ACTIVE teams."
           },
           "organizationId": {
             "type": "string",
@@ -32387,7 +32387,7 @@
       },
       "PhoneVerificationStatus": {
         "type": "object",
-        "description": "Phone binding is provider-gated (ADR 0056 \u00a78): `PROVIDER_BLOCKED` until an SMS or\nverification provider is approved, and never required.",
+        "description": "Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or\nverification provider is approved, and never required.",
         "required": [
           "status",
           "required"
@@ -32618,7 +32618,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Option labels (choice / ranking). Ids `o1\u2026oN` are assigned by the server.",
+            "description": "Option labels (choice / ranking). Ids `o1…oN` are assigned by the server.",
             "nullable": true
           },
           "points": {
@@ -33385,7 +33385,7 @@
         "properties": {
           "batchId": {
             "type": "string",
-            "description": "Client batch id (idempotency for retries; 1\u201364 chars).",
+            "description": "Client batch id (idempotency for retries; 1–64 chars).",
             "nullable": true
           },
           "participantSessionId": {
@@ -33537,7 +33537,7 @@
           },
           "averagePositions": {
             "type": "object",
-            "description": "Ranking: option id \u2192 average position (1 = first).",
+            "description": "Ranking: option id → average position (1 = first).",
             "additionalProperties": {
               "type": "number",
               "format": "double"
@@ -33554,7 +33554,7 @@
           },
           "optionCounts": {
             "type": "object",
-            "description": "Choice: option id \u2192 votes.",
+            "description": "Choice: option id → votes.",
             "additionalProperties": {
               "type": "integer",
               "minimum": 0
@@ -33571,7 +33571,7 @@
           },
           "ratingDistribution": {
             "type": "object",
-            "description": "Rating: value \u2192 count, and the average.",
+            "description": "Rating: value → count, and the average.",
             "additionalProperties": {
               "type": "integer",
               "minimum": 0
@@ -33785,7 +33785,7 @@
           "sequence": {
             "type": "integer",
             "format": "int64",
-            "description": "Gap-free per-conference sequence (commit order) \u2014 the replay cursor.",
+            "description": "Gap-free per-conference sequence (commit order) — the replay cursor.",
             "nullable": true
           }
         }
@@ -33815,7 +33815,7 @@
           },
           "ticket": {
             "type": "string",
-            "description": "One-shot, short-lived ticket for `GET \u2026/realtime?ticket=` (browser WebSockets)."
+            "description": "One-shot, short-lived ticket for `GET …/realtime?ticket=` (browser WebSockets)."
           },
           "websocketPath": {
             "type": "string",
@@ -34447,7 +34447,7 @@
           },
           "misconfigured": {
             "type": "boolean",
-            "description": "A stored layer failed validation \u2192 restrictive fallback is in force."
+            "description": "A stored layer failed validation → restrictive fallback is in force."
           },
           "policy": {
             "$ref": "#/components/schemas/ProfilePolicy"
@@ -34543,7 +34543,7 @@
         "properties": {
           "externalRoleMapping": {
             "type": "object",
-            "description": "External role token (e.g. `DOCTOR`) \u2192 generic meeting role. Never OWNER.",
+            "description": "External role token (e.g. `DOCTOR`) → generic meeting role. Never OWNER.",
             "additionalProperties": {
               "$ref": "#/components/schemas/Role"
             }
@@ -34557,7 +34557,7 @@
         "properties": {
           "overrides": {
             "type": "object",
-            "description": "role \u2192 permission key \u2192 allowed. Only POLICY cells may be overridden.",
+            "description": "role → permission key → allowed. Only POLICY cells may be overridden.",
             "additionalProperties": {
               "type": "object",
               "additionalProperties": {
@@ -35473,7 +35473,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "Why (audited), 3\u2013500 characters."
+            "description": "Why (audited), 3–500 characters."
           },
           "targetState": {
             "$ref": "#/components/schemas/ChatMigrationState"
@@ -36535,8 +36535,8 @@
       "oauthAccessToken": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "cfoa_<sbx|test|live>_\u2026",
-        "description": "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_\u2026`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused."
+        "bearerFormat": "cfoa_<sbx|test|live>_…",
+        "description": "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_…`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused."
       },
       "participant_token": {
         "type": "apiKey",
@@ -36553,7 +36553,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "cfut",
-        "description": "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_\u2026`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards."
+        "description": "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards."
       }
     }
   },
@@ -36608,7 +36608,7 @@
     },
     {
       "name": "Chat",
-      "description": "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) \u2192 LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"
+      "description": "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) → LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"
     },
     {
       "name": "Users",
@@ -36620,7 +36620,7 @@
     },
     {
       "name": "Notifications (v2)",
-      "description": "Document 4 \u00a73.1: the signed-in user's notification inbox, unread count, notification preferences and push endpoints of the unified Notification Service, relayed like the Communications API: the Account session is verified here and the request is forwarded with the server-resolved account. Answers are the Notification Service's own (schemaVersion 1; Retry-After and ETag relayed; never codes, tokens, addresses, push handles, E2EE text or URLs). Answers 503 SERVICE_UNAVAILABLE until the relay is configured."
+      "description": "Document 4 §3.1: the signed-in user's notification inbox, unread count, notification preferences and push endpoints of the unified Notification Service, relayed like the Communications API: the Account session is verified here and the request is forwarded with the server-resolved account. Answers are the Notification Service's own (schemaVersion 1; Retry-After and ETag relayed; never codes, tokens, addresses, push handles, E2EE text or URLs). Answers 503 SERVICE_UNAVAILABLE until the relay is configured."
     },
     {
       "name": "Meeting Spaces (v2)",
@@ -36632,7 +36632,7 @@
     },
     {
       "name": "Conferences (v2)",
-      "description": "ConferenceSession lifecycle: CREATED \u2192 PREPARING \u2192 WAITING \u2192 LIVE \u2192 ENDING \u2192 ENDED (+ CANCELLED / FAILED). ENDED is reached only after provider termination (Part E)."
+      "description": "ConferenceSession lifecycle: CREATED → PREPARING → WAITING → LIVE → ENDING → ENDED (+ CANCELLED / FAILED). ENDED is reached only after provider termination (Part E)."
     },
     {
       "name": "Members (v2)",
@@ -36648,7 +36648,7 @@
     },
     {
       "name": "Media controls (v2)",
-      "description": "Part F: provider-enforced media locks, host mute, screen-share stop, spotlight and credential refresh. Locks only reduce rights; grants are always the effective projection of role \u2227 policy \u2227 locks."
+      "description": "Part F: provider-enforced media locks, host mute, screen-share stop, spotlight and credential refresh. Locks only reduce rights; grants are always the effective projection of role ∧ policy ∧ locks."
     },
     {
       "name": "Collaboration (v2)",
@@ -36656,7 +36656,7 @@
     },
     {
       "name": "Chat (v2)",
-      "description": "Part F: MeetingMessagingService \u2014 server-derived sender identity, main / breakout / private scope, cursor pagination, rate limits and moderation."
+      "description": "Part F: MeetingMessagingService — server-derived sender identity, main / breakout / private scope, cursor pagination, rate limits and moderation."
     },
     {
       "name": "Engagement (v2)",
@@ -36676,7 +36676,7 @@
     },
     {
       "name": "Realtime (v2)",
-      "description": "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only \u2014 recover canonical state from GET /api/v2/conferences/{id}."
+      "description": "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."
     },
     {
       "name": "Waiting Room (v2)",
@@ -36692,11 +36692,11 @@
     },
     {
       "name": "Compatibility (v2)",
-      "description": "Legacy \u2192 v2 migration evidence and shadow comparison (platform administrators)."
+      "description": "Legacy → v2 migration evidence and shadow comparison (platform administrators)."
     },
     {
       "name": "Recordings (v2)",
-      "description": "Part G: composite recording through the provider egress. REQUESTED \u2192 RECORDING only on provider evidence; STOPPING \u2192 PROCESSING \u2192 READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."
+      "description": "Part G: composite recording through the provider egress. REQUESTED → RECORDING only on provider evidence; STOPPING → PROCESSING → READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."
     },
     {
       "name": "Artifacts (v2)",
@@ -36716,7 +36716,7 @@
     },
     {
       "name": "Profiles (v2)",
-      "description": "Part H: meeting profiles (STANDARD, WEBINAR, TOWN_HALL, HIGH_SECURITY, HEALTHCARE) resolved base \u2192 type \u2192 security \u2192 organization \u2192 space \u2192 conference with hard ceilings."
+      "description": "Part H: meeting profiles (STANDARD, WEBINAR, TOWN_HALL, HIGH_SECURITY, HEALTHCARE) resolved base → type → security → organization → space → conference with hard ceilings."
     },
     {
       "name": "Registrations (v2)",

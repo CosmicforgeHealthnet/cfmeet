@@ -9,6 +9,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import * as privateShares from "../src/lib/messaging/private-shares.ts";
 import {
   UNKNOWN_PERSON, conversationTitle, decodeGroupTitle, directCounterpartLabel, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle,
 } from "../src/lib/messaging/conversation-title.ts";
@@ -146,6 +147,7 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "@/services/messaging-session": { messagingClientAccessToken: () => "", messagingSessionDeviceToken: () => "" },
     "@/services/v2/messaging.service": { messagingService: identityApi, relay },
     "./api": { b64u },
+    "./private-shares": privateShares,
     "./errors": errors,
     "@/lib/auth/account-device": { accountDevice: {} },
     "@/lib/auth/session": { accountSession: {} },

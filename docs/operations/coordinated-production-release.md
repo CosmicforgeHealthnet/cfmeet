@@ -286,3 +286,23 @@ the release they protect is accepted.
   release gate: it is reported as a warning and never blocks a first-party release (owner decision
   2026-11-13). The same holds for `backup-restore-drill.yml` and `cfmeet-offsite-backup.yml`.
 - Staging activation (runbook §9) before each production activation step.
+## Service log archive (M6)
+
+After the reviewed release is live, dispatch `activate-service-log-collector` with
+`confirm=retain-14-days`. It installs the owned `cfmeet-service-logs.service` host unit.
+The collector reads only running CF Meet containers from the release catalogue and
+known CF Meet infrastructure names; other applications, staging and old release
+containers are excluded. Logs stay under `/opt/cfmeet-core/logs/services/`, separated
+by container and UTC date, with private file permissions. Fourteen complete UTC days
+plus the current day are retained, independently of container replacement.
+
+The cursor is checkpointed only after archived bytes are durable. Restart may repeat
+the final timestamp boundary, but does not skip unflushed bytes. The collector reconnects
+to the current container name after replacement. Its systemd unit has no network
+address family, a read-only host filesystem apart from its archive, no capabilities,
+and a 512 MiB memory ceiling. Activation requires 2 GiB free disk and a fresh healthy
+collector heartbeat. Rollback restores the prior unit/configuration and preserves logs.
+
+This starts durable collection at activation; it can recover only history still held
+by Docker. It cannot reconstruct logs already removed before installation. Inspect
+`health.json` for collector failures and monitor host disk usage as part of operations.

@@ -658,7 +658,7 @@ async fn provider_webhooks_drive_delivery_evidence_and_suppression() {
     // cannot increase the counter.
     let permanent = json!({"type":"email.bounced","data":{"email_id":provider_id,"bounce":{"type":"Permanent"}}});
     assert!(notifications::email::apply_provider_event(
-        &h.db,
+        &h.db.conn,
         &h.state.metrics,
         "resend",
         "permanent-1",
@@ -667,7 +667,7 @@ async fn provider_webhooks_drive_delivery_evidence_and_suppression() {
     .await
     .unwrap());
     assert!(!notifications::email::apply_provider_event(
-        &h.db,
+        &h.db.conn,
         &h.state.metrics,
         "resend",
         "permanent-1",
@@ -1339,6 +1339,45 @@ async fn retention_expiry_and_erasure_run_cleanly() {
             "SELECT count(*)::bigint FROM notif_email_messages WHERE recipient_sealed IS NOT NULL"
         )
         .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn expired_holds_are_retired_without_replaying_live_or_undated_events() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    h.set_category("ORGANIZATION_UPDATES", "OFF").await;
+    let peer = h.peers.organizations.clone();
+    for _ in 0..3 {
+        h.ingest(&peer, vec![org_removed(&alice())])
+            .await
+            .expect(200);
+    }
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_event_inbox WHERE state='HELD'")
+            .await,
+        3
+    );
+    h.exec("UPDATE notif_event_inbox SET envelope=jsonb_set(envelope,'{delivery}',jsonb_build_object('expiresAt',(now()+interval '1 hour')::text))").await.unwrap();
+    h.exec("UPDATE notif_event_inbox SET envelope=jsonb_set(envelope,'{delivery,expiresAt}',to_jsonb((now()-interval '1 minute')::text)) WHERE event_id=(SELECT event_id FROM notif_event_inbox ORDER BY event_id LIMIT 1)").await.unwrap();
+    h.exec("UPDATE notif_event_inbox SET envelope=envelope #- '{delivery,expiresAt}' WHERE event_id=(SELECT event_id FROM notif_event_inbox ORDER BY event_id DESC LIMIT 1)").await.unwrap();
+    notifications::workers::expire_overdue(&h.db.conn)
+        .await
+        .unwrap();
+    notifications::workers::expire_overdue(&h.db.conn)
+        .await
+        .unwrap();
+    assert_eq!(h.count("SELECT count(*)::bigint FROM notif_event_inbox WHERE state='PROCESSED' AND last_error_class='DELIVERY_EXPIRED'").await, 1);
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_event_inbox WHERE state='HELD'")
+            .await,
+        2
+    );
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_deliveries")
+            .await,
         0
     );
 }

@@ -83,11 +83,17 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
     let user = app.user("phone-owner").await;
     let other = app.user("phone-other").await;
     let session = Uuid::new_v4();
-    let challenge = phone::start(&app.db, &Provider, user.id, Some(session), "+393331234567")
-        .await
-        .unwrap();
+    let challenge = phone::start(
+        &app.db.conn,
+        &Provider,
+        user.id,
+        Some(session),
+        "+393331234567",
+    )
+    .await
+    .unwrap();
     assert!(phone::verify(
-        &app.db,
+        &app.db.conn,
         &Provider,
         challenge,
         Some((other.id, session)),
@@ -96,7 +102,7 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
     .await
     .is_err());
     assert!(phone::verify(
-        &app.db,
+        &app.db.conn,
         &Provider,
         challenge,
         Some((user.id, Uuid::new_v4())),
@@ -104,12 +110,14 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
     )
     .await
     .is_err());
-    assert!(phone::verify(&app.db, &Provider, challenge, None, "123456")
-        .await
-        .is_err());
+    assert!(
+        phone::verify(&app.db.conn, &Provider, challenge, None, "123456")
+            .await
+            .is_err()
+    );
     assert_eq!(
         phone::verify(
-            &app.db,
+            &app.db.conn,
             &Provider,
             challenge,
             Some((user.id, session)),
@@ -120,7 +128,7 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
         user.id
     );
     assert!(phone::verify(
-        &app.db,
+        &app.db.conn,
         &Provider,
         challenge,
         Some((user.id, session)),
@@ -129,14 +137,19 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
     .await
     .is_err());
     assert_eq!(
-        phone::find(&app.db, "+393331234567", false).await.unwrap(),
+        phone::find(&app.db.conn, "+393331234567", false)
+            .await
+            .unwrap(),
         Some(user.id)
     );
     assert_eq!(
-        phone::find(&app.db, "+393331234567", true).await.unwrap(),
+        phone::find(&app.db.conn, "+393331234567", true)
+            .await
+            .unwrap(),
         None
     );
     app.db
+        .conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "UPDATE account_phone_bindings SET discoverable=true WHERE user_id=$1",
@@ -145,7 +158,9 @@ async fn phone_binding_requires_the_original_session_and_a_single_provider_appro
         .await
         .unwrap();
     assert_eq!(
-        phone::find(&app.db, "+393331234567", true).await.unwrap(),
+        phone::find(&app.db.conn, "+393331234567", true)
+            .await
+            .unwrap(),
         Some(user.id)
     );
 }
@@ -157,12 +172,18 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
     };
     let user = app.user("phone-attempts").await;
     let session = Uuid::new_v4();
-    let first = phone::start(&app.db, &Provider, user.id, Some(session), "+393331234567")
-        .await
-        .unwrap();
+    let first = phone::start(
+        &app.db.conn,
+        &Provider,
+        user.id,
+        Some(session),
+        "+393331234567",
+    )
+    .await
+    .unwrap();
     for _ in 0..5 {
         assert!(phone::verify(
-            &app.db,
+            &app.db.conn,
             &Provider,
             first,
             Some((user.id, session)),
@@ -172,7 +193,7 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
         .is_err());
     }
     assert!(phone::verify(
-        &app.db,
+        &app.db.conn,
         &Provider,
         first,
         Some((user.id, session)),
@@ -180,11 +201,17 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
     )
     .await
     .is_err());
-    let linked = phone::start(&app.db, &Provider, user.id, Some(session), "+393331234567")
-        .await
-        .unwrap();
+    let linked = phone::start(
+        &app.db.conn,
+        &Provider,
+        user.id,
+        Some(session),
+        "+393331234567",
+    )
+    .await
+    .unwrap();
     phone::verify(
-        &app.db,
+        &app.db.conn,
         &Provider,
         linked,
         Some((user.id, session)),
@@ -192,10 +219,11 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
     )
     .await
     .unwrap();
-    let signin = phone::start(&app.db, &Provider, user.id, None, "+393331234567")
+    let signin = phone::start(&app.db.conn, &Provider, user.id, None, "+393331234567")
         .await
         .unwrap();
     app.db
+        .conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "DELETE FROM account_phone_bindings WHERE user_id=$1",
@@ -203,12 +231,18 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
         ))
         .await
         .unwrap();
-    assert!(phone::verify(&app.db, &Provider, signin, None, "123456")
-        .await
-        .is_err());
     assert!(
-        phone::start(&app.db, &Provider, user.id, Some(session), "+393331234567")
+        phone::verify(&app.db.conn, &Provider, signin, None, "123456")
             .await
             .is_err()
     );
+    assert!(phone::start(
+        &app.db.conn,
+        &Provider,
+        user.id,
+        Some(session),
+        "+393331234567"
+    )
+    .await
+    .is_err());
 }

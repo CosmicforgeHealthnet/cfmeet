@@ -207,7 +207,7 @@ pub async fn verify_signin(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<PhoneConfirm>,
-) -> ApiResult<Json<crate::dto::auth::OtpVerifyResponse>> {
+) -> ApiResult<Json<OtpVerifyResponse>> {
     let provider = TwilioVerify::from_env()?;
     crate::handlers::auth::limit_by_client(&state, &headers, "phone-verify", 30, 900).await?;
     let user = phone::verify(&state.db, &provider, req.challenge_id, None, &req.code).await?;

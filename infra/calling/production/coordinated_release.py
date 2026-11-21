@@ -1621,7 +1621,7 @@ def rollback(sha, run_id):
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
                   and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
                        or e.get('notificationFence') or e.get('preferenceAuthority')
-                       or e.get('edgeLimits') or e.get('platformEdge') or e.get('databaseCapacity'))]
+                       or e.get('edgeLimits') or e.get('platformEdge') or e.get('databaseCapacity') or e.get('serviceLogs'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1633,6 +1633,8 @@ def rollback(sha, run_id):
         previous = component.get('previous')
         if previous and component['status'] not in ('unchanged', 'rolled-back') and previous in container_names():
             notif_ops.rollback_floor(sys.modules[__name__], component['service'], p.inspect(previous)['Image'])
+    if entry.get('serviceLogs'):
+        audit_operations.restore_service_logs(entry['serviceLogs'])
     if entry.get('routing'):
         undo_gateway_routing(entry['routing'])
     if entry['operation'] == 'activate-gateway-families' and GATEWAY_SNIPPET.exists():
@@ -2963,6 +2965,7 @@ ACTIVATIONS = {
     # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
     audit_operations.CAPACITY_OPERATION: ((), _platform(audit_operations.activate_database_capacity)),
+    audit_operations.LOGS_OPERATION: ((), _platform(audit_operations.activate_service_logs)),
     provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
     provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.

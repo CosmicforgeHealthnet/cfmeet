@@ -67,6 +67,13 @@ The operation deliberately reports real-device acceptance as outstanding.
 
 Mobile integration still required before advertising phone alerts:
 
+The prepared client coordinator is
+`apps/mobile/features/notifications/native-push-registration.ts`, with the account relay
+adapter in `lib/api/native-push.ts`. It serializes token replacements, drains pending
+registration before removal, and guards late callbacks across logout/account changes.
+Supply its native token source from the signed app, and bind it to the approved Account
+Device lifecycle below; it is deliberately not enabled by the current mobile screens.
+
 1. In the Expo SDK 57 app, install the SDK-compatible `expo-notifications` with
    `npx expo install expo-notifications`, configure its app plugin and platform client
    credentials, and produce a signed development/release build.
