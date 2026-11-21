@@ -75,7 +75,7 @@ class ResourceGate(unittest.TestCase):
     def test_required_memory_is_new_container_limits_plus_transient(self):
         new = cr.planned_new(['cfmeet-platform-access'])
         self.assertNotIn('platform-access', new)
-        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + 256 * 2 + cr.TRANSIENT_MIB)
+        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + 256 * 2 + 128 + cr.TRANSIENT_MIB)
         self.assertEqual(cr.required_mib([]), cr.TRANSIENT_MIB)
         for name in cr.ORDER:
             s = cr.SERVICES[name]
@@ -760,3 +760,27 @@ class SafeStderr(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AdminBridgeDarkBootstrap(unittest.TestCase):
+    def test_bootstrap_is_off_and_has_no_hq_or_public_listener(self):
+        item = cr.SERVICES['admin-bridge']
+        self.assertEqual(item['container'], 'cfmeet-admin-bridge')
+        self.assertEqual((item['port'], item['health']), (8190, '/ready'))
+        self.assertIsNone(item['tls'])
+        self.assertIsNone(item['db'])
+        self.assertEqual(item['memory'], 128)
+        self.assertFalse(item['existing'])
+        env = cr.template_env('admin-bridge')
+        self.assertEqual(env['CF_RUNTIME_ENVIRONMENT'], 'production')
+        for key, value in cr.ADMIN_BRIDGE_DARK_ENV.items():
+            if key.endswith('_ENABLED') or key.startswith('ADMIN_BRIDGE_MODULE_'):
+                self.assertEqual(value, 'false')
+        self.assertEqual(env['ADMIN_BRIDGE_ENABLED'], 'false')
+        self.assertEqual(env['ADMIN_BRIDGE_WRITES_ENABLED'], 'false')
+        self.assertEqual(cr.DEPENDS['admin-bridge'], ('organizations',))
+        self.assertIn('admin-bridge', cr.IMAGES)
+        self.assertIn('admin-bridge', cr.ORDER)
+        self.assertNotIn('admin-bridge', cr.tls_routes('http {\n}\n'))
+        self.assertTrue(all(cr.safe_defaults()['admin-bridge'][key] == (None, 'false')
+                            for key in ('ADMIN_BRIDGE_ENABLED', 'ADMIN_BRIDGE_WRITES_ENABLED')))
