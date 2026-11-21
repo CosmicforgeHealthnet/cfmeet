@@ -233,6 +233,17 @@ impl AppCallService {
         .one(&txn)
         .await?
         .ok_or(CallError::Conflict("the abuse report was not recorded"))?;
+        // ADR 0068 A7: the bridge learns of the report (ids, state, version only).
+        crate::admin_bridge_events::enqueue(
+            &txn,
+            crate::admin_bridge_events::Subject::AbuseReport,
+            view.id,
+            Some(scope.tenant_id().as_uuid()),
+            &view.status,
+            view.version,
+            now,
+        )
+        .await?;
         if let Some(reported) = reported {
             self.note_burst(&txn, scope, reported, now).await?;
         }
@@ -329,7 +340,8 @@ impl AppCallService {
 }
 
 /// Operator review (`platform_admin abuse-report set-status`): moves the report to
-/// `status`, inside the caller's transaction (audited alongside). `None` = unknown id.
+/// `status`, inside the caller's transaction (audited alongside), with its owner event to
+/// the admin bridge (ADR 0068 A7, when configured). `None` = unknown id.
 pub async fn set_status<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
@@ -340,15 +352,31 @@ pub async fn set_status<C: ConnectionTrait>(
         AbuseReportStatus::Open => None,
         _ => Some(now),
     };
-    Ok(AbuseReportView::find_by_statement(stmt(
-        &format!(
-            "UPDATE calling_abuse_reports SET status = $2, reviewed_at = $3, version = version + 1 \
-             WHERE id = $1 RETURNING {VIEW_COLUMNS}"
-        ),
-        vec![id.into(), status.as_str().into(), reviewed_at.into()],
-    ))
-    .one(db)
-    .await?)
+    let Some(row) = db
+        .query_one(stmt(
+            &format!(
+                "UPDATE calling_abuse_reports SET status = $2, reviewed_at = $3, version = version + 1 \
+                 WHERE id = $1 RETURNING tenant_id, {VIEW_COLUMNS}"
+            ),
+            vec![id.into(), status.as_str().into(), reviewed_at.into()],
+        ))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let tenant: Uuid = row.try_get("", "tenant_id")?;
+    let view = AbuseReportView::from_query_result(&row, "")?;
+    crate::admin_bridge_events::enqueue(
+        db,
+        crate::admin_bridge_events::Subject::AbuseReport,
+        view.id,
+        Some(tenant),
+        &view.status,
+        view.version,
+        now,
+    )
+    .await?;
+    Ok(Some(view))
 }
 
 /// `platform_admin abuse-report set-status` (audited, one transaction). `None` = no

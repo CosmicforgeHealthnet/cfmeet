@@ -5,3 +5,4 @@
 //! gap-closure or call-kind-offer history it does not know, and never reads this table.
 
 pub mod m20261210_000058_calling_admin_operations;
+pub mod m20261211_000059_calling_admin_bridge_events;

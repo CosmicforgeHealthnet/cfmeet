@@ -211,7 +211,8 @@ pub(crate) async fn raise<C: ConnectionTrait + TransactionTrait>(
              ON CONFLICT (dedupe_key) WHERE status = 'OPEN' DO UPDATE SET \
                occurrences = calling_incidents.occurrences + 1, \
                last_seen_at = GREATEST(calling_incidents.last_seen_at, EXCLUDED.last_seen_at), \
-               restricted_evidence = EXCLUDED.restricted_evidence",
+               restricted_evidence = EXCLUDED.restricted_evidence \
+             RETURNING id, (xmax = 0) AS inserted",
         vec![
             Uuid::new_v4().into(),
             incident.scope.map(|s| s.tenant_id().as_uuid()).into(),
@@ -227,9 +228,26 @@ pub(crate) async fn raise<C: ConnectionTrait + TransactionTrait>(
             at.into(),
         ],
     );
+    let tenant = incident.scope.map(|s| s.tenant_id().as_uuid());
     let result = async {
         let savepoint = db.begin().await?;
-        savepoint.execute(insert).await?;
+        let row = savepoint.query_one(insert).await?;
+        // ADR 0068 A7: a NEW open incident of a tenant is an owner event (a repeat
+        // occurrence of the open one changes no state and is not).
+        if let Some(row) = row {
+            if row.try_get::<bool>("", "inserted")? {
+                crate::admin_bridge_events::enqueue(
+                    &savepoint,
+                    crate::admin_bridge_events::Subject::Incident,
+                    row.try_get("", "id")?,
+                    tenant,
+                    IncidentStatus::Open.as_str(),
+                    crate::admin_bridge_events::incident_version(IncidentStatus::Open.as_str()),
+                    at,
+                )
+                .await?;
+            }
+        }
         savepoint.commit().await
     }
     .await;
@@ -340,7 +358,7 @@ pub(crate) async fn operator_resolve_in<C: ConnectionTrait>(
     .await?
     .ok_or(PlatformError::NotFound("incident"))?;
     let view = if current.status == IncidentStatus::Open.as_str() {
-        IncidentView::find_by_statement(stmt(
+        let resolved = IncidentView::find_by_statement(stmt(
             &format!(
                 "UPDATE calling_incidents SET status = 'RESOLVED', \
                    resolved_at = GREATEST($2, last_seen_at) \
@@ -350,7 +368,20 @@ pub(crate) async fn operator_resolve_in<C: ConnectionTrait>(
         ))
         .one(txn)
         .await?
-        .ok_or(PlatformError::NotFound("incident"))?
+        .ok_or(PlatformError::NotFound("incident"))?;
+        // ADR 0068 A7: the tenant's incident was resolved (a platform-wide one is never
+        // published).
+        crate::admin_bridge_events::enqueue(
+            txn,
+            crate::admin_bridge_events::Subject::Incident,
+            resolved.id,
+            resolved.tenant_id,
+            &resolved.status,
+            crate::admin_bridge_events::incident_version(&resolved.status),
+            now,
+        )
+        .await?;
+        resolved
     } else {
         current.clone()
     };
