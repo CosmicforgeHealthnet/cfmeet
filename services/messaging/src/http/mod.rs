@@ -138,6 +138,8 @@ pub fn app(state: AppState) -> Router {
                 .merge(crate::operator_reads::routes())
                 // ADR 0068: the admin bridge's operator commands and settlement read.
                 .merge(crate::operator_commands::routes())
+                // ADR 0068 A7: the admin bridge's daily dataset pull.
+                .merge(crate::operator_datasets::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

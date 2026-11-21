@@ -1872,6 +1872,11 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             json!({}),
         ),
         (
+            Method::GET,
+            "/internal/v1/operator/datasets/cfmeet.messaging_daily/days/2026-01-01".into(),
+            json!({}),
+        ),
+        (
             Method::POST,
             "/internal/v1/operator/exports".into(),
             json!({ "tenantId": tenant, "conversationId": cid, "recipientPrincipalId": pid, "reasonCode": "MATRIX" }),
@@ -2008,6 +2013,10 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
                 .replace(&mid.to_string(), "{messageId}")
                 .replace(&rid.to_string(), "{reportId}")
                 .replace(&xid.to_string(), "{exportId}")
+                .replace(
+                    "/datasets/cfmeet.messaging_daily/days/2026-01-01",
+                    "/datasets/{datasetId}/days/{day}",
+                )
                 .replace(&hold.to_string(), "{holdId}")
                 .replace(&incident.to_string(), "{incidentId}")
                 .replace(&event.to_string(), "{eventId}")

@@ -44,6 +44,7 @@ pub mod notification_publications;
 pub mod notifications;
 pub mod operations;
 pub mod operator_commands;
+pub mod operator_datasets;
 pub mod operator_reads;
 pub mod partner;
 pub mod push_mirror;

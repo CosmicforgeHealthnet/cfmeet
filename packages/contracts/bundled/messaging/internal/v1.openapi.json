@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.5.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version. 1.5.0 (ADR 0068 final round, owner-delivered exports): POST /internal/v1/operator/exports (messaging.export.request, R4) registers an export of a MANAGED conversation delivered ONLY to the verified recipient it names (never the tenant), answered with a reference (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, exportState); GET /internal/v1/operator/exports/{exportId} reads its state; the A2 export list carries each export's delivery; the recipient lists and claims it once on the delegated mirror (GET /internal/v1/delegated/v1/messaging/export-deliveries, POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim)."
+    "version": "1.6.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version. 1.5.0 (ADR 0068 final round, owner-delivered exports): POST /internal/v1/operator/exports (messaging.export.request, R4) registers an export of a MANAGED conversation delivered ONLY to the verified recipient it names (never the tenant), answered with a reference (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, exportState); GET /internal/v1/operator/exports/{exportId} reads its state; the A2 export list carries each export's delivery; the recipient lists and claims it once on the delegated mirror (GET /internal/v1/delegated/v1/messaging/export-deliveries, POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim). 1.6.0 (ADR 0068 A7, daily datasets): GET /internal/v1/operator/datasets/{datasetId}/days/{day} answers cfmeet.messaging_daily (messages_sent) and cfmeet.operations_health (failed_messages) for a UTC day: counts only, null when not computable."
   },
   "tags": [
     {
@@ -3079,6 +3079,73 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{day}": {
+      "get": {
+        "operationId": "operatorGetDatasetDay",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Get a dataset's daily counts (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "The admin bridge's daily pull (ADR 0068 A7): cfmeet.messaging_daily (messages_sent) and cfmeet.operations_health (failed_messages; Messaging's part only). Counts only, from data Messaging keeps. 404 for any other dataset; 400 for a malformed day or one in the future. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator (the bridge sends hq:dataset-sync); otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "datasetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet\\.[a-z_]{1,64}$"
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "The UTC day, yyyy-mm-dd."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3436,6 +3503,51 @@
           }
         },
         "description": "A conversation's ids, class, profile, lifecycle and version. Never a title, avatar, member list or content."
+      },
+      "OperatorDatasetDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "date",
+          "metrics"
+        ],
+        "properties": {
+          "datasetId": {
+            "enum": [
+              "cfmeet.messaging_daily",
+              "cfmeet.operations_health"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "messages_sent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "cfmeet.messaging_daily: accepted application messages of the UTC day, every environment (usage facts; never content)."
+              },
+              "failed_messages": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "cfmeet.operations_health: committed events of the UTC day that are dead letters now."
+              }
+            }
+          }
+        },
+        "description": "Counts for one UTC day. A metric is null, never a guessed 0, when the day has not ended or its source did not exist for the whole day."
       },
       "OperatorDeletionRequest": {
         "type": "object",
