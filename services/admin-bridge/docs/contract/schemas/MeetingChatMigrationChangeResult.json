@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "migration_state",
+        "migration_version",
+        "changed_at"
+      ],
+      "properties": {
+        "migration_state": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "migration_version": {
+          "type": "integer"
+        },
+        "changed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after meetings.chat-migration.change; status: LEGACY_PRIMARY, SHADOW_VALIDATION, MESSAGING_PRIMARY, LEGACY_RETIRED."
+    }
+  }
+}

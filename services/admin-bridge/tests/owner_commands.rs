@@ -79,6 +79,7 @@ fn sample_out(fields: &[OutField]) -> Value {
             Out::StrList => json!(["sharing"]),
             Out::Obj(inner) => sample_out(inner),
             Out::ObjList(inner) => json!([sample_out(inner)]),
+            Out::UuidGroups => json!([[ID, ID]]),
         };
         m.insert(f.owner.into(), v);
     }

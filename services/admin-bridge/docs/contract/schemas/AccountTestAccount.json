@@ -1,0 +1,43 @@
+{
+  "description": "One review test account: its address masked, and the account it belongs to (never the code).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "email_masked",
+    "registered",
+    "user_id",
+    "account_status",
+    "role"
+  ],
+  "properties": {
+    "email_masked": {
+      "type": "string",
+      "maxLength": 120,
+      "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$"
+    },
+    "registered": {
+      "type": "boolean"
+    },
+    "user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "account_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "role": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    }
+  }
+}

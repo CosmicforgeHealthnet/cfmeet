@@ -3404,6 +3404,42 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "MeetingAuditEventPage",
         &["meetings_audit_maps_window_and_time_cursor"],
     ),
+    // A5-A7 Meeting Service.
+    (
+        "accounts.duplicates.list",
+        "AccountDuplicates",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "accounts.test-accounts.list",
+        "AccountTestAccountPage",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.live-health.read",
+        "MeetingLiveHealth",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.webinars.list",
+        "MeetingWebinarPage",
+        &["meetings_webinars_keep_the_window"],
+    ),
+    (
+        "meetings.webinar-registrations.list",
+        "MeetingWebinarRegistrationPage",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.chat-migration.read",
+        "MeetingChatMigration",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.critical-lane.read",
+        "MeetingCriticalLane",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
     // A2.6 Messaging.
     (
         "messaging.reports.list",

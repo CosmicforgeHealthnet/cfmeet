@@ -1,0 +1,32 @@
+{
+  "description": "The account CRITICAL notification lane: counts, the fallback key's readiness and the leased, uncompleted decision ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fallback_key",
+    "pending",
+    "dead",
+    "leased_uncompleted_decisions"
+  ],
+  "properties": {
+    "fallback_key": {
+      "type": "boolean"
+    },
+    "pending": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dead": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "leased_uncompleted_decisions": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    }
+  }
+}

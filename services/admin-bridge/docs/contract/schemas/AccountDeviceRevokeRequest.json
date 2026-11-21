@@ -1,0 +1,24 @@
+{
+  "description": "Request of accounts.device.revoke (POST /internal/v1/operator/accounts/users/{user_id}/devices/{device_id}/revoke).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}
