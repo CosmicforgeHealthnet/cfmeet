@@ -7,7 +7,7 @@ The only doorway from the CosmicForge central admin (HQ) into CF Meet
 **Phase A1: the runtime, off by default.** It serves the four platform reads
 (`bridge.capabilities.read`, `bridge.health.read`, `bridge.datasets.read`,
 `hq.projections.status`); every other capability is refused (`CAPABILITY_DISABLED`)
-until its phase. Not deployed by any workflow yet.
+until its phase. The coordinated release can bootstrap this image in dark mode only (no database, HQ listener, private route or public port); HQ activation remains owner-gated.
 
 ## Runtime
 

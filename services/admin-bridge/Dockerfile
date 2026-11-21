@@ -10,7 +10,7 @@
 # (`admin-bridge-migration`) and the operator tool (`admin-bridge-admin`). Everything is
 # OFF by default (ADMIN_BRIDGE_ENABLED=false): only the loopback ops listener runs.
 # DATABASE_URL, TLS files, HMAC key files and the policy key are supplied at runtime only;
-# nothing secret is baked in. Not deployed by any workflow yet.
+# nothing secret is baked in. The coordinated release may deploy this DARK by default.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /src
