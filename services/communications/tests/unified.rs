@@ -1641,7 +1641,10 @@ async fn every_published_communications_operation_is_routed() {
             );
         }
     }
-    assert_eq!(operations, 76, "published Communications operations");
+    assert_eq!(
+        operations, 77,
+        "published Communications operations, including phone lookup"
+    );
     let body = serde_json::to_value(route("GET", "phone/verification".into())).unwrap();
     let (status, headers) = h
         .http_full(
