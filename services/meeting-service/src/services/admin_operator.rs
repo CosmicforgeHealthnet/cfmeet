@@ -57,6 +57,7 @@ use uuid::Uuid;
 use crate::{config::env_bool, state::AppState};
 
 pub mod commands;
+pub mod datasets;
 pub mod reads;
 
 pub const USERS: &str = "/internal/v1/operator/accounts/users";
@@ -188,6 +189,8 @@ pub fn router(app: AppState, verifier: Arc<ServiceTokenVerifier>) -> Router {
         .route(commands::USER_EXPORT, post(commands::user_export))
         .route(reads::USER_EXPORTS, get(reads::user_exports))
         .route(reads::EXPORT, get(reads::export))
+        // A7: the bridge's daily dataset pull.
+        .route(datasets::DATASET_DAY, get(datasets::dataset_day))
         .route(
             commands::DUPLICATES_ENFORCE,
             post(commands::duplicates_enforce),
