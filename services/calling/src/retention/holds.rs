@@ -108,54 +108,69 @@ pub async fn operator_place(
     scope.validate()?;
     let created_by = op.operator().to_string();
     operator::audited(db, op, now, move |txn| {
-        Box::pin(async move {
-            if let Some(owner) = scope.owner {
-                txn.query_one(stmt(
-                    "SELECT 1 FROM platform_environments WHERE tenant_id = $1 AND application_id = $2 AND id = $3",
-                    vec![
-                        owner.tenant_id.into(),
-                        owner.application_id.into(),
-                        owner.environment_id.into(),
-                    ],
-                ))
-                .await?
-                .ok_or(PlatformError::NotFound("environment"))?;
-            }
-            let hold = HoldView::find_by_statement(stmt(
-                &format!(
-                    "INSERT INTO calling_retention_holds (id, data_class, resource_id, tenant_id, application_id, \
-                       environment_id, reason_code, created_by, created_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {HOLD_COLUMNS}"
-                ),
-                vec![
-                    Uuid::new_v4().into(),
-                    scope.class_str().into(),
-                    scope.resource_id.into(),
-                    scope.owner.map(|o| o.tenant_id).into(),
-                    scope.owner.map(|o| o.application_id).into(),
-                    scope.owner.map(|o| o.environment_id).into(),
-                    reason.as_str().into(),
-                    created_by.into(),
-                    now.into(),
-                ],
-            ))
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("retention hold"))?;
-            let audit = entry(
-                OperatorAction::RetentionHoldPlaced,
-                &hold,
-                json!({
-                    "dataClass": hold.data_class,
-                    "reasonCode": hold.reason_code,
-                    "resourceId": hold.resource_id,
-                    "platformWide": scope.owner.is_none(),
-                }),
-            );
-            Ok((hold, audit))
-        })
+        Box::pin(
+            async move { place_in(txn, &created_by, Uuid::new_v4(), scope, reason, now).await },
+        )
     })
     .await
+}
+
+/// The placement of [`operator_place`] in the caller's transaction, under the hold id
+/// `id` (the admin bridge places a hold under its command's idempotency key, ADR 0068
+/// A4), with the audit entry the caller records in that same transaction.
+pub(crate) async fn place_in<C: ConnectionTrait>(
+    txn: &C,
+    created_by: &str,
+    id: Uuid,
+    scope: HoldScope,
+    reason: HoldReason,
+    now: DateTime<Utc>,
+) -> PlatformResult<(HoldView, AuditEntry)> {
+    scope.validate()?;
+    if let Some(owner) = scope.owner {
+        txn.query_one(stmt(
+            "SELECT 1 FROM platform_environments WHERE tenant_id = $1 AND application_id = $2 AND id = $3",
+            vec![
+                owner.tenant_id.into(),
+                owner.application_id.into(),
+                owner.environment_id.into(),
+            ],
+        ))
+        .await?
+        .ok_or(PlatformError::NotFound("environment"))?;
+    }
+    let hold = HoldView::find_by_statement(stmt(
+        &format!(
+            "INSERT INTO calling_retention_holds (id, data_class, resource_id, tenant_id, application_id, \
+               environment_id, reason_code, created_by, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {HOLD_COLUMNS}"
+        ),
+        vec![
+            id.into(),
+            scope.class_str().into(),
+            scope.resource_id.into(),
+            scope.owner.map(|o| o.tenant_id).into(),
+            scope.owner.map(|o| o.application_id).into(),
+            scope.owner.map(|o| o.environment_id).into(),
+            reason.as_str().into(),
+            created_by.to_string().into(),
+            now.into(),
+        ],
+    ))
+    .one(txn)
+    .await?
+    .ok_or(PlatformError::NotFound("retention hold"))?;
+    let audit = entry(
+        OperatorAction::RetentionHoldPlaced,
+        &hold,
+        json!({
+            "dataClass": hold.data_class,
+            "reasonCode": hold.reason_code,
+            "resourceId": hold.resource_id,
+            "platformWide": scope.owner.is_none(),
+        }),
+    );
+    Ok((hold, audit))
 }
 
 /// Releases a hold (operator-audited; idempotent — an already released hold is not
@@ -166,45 +181,48 @@ pub async fn operator_release(
     id: Uuid,
     now: DateTime<Utc>,
 ) -> PlatformResult<HoldView> {
-    operator::audited(db, op, now, move |txn| {
-        Box::pin(async move {
-            let current = HoldView::find_by_statement(stmt(
-                &format!(
-                    "SELECT {HOLD_COLUMNS} FROM calling_retention_holds WHERE id = $1 FOR UPDATE"
-                ),
-                vec![id.into()],
-            ))
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("retention hold"))?;
-            let was_active = current.released_at.is_none();
-            let hold = if was_active {
-                HoldView::find_by_statement(stmt(
-                    &format!(
-                        "UPDATE calling_retention_holds SET released_at = GREATEST($2, created_at) \
-                         WHERE id = $1 AND released_at IS NULL RETURNING {HOLD_COLUMNS}"
-                    ),
-                    vec![id.into(), now.into()],
-                ))
-                .one(txn)
-                .await?
-                .ok_or(PlatformError::NotFound("retention hold"))?
-            } else {
-                current
-            };
-            let audit = entry(
-                OperatorAction::RetentionHoldReleased,
-                &hold,
-                json!({
-                    "dataClass": hold.data_class,
-                    "reasonCode": hold.reason_code,
-                    "wasActive": was_active,
-                }),
-            );
-            Ok((hold, audit))
-        })
-    })
-    .await
+    operator::audited(db, op, now, move |txn| Box::pin(release_in(txn, id, now))).await
+}
+
+/// The release of [`operator_release`] in the caller's transaction, with the audit entry
+/// the caller records in that same transaction (the admin bridge, ADR 0068 A4).
+pub(crate) async fn release_in<C: ConnectionTrait>(
+    txn: &C,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> PlatformResult<(HoldView, AuditEntry)> {
+    let current = HoldView::find_by_statement(stmt(
+        &format!("SELECT {HOLD_COLUMNS} FROM calling_retention_holds WHERE id = $1 FOR UPDATE"),
+        vec![id.into()],
+    ))
+    .one(txn)
+    .await?
+    .ok_or(PlatformError::NotFound("retention hold"))?;
+    let was_active = current.released_at.is_none();
+    let hold = if was_active {
+        HoldView::find_by_statement(stmt(
+            &format!(
+                "UPDATE calling_retention_holds SET released_at = GREATEST($2, created_at) \
+                 WHERE id = $1 AND released_at IS NULL RETURNING {HOLD_COLUMNS}"
+            ),
+            vec![id.into(), now.into()],
+        ))
+        .one(txn)
+        .await?
+        .ok_or(PlatformError::NotFound("retention hold"))?
+    } else {
+        current
+    };
+    let audit = entry(
+        OperatorAction::RetentionHoldReleased,
+        &hold,
+        json!({
+            "dataClass": hold.data_class,
+            "reasonCode": hold.reason_code,
+            "wasActive": was_active,
+        }),
+    );
+    Ok((hold, audit))
 }
 
 /// Holds, active first then newest first (at most 500).

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Calling service API",
-    "version": "1.33.0",
+    "version": "1.34.0",
     "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; the media connection gateway, which admits every media signaling connection against authoritative state before the media server is contacted; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id. 1.12.0 the Part VI §53 webhook migration export (GET /internal/v1/webhook-migration/{inventory,digest,subscriptions,events,deliveries,attempts}, webhook-migration.export; signing secrets only re-sealed under the migration transfer key) and rollback (POST /internal/v1/webhook-migration/rollback/{subscriptions,deliveries}, webhook-migration.import); customer webhook routes answer 503 SERVICE_UNAVAILABLE with CF-Webhook-Migration: frozen (mutations, CALLING_WEBHOOK_MUTATIONS_FROZEN) or moved (CALLING_WEBHOOK_AUTHORITY=retired). 1.13.0 (Part VI §19.4): the Calling-owned usage and limit views are also published at the service-specific paths GET /v1/calling/usage (listCallingUsage) and GET /v1/calling/limits (getCallingLimits) - identical parameters and responses to GET /v1/usage and GET /v1/limits, never re-pointed by the API Gateway's central-usage switch, so existing clients keep Calling's full detail (participant / session / voicemail / recording facts, concurrent calls, telecom spend, the PRINCIPAL axis) after /v1/usage and /v1/limits move to the Developer Platform. CALLING_LEGACY_USAGE_AUTHORITY=retired switches all four usage / limit views off independently (503 SERVICE_UNAVAILABLE with CF-Usage-Migration: moved, after the scope check). 1.14.0: first-party personal app calls enforce the Communications relationship and privacy policy at creation, acceptance, media credential issuance and admission. Policy dependency failure returns COMMUNICATIONS_POLICY_UNAVAILABLE. Canonical enterprise contexts retain separately scoped authorization. 1.16.0 (Blueprint Section 12 follow-up, CAL-007): enterprise audit records carry actorPrincipalId, the acting human member of a first-party organization request the Meeting Service forwarded (calling-request.act-for-organization, off unless CALLING_ORGANIZATION_FORWARDING_ENABLED=true); null for every other actor. 1.21.0: the host of a call - the creator unless the role was transferred (POST /v1/calls/{call_id}/host); in a group call only the host ends or holds / resumes it for everyone (actingParticipantId on end / hold / resume), and the host removes (final) or mutes participants (POST /v1/calls/{call_id}/participants/{participant_id}/remove, /mute); the Call shows hostParticipantId and mutedParticipantIds. 1.22.0: rejoining an ongoing call (POST /v1/calls/{call_id}/participants/{participant_id}/rejoin) after leaving it, unless the host removed the participant. 1.23.0: the recording notice and consent apply to participants who join after a recording started. 1.24.0: a principal hides a finished call from its own history (DELETE /v1/calls/{call_id}/history?principalId=); finished calls leave every history after CALLING_RETENTION_CALL_HISTORY_DAYS (default 400). 1.25.0: forwarding rules and the voicemail fallback apply to direct person-to-person application calls. 1.26.0: operator review of abuse reports over internal service authentication (GET /internal/v1/abuse-reports, POST /internal/v1/abuse-reports/{abuse_report_id}/resolve; permission calling-abuse-reports.review, operator console only). 1.27.0 (C15): queue wrap-up time (wrapUpSeconds) honoured in queue distribution and QUEUE transfer-target selection, and built-in queue hold music (holdMusic) on createQueue / updateQueue / the Queue view and the queued caller's Call. 1.29.0 (C14): attended (consultative) transfer - POST /v1/calls/{call_id}/consultations (hold the call and place a consultation call to the target), POST /v1/calls/{call_id}/consultations/{consultation_id}/complete (the canonical transfer of the original call to the consulted target; the consultation call ends when the target joined) and /cancel (end the consultation call, resume the original); a transfer that started from HELD lifts the hold at the media provider when it completes. 1.30.0 (ADR 0062): CF Meet Platform device exchange POST /v1/calling/user-sessions (security userToken: Authorization: Bearer cfut_..., verified live with Platform Access; effective grant call:receive; EXTERNAL tenants only; off unless CALLING_USER_TOKEN_EXCHANGE_ENABLED=true): creates or reuses the endpoint of the app installation (endpoint key inst:<installationId>) for the token's user and mints its signaling credential, bound to the token's minting credential and never valid past the token's expiry. 1.31.0: CF1 - a target already in a live call is not rung (its offers close at once: a missed call for it) and a Call whose every target is on another call ends BUSY at once; CF2 - a VOICE Call may switch to VIDEO while DIALING or RINGING too; C1 - cancel and end answer as soon as they are committed, the media cleanup runs after the answer. 1.32.0 (S2, account deletion and data download): POST /internal/v1/account-privacy/erasure and /export over internal service authentication (calling-account.privacy, Meeting Service only): erase (hide from history, minimize display names) or export the call history of a deleted or exporting account's principal in the delegated CF Meet FIRST_PARTY scope. 1.33.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller; the admin bridge's tenant-scoped operator reads under /internal/v1/operator/* (calls, live calls, abuse reports, block rules, limits, routing, enterprise and spend policies, recording and voicemail metadata, retention holds, incidents, webhook sealing keys, operator audit), each requiring calling.administer and X-CF-Operator."
   },
   "tags": [
@@ -13770,6 +13770,124 @@
         "tags": [
           "Internal — Admin Bridge"
         ]
+      },
+      "post": {
+        "operationId": "operatorChangeLimits",
+        "summary": "Change limits (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.limits.change: platform_admin limits set-tenant / set-application for the request-rate and concurrency limits (the level's telecom spend ceilings are kept). expectedVersion: the level's limits version (0 = not configured, see operatorGetLimits). status CONFIGURED; version: the new limits version. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorLimitsChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
       }
     },
     "/internal/v1/operator/routing-policies": {
@@ -14317,6 +14435,124 @@
         "tags": [
           "Internal — Admin Bridge"
         ]
+      },
+      "post": {
+        "operationId": "operatorPlaceRetentionHold",
+        "summary": "Place a retention hold (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.retention-hold.place: platform_admin retention hold over one scope of the tenant (never platform-wide); the hold's id is the Idempotency-Key. No expectedVersion (the command creates the hold). status ACTIVE; version null. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorPlaceRetentionHoldRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
       }
     },
     "/internal/v1/operator/incidents": {
@@ -14631,6 +14867,1237 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/abuse-reports/{abuse_report_id}/resolve": {
+      "post": {
+        "operationId": "operatorResolveAbuseReport",
+        "summary": "Resolve an abuse report (admin bridge)",
+        "description": "ADR 0068 A4 (R2): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.abuse-report.resolve: the same audited transition as resolveAbuseReport and platform_admin abuse-report set-status, at expectedVersion (the report's version). status: the report's status; version: its version. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "abuse_report_id",
+            "in": "path",
+            "required": true,
+            "description": "The abuse report.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorResolveAbuseReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/blocks/{block_rule_id}/release": {
+      "post": {
+        "operationId": "operatorReleaseBlock",
+        "summary": "Release a block rule (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.block.release: platform_admin block release (idempotent; the row stays as evidence) at expectedVersion. status RELEASED; version: the rule's version. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "block_rule_id",
+            "in": "path",
+            "required": true,
+            "description": "The block rule.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/routing-policies/{environment_id}": {
+      "post": {
+        "operationId": "operatorChangeRoutingPolicy",
+        "summary": "Change a routing policy (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.routing.change: platform_admin routing-policy set (a validated typed document). expectedVersion: the environment's routing policy revision (0 = none stored). status CONFIGURED; version: the new revision. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "description": "An environment of the tenant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRoutingPolicyChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/enterprise-policies/{environment_id}/capabilities": {
+      "post": {
+        "operationId": "operatorChangeEnterpriseFeatures",
+        "summary": "Change enterprise features (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.enterprise-features.change: platform_admin enterprise-capabilities set (the baseline policy is created at version 1 when none exists). expectedVersion: the baseline policy's version (0 = none). status CONFIGURED; version: the baseline's new version. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "description": "An environment of the tenant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorEnterpriseFeaturesChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/spend-policies/{environment_id}": {
+      "post": {
+        "operationId": "operatorChangeSpendPolicy",
+        "summary": "Change a spend policy (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.spend-limits.change: platform_admin spend-policy set. expectedVersion: the environment's spend policy revision (0 = none). status ENABLED or DISABLED; version: the new revision. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "environment_id",
+            "in": "path",
+            "required": true,
+            "description": "An environment of the tenant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorSpendPolicyChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/recordings/{recording_id}/delete": {
+      "post": {
+        "operationId": "operatorDeleteRecording",
+        "summary": "Delete a recording (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.recording.delete: the administrator's safe deletion path (READY or FAILED to DELETING, reason ADMIN; the recording worker removes the object). A retention hold on the recording or its call, or a recording still being captured or already deleted: 409 CONFLICT, nothing done. Access-audited (SYSTEM, reason OPERATOR_REQUEST); no media is read. expectedVersion: the recording's version (operatorListRecordings). status DELETING; version: the recording's version. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "description": "The recording.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/retention-holds/{hold_id}/release": {
+      "post": {
+        "operationId": "operatorReleaseRetentionHold",
+        "summary": "Release a retention hold (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.retention-hold.release: platform_admin retention release (idempotent) for a hold of the tenant (a platform-wide hold is not the tenant's: 404). Unversioned: no expectedVersion. status RELEASED; version null. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "hold_id",
+            "in": "path",
+            "required": true,
+            "description": "The retention hold.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorTenantCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/incidents/{incident_id}/resolve": {
+      "post": {
+        "operationId": "operatorRecordIncident",
+        "summary": "Record an incident resolution (admin bridge)",
+        "description": "ADR 0068 A4 (R2): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.incident.record: platform_admin incidents resolve (idempotent; the audit rows are the resolution history) for an incident of the tenant (a platform-wide incident: 404). Unversioned: no expectedVersion. status RESOLVED; version null. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "Optional (R2): recorded when present. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "description": "The incident.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorTenantCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/webhook-keys/reseal": {
+      "post": {
+        "operationId": "operatorResealWebhookKeys",
+        "summary": "Re-seal webhook signing secrets (admin bridge)",
+        "description": "ADR 0068 A4 (R3/R4, two-person): requires an internal service token with the receiver-granted permission calling.administer (grantable only to cfmeet.admin-bridge), X-CF-Operator and an Idempotency-Key. calling.webhook-key.reseal: platform_admin webhooks reseal for the tenant's subscriptions only, in bounded idempotent batches; the audit row and the record commit once every batch is done. No sealing key ring configured: 409 CONFLICT. Unversioned: no expectedVersion. status RESEALED; version null; resource: subscription counts per sealing key id. Never a secret, a seal or key material. The change, its operator audit row (actor cfmeet.admin-bridge, correlation op_<key>) and its calling_admin_operations record (GET /internal/v1/operator/operations/{idempotencyKey}) commit in one transaction. Another tenant's subject: 404. Every refusal is a definite 4xx and changes nothing.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (one UUID). The change is recorded under it in the same transaction; a repeat for the same command and subject answers with the current subject and applies nothing; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or malformed: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. The approving HQ staff member (a different person).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "Required (two-person command): without the approval headers 403 INTERNAL_PERMISSION_DENIED, nothing done. HQ's intent digest (64 lower-case hex).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorTenantCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting subject (applied, or the replay of an applied key).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/OperatorCommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "tags": [
+          "Internal — Admin Bridge"
+        ]
+      }
+    },
+    "/internal/v1/operator/operations/{idempotency_key}": {
+      "get": {
+        "operationId": "operatorGetOperationRecord",
+        "summary": "Read an applied command's record (admin bridge)",
+        "description": "ADR 0068 A4 settlement read: requires calling.administer (cfmeet.admin-bridge) and X-CF-Operator; anyone else, and an unknown key: 404. The record of an applied command, written in the same transaction as the change: outcome APPLIED with the status and version the command answered. A key with no record was never applied.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "calling.administer"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route (403 INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "idempotency_key",
+            "in": "path",
+            "required": true,
+            "description": "The command's Idempotency-Key.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The record.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOperationRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15068,6 +16535,21 @@
       },
       "EnterpriseConflict": {
         "description": "VERSION_CONFLICT (expectedVersion is not the current version; nothing changed) or CONFLICT (an active name / extension number already exists, the resource is disabled, or it is still referenced).",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "OperatorCommandConflict": {
+        "description": "Nothing changed: VERSION_CONFLICT (expectedVersion is not the subject's current version), IDEMPOTENCY_CONFLICT (the Idempotency-Key was used for another command or subject) or CONFLICT (the subject's state refuses the command: e.g. a recording under a retention hold, still being captured or already deleted; no sealing key ring configured).",
         "headers": {
           "x-request-id": {
             "$ref": "#/components/headers/XRequestId"
@@ -15972,7 +17454,8 @@
           "maxConcurrentCommunications",
           "telecomSpendDailyLimitMinor",
           "telecomSpendMonthlyLimitMinor",
-          "updatedAt"
+          "updatedAt",
+          "version"
         ],
         "properties": {
           "applicationId": {
@@ -16006,6 +17489,11 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The row version an admin-bridge command is locked to (expectedVersion)."
           }
         }
       },
@@ -16480,6 +17968,71 @@
           }
         }
       },
+      "OperatorCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The answer of an admin-bridge command; a replay of the same key answers with the subject as it is now.",
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,31}$",
+            "description": "The subject's resulting state code."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,19}$",
+            "description": "The resulting row version as a string of the integer; null for an unversioned subject (retention hold, incident, webhook key ring)."
+          },
+          "resource": {
+            "type": "object",
+            "description": "A small closed object of ids, codes, numbers and times of the subject (never a telephone number, SIP URI, media URL, object key, key material or free text)."
+          }
+        }
+      },
+      "OperatorEnterpriseFeaturesChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.enterprise-features.change: the whole administrative capability set of the environment's enterprise baseline policy.",
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "capabilities"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The configuration's current version (0 = not configured yet); the change happens only at this version (else 409 VERSION_CONFLICT)."
+          },
+          "capabilities": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": [
+                "MANAGE_ROUTING",
+                "MANAGE_PUBLIC_FORWARDING",
+                "MANAGE_VOICEMAIL",
+                "MANAGE_RECORDING"
+              ]
+            }
+          }
+        }
+      },
       "OperatorEnterprisePolicies": {
         "type": "object",
         "additionalProperties": false,
@@ -16716,7 +18269,8 @@
           "maxConcurrentCommunications",
           "telecomSpendDailyLimitMinor",
           "telecomSpendMonthlyLimitMinor",
-          "updatedAt"
+          "updatedAt",
+          "version"
         ],
         "properties": {
           "requestsPerMinute": {
@@ -16746,6 +18300,11 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The row version an admin-bridge command is locked to (expectedVersion)."
           }
         }
       },
@@ -16791,6 +18350,134 @@
           }
         }
       },
+      "OperatorLimitsChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.limits.change: replaces the request-rate and concurrency limits of the level; its telecom spend ceilings are kept.",
+        "required": [
+          "tenantId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "applicationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application level (an application of the tenant); absent or null = the tenant level."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The configuration's current version (0 = not configured yet); the change happens only at this version (else 409 VERSION_CONFLICT)."
+          },
+          "requestsPerMinute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "null or absent = not configured."
+          },
+          "maxConcurrentCommunications": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "null or absent = not configured."
+          }
+        }
+      },
+      "OperatorOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The settlement record of an applied admin-bridge command (written in the same transaction as the change).",
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "APPLIED"
+            ]
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,19}$"
+          }
+        }
+      },
+      "OperatorPlaceRetentionHoldRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.retention-hold.place: a hold over one scope of the tenant (never platform-wide). The hold's id is the Idempotency-Key.",
+        "required": [
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "dataClass",
+          "reasonCode"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dataClass": {
+            "type": "string",
+            "pattern": "^(\\*|[A-Z][A-Z_]{1,63})$",
+            "description": "A retention data class, or * for every class."
+          },
+          "resourceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "One resource of the scope; absent or null = every resource."
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "POLICY_REVIEW",
+              "DISPUTE",
+              "SECURITY_INVESTIGATION",
+              "OTHER"
+            ]
+          }
+        }
+      },
       "OperatorRecording": {
         "type": "object",
         "additionalProperties": false,
@@ -16805,7 +18492,8 @@
           "sizeBytes",
           "retentionUntil",
           "createdAt",
-          "deletedAt"
+          "deletedAt",
+          "version"
         ],
         "properties": {
           "recordingId": {
@@ -16859,6 +18547,11 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The row version an admin-bridge command is locked to (expectedVersion)."
           }
         }
       },
@@ -16884,6 +18577,36 @@
               "null"
             ],
             "maxLength": 100
+          }
+        }
+      },
+      "OperatorResolveAbuseReportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.abuse-report.resolve: the report's new status.",
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "status"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's current row version; the change happens only at this version (else 409 VERSION_CONFLICT)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REVIEWED",
+              "DISMISSED",
+              "OPEN"
+            ]
           }
         }
       },
@@ -17080,6 +18803,32 @@
           }
         }
       },
+      "OperatorRoutingPolicyChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.routing.change: the environment's new routing policy (version = its revision).",
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "policy"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The configuration's current version (0 = not configured yet); the change happens only at this version (else 409 VERSION_CONFLICT)."
+          },
+          "policy": {
+            "type": "object",
+            "description": "The whole typed routing policy (camelCase RoutingPolicy as platform_admin routing-policy set takes it; unknown fields are refused, 400)."
+          }
+        }
+      },
       "OperatorSpendPolicies": {
         "type": "object",
         "additionalProperties": false,
@@ -17178,6 +18927,92 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "OperatorSpendPolicyChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "calling.spend-limits.change: the environment's whole telecom spend / velocity policy, amounts in minor units of currency (version = its revision). The database's consistency checks apply (400 otherwise).",
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "currency",
+          "legAllowanceMinor",
+          "maxLegSeconds",
+          "dailyLimitMinor",
+          "monthlyLimitMinor",
+          "maxConcurrentLegs",
+          "maxOriginationsPerMinute",
+          "maxPerPartyPerHour",
+          "enabled"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The configuration's current version (0 = not configured yet); the change happens only at this version (else 409 VERSION_CONFLICT)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "legAllowanceMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxLegSeconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "dailyLimitMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "monthlyLimitMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxConcurrentLegs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxOriginationsPerMinute": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxPerPartyPerHour": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxPerPrincipalPerHour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "maxPerServiceAccountPerHour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "maxPerContextPerHour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -17281,6 +19116,42 @@
               "null"
             ],
             "maxLength": 100
+          }
+        }
+      },
+      "OperatorTenantCommandRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A command on an unversioned subject of the tenant (no expectedVersion).",
+        "required": [
+          "tenantId"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          }
+        }
+      },
+      "OperatorVersionedCommandRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A command on one versioned row of the tenant.",
+        "required": [
+          "tenantId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Platform Access tenant of the subject (no command crosses tenants)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The subject's current row version; the change happens only at this version (else 409 VERSION_CONFLICT)."
           }
         }
       },

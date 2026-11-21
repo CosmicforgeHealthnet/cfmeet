@@ -14,6 +14,7 @@
 //! | `CF_NUMBERING_BASE_URL` | no | Numbering (Part IV L): DCN grants; unset = DCN calls fail closed |
 //! | `CF_NOTIFICATIONS_BASE_URL` | with `CALLING_PUSH_TRANSPORT=notifications` | the Notification Service's call fast lane I3 and its cancellation I3c (`notifications-call-push.dispatch`, roadmap N9, gap audit C1) |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `CALLING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
+//! | `CF_ADMIN_BRIDGE_BASE_URL` | no | the HQ admin bridge's private event listener (ADR 0068 A7): Calling writes and relays its owner events `abuse.report.changed.v1` / `incident.changed.v1` to `POST /internal/v1/hq-bridge/events` (`hq-bridge-events.publish`); unset = nothing is written or sent |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service (roadmap N7): Calling writes and relays its `calling.*` publications (missed call, voicemail / recording ready) to I1 (`notifications-event.publish`); unset = nothing is written or sent, and the notification-publications migration history is not required |
 //!
 //! There is no default key, no inline-key variable and no shared secret. A missing or
@@ -67,6 +68,12 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "CF_NOTIFICATIONS_BASE_URL",
         cf_service_auth::services::NOTIFICATIONS,
+    ),
+    // ADR 0068 A7: the HQ admin bridge's private event listener (hq-bridge-events.publish)
+    // for Calling's owner events (abuse reports, incidents); unset = none written or sent.
+    (
+        crate::admin_bridge_events::ENV_BASE_URL,
+        cf_service_auth::services::ADMIN_BRIDGE,
     ),
 ];
 

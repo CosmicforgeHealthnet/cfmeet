@@ -323,6 +323,45 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("DELETE /v1/blocks/{block_id}", Probe::HiddenPath),
     ("POST /v1/calls/{call_id}/abuse-reports", Probe::Body),
     ("POST /v1/calling/user-sessions", Probe::Body),
+    // ADR 0068 A4: the admin bridge's operator commands (calling.administer).
+    (
+        "POST /internal/v1/operator/abuse-reports/{abuse_report_id}/resolve",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/blocks/{block_rule_id}/release",
+        Probe::Body,
+    ),
+    ("POST /internal/v1/operator/limits", Probe::Body),
+    (
+        "POST /internal/v1/operator/routing-policies/{environment_id}",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/enterprise-policies/{environment_id}/capabilities",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/spend-policies/{environment_id}",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/recordings/{recording_id}/delete",
+        Probe::Body,
+    ),
+    ("POST /internal/v1/operator/retention-holds", Probe::Body),
+    (
+        "POST /internal/v1/operator/retention-holds/{hold_id}/release",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/incidents/{incident_id}/resolve",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/webhook-keys/reseal",
+        Probe::Body,
+    ),
 ];
 
 /// Operations that cannot be reached in the test world, with the reason.
@@ -665,6 +704,12 @@ async fn provision() -> Option<Provisioned> {
     )
     .await;
     ids.insert("block_id", id_of(&block, "blockId"));
+    // The admin bridge's operator commands address the same rule, the environment, and a
+    // hold / incident id (refused before any lookup in the matrix).
+    ids.insert("block_rule_id", id_of(&block, "blockId"));
+    ids.insert("environment_id", a.w.consumer.env(a.w.kind).id.as_uuid());
+    ids.insert("hold_id", Uuid::new_v4());
+    ids.insert("incident_id", Uuid::new_v4());
     // An abuse report (operator review, C21) on a connected call.
     let (reported, _, _) = a.connected_call("VOICE").await;
     let report = send(
@@ -792,6 +837,39 @@ impl Provisioned {
             .iter()
             .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
             .collect();
+        let refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.as_str()))
+            .collect();
+        self.h()
+            .request_with(method, path, None, Some(body), &refs)
+            .await
+    }
+}
+
+impl Provisioned {
+    /// The admin bridge (ADR 0068) relaying a two-person command of a named HQ operator.
+    async fn as_bridge(&self, method: Method, path: &str, body: Value) -> TestResponse {
+        let signed = self
+            .h()
+            .peers
+            .admin_bridge
+            .sign(&OutboundServiceRequest::new_operation(ServiceId::calling()))
+            .unwrap();
+        let mut headers: Vec<(String, String)> = signed
+            .headers()
+            .iter()
+            .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
+            .collect();
+        for (n, v) in [
+            ("x-cf-operator", "hq:matrix-operator".to_string()),
+            ("x-cf-approver", "hq:matrix-approver".to_string()),
+            ("x-cf-approval-ref", "apr_matrix".to_string()),
+            ("x-cf-intent-digest", "a".repeat(64)),
+            ("idempotency-key", Uuid::new_v4().to_string()),
+        ] {
+            headers.push((n.to_string(), v));
+        }
         let refs: Vec<(&str, &str)> = headers
             .iter()
             .map(|(n, v)| (n.as_str(), v.as_str()))
@@ -1106,6 +1184,11 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                         &[("idempotency-key", &Uuid::new_v4().to_string())],
                     )
                     .await
+            }
+            (Auth::Service, _) if op.requires[0] == "calling.administer" => {
+                // The admin bridge with a named, approved operator and a key: the body
+                // alone is wrong.
+                p.as_bridge(op.method.clone(), &path, bad.clone()).await
             }
             (Auth::Service, _) => {
                 let peers = p.h().peers.clone();

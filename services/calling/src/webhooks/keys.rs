@@ -156,17 +156,35 @@ impl WebhookService {
         after: Option<Uuid>,
         limit: u64,
     ) -> WebhookResult<ResealReport> {
+        self.reseal_batch_of(None, after, limit).await
+    }
+
+    /// Whether a sealing key ring is configured (a reseal can run).
+    pub fn key_ring_configured(&self) -> bool {
+        self.secret_box().is_ok()
+    }
+
+    /// [`reseal_batch`](Self::reseal_batch), limited to one tenant's subscriptions when
+    /// `tenant` is given (the admin bridge's tenant-scoped reseal, ADR 0068 A4).
+    pub async fn reseal_batch_of(
+        &self,
+        tenant: Option<Uuid>,
+        after: Option<Uuid>,
+        limit: u64,
+    ) -> WebhookResult<ResealReport> {
         let secret_box = self.secret_box()?;
         let current = secret_box.current_kid().to_string();
         let txn = self.db().begin().await.db()?;
         let rows = SealedRow::find_by_statement(stmt(
             "SELECT id, secret_sealed FROM webhook_subscriptions \
               WHERE secret_key_id IS DISTINCT FROM $1 AND ($2::uuid IS NULL OR id > $2) \
+                AND ($4::uuid IS NULL OR tenant_id = $4) \
               ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED",
             vec![
                 current.clone().into(),
                 after.into(),
                 (limit.clamp(1, 1000) as i64).into(),
+                tenant.into(),
             ],
         ))
         .all(&txn)

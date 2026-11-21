@@ -14,6 +14,7 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod bridge;
 pub mod calls;
 pub mod contracts;
 pub mod deployment;

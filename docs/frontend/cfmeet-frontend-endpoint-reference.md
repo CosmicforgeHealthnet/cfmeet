@@ -16,7 +16,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.9.0 | 312 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.9.0 | 76 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.33.0 | 146 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.34.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
 | **Total** | | | **745** |
@@ -694,7 +694,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.9.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.33.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.34.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
