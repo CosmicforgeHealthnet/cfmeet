@@ -655,8 +655,22 @@ async fn meeting_commands_end_archive_transfer_and_delete_artifacts() {
         (v["status"].as_str(), v["version"].as_str()),
         (Some("DELETE_REQUESTED"), Some("2"))
     );
-    let (status, _) = command(&h, &tpath, Uuid::new_v4(), json!({ "expectedVersion": 2 })).await;
-    assert_eq!(status, StatusCode::GONE, "already being deleted");
+    // The request deletes at once when it can (`delete_now` after the commit), which moves
+    // the artifact past version 2: refused at its CURRENT version, as already deleted
+    // (410); at a stale version it would be a 409 VERSION_CONFLICT, nothing done.
+    let av = h
+        .app
+        .scalar(&format!(
+            "SELECT version::bigint FROM meeting_artifacts WHERE id = '{artifact}'"
+        ))
+        .await;
+    assert!(av >= 2, "the request moved the version forward");
+    let (status, v) = command(&h, &tpath, Uuid::new_v4(), json!({ "expectedVersion": av })).await;
+    assert_eq!(
+        (status, code_of(&v)),
+        (StatusCode::GONE, "ARTIFACT_DELETED"),
+        "already being deleted"
+    );
 
     // archive at the space's version
     let sv = h
