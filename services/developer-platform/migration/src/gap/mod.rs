@@ -5,3 +5,4 @@
 pub mod m20261206_000001_retention_purge;
 pub mod m20261207_000002_platform_build;
 pub mod m20261208_000003_apps;
+pub mod m20261209_000004_admin_operations;

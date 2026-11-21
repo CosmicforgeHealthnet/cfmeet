@@ -1915,6 +1915,32 @@ impl Control {
             .map(|(c, w)| (c, w.expect("producers").producers))
     }
 
+    /// A request from the admin bridge with the given headers and body (ADR 0068 A3).
+    pub async fn bridge_send(
+        &self,
+        method: Method,
+        path: &str,
+        extra: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Response {
+        let signed = self
+            .peers
+            .bridge
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        for (k, v) in extra {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        self.send(method, path, headers, body).await
+    }
+
     /// A GET from the admin bridge with the given attribution headers (ADR 0068).
     pub async fn bridge(&self, path: &str, attribution: &[(&str, &str)]) -> Response {
         self.signed_with(&self.peers.bridge, path, attribution)

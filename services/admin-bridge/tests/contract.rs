@@ -207,6 +207,16 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "apps.apps.read",
             "apps.versions.list",
             "apps.installs.list",
+            "verification.cases.list",
+            "verification.cases.read",
+            "verification.case-history.list",
+            "verification.case.claim",
+            "verification.partner-go-live.approve",
+            "verification.partner-go-live.reject",
+            "verification.partner-go-live.suspend",
+            "verification.app-review.approve",
+            "verification.app-review.reject",
+            "verification.app-review.publish",
             "notifications.deliveries.list",
             "notifications.failed-deliveries.list",
             "notifications.suppressions.list",
@@ -216,7 +226,12 @@ fn served_capabilities_are_exactly_the_ones_built() {
     );
     for c in catalog() {
         if c.served {
-            assert_eq!(c.state(), State::ReadOnly, "{}", c.id);
+            let expected = if c.kind == Kind::Command {
+                State::Available
+            } else {
+                State::ReadOnly
+            };
+            assert_eq!(c.state(), expected, "{}", c.id);
             assert!(c.blocker().is_none() && !c.tests.is_empty(), "{}", c.id);
         } else {
             assert!(
