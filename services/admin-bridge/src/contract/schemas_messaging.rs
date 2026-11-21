@@ -47,11 +47,16 @@ pub fn insert(m: &mut Map<String, Value>) {
         "status": {"enum": ["OPEN", "ACTIONED", "DISMISSED"]},
         "resolution": nullable_code, "resolved_at": nullable_ts, "created_at": ts
     });
+    let mut listed = report_props.as_object().cloned().unwrap_or_default();
+    listed.insert(
+        "version".into(),
+        json!({"type": "integer", "minimum": 1, "description": "The report's row version (expected_version of its moderation commands)."}),
+    );
     m.insert(
         "MessagingReport".into(),
         closed(
             "One chat report: ids, category, states and times. The evidence itself (a sealed reporter disclosure or a MANAGED message reference) is never relayed; evidence_kind only says which kind was given.",
-            report_props.clone(),
+            Value::Object(listed),
         ),
     );
     m.insert("MessagingReportPage".into(), page("MessagingReport"));
@@ -86,7 +91,8 @@ pub fn insert(m: &mut Map<String, Value>) {
                 "conversation_id": nullable_uuid, "principal_id": nullable_uuid,
                 "reason_category": {"enum": ["LITIGATION", "REGULATORY", "INVESTIGATION", "INTERNAL_POLICY"]},
                 "status": {"enum": ["ACTIVE", "RELEASED"]},
-                "created_at": ts, "expires_at": nullable_ts, "released_at": nullable_ts, "release_reason": nullable_code
+                "created_at": ts, "expires_at": nullable_ts, "released_at": nullable_ts, "release_reason": nullable_code,
+                "version": {"type": "integer", "minimum": 1}
             }),
         ),
     );

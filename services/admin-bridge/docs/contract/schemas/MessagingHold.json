@@ -15,7 +15,8 @@
     "created_at",
     "expires_at",
     "released_at",
-    "release_reason"
+    "release_reason",
+    "version"
   ],
   "properties": {
     "hold_id": {
@@ -93,6 +94,10 @@
         "null"
       ],
       "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
     }
   }
 }

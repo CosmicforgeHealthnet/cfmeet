@@ -76,7 +76,10 @@ fn report_fields(r: &Value) -> T<Vec<(&'static str, Value)>> {
 /// One report: ids, category, states and times. The evidence itself is never relayed;
 /// `evidence_kind` only says which kind the reporter gave.
 pub fn report(r: &Value) -> T<Value> {
-    Ok(obj(report_fields(r)?))
+    let mut f = report_fields(r)?;
+    // The row version the moderation commands act on (the detail carries none).
+    f.push(("version", t::int(r, "version")?));
+    Ok(obj(f))
 }
 
 fn action(a: &Value) -> T<Value> {
@@ -121,6 +124,7 @@ pub fn hold(h: &Value) -> T<Value> {
         ("expires_at", t::opt_time(h, "expiresAt")?),
         ("released_at", t::opt_time(h, "releasedAt")?),
         ("release_reason", t::opt_string(h, "releaseReason")?),
+        ("version", t::int(h, "version")?),
     ]);
     Ok(obj(f))
 }

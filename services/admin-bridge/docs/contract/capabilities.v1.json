@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "a5197ee283932a2e04410fab50dfb4ace5010a68e7befed5dac780b8f7c49c96",
-    "capability_matrix_sha256": "35453c5e9559a41b4c60382a54e131616d93f9014a853bf3484671c39ab4892d"
+    "openapi_sha256": "9abdb415a4caa5418f36ba009f048057f6ffce323d8191f480a6f8dc69335184",
+    "capability_matrix_sha256": "d1bd61962bd62d914df4d9b611585cd6dfc614847b0ec62d428893815047c1fc"
   },
   "query_shapes": {
     "SCOPED": [
@@ -52,8 +52,8 @@
     "capabilities": 247,
     "by_state": {
       "READ_ONLY": 110,
-      "AVAILABLE": 63,
-      "DISABLED": 51,
+      "AVAILABLE": 76,
+      "DISABLED": 38,
       "BLOCKED_DEPENDENCY": 23
     }
   },
@@ -2721,11 +2721,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/messaging/reports/{report_id}/remove-message",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/reports/{report_id}/remove-message",
       "path_params": [
         {
           "name": "report_id",
@@ -2750,14 +2750,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMessageRemoveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMessageRemoveResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.message.remove",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -2766,8 +2766,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -2776,11 +2778,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/messaging/conversations/{conversation_id}/members/{member_id}/mute",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/mute",
       "path_params": [
         {
           "name": "conversation_id",
@@ -2810,14 +2812,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMemberMuteRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMemberMuteResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.member.mute",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -2826,8 +2828,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -2836,11 +2840,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/messaging/conversations/{conversation_id}/members/{member_id}/remove",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/remove",
       "path_params": [
         {
           "name": "conversation_id",
@@ -2870,14 +2874,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMemberRemoveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingMemberRemoveResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.member.remove",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -2886,8 +2890,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -2896,11 +2902,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/messaging/conversations/{conversation_id}/restrict",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/restrict",
       "path_params": [
         {
           "name": "conversation_id",
@@ -2925,14 +2931,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingConversationRestrictRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingConversationRestrictResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.conversation.restrict",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -2941,8 +2947,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -2951,11 +2959,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/messaging/reports/{report_id}/dismiss",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/reports/{report_id}/dismiss",
       "path_params": [
         {
           "name": "report_id",
@@ -2980,14 +2988,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportDismissRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportDismissResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.report.dismiss",
       "risk": "R3",
       "privacy": "SAFETY_EVIDENCE",
@@ -2996,8 +3004,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3054,11 +3064,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/policy",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/policy",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -3077,14 +3087,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingPolicyChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingPolicyChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.policy.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -3093,8 +3103,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3153,11 +3165,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/holds",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/holds",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -3176,14 +3188,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldPlaceRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldPlaceResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.hold.place",
       "risk": "R3",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3192,8 +3204,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3202,11 +3216,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/holds/{hold_id}/release",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/holds/{hold_id}/release",
       "path_params": [
         {
           "name": "hold_id",
@@ -3231,14 +3245,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldReleaseRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldReleaseResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.hold.release",
       "risk": "R3",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3247,8 +3261,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3406,11 +3422,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A7",
       "method": "POST",
       "path": "/messaging/deletion-requests",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/deletion-requests",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -3427,14 +3443,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingDeletionRequestCreateRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingDeletionRequestCreateResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.deletion-request.create",
       "risk": "R4",
       "privacy": "PERSONAL",
@@ -3443,8 +3459,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A7: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3555,11 +3573,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/switches/{switch_id}",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/switches/{switch_id}",
       "path_params": [
         {
           "name": "switch_id",
@@ -3582,14 +3600,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingSwitchChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingSwitchChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.switch.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -3598,8 +3616,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3660,11 +3680,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/incidents",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/incidents/{incident_id}/resolve",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -3681,14 +3701,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingIncidentRecordRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingIncidentRecordResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.incident.record",
       "risk": "R2",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3697,8 +3717,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3759,11 +3781,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/failed-messages/{message_id}/retry",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/failed-messages/{message_id}/retry",
       "path_params": [
         {
           "name": "message_id",
@@ -3786,14 +3808,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingFailedMessageRetryRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingFailedMessageRetryResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.failed-message.retry",
       "risk": "R2",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3802,8 +3824,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -3862,11 +3886,11 @@
       "module": "messaging",
       "kind": "COMMAND",
       "owner": "messaging",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A5",
       "method": "POST",
       "path": "/messaging/key-transparency/checkpoint",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/key-transparency/checkpoint",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -3883,14 +3907,14 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingKeyTransparencyCheckpointRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingKeyTransparencyCheckpointResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "messaging.key-transparency.checkpoint",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -3899,8 +3923,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
