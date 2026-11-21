@@ -12398,8 +12398,31 @@
           "Account security (v2)"
         ],
         "summary": "Export my personal data",
-        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events) and, under\n`elsewhere`, what Messaging (conversations), the Communications Hub (profile, CF Meet ID,\ncontacts, lists, saved messages, settings) and Calling (call history) hold about it; an\nowner that cannot answer is reported as unavailable. Requires a session-bound sign-in.",
+        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events) and, under\n`elsewhere`, what Messaging (conversations), the Communications Hub (profile, CF Meet ID,\ncontacts, lists, saved messages, settings) and Calling (call history) hold about it; an\nowner that cannot answer is reported as unavailable. Requires a session-bound sign-in.\n\nADR 0068 A7: with `exportId` and the `X-CF-Data-Export-Token` header (both from the emailed\nlink of an export CF Meet support requested for the owner), the stored copy of THAT export\nis answered instead, once (it is deleted at once): this needs a sign-in made within the\nre-authentication window (otherwise 403 `REAUTHENTICATION_REQUIRED`: sign in again), and a\nused, foreign, wrong or expired link (7 days) is 404.",
         "operationId": "v2_export_my_data",
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "query",
+            "description": "An export CF Meet support requested for this account (from the emailed download link;\nits `token` goes in the `X-CF-Data-Export-Token` header). Omitted: the live export.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "X-CF-Data-Export-Token",
+            "in": "header",
+            "description": "The single-use token of the emailed download link (with exportId)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "The personal-data export",
@@ -12407,6 +12430,16 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR - exportId without X-CF-Data-Export-Token (or the reverse)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -12422,7 +12455,17 @@
             }
           },
           "403": {
-            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session, or (exportId) the sign-in is not recent; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND - (exportId) the link is invalid, already used or expired",
             "content": {
               "application/json": {
                 "schema": {

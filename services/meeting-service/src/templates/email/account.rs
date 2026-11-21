@@ -261,6 +261,48 @@ pub fn notification_email(username: &str, subject: &str, message: &str) -> Email
     }
 }
 
+/// ADR 0068 A7: the owner's personal-data export (requested through CF Meet support) is
+/// ready. The single-use download link needs the owner's own CF Meet sign-in.
+pub fn data_export_ready_email(
+    username: &str,
+    download_url: &str,
+    expires_utc: &str,
+) -> EmailTemplate {
+    let (hi_html, hi_text) = greeting(username);
+    let what = "The copy of your personal data that CF Meet support requested for you is ready.                 Only you can download it: the link works once, and asks you to sign in to your                 CF Meet account again first.";
+    let until = format!("The link expires on {expires_utc} (UTC); after that the copy is deleted.");
+    let warn = "If you did not ask CF Meet support for a copy of your data, do not open the link                 and contact support.";
+    let html = format!(
+        "{hi_html}{}{}{}{}",
+        paragraph(&escape_html(what)),
+        button("Download my data", &escape_html(download_url)),
+        paragraph(&escape_html(&until)),
+        note(warn),
+    );
+    let text = format!(
+        "{hi_text}
+
+{}
+{}
+
+{}
+
+{}",
+        plain(what),
+        plain(download_url),
+        plain(&until),
+        plain(warn)
+    );
+    EmailTemplate {
+        html: wrap_html("Your CF Meet data export is ready", &html),
+        text: wrap_text(&format!(
+            "Your CF Meet data export is ready
+
+{text}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use super::{
     authenticate, error, limit_of, mask_email, not_found, ok, opt_rfc, page, path_uuid, rfc, rows,
-    unavailable, uuid_cursor, validation, OperatorState, PageQuery,
+    time_cursor, unavailable, uuid_cursor, validation, OperatorState, PageQuery,
 };
 use crate::{
     error::ErrorCode,
@@ -42,6 +42,8 @@ pub const CHAT_MIGRATION: &str = "/internal/v1/operator/meetings/chat-migration"
 pub const EMAIL_DELIVERY: &str = "/internal/v1/operator/meetings/email-deliveries/:delivery_id";
 pub const CRITICAL_LANE: &str = "/internal/v1/operator/meetings/critical-lane";
 pub const OPERATION: &str = "/internal/v1/operator/operations/:idempotency_key";
+pub const USER_EXPORTS: &str = "/internal/v1/operator/accounts/users/:user_id/exports";
+pub const EXPORT: &str = "/internal/v1/operator/accounts/exports/:export_id";
 
 macro_rules! auth {
     ($s:expr, $req:expr, $perm:expr) => {
@@ -442,6 +444,63 @@ pub(super) async fn critical_lane(State(s): State<OperatorState>, req: Parts) ->
     let rid = auth!(s, req, InternalPermission::MeetingAdminister);
     match crate::services::critical_notifications::lane_status(&s.app.db).await {
         Ok(l) => ok(serde_json::to_value(l).unwrap_or(Value::Null)),
+        Err(_) => unavailable(&rid),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A7: owner-delivered personal-data exports (references only)
+// ---------------------------------------------------------------------------
+
+/// `GET /internal/v1/operator/accounts/users/{userId}/exports?limit&cursor`: the account's
+/// exports, newest first (`cursor` = `<micros>.<exportId>`): state, delivery channel,
+/// masked recipient, size, SHA-256 and times. Never the document, a token, a link or the
+/// address.
+pub(super) async fn user_exports(
+    State(s): State<OperatorState>,
+    Path(id): Path<String>,
+    Query(q): Query<PageQuery>,
+    req: Parts,
+) -> Response {
+    let rid = auth!(s, req, InternalPermission::AccountAdminister);
+    let id = try_r!(path_uuid(&id, &rid));
+    let limit = try_r!(limit_of(&q, &rid));
+    let after = try_r!(time_cursor(&q, &rid));
+    match exists(&s, "SELECT 1 AS one FROM users WHERE id = $1", id).await {
+        Ok(true) => {}
+        Ok(false) => return not_found(&rid),
+        Err(_) => return unavailable(&rid),
+    }
+    let found = match crate::services::account_export::list(&s.app.db, id, after, limit).await {
+        Ok(f) => f,
+        Err(_) => return unavailable(&rid),
+    };
+    let next = (found.len() as i64 > limit).then(|| {
+        let (at, eid, _) = &found[limit as usize - 1];
+        format!("{}.{}", at.timestamp_micros(), eid)
+    });
+    page(
+        found
+            .into_iter()
+            .take(limit as usize)
+            .map(|(_, _, v)| v)
+            .collect(),
+        next,
+    )
+}
+
+/// `GET /internal/v1/operator/accounts/exports/{exportId}`: one export's state (the same
+/// reference the command answered).
+pub(super) async fn export(
+    State(s): State<OperatorState>,
+    Path(id): Path<String>,
+    req: Parts,
+) -> Response {
+    let rid = auth!(s, req, InternalPermission::AccountAdminister);
+    let id = try_r!(path_uuid(&id, &rid));
+    match crate::services::account_export::resource(&s.app.db, id).await {
+        Ok(Some(v)) => ok(v),
+        Ok(None) => not_found(&rid),
         Err(_) => unavailable(&rid),
     }
 }

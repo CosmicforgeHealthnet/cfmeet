@@ -809,3 +809,371 @@ async fn the_new_reads_answer_ids_states_and_counts() {
         StatusCode::FORBIDDEN
     );
 }
+
+// ---------------------------------------------------------------------------
+// A7: accounts.user.export (R4), owner-delivered
+// ---------------------------------------------------------------------------
+
+/// Waits until the export built in the background (or builds it here) is past REQUESTED.
+async fn export_built(h: &Harness, export_id: Uuid) -> String {
+    for _ in 0..100 {
+        backend::services::account_export::process(&h.app.state, export_id)
+            .await
+            .unwrap();
+        let (status, v) = read(h, &format!("{BASE}/accounts/exports/{export_id}")).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let state = v["state"].as_str().unwrap().to_string();
+        if state != "REQUESTED" {
+            return state;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("the export was never built");
+}
+
+/// The single-use token of the download link emailed for `export_id`.
+async fn emailed_token(h: &Harness, export_id: Uuid) -> (String, String) {
+    let row = h
+        .app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "SELECT d.recipient, d.text_body FROM email_deliveries d \
+               JOIN account_data_exports e ON e.email_delivery_id = d.id WHERE e.id = $1",
+            [export_id.into()],
+        ))
+        .await
+        .unwrap()
+        .expect("the download link was queued");
+    let recipient: String = row.try_get("", "recipient").unwrap();
+    let text: String = row.try_get("", "text_body").unwrap();
+    let marker = format!("/settings/data-export/download?export={export_id}&token=");
+    let start = text.find(&marker).expect("the link names the export") + marker.len();
+    let token: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    (recipient, token)
+}
+
+/// The owner's download (`GET /api/v2/me/data-export?exportId` + the link's token): (status,
+/// raw body).
+async fn download(
+    h: &Harness,
+    export_id: Uuid,
+    bearer: &str,
+    token: &str,
+) -> (StatusCode, Vec<u8>) {
+    let r = h
+        .app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/v2/me/data-export?exportId={export_id}"))
+                .header("authorization", format!("Bearer {bearer}"))
+                .header("x-cf-data-export-token", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = r.status();
+    let bytes = axum::body::to_bytes(r.into_body(), 1 << 24).await.unwrap();
+    (status, bytes.to_vec())
+}
+
+#[tokio::test]
+async fn account_export_is_delivered_to_the_owner_only() {
+    let Some(h) = Harness::start().await else {
+        return;
+    };
+    let mut owner = h.app.user_with_email("ada", "ada.export@example.com").await;
+    let pre_session = owner.token.clone();
+    h.exec(&format!(
+        "UPDATE users SET email_verified_at = now() WHERE id = '{}'",
+        owner.id
+    ))
+    .await;
+    h.app.trust_device(&mut owner).await;
+    let path = format!("{BASE}/accounts/users/{}/export", owner.id);
+    let v1 = account_version(&h, owner.id).await;
+    let body = json!({ "expectedVersion": v1, "reasonCode": "DATA_SUBJECT_REQUEST" });
+
+    // refusals: nothing recorded
+    let mut no_key = Opts::key(Uuid::new_v4());
+    no_key.key = None;
+    assert_eq!(
+        command_on(&h, &h.router, &path, no_key, body.clone())
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let mut no_approval = Opts::key(Uuid::new_v4());
+    no_approval.approval = false;
+    let (status, v) = command_on(&h, &h.router, &path, no_approval, body.clone()).await;
+    assert_eq!(
+        (status, code_of(&v)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "APPROVAL_REQUIRED")
+    );
+    let (status, v) = command(
+        &h,
+        &path,
+        Uuid::new_v4(),
+        json!({ "expectedVersion": v1 + 3 }),
+    )
+    .await;
+    assert_eq!(
+        (status, code_of(&v)),
+        (StatusCode::CONFLICT, "VERSION_CONFLICT")
+    );
+    assert_eq!(
+        command(
+            &h,
+            &path,
+            Uuid::new_v4(),
+            json!({ "expectedVersion": v1, "to": "x@y.z" })
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST,
+        "no recipient can be named"
+    );
+    let mut own = Opts::key(Uuid::new_v4());
+    own.linked_user = Some(owner.id);
+    let (status, v) = command_on(&h, &h.router, &path, own, body.clone()).await;
+    assert_eq!(
+        (status, code_of(&v)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "SELF_ACTION_REFUSED")
+    );
+    let unverified = h.app.user_with_email("bob", "bob.export@example.com").await;
+    let (status, v) = command(
+        &h,
+        &format!("{BASE}/accounts/users/{}/export", unverified.id),
+        Uuid::new_v4(),
+        json!({ "expectedVersion": 1 }),
+    )
+    .await;
+    assert_eq!(
+        (status, code_of(&v)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "STATE_CONFLICT"),
+        "no verified address to deliver to"
+    );
+    let (status, _) = command_on(
+        &h,
+        &h.meetings_only,
+        &path,
+        Opts::key(Uuid::new_v4()),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let mut headers = signed(&h.peer, &Method::POST, &path);
+    headers.push(("x-cf-operator".into(), "hq:staff-0001".into()));
+    headers.push(("idempotency-key".into(), Uuid::new_v4().to_string()));
+    assert_eq!(
+        send(&h.router, Method::POST, &path, headers, Some(body.clone()))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        h.app
+            .scalar("SELECT count(*) FROM account_data_exports")
+            .await,
+        0
+    );
+
+    // applied: a reference only
+    let key = Uuid::new_v4();
+    let (status, v) = command(&h, &path, key, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["status"], "REQUESTED");
+    assert_eq!(v["version"], "1");
+    let r = &v["resource"];
+    assert_eq!(r["delivery"], "OWNER_DELIVERED");
+    assert_eq!(r["deliveryChannel"], "DOWNLOAD_LINK_EMAIL");
+    assert_eq!(r["recipientMasked"], "a***@e***.com");
+    assert_eq!(r["userId"], json!(owner.id));
+    assert!(r["deliveryRef"].as_str().is_some() && r["expiresAt"].as_str().is_some());
+    let export_id = Uuid::parse_str(r["exportId"].as_str().unwrap()).unwrap();
+    let text = v.to_string();
+    assert!(!text.contains("ada.export@") && !text.contains("token") && !text.contains("http"));
+    let (status, rec) = record(&h, key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        (rec["source_status"].clone(), rec["source_version"].clone()),
+        (json!("REQUESTED"), json!("1"))
+    );
+
+    // built, sealed and the link emailed to the owner's verified address only
+    assert_eq!(export_built(&h, export_id).await, "READY");
+    let (status, state) = read(&h, &format!("{BASE}/accounts/exports/{export_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(state["sizeBytes"].as_i64().unwrap() > 0);
+    let sha = state["sha256"].as_str().unwrap().to_string();
+    assert_eq!(sha.len(), 64);
+    assert!(!state.to_string().contains("ada.export@"));
+    let (recipient, token) = emailed_token(&h, export_id).await;
+    assert_eq!(recipient, "ada.export@example.com");
+    assert_eq!(token.len(), 43);
+    assert_eq!(
+        h.app
+            .scalar(&format!(
+                "SELECT count(*) FROM account_data_exports WHERE id = '{export_id}' \
+                   AND token_digest = encode(sha256('{token}'::bytea), 'hex') \
+                   AND position('ada.export@'::bytea IN sealed) = 0"
+            ))
+            .await,
+        1,
+        "only the token's digest and a sealed copy are stored"
+    );
+    assert_eq!(
+        h.app
+            .scalar(&format!(
+                "SELECT count(*) FROM meeting_admin_operations WHERE idempotency_key = '{key}' \
+                   AND command = 'accounts.user.export' AND subject_id = '{}' \
+                   AND resulting_state = 'REQUESTED' AND operator_ref = 'hq:staff-0001' \
+                   AND approver_ref = 'hq:staff-0002'",
+                owner.id
+            ))
+            .await,
+        1
+    );
+    let (status, list) = read(
+        &h,
+        &format!("{BASE}/accounts/users/{}/exports?limit=1", owner.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["items"][0]["exportId"], json!(export_id));
+    assert_eq!(list["items"][0]["state"], "READY");
+    assert!(list.get("nextCursor").is_some());
+    assert_eq!(
+        read(
+            &h,
+            &format!("{BASE}/accounts/users/{}/exports", Uuid::new_v4())
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        read(&h, &format!("{BASE}/accounts/exports/{}", Uuid::new_v4()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // replay: same answer, applied once
+    let (status, again) = command(&h, &path, key, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        (again["status"].clone(), again["version"].clone()),
+        (json!("REQUESTED"), json!("1"))
+    );
+    assert_eq!(again["resource"]["exportId"], json!(export_id));
+    assert_eq!(
+        h.app
+            .scalar(&format!(
+                "SELECT count(*) FROM account_data_exports WHERE user_id = '{}'",
+                owner.id
+            ))
+            .await,
+        1
+    );
+
+    // the owner downloads it: own recent sign-in, the right token, once
+    assert_eq!(
+        download(&h, export_id, &pre_session, &token).await.0,
+        StatusCode::FORBIDDEN,
+        "a sign-in without a session must sign in again"
+    );
+    let stranger = {
+        let mut s = h.app.user_with_email("eve", "eve.export@example.com").await;
+        h.app.trust_device(&mut s).await;
+        s
+    };
+    assert_eq!(
+        download(&h, export_id, &stranger.token, &token).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        download(&h, export_id, &owner.token, "not-the-token")
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, _) = h
+        .app
+        .get(
+            &format!("/api/v2/me/data-export?exportId={export_id}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the token goes with the export id"
+    );
+    let (status, live) = h
+        .app
+        .get("/api/v2/me/data-export", Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "the live export is unchanged");
+    assert_eq!(live["account"]["email"], "ada.export@example.com");
+    let (status, bytes) = download(&h, export_id, &owner.token, &token).await;
+    assert_eq!(status, StatusCode::OK);
+    {
+        use sha2::{Digest, Sha256};
+        assert_eq!(
+            hex::encode(Sha256::digest(&bytes)),
+            sha,
+            "the digest HQ sees"
+        );
+    }
+    let doc: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(doc["account"]["email"], "ada.export@example.com");
+    assert_eq!(
+        download(&h, export_id, &owner.token, &token).await.0,
+        StatusCode::NOT_FOUND,
+        "single use"
+    );
+    let (_, state) = read(&h, &format!("{BASE}/accounts/exports/{export_id}")).await;
+    assert_eq!(state["state"], "DELIVERED");
+    assert_eq!(
+        h.app
+            .scalar(&format!(
+                "SELECT count(*) FROM account_data_exports WHERE id = '{export_id}' \
+                   AND sealed IS NULL AND token_digest IS NULL AND delivered_at IS NOT NULL"
+            ))
+            .await,
+        1,
+        "the copy is purged once downloaded"
+    );
+
+    // retention: an export not downloaded within 7 days is purged and its link dies
+    let v2 = account_version(&h, owner.id).await;
+    let (status, v) = command(&h, &path, Uuid::new_v4(), json!({ "expectedVersion": v2 })).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let late = Uuid::parse_str(v["resource"]["exportId"].as_str().unwrap()).unwrap();
+    assert_eq!(export_built(&h, late).await, "READY");
+    let (_, late_token) = emailed_token(&h, late).await;
+    h.exec(&format!(
+        "UPDATE account_data_exports SET expires_at = now() - interval '1 second' WHERE id = '{late}'"
+    ))
+    .await;
+    let swept = backend::services::account_export::sweep(&h.app.state)
+        .await
+        .unwrap();
+    assert!(swept.expired >= 1);
+    let (_, state) = read(&h, &format!("{BASE}/accounts/exports/{late}")).await;
+    assert_eq!(state["state"], "EXPIRED");
+    assert!(state["purgedAt"].as_str().is_some());
+    assert_eq!(
+        download(&h, late, &owner.token, &late_token).await.0,
+        StatusCode::NOT_FOUND
+    );
+}

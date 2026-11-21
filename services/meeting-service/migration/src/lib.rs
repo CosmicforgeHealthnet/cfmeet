@@ -51,6 +51,7 @@ mod m20261118_000007_platform_user_participants;
 mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
 mod m20261120_000001_admin_operations;
+mod m20261121_000001_account_data_exports;
 
 pub mod phase2_backfill;
 
@@ -571,14 +572,18 @@ pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrai
         .is_empty())
 }
 
-/// ADR 0068, phases A4–A7: the admin bridge's operations ledger (`meeting_admin_operations`)
-/// and the account administration version (`users.account_version`), in their own
+/// ADR 0068, phases A4–A7: the admin bridge's operations ledger (`meeting_admin_operations`),
+/// the account administration version (`users.account_version`) and the owner-delivered
+/// personal-data exports (`account_data_exports`, A7), in their own
 /// additive history so the previous image still starts after a rollback.
 pub struct AdminOperationsMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for AdminOperationsMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261120_000001_admin_operations::Migration)]
+        vec![
+            Box::new(m20261120_000001_admin_operations::Migration),
+            Box::new(m20261121_000001_account_data_exports::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("meeting_admin_operations_migrations").into_iden()

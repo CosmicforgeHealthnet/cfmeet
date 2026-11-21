@@ -604,6 +604,12 @@ async fn main() -> anyhow::Result<()> {
             panic!("Admin-operations migration is required (admin-operations-migration up)");
         }
         tracing::info!("admin bridge operator reads and commands enabled");
+        // A7: owner-delivered exports: builds that lapsed are retried, copies past their
+        // 7-day retention (or of a deleted account) are purged.
+        let _account_export_worker = backend::services::account_export::spawn_worker(
+            state.clone(),
+            std::time::Duration::from_secs(60),
+        );
     }
 
     // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
