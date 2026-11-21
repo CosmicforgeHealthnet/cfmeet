@@ -920,6 +920,70 @@ class Credential {
   Map<String, Object?> toJson() => json;
 }
 
+/// ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.
+class CredentialDelivery {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CredentialDelivery.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CredentialDelivery.create({required String createdAt, required Uuid credentialId, required String deliveryChannel, required Uuid deliveryRef, required Uuid environmentId, required String expiresAt, required String publicId, required Uuid serviceAccountId, required String state}) =>
+      CredentialDelivery.fromJson(<String, Object?>{
+        'createdAt': createdAt,
+        'credentialId': credentialId,
+        'deliveryChannel': deliveryChannel,
+        'deliveryRef': deliveryRef,
+        'environmentId': environmentId,
+        'expiresAt': expiresAt,
+        'publicId': publicId,
+        'serviceAccountId': serviceAccountId,
+        'state': state,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get createdAt => json['createdAt']! as String;
+
+  Uuid get credentialId => json['credentialId']! as String;
+
+  String get deliveryChannel => json['deliveryChannel']! as String;
+
+  Uuid get deliveryRef => json['deliveryRef']! as String;
+
+  Uuid get environmentId => json['environmentId']! as String;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  String get publicId => json['publicId']! as String;
+
+  Uuid get serviceAccountId => json['serviceAccountId']! as String;
+
+  String get state => json['state']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class CredentialDeliveryList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CredentialDeliveryList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CredentialDeliveryList.create({required List<CredentialDelivery> items, required Object? nextCursor}) =>
+      CredentialDeliveryList.fromJson(<String, Object?>{
+        'items': items.map((e) => e.toJson()).toList(),
+        'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<CredentialDelivery> get items => (json['items']! as List<Object?>).map((e) => CredentialDelivery.fromJson(e! as Map<String, Object?>)).toList();
+
+  Object? get nextCursor => json['nextCursor'];
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// One of: ACTIVE, ROTATION_OVERLAP, NOT_YET_VALID, EXPIRED, SUPERSEDED, REVOKED, SUSPENDED.
 typedef CredentialEffectiveState = String;
 

@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 57,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 566,
+    "PUBLIC_CUSTOMER": 568,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -5049,6 +5049,34 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.listCredentialDeliveries",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/credential-deliveries",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credential-deliveries",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.revealCredentialDelivery",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
     },
     {
       "id": "developer-platform.getCredential",
@@ -11150,6 +11178,22 @@
       "operationId": "putAllowedOrigins",
       "method": "PUT",
       "path": "/v1/environments/{environmentId}/allowed-origins",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listCredentialDeliveries",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/credential-deliveries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "revealCredentialDelivery",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal",
       "class": "PUBLIC_CUSTOMER"
     },
     {
