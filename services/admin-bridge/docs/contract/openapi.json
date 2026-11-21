@@ -76363,7 +76363,7 @@
               "application_id",
               "environment_id",
               "kind",
-              "tokens_not_before"
+              "sessions_invalid_before"
             ],
             "properties": {
               "principal_id": {
@@ -76392,7 +76392,7 @@
                 "type": "string",
                 "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
               },
-              "tokens_not_before": {
+              "sessions_invalid_before": {
                 "type": [
                   "string",
                   "null"
