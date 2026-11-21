@@ -43,6 +43,8 @@ pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
             HeaderName::from_static("x-request-id"),
             HeaderName::from_static("x-client-kind"),
             HeaderName::from_static("idempotency-key"),
+            // ADR 0068 A7: the single-use token of an emailed data-export link.
+            HeaderName::from_static("x-cf-data-export-token"),
         ])
         .expose_headers([
             HeaderName::from_static("x-request-id"),

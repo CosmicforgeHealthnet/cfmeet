@@ -15,7 +15,8 @@
 //! A4–A7 add the bridge's R3 / R4 COMMANDS ([`commands`]: account status, role, email,
 //! sessions, devices, MFA, deletion and duplicate enforcement; ending meetings, archiving
 //! and transferring spaces, deleting recordings and transcripts, the chat migration and the
-//! CRITICAL lane), further reads ([`reads`]) and the settlement record
+//! CRITICAL lane; A7: the owner-delivered personal-data export), further reads ([`reads`]:
+//! with A7 the export's state) and the settlement record
 //! (`GET /internal/v1/operator/operations/{key}`, table `meeting_admin_operations`).
 //!
 //! Every request must also name the HQ staff member it reads for (`X-CF-Operator:
@@ -183,6 +184,10 @@ pub fn router(app: AppState, verifier: Arc<ServiceTokenVerifier>) -> Router {
         )
         .route(commands::USER_MFA_RESET, post(commands::user_mfa_reset))
         .route(commands::USER_DELETE, post(commands::user_delete))
+        // A7: the owner-delivered personal-data export and its state.
+        .route(commands::USER_EXPORT, post(commands::user_export))
+        .route(reads::USER_EXPORTS, get(reads::user_exports))
+        .route(reads::EXPORT, get(reads::export))
         .route(
             commands::DUPLICATES_ENFORCE,
             post(commands::duplicates_enforce),

@@ -58,6 +58,7 @@ pub const USER_DEVICE_REVOKE: &str =
     "/internal/v1/operator/accounts/users/:user_id/devices/:device_id/revoke";
 pub const USER_MFA_RESET: &str = "/internal/v1/operator/accounts/users/:user_id/mfa/reset";
 pub const USER_DELETE: &str = "/internal/v1/operator/accounts/users/:user_id/delete";
+pub const USER_EXPORT: &str = "/internal/v1/operator/accounts/users/:user_id/export";
 pub const DUPLICATES_ENFORCE: &str = "/internal/v1/operator/accounts/duplicates/enforce";
 pub const CONFERENCE_END: &str = "/internal/v1/operator/meetings/conferences/:conference_id/end";
 pub const SPACE_ARCHIVE: &str = "/internal/v1/operator/meetings/spaces/:space_id/archive";
@@ -357,19 +358,31 @@ async fn accept<B: CommandBody>(
 #[derive(Debug, Clone, Copy)]
 enum Subject {
     User(Uuid),
-    Device { user: Uuid, device: Uuid },
+    Device {
+        user: Uuid,
+        device: Uuid,
+    },
     Identity,
     Conference(Uuid),
     Space(Uuid),
-    Artifact { conference: Uuid, artifact: Uuid },
+    Artifact {
+        conference: Uuid,
+        artifact: Uuid,
+    },
     ChatMigration,
     Decision(Uuid),
+    /// `accounts.user.export`: recorded on the account; the resource is the export recorded
+    /// under the command's key.
+    Export {
+        user: Uuid,
+        key: Uuid,
+    },
 }
 
 impl Subject {
     fn kind(self) -> &'static str {
         match self {
-            Subject::User(_) => subject::USER,
+            Subject::User(_) | Subject::Export { .. } => subject::USER,
             Subject::Device { .. } => subject::ACCOUNT_DEVICE,
             Subject::Identity => subject::IDENTITY_UNIQUENESS,
             Subject::Conference(_) => subject::CONFERENCE,
@@ -387,6 +400,7 @@ impl Subject {
             | Subject::Space(id)
             | Subject::Decision(id) => id,
             Subject::Device { device, .. } => device,
+            Subject::Export { user, .. } => user,
             Subject::Artifact { artifact, .. } => artifact,
             Subject::Identity | Subject::ChatMigration => Uuid::nil(),
         }
@@ -509,6 +523,11 @@ impl Subject {
                     "migrationVersion": r.try_get::<i64>("", "version")?,
                     "changedAt": opt_rfc(r.try_get("", "changed_at")?),
                 })
+            }
+            Subject::Export { key, .. } => {
+                crate::services::account_export::resource_by_key(db, key)
+                    .await?
+                    .ok_or_else(|| ApiError::InternalError("export vanished".into()))?
             }
             Subject::Decision(id) => {
                 let r = db
@@ -1084,6 +1103,39 @@ pub(super) async fn user_delete(
     replay_or_go!(s, a, subject);
     let outcome =
         crate::services::account_erasure::erase_with(&s.app, user_id, None, Some(&a.cmd)).await;
+    settle(&s, &a.rid, &a.cmd, subject, outcome).await
+}
+
+/// `POST …/accounts/users/{userId}/export` (`accounts.user.export`, R4): the owner's
+/// personal-data export, OWNER-DELIVERED (design brief 2 §1): the Meeting Service builds the
+/// document `GET /api/v2/me/data-export` answers, keeps it only sealed (7 days at most) and
+/// emails the owner's verified address a single-use link that needs the owner's own sign-in.
+/// The answer is a reference only (`REQUESTED`; the resource's `state` follows the build:
+/// READY once the link is queued, DELIVERED once downloaded, EXPIRED, FAILED).
+pub(super) async fn user_export(
+    State(s): State<OperatorState>,
+    Path(id): Path<String>,
+    req: Parts,
+    raw: Bytes,
+) -> Response {
+    let a: Accepted<VersionedBody> = accept!(
+        s,
+        req,
+        raw,
+        InternalPermission::AccountAdminister,
+        "accounts.user.export",
+        true
+    );
+    let user_id = path!(id, a.rid);
+    not_self!(a, user_id);
+    let subject = Subject::Export {
+        user: user_id,
+        key: a.cmd.key,
+    };
+    replay_or_go!(s, a, subject);
+    let outcome = crate::services::account_export::request(&s.app, user_id, &a.cmd)
+        .await
+        .map(|_| ());
     settle(&s, &a.rid, &a.cmd, subject, outcome).await
 }
 

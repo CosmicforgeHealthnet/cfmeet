@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Meeting Service / Account — admin bridge operator reads and commands",
-    "version": "1.1.0",
-    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media. 1.1.0 (A4-A7): R3 / R4 COMMANDS (POST, Idempotency-Key required, expectedVersion where the subject is versioned, X-CF-Approver / X-CF-Approval-Ref / X-CF-Intent-Digest required) recorded in meeting_admin_operations in the same transaction and answered {status, version, resource}; the settlement read GET /internal/v1/operator/operations/{idempotencyKey}; further reads (duplicates, test accounts, conference health, recordings, transcripts, webinars and registrations, chat migration, email deliveries, CRITICAL lane). Account reads answer `version` (users.account_version)."
+    "version": "1.2.0",
+    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media. 1.1.0 (A4-A7): R3 / R4 COMMANDS (POST, Idempotency-Key required, expectedVersion where the subject is versioned, X-CF-Approver / X-CF-Approval-Ref / X-CF-Intent-Digest required) recorded in meeting_admin_operations in the same transaction and answered {status, version, resource}; the settlement read GET /internal/v1/operator/operations/{idempotencyKey}; further reads (duplicates, test accounts, conference health, recordings, transcripts, webinars and registrations, chat migration, email deliveries, CRITICAL lane). Account reads answer `version` (users.account_version). 1.2.0 (A7): accounts.user.export, owner-delivered (POST .../accounts/users/{userId}/export, R4; the data goes only to the owner's verified address as a single-use, sign-in-protected download link, sealed at rest for at most 7 days; HQ gets a reference) and its state (GET .../accounts/users/{userId}/exports, GET .../accounts/exports/{exportId})."
   },
   "tags": [
     {
@@ -3861,6 +3861,306 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/export": {
+      "post": {
+        "operationId": "operatorExportUser",
+        "summary": "Export an account owner’s data, owner-delivered (admin bridge)",
+        "description": "accounts.user.export: the owner's personal-data export (the document GET /api/v2/me/data-export answers), OWNER-DELIVERED: the Meeting Service builds it after the commit, stores it only sealed (XChaCha20-Poly1305) for at most 7 days, and emails the owner's VERIFIED address a single-use download link that needs the owner's own recent CF Meet sign-in (GET /api/v2/me/data-export?exportId=… with the link's token in X-CF-Data-Export-Token). HQ never receives the data, a token, the link or the address: the answer is a reference (REQUESTED; follow resource.state with GET /internal/v1/operator/accounts/exports/{exportId}). Expiry means the command is re-issued; nothing is ever resent. A deleted, disabled or guest account, or one without a verified address, is 422 STATE_CONFLICT. Risk R4: two people decide it.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "x-cfmeet-risk": "R4",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorUserId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserExportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: Idempotency-Key missing or not a UUID, an invalid or unknown body field, expectedVersion missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the subject does not exist (nothing done).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT (the subject is not at expectedVersion) or IDEMPOTENCY_CONFLICT (the key was used for another command or subject); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "APPROVAL_REQUIRED (no X-CF-Approver), SELF_ACTION_REFUSED, STATE_CONFLICT, NOT_ALLOWED or a domain code (for example CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, CHAT_MIGRATION_REFUSED, PROFILE_POLICY_DENIED, ARTIFACT_DELETED is 410, FEATURE_DISABLED, WAIT_FOR_LEASE, REFUSED, FALLBACK_UNAVAILABLE); nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: outcome unknown; settle it with the operations record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/exports": {
+      "get": {
+        "operationId": "operatorListUserExports",
+        "summary": "Owner-delivered exports of an account (admin bridge)",
+        "description": "accounts.user.export (state): the account's exports, newest first: state, delivery channel, masked recipient, size, SHA-256 and times. References only.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetExport",
+        "summary": "One owner-delivered export (admin bridge)",
+        "description": "accounts.user.export (state): one export, the same reference the command answered.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorExportResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4046,6 +4346,15 @@
       },
       "IdempotencyKeyPath": {
         "name": "idempotencyKey",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ExportId": {
+        "name": "exportId",
         "in": "path",
         "required": true,
         "schema": {
@@ -6345,6 +6654,191 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        }
+      },
+      "OperatorExportResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An owner-delivered personal-data export as HQ sees it: a REFERENCE only. Never the document, a token, a download link, a sealed blob or the clear address.",
+        "required": [
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientMasked",
+          "expiresAt",
+          "exportId",
+          "userId",
+          "state",
+          "sizeBytes",
+          "sha256",
+          "emailDeliveryId",
+          "failureCode",
+          "requestedAt",
+          "readyAt",
+          "deliveredAt",
+          "purgedAt",
+          "version"
+        ],
+        "properties": {
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "OWNER_DELIVERED"
+            ]
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "DOWNLOAD_LINK_EMAIL"
+            ]
+          },
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The export's delivery reference (the email ledger key account-export:<deliveryRef>)."
+          },
+          "recipientMasked": {
+            "type": "string",
+            "maxLength": 160,
+            "pattern": "^[^@\\s]\\*\\*\\*@[^@\\s.]\\*\\*\\*(\\.[A-Za-z0-9-]+)?$|^\\*\\*\\*$",
+            "description": "The owner's verified address, masked (a***@e***.com)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The end of retention (7 days after the request): the copy and the link are purged then."
+          },
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ],
+            "description": "REQUESTED: recorded, being built. READY: sealed and the single-use link queued to the owner. DELIVERED: the owner downloaded it once (copy purged). EXPIRED: retention over (copy purged). FAILED: see failureCode (copy purged)."
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Size of the document (from READY)."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the document the owner downloads (from READY)."
+          },
+          "emailDeliveryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The queued email (GET /internal/v1/operator/meetings/email-deliveries/{deliveryId})."
+          },
+          "failureCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 48,
+            "description": "ACCOUNT_NOT_FOUND, ACCOUNT_UNAVAILABLE, ACCOUNT_DELETED, RECIPIENT_UNVERIFIED, RECIPIENT_UNUSABLE, BUILD_FAILED or UNSEALABLE."
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readyAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The export row's version (moves with every state change)."
+          }
+        }
+      },
+      "OperatorUserExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REQUESTED"
+            ],
+            "description": "UPPER_SNAKE resulting state (as recorded; the readback answers the same)."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The new export row's version, as a string (\"1\")."
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperatorExportResource"
+          }
+        }
+      },
+      "OperatorExportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorExportResource"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "<micros>.<exportId> of the last item (newest first)."
           }
         }
       }
