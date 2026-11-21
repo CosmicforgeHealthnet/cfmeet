@@ -1198,6 +1198,96 @@ pub async fn change_override(
 }
 
 // ---------------------------------------------------------------------------------------
+// Plan enforcement support: a holder's effective limits (signed internal read)
+// ---------------------------------------------------------------------------------------
+
+/// How long a caller may cache an effective-limits answer (the answer says so).
+pub const LIMITS_CACHE_SECONDS: u64 = 60;
+
+/// ADR 0068 A6 (plan enforcement where the usage happens): the effective CF Meet plan
+/// limits of a user or business organization — its plan (FREE when never assigned) priced
+/// by the effective version of its CONSUMER lineage (the holder's, else the GLOBAL one),
+/// with an ACTIVE override applied key by key. A limit the plan does not set is `null`
+/// (the caller keeps today's behaviour for it). Ids, codes and limits only.
+pub async fn effective_limits<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    holder: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Value, ApiError> {
+    let kind = holder_kind(kind)?;
+    let assigned = db
+        .query_one(stmt(
+            "SELECT plan_code, price_book_id, version FROM devplat_plan_holders              WHERE holder_kind = $1 AND holder_ref = $2",
+            vec![kind.into(), holder.into()],
+        ))
+        .await?;
+    let (plan_code, book, holder_version) = match &assigned {
+        Some(r) => (
+            r.try_get::<String>("", "plan_code")?,
+            Some(r.try_get::<Uuid>("", "price_book_id")?),
+            r.try_get::<i64>("", "version")?,
+        ),
+        None => ("FREE".to_string(), None, 0),
+    };
+    let book = match book {
+        Some(b) => Some(b),
+        None => db
+            .query_one(stmt(
+                "SELECT id FROM devplat_price_books WHERE product_line = 'CONSUMER' AND market_code = 'GLOBAL'                  ORDER BY currency LIMIT 1",
+                vec![],
+            ))
+            .await?
+            .map(|r| r.try_get::<Uuid>("", "id"))
+            .transpose()?,
+    };
+    let effective = match book {
+        Some(b) => effective_version(db, b, now).await?,
+        None => None,
+    };
+    let plan_limits = match effective {
+        Some(v) => rates::plan(&version(db, v).await?.rates, &plan_code)
+            .map(|p| p["limits"].clone())
+            .unwrap_or(Value::Null),
+        None => Value::Null,
+    };
+    let over = db
+        .query_one(stmt(
+            "SELECT limits, version FROM devplat_plan_overrides              WHERE holder_kind = $1 AND holder_ref = $2 AND state = 'ACTIVE'",
+            vec![kind.into(), holder.into()],
+        ))
+        .await?;
+    let (override_limits, override_version) = match &over {
+        Some(r) => (
+            r.try_get::<Option<Value>>("", "limits")?,
+            Some(r.try_get::<i64>("", "version")?),
+        ),
+        None => (None, None),
+    };
+    let mut limits = Map::new();
+    for (key, _) in rates::PLAN_LIMITS {
+        let from_override = override_limits.as_ref().and_then(|o| o.get(*key)).cloned();
+        let v =
+            from_override.unwrap_or_else(|| plan_limits.get(*key).cloned().unwrap_or(Value::Null));
+        limits.insert((*key).to_string(), v);
+    }
+    Ok(json!({
+        "holderKind": kind,
+        "holderId": holder,
+        "planCode": plan_code,
+        "assigned": assigned.is_some(),
+        "holderVersion": holder_version,
+        "priceBookId": book,
+        "versionId": effective,
+        "overrideApplied": override_limits.is_some(),
+        "overrideVersion": override_version,
+        "limits": limits,
+        "evaluatedAt": now,
+        "cacheSeconds": LIMITS_CACHE_SECONDS,
+    }))
+}
+
+// ---------------------------------------------------------------------------------------
 // Charge simulation (a read)
 // ---------------------------------------------------------------------------------------
 

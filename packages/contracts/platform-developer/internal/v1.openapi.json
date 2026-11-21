@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.17.0",
+    "version": "1.18.0",
     "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version. 1.15.0 (ADR 0068 A6): pricing and plans under /internal/v1/operator/pricing/** and finance reports under /internal/v1/operator/finance/** (pricing.administer, admin bridge only): price books, versions (draft, edit, submit, two-person approve / reject, schedule, activate), rollback, market freezes, CF Meet user plans, plan assignments, overrides, a charge simulation read and the usage / estimated charges / plan spread reports. Nothing charges anyone."
   },
   "tags": [
@@ -7942,6 +7942,67 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/plan-limits/{holderKind}/{holderId}": {
+      "get": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "A CF Meet plan holder's effective limits",
+        "operationId": "getEffectivePlanLimits",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A6 (plan enforcement where the usage happens): the effective CF Meet plan limits of a user (`USER`) or business organization (`ORGANIZATION`) — plan assignment and overrides — for the Meeting Service and Messaging. Permission `developer-entitlement.read` (grantable to the API Gateway, the Meeting Service and Messaging). Ids, codes and limits only; `Cache-Control: private, max-age=<cacheSeconds>`. A holder never assigned is on FREE; a limit the plan does not set is null. Callers keep today's behaviour when this read is unconfigured or unreachable.",
+        "parameters": [
+          {
+            "name": "holderKind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EffectivePlanLimits"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
