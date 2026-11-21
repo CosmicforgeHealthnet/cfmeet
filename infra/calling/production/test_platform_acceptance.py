@@ -25,7 +25,11 @@ class FakePlatform:
         # CF Meet Apps features served (only while the apps stage is on).
         self.apps_on = set(apps) if 'apps' in self.stages else set()
         # Behaviours to break: 'isolation-users', 'chat-receive', 'cors-credential-route',
-        # 'refresh-reuse', 'cross-client-code', 'apps-isolation'.
+        # 'refresh-reuse', 'cross-client-code', 'apps-isolation', and partner meeting chat:
+        # 'meeting-chat-sync' (joined users never become members), 'meeting-chat-leak' (a user
+        # who has not joined reads it), 'meeting-chat-isolation' (another tenant's device reads
+        # it), 'meeting-chat-receive' (messages are not delivered), 'first-party-chat-open'
+        # (the first-party participant-token chat route answers 200: recorded only).
         self.broken = set(broken)
         self.n = 0
         self.calls = []
@@ -141,7 +145,10 @@ class FakePlatform:
         if headers.get('X-Participant-Token') in self.participant_tokens:
             conf = self.participant_tokens[headers['X-Participant-Token']]
             if bare == '/api/v2/conferences/%s/messages' % conf:
-                return 200, {'success': True, 'data': {'items': []}}
+                if 'first-party-chat-open' in self.broken:
+                    return 200, {'success': True, 'data': {'items': []}}
+                # Environment-owned meetings have no first-party conversation (fail closed).
+                return 503, {'error': {'code': 'CHAT_UNAVAILABLE'}}
         return 401, {}
 
     def preflight(self, client, path, headers):
@@ -308,6 +315,7 @@ class FakePlatform:
                 return 409, {'error': {'code': 'CONFERENCE_NOT_LIVE'}}
             key = (m.group(1), t['user'])
             pid = self.participants.setdefault(key, self.id('p'))
+            self.partner_chat_join(m.group(1), conf['env'], t['user'])
             pt = 'pt_' + self.id()
             self.participant_tokens[pt] = m.group(1)
             return 200, {'participant': {'id': pid, 'role': t['grants']['mtg'][0]['r'],
@@ -320,10 +328,19 @@ class FakePlatform:
             return 201, {'ticket': 'rt_x'}
         if re.fullmatch(r'/v1/messaging/user-push-registrations/([\w.-]+)', path):
             return 401, {}  # these take the user token, never a client token
+        if path == '/v1/conversations' and method == 'GET':
+            # Partner session devices list the MANAGED conversations they are an ACTIVE member of.
+            return 200, {'conversations': [
+                dict(conversationId=cid, securityProfile='MANAGED', contextClass='MEETING' if c.get('meeting') else 'DIRECT',
+                     context={'namespace': 'meeting', 'reference': 'conference:%s' % c['meeting']} if c.get('meeting')
+                     else None)
+                for cid, c in self.conversations.items() if c['env'] == ct['env'] and ct['user'] in c['members']]}
         m = re.fullmatch(r'/v1/conversations/(\w+)/(messages|mls/state)', path)
         if m:
             c = self.conversations.get(m.group(1))
-            if not c or c['env'] != ct['env'] or ct['user'] not in c['members']:
+            leak = c and c.get('meeting') and 'meeting-chat-leak' in self.broken
+            foreign = c and c.get('meeting') and 'meeting-chat-isolation' in self.broken
+            if not c or (c['env'] != ct['env'] and not foreign) or (ct['user'] not in c['members'] and not leak and not foreign):
                 return self.nf()
             if m.group(2) == 'mls/state':
                 return 401, {'error': {'code': 'CLIENT_TOKENS_NOT_ENABLED'}}  # not a partner device route
@@ -331,8 +348,18 @@ class FakePlatform:
             if method == 'POST':
                 log.append(dict(body))
                 return 201, {}
-            return 200, {'messages': [] if 'chat-receive' in self.broken else list(log)}
+            dropped = 'meeting-chat-receive' if c.get('meeting') else 'chat-receive'
+            return 200, {'messages': [] if dropped in self.broken else list(log)}
         return 404, {}
+
+    def partner_chat_join(self, conf, env, user):
+        """Meeting Service partner chat: one MANAGED conversation per partner meeting, in the
+        partner's own environment, owned by its system principal; joined users become members."""
+        if 'meetings' not in self.stages or 'chat' not in self.stages:
+            return
+        c = self.conversations.setdefault('mc' + conf, dict(env=env, members=set(), meeting=conf))
+        if 'meeting-chat-sync' not in self.broken:
+            c['members'].add(user)
 
     def device_signaling(self, sig, method, path, body):
         if path == '/v1/calling/invitations':
@@ -664,6 +691,80 @@ class Journey(unittest.TestCase):
         self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'),
                          ["chat A: rider's device sends, customer's device receives",
                           "chat B: rider's device sends, customer's device receives"])
+
+    def test_partner_meeting_chat_uses_messaging_partner_devices_in_each_tenants_own_scope(self):
+        api = FakePlatform()
+        checks, _, _ = run_flow(api)
+        self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
+        for label in ('A', 'B'):
+            for name in ("partner meeting chat linked; the joined rider's device sees the MANAGED meeting conversation",
+                         "a user who has not joined cannot read the meeting chat -> 404/403",
+                         "a user who has not joined cannot send into the meeting chat -> 404/403",
+                         "the customer who joined becomes a member of the meeting chat",
+                         "rider's device sends, customer's device receives in the meeting chat"):
+                self.assertEqual(checks['meetings %s: %s' % (label, name)], 'PASS')
+        for name in ("B's device reads A's meeting chat -> 404/403", "B's device sends into A's meeting chat -> 404/403",
+                     "B's server reads A's meeting chat -> 404"):
+            self.assertEqual(checks['isolation meetings: ' + name], 'PASS')
+        self.assertFalse(any('partner meeting chat available' in k for k in checks))
+        # One meeting conversation per tenant, in its own environment, with exactly the two
+        # users who joined; the message reached it through the partner session device.
+        meeting = {c['env']: c for c in api.conversations.values() if c.get('meeting')}
+        self.assertEqual(set(meeting), {'paenv', 'pbenv'})
+        for env, c in meeting.items():
+            self.assertEqual(len(c['members']), 2)
+            self.assertTrue(all(api.users.get(u) is None for u in c['members']))  # users deleted at cleanup
+            self.assertEqual(api.conferences[c['meeting']]['env'], env)
+        sent = [m for cid, log in api.messages.items() if cid.startswith('mc') for m in log]
+        self.assertEqual(len(sent), 2)
+
+    def test_meeting_chat_that_never_admits_joined_users_fails_and_still_cleans_up(self):
+        api = FakePlatform(broken=('meeting-chat-sync',))
+        checks, _, _ = run_flow(api)
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        linked = "partner meeting chat linked; the joined rider's device sees the MANAGED meeting conversation"
+        # A fatal check is also recorded under its step's name.
+        self.assertTrue(failed and all(k.endswith(linked) for k in failed), failed)
+        self.assertEqual({k[:10] for k in failed}, {'meetings A', 'meetings B'})
+        self.assertFalse(any('meeting chat' in k for k, v in checks.items() if k.startswith('isolation')))
+        self.assertEqual({c['status'] for c in api.conferences.values()}, {'ENDED'})
+        self.assertEqual(api.users, {})
+
+    def test_a_user_who_has_not_joined_reading_meeting_chat_fails(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-leak',)))
+        self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'), sorted(
+            'meetings %s: a user who has not joined cannot %s' % (label, what)
+            for label in ('A', 'B') for what in ('read the meeting chat -> 404/403',
+                                                  'send into the meeting chat -> 404/403')))
+
+    def test_another_tenant_reading_meeting_chat_fails_isolation(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-isolation',)))
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        self.assertIn("isolation meetings: B's device reads A's meeting chat -> 404/403", failed)
+        self.assertIn("isolation meetings: B's device sends into A's meeting chat -> 404/403", failed)
+
+    def test_undelivered_meeting_chat_fails_only_meeting_receive(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-receive',)))
+        self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'), [
+            "meetings A: rider's device sends, customer's device receives in the meeting chat",
+            "meetings B: rider's device sends, customer's device receives in the meeting chat"])
+
+    def test_the_first_party_chat_route_is_recorded_not_used_as_partner_chat(self):
+        for broken, expected in (((), {'status': 503, 'code': 'CHAT_UNAVAILABLE'}),
+                                 (('first-party-chat-open',), {'status': 200, 'code': None})):
+            checks, _, emitted = run_flow(FakePlatform(broken=broken))
+            self.assertEqual([k for k, v in checks.items() if v != 'PASS'], [])
+            notes = [v for kind, v in emitted if kind == 'platformAcceptanceNote']
+            for label in ('A', 'B'):
+                self.assertIn({'meetings %s first-party chat route' % label: expected}, notes)
+            self.assertFalse(any('first-party' in k for k in checks))
+
+    def test_meeting_chat_is_not_claimed_without_the_chat_stage(self):
+        stages = ('users', 'tokens', 'calls', 'push', 'meetings')
+        checks, _, emitted = run_flow(FakePlatform(stages=stages), stages)
+        self.assertEqual([k for k, v in checks.items() if v != 'PASS'], [])
+        self.assertFalse(any('meeting chat' in k for k in checks))
+        self.assertTrue(any(kind == 'platformAcceptanceNote' and 'meetings chat' in value for kind, value in emitted))
 
     def test_a_conference_that_cannot_start_fails_meetings_and_is_cancelled_at_cleanup(self):
         api = FakePlatform()

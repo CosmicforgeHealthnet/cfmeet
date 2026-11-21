@@ -107,6 +107,27 @@ class RepairGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not authorized"):
             self.authorize(MEETINGS_FAILED, sha=MEETINGS_FAILED["repairSha"])
 
+    def test_the_second_meetings_failure_is_repaired_exactly_once_at_its_release(self):
+        second = dict(MEETINGS_FAILED, repairSha="7000d8a57c05e4c1952d18a014a7c9ebdb5cf28d", repairAttempts=2)
+        operation, record = self.authorize(second)
+        self.assertEqual((operation, record["repairAttempts"], record["repairFromSha"]),
+                         ("activate-platform-meetings", 3, second["repairSha"]))
+        record.update(status="failed")
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(record, sha="c" * 40)
+        # Never at another release, another attempt count or the failing release itself.
+        for change in ({"repairSha": "d" * 40}, {"repairAttempts": 3}, {"repairAttempts": 1}):
+            with self.assertRaisesRegex(RuntimeError, "not authorized"):
+                self.authorize(dict(second, **change))
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(second, sha=second["repairSha"])
+
+    def test_the_repair_table_is_finite_and_each_entry_is_one_attempt(self):
+        self.assertEqual(len(campaign.REPAIRS), len(set(campaign.REPAIRS)))
+        attempts = sorted(a for _, _, a in campaign.REPAIRS)
+        self.assertEqual(attempts, list(range(len(campaign.REPAIRS))))
+        self.assertTrue(all(op in campaign.APPROVED for op, _, _ in campaign.REPAIRS))
+
     def test_unlisted_operations_and_error_classes_are_refused(self):
         for change in ({"failedOperation": "activate-oauth"}, {"errorClass": "KeyError"},
                        {"status": "running"}, {"repairAttempts": 0}):

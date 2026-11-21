@@ -148,9 +148,14 @@ def prerequisite_evidence(operation):
 #  * Partner Calls: the acceptance sent {} instead of the required expectedVersion.
 #  * Platform Meetings: the acceptance joined a conference it never started (join is
 #    admitted only while LIVE: 409 CONFERENCE_NOT_LIVE); it now starts it first.
+#  * Platform Meetings (owner-approved second recovery): the acceptance read partner
+#    meeting chat through the first-party participant-token route, which by design fails
+#    closed for environment-owned meetings (503 CHAT_UNAVAILABLE). It now uses the
+#    partner's Messaging session devices, as ADR 0062 section 8 specifies.
 REPAIRS = (
     ("activate-partner-calls", "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab", 0),
     ("activate-platform-meetings", "745f1525d3d1f9d9080f846214bd989e334eccff", 1),
+    ("activate-platform-meetings", "7000d8a57c05e4c1952d18a014a7c9ebdb5cf28d", 2),
 )
 
 
