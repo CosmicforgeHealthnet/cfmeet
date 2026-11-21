@@ -26,7 +26,7 @@ async fn main() {
         calling_migration::up_all(&db)
             .await
             .expect("Calling migrations failed");
-        println!("Calling migrations applied (main, notification-publications, gap-closure and call-kind-offer histories)");
+        println!("Calling migrations applied (main, notification-publications, gap-closure, call-kind-offer and admin-operations histories)");
         return;
     }
     // The destructive subcommands roll back the main history, whose tables the

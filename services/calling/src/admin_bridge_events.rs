@@ -90,6 +90,14 @@ impl Subject {
         }
     }
 
+    /// The bounded metric label of the subject (a code, never the event type string).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Subject::AbuseReport => "ABUSE_REPORT",
+            Subject::Incident => "INCIDENT",
+        }
+    }
+
     pub fn kind(self) -> &'static str {
         match self {
             Subject::AbuseReport => "abuse_report",
@@ -157,7 +165,7 @@ pub async fn enqueue<C: ConnectionTrait>(
     .await?;
     crate::metrics::inc(
         "calling_admin_bridge_events_total",
-        &[("type", subject.event_type()), ("result", "ENQUEUED")],
+        &[("type", subject.as_str()), ("result", "ENQUEUED")],
     );
     Ok(true)
 }
