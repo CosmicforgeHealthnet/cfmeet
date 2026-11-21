@@ -124,6 +124,7 @@
         "organizations.organization.archived",
         "organizations.organization.reactivated",
         "developer-platform.workspace.owner-invitation.email-requested",
+        "organizations.organization.export_ready",
         "notifications.cancel"
       ]
     },
