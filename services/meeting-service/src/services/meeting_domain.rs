@@ -93,7 +93,7 @@ impl MeetingDomainDeps {
     }
 }
 
-/// ADR 0068 A6: plan enforcement (`MEETING_PLAN_ENFORCEMENT_ENABLED`, default off). FAIL
+/// ADR 0068 A6: plan enforcement (`MEETING_PLAN_ENFORCEMENT=on`, default off). FAIL
 /// OPEN: off, unconfigured or misconfigured, today's limits stay the only limits.
 fn plan_limits_from_env() -> Option<Arc<crate::services::plan_limits::PlanEnforcement>> {
     match crate::services::plan_limits::PlanEnforcement::from_env() {
