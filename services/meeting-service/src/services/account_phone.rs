@@ -222,6 +222,19 @@ pub async fn verify(
         return Err(invalid());
     }
     let txn = db.begin().await?;
+    let owner = txn
+        .query_one(stmt(
+            "SELECT user_id FROM account_phone_challenges WHERE id=$1",
+            vec![challenge.into()],
+        ))
+        .await?
+        .ok_or_else(invalid)?;
+    let account: Uuid = owner.try_get("", "user_id")?;
+    txn.execute(stmt(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,1))",
+        vec![account.to_string().into()],
+    ))
+    .await?;
     let row = txn.query_one(stmt("SELECT user_id,session_id,phone_e164,provider_id,purpose FROM account_phone_challenges WHERE id=$1 AND consumed_at IS NULL AND expires_at>now() AND attempts<5 FOR UPDATE", vec![challenge.into()])).await?.ok_or_else(invalid)?;
     let user: Uuid = row.try_get("", "user_id")?;
     let session: Option<Uuid> = row.try_get("", "session_id")?;
@@ -276,6 +289,45 @@ pub async fn verify(
     .await?;
     txn.commit().await?;
     Ok(user)
+}
+
+/// Privacy changes remain in the account domain, rather than the transport layer.
+pub async fn set_discoverable(
+    db: &DatabaseConnection,
+    user: Uuid,
+    discoverable: bool,
+) -> ApiResult<()> {
+    db.execute(stmt(
+        "UPDATE account_phone_bindings SET discoverable=$2 WHERE user_id=$1",
+        vec![user.into(), discoverable.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Removing a number also retires pending SMS proofs and all current credentials in
+/// one transaction. A previously issued binding proof cannot restore the number.
+pub async fn remove(db: &DatabaseConnection, user: Uuid) -> ApiResult<()> {
+    let txn = db.begin().await?;
+    txn.execute(stmt(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,1))",
+        vec![user.to_string().into()],
+    ))
+    .await?;
+    txn.execute(stmt(
+        "DELETE FROM account_phone_bindings WHERE user_id=$1",
+        vec![user.into()],
+    ))
+    .await?;
+    txn.execute(stmt("UPDATE account_phone_challenges SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL", vec![user.into()])).await?;
+    crate::services::account_security::revoke_all(
+        &txn,
+        user,
+        crate::services::account_security::RevokeReason::CredentialsChanged,
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(())
 }
 
 pub async fn find(

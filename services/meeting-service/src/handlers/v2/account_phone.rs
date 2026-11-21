@@ -16,7 +16,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -120,14 +119,7 @@ pub async fn update_privacy(
 ) -> ApiResult<Json<PhoneView>> {
     let _provider = TwilioVerify::from_env()?;
     let user = actor.require_registered()?.user_id;
-    state
-        .db
-        .execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE account_phone_bindings SET discoverable=$2 WHERE user_id=$1",
-            vec![user.into(), req.discoverable.into()],
-        ))
-        .await?;
+    phone::set_discoverable(&state.db, user, req.discoverable).await?;
     Ok(Json(phone::view(&state.db, user).await?))
 }
 /// Remove my phone
@@ -149,20 +141,7 @@ pub async fn remove_phone(
         Some(&req.step_up_token),
     )
     .await?;
-    state
-        .db
-        .execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "DELETE FROM account_phone_bindings WHERE user_id=$1",
-            vec![user.into()],
-        ))
-        .await?;
-    crate::services::account_security::revoke_all(
-        &state.db,
-        user,
-        crate::services::account_security::RevokeReason::CredentialsChanged,
-    )
-    .await?;
+    phone::remove(&state.db, user).await?;
     crate::services::communications::credentials_ended(&state, user, "PHONE_REMOVED").await;
     Ok(StatusCode::NO_CONTENT)
 }

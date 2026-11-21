@@ -222,15 +222,11 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
     let signin = phone::start(&app.db.conn, &Provider, user.id, None, "+393331234567")
         .await
         .unwrap();
-    app.db
-        .conn
-        .execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "DELETE FROM account_phone_bindings WHERE user_id=$1",
-            vec![user.id.into()],
-        ))
+    phone::remove(&app.db.conn, user.id).await.unwrap();
+    assert!(phone::find(&app.db.conn, "+393331234567", false)
         .await
-        .unwrap();
+        .unwrap()
+        .is_none());
     assert!(
         phone::verify(&app.db.conn, &Provider, signin, None, "123456")
             .await
@@ -245,4 +241,34 @@ async fn wrong_phone_codes_lock_after_five_attempts_and_a_removed_number_cannot_
     )
     .await
     .is_err());
+}
+
+#[tokio::test]
+async fn removing_phone_retires_unconsumed_binding_proofs_and_credentials() {
+    let Some(app) = TestApp::new().await else {
+        return;
+    };
+    let user = app.user("phone-remove-pending").await;
+    let session = Uuid::new_v4();
+    let pending = phone::start(
+        &app.db.conn,
+        &Provider,
+        user.id,
+        Some(session),
+        "+393331234569",
+    )
+    .await
+    .unwrap();
+    phone::remove(&app.db.conn, user.id).await.unwrap();
+    assert!(phone::verify(
+        &app.db.conn,
+        &Provider,
+        pending,
+        Some((user.id, session)),
+        "123456"
+    )
+    .await
+    .is_err());
+    let (status, _) = app.get("/api/v2/me/phone", Auth::Bearer(&user.token)).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
 }
