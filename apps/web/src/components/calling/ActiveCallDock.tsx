@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, PhoneOff, Play, RefreshCw, UserPlus, Users } from "lucide-react";
+import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, PhoneOff, Play, RefreshCw, UserPlus, Users, Video } from "lucide-react";
 import { useCalling } from "@/context/CallingContext";
 import { callingKeys, useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
 import { callsService } from "@/services/calling/calls.service";
@@ -273,6 +273,8 @@ export default function ActiveCallDock() {
         </Popover.Portal>
       </Popover.Root>
       {controls.upgrade && !video && inRoom && <CallUpgradeButton upgrade={() => mutation.mutateAsync({ operation: "upgrade", callId: media.callId, body: { kind: "VIDEO", expectedVersion: call.data!.version }, key: newIdempotencyKey() })} onError={setError} />}
+      {/* CF2: still ringing (no room yet) — switch the call to video; the camera button appears once connected. */}
+      {controls.upgrade && !video && !inRoom && <CallButton icon={<Video />} label="Video" disabled={mutation.isPending} onClick={() => void run(() => mutation.mutateAsync({ operation: "upgrade", callId: media.callId, body: { kind: "VIDEO", expectedVersion: call.data!.version }, key: newIdempotencyKey() }))} />}
       {inRoom && (controls.screenShare || presenting) && (
         <CallScreenShareButton presenting={presenting} onError={(e) => setError(callingErrorMessage(e))}
           onStart={() => screenShare("startScreenShare")} onStop={() => screenShare("stopScreenShare")} />

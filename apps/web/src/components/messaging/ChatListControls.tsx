@@ -5,10 +5,11 @@
  * the chat's notifications; the chat list shows an "Archived" row and pinned chats first.
  */
 import { useState } from "react";
-import { Archive, ArchiveRestore, ArrowLeft, Pin, PinOff } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Pin, PinOff, Timer } from "lucide-react";
 import type { ConversationView, MessagingEngine } from "@/lib/messaging/engine";
 import { MAX_PINNED_CHATS } from "@/lib/messaging/chat-list";
 import { MessagingApiError, messagingErrorMessage } from "@/lib/messaging/errors";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 const action = "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted disabled:opacity-50";
 
@@ -59,5 +60,42 @@ export function ArchivedHeader({ onBack }: { onBack: () => void }) {
       <button type="button" aria-label="Back to chats" data-testid="archived-back" onClick={onBack} className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><ArrowLeft className="size-5" /></button>
       <span className="text-sm font-semibold">Archived</span>
     </li>
+  );
+}
+
+const DAY = 86_400;
+const TIMERS = [["off", "Off"], [String(DAY), "24 hours"], [String(7 * DAY), "7 days"], [String(90 * DAY), "90 days"]] as const;
+type Timer = (typeof TIMERS)[number][0];
+
+/**
+ * B4 (WhatsApp): disappearing messages. A chat admin (a group's owner or admin, either
+ * person in a one-to-one chat) turns it on, changes it or turns it off; messages already
+ * sent keep the timer they were sent with.
+ */
+export function DisappearingMessages({ engine, conversation, canChange }: { engine: MessagingEngine; conversation: ConversationView; canChange: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = conversation.retentionSeconds;
+  const known = TIMERS.find(([v]) => (v === "off" ? current === null : Number(v) === current));
+  const value: Timer | "" = known ? known[0] : "";
+  const options = TIMERS.map(([v, label]) => ({ value: v as Timer, label }));
+  const change = (next: Timer) => {
+    if (next === value) return;
+    setBusy(true);
+    setError(null);
+    engine.setDisappearing(conversation.id, next === "off" ? null : Number(next))
+      .catch((e) => setError(e instanceof MessagingApiError && e.reason === "RETENTION_LOOSER_THAN_POLICY" ? "Your organization keeps messages for less time than this." : messagingErrorMessage(e)))
+      .finally(() => setBusy(false));
+  };
+  if (!canChange && current === null) return null;
+  return (
+    <section data-testid="disappearing-messages" className="px-3">
+      <p className="mb-1.5 flex items-center gap-2 text-sm font-medium"><Timer className="size-4 text-muted-foreground" />Disappearing messages</p>
+      {canChange
+        ? <NiceSelect value={value} onChange={change} disabled={busy} options={options} placeholder={current ? `${Math.round(current / 3600)} hours` : "Off"} />
+        : <p className="text-sm text-muted-foreground">{known ? known[1] : `${Math.round((current ?? 0) / 3600)} hours`}</p>}
+      <p className="mt-1.5 text-xs text-muted-foreground">New messages disappear after this time.</p>
+      {error ? <p role="alert" className="mt-1 text-xs text-destructive">{error}</p> : null}
+    </section>
   );
 }

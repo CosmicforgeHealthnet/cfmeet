@@ -85,6 +85,8 @@ export type ConversationView = {
   myRole: MemberRole | null;
   /** Only owners and admins can send (S13). */
   announcementOnly: boolean;
+  /** Disappearing messages: seconds a new message is kept (null: off). */
+  retentionSeconds: number | null;
 } & InboxFlags;
 
 export type MessageView = {
@@ -165,6 +167,8 @@ type ServerConversation = {
   members?: { principalId: string; role?: string; state?: string }[];
   version?: number;
   announcementOnly?: boolean;
+  /** Disappearing messages: seconds a message is kept (null: off). */
+  retentionSeconds?: number | null;
   ownerPrincipalId?: string;
   title?: string | null;
   avatarRef?: string | null;
@@ -1177,6 +1181,7 @@ export class MessagingEngine {
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
         announcementOnly: !!c.announcementOnly,
+        retentionSeconds: c.retentionSeconds ?? null,
         ...inboxFlags(c.inbox, previous),
       });
     }
@@ -1483,6 +1488,13 @@ export class MessagingEngine {
     const c = this.server.get(conversationId);
     if (c?.inbox) c.inbox = { ...c.inbox, ...flags };
     this.set({ conversations: this.snapshot.conversations.map((x) => (x.id === conversationId ? { ...x, ...flags } : x)) });
+  }
+
+  /** B4: turn disappearing messages on, change them, or turn them off (null); applies to new messages. */
+  async setDisappearing(conversationId: string, seconds: number | null): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, retentionSeconds: seconds });
+    await this.refreshConversations();
   }
 
   async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {

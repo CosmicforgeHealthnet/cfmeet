@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, ListFilter, Plus, Repeat, Video } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronDown, ChevronLeft, ChevronRight, Download, ListFilter, Plus, Repeat, Video } from "lucide-react";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { CalendarArt } from "@/components/dashboard/EmptyArt";
@@ -187,6 +187,7 @@ export default function CalendarContent({ previewItems, previewOpen }: { preview
 
         <NextUp items={items} zone={zone} onOpen={setSelected} visible={(item) => { const d = item.scheduledStartAt; return d >= range.from && d < range.to; }} />
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <CalendarFeedControl buttonClass={iconBtn} />
           <Popover.Root>
             <Popover.Trigger asChild>
               <button type="button" aria-label="Filters" className={cn(iconBtn, "relative")}>
@@ -200,7 +201,6 @@ export default function CalendarContent({ previewItems, previewOpen }: { preview
                 <NiceSelect label="Show" value={status} onChange={setStatus} options={STATUS_FILTERS} />
                 <NiceSelect label="Meetings where" value={relation} onChange={setRelation} options={[{ value: "", label: "Any role" }, ...AGENDA_RELATIONS.filter((v) => v !== "ORGANIZATION" || organizationId).map((v) => ({ value: v, label: RELATION_LABELS[v] }))]} />
                 <p className="text-xs text-muted-foreground">Times shown in {zone.replaceAll("_", " ")}</p>
-                <CalendarFeedControl />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -486,42 +486,48 @@ function ListView({ byDate, zone, today, loading, onSelect, onDownload, download
   );
 }
 
-/** Audit MF2: a private calendar subscription (Google / Outlook / Apple "subscribe from URL"). */
-function CalendarFeedControl() {
-  const [link, setLink] = useState<string | null>(null);
+/**
+ * Audit MF2: see your CF Meet meetings in Google, Outlook or Apple Calendar through a private
+ * link. One tap makes the link and copies it; a new link turns the old one off.
+ */
+function CalendarFeedControl({ buttonClass }: { buttonClass: string }) {
   const [state, setState] = useState<"idle" | "busy" | "copied" | "off" | "error">("idle");
   const apiOrigin = (() => {
     try { return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1").origin; } catch { return ""; }
   })();
-  const create = async () => {
+  const copy = async () => {
     setState("busy");
     try {
       const feed = await conferencesService.createCalendarFeed();
-      setLink(feed.path ? `${apiOrigin}${feed.path}` : null);
-      setState("idle");
+      if (!feed.path) throw new Error("no link");
+      await navigator.clipboard.writeText(`${apiOrigin}${feed.path}`);
+      setState("copied");
     } catch { setState("error"); }
   };
   const turnOff = async () => {
     setState("busy");
-    try { await conferencesService.deleteCalendarFeed(); setLink(null); setState("off"); } catch { setState("error"); }
+    try { await conferencesService.deleteCalendarFeed(); setState("off"); } catch { setState("error"); }
   };
   return (
-    <div className="space-y-2 border-t border-border pt-3">
-      <p className="text-xs font-medium text-foreground">Subscribe in Google or Outlook</p>
-      {link ? (
-        <>
-          <input readOnly aria-label="Calendar feed link" value={link} onFocus={(e) => e.currentTarget.select()} className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" />
-          <div className="flex gap-2">
-            <button type="button" onClick={() => { void navigator.clipboard.writeText(link).then(() => setState("copied"), () => setState("error")); }} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted">{state === "copied" ? "Copied" : "Copy link"}</button>
-            <button type="button" disabled={state === "busy"} onClick={() => void turnOff()} className="h-8 rounded-lg px-3 text-xs font-medium text-destructive hover:bg-destructive/10">Turn off</button>
+    <Popover.Root onOpenChange={(open) => { if (open) setState("idle"); }}>
+      <Popover.Trigger asChild>
+        <button type="button" aria-label="Add to my calendar" title="Add to my calendar" className={buttonClass}><CalendarPlus className="size-5" /></button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} collisionPadding={12} className="z-50 w-[min(92vw,20rem)] space-y-3 rounded-2xl border border-border bg-popover p-4 shadow-xl">
+          <div>
+            <p className="text-[15px] font-semibold text-foreground">Add to my calendar</p>
+            <p className="mt-1 text-sm text-muted-foreground">See your meetings in Google, Outlook or Apple Calendar. Copy the link, then add it there as a calendar &quot;from URL&quot;.</p>
           </div>
-          <p className="text-xs text-muted-foreground">Keep this link private. Getting a new link turns the old one off.</p>
-        </>
-      ) : (
-        <button type="button" disabled={state === "busy"} onClick={() => void create()} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted">Get calendar link</button>
-      )}
-      {state === "off" && <p role="status" className="text-xs text-muted-foreground">Calendar link turned off.</p>}
-      {state === "error" && <p role="alert" className="text-xs text-destructive">Something went wrong. Please try again.</p>}
-    </div>
+          <button type="button" disabled={state === "busy"} onClick={() => void copy()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
+            {state === "copied" ? <><Check className="size-4" />Link copied</> : state === "busy" ? "Please wait…" : "Copy calendar link"}
+          </button>
+          {state === "copied" && <p role="status" className="text-xs text-muted-foreground">Keep this link private. Copying a new link turns the old one off.</p>}
+          {state === "off" && <p role="status" className="text-xs text-muted-foreground">Your calendar link is off. Calendars using it stop updating.</p>}
+          {state === "error" && <p role="alert" className="text-xs text-destructive">Something went wrong. Please try again.</p>}
+          <button type="button" disabled={state === "busy"} onClick={() => void turnOff()} className="h-10 w-full rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60">Turn off my calendar link</button>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
