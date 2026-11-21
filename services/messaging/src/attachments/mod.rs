@@ -306,6 +306,23 @@ pub async fn create_intent(
             "ATTACHMENT_TOO_LARGE",
         ));
     }
+    // ADR 0068 A6: the uploader's CF Meet plan may cap the size further (never raise it).
+    if let Some(cap) = crate::plans::attachment_cap(state, ctx, acting.principal_id).await {
+        let cap = match profile {
+            SecurityProfile::PrivateE2ee => e2ee_allowance(cap),
+            SecurityProfile::Managed => cap,
+        };
+        if request.size > cap {
+            crate::metrics::inc(
+                "messaging_attachment_quota_refusals_total",
+                &[("quota", "plan_attachment")],
+            );
+            return Err(Error::reason(
+                ErrorCode::QuotaExceeded,
+                "PLAN_ATTACHMENT_LIMIT",
+            ));
+        }
+    }
     // What the server may know depends on the PERSISTED profile.
     let (media_type, file_name, metadata, device, format) = match profile {
         SecurityProfile::PrivateE2ee => {
