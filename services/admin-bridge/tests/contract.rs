@@ -144,6 +144,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "accounts.security-history.list",
             "accounts.duplicates.list",
             "accounts.duplicates.enforce-all",
+            "accounts.user.export",
             "accounts.user.delete",
             "accounts.test-accounts.list",
             "meetings.spaces.search",

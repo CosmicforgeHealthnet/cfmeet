@@ -468,8 +468,8 @@
     "owner": "meeting-service",
     "method": "POST",
     "bridge_endpoint": "/accounts/users/{user_id}/export",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/accounts/users/{user_id}/export",
+    "state": "AVAILABLE",
     "permission": "accounts.user.export",
     "risk": "R4",
     "privacy": "PERSONAL",
@@ -478,8 +478,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A7: new meeting-service operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "accounts.user.delete",

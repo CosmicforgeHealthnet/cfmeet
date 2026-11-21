@@ -185,6 +185,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `accounts.security-history.list`
 - `accounts.duplicates.list`
 - `accounts.duplicates.enforce-all`
+- `accounts.user.export`
 - `accounts.user.delete`
 - `accounts.test-accounts.list`
 - `meetings.spaces.search`
