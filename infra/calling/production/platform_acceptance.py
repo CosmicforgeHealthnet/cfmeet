@@ -94,6 +94,7 @@ def off_status(answer):
     status, value = answer
     return status if status != 503 or error_code(value) == 'FEATURE_DISABLED' else 599
 CORS_WAIT = (12, 5)        # attempts, seconds: the gateway polls the origins feed every <= 30 s
+MEETING_CHAT_WAIT = (10, 2)  # join syncs at once; the background pass runs every 2 s
 REVOCATION_WAIT = (12, 5)  # verify results are cached for <= 30 s
 
 
@@ -598,11 +599,63 @@ class Journey:
         status, _ = join(t['customerToken'], expected=(200, 201, 403))
         self.check('meetings %s: token without a grant for the conference -> 403' % label, status == 403)
         if joined.get('participantToken'):
-            status, value = Client().call('GET', '/api/v2/conferences/%s/messages' % conf, expected=(200, 403, 409, 503),
+            # Not a partner chat surface (ADR 0062 section 8: partner users use their Messaging
+            # partner session device, below). Its answer for a partner meeting depends on the
+            # collaboration flag and the chat migration state (503 CHAT_UNAVAILABLE once
+            # Messaging is authoritative), so it is recorded for diagnosis, not asserted.
+            status, value = Client().call('GET', '/api/v2/conferences/%s/messages' % conf,
+                                          expected=(200, 403, 404, 409, 503),
                                           headers={'X-Participant-Token': joined['participantToken']})
-            self.check('meetings %s: partner meeting chat available' % label,
-                       status == 200 and code(value) != 'CHAT_UNAVAILABLE')
+            self.emit('platformAcceptanceNote', {'meetings %s first-party chat route' % label:
+                                                 {'status': status, 'code': code(value)}})
         t.update(conference=conf)
+        self.meeting_chat(t, conf, grants)
+
+    def meeting_conversation(self, client_token, conf):
+        """The MANAGED meeting conversation of `conf` as one partner session device lists it."""
+        _, page = device(client_token).call('GET', '/v1/conversations?contextClass=MEETING&limit=100')
+        for c in page.get('conversations', []):
+            context = c.get('context') or {}
+            if context.get('namespace') == 'meeting' and context.get('reference') == 'conference:%s' % conf:
+                return c
+        return None
+
+    def meeting_chat(self, t, conf, grants):
+        """Partner meeting chat: Meeting Service links a MANAGED conversation in the partner's own
+        scope and admits partner users who joined; they use it with their Messaging partner session
+        device. Someone who has not joined is not a member."""
+        label = t['label']
+        if not (t.get('riderClient') and t.get('customerClient')):
+            self.emit('platformAcceptanceNote', {'meetings chat': 'needs the chat stage\'s partner session devices'})
+            return
+        found = retry(lambda: self.meeting_conversation(t['riderClient'], conf), *MEETING_CHAT_WAIT)
+        self.check('meetings %s: partner meeting chat linked; the joined rider\'s device sees the MANAGED '
+                   'meeting conversation' % label,
+                   bool(found) and found.get('securityProfile') == 'MANAGED' and bool(found.get('conversationId')),
+                   fatal=True)
+        mconv = found['conversationId']
+        path = '/v1/conversations/%s/messages' % mconv
+        status, _ = device(t['customerClient']).call('GET', path, expected=(200, 403, 404))
+        self.check('meetings %s: a user who has not joined cannot read the meeting chat -> 404/403' % label,
+                   status in (403, 404), status=status)
+        status, _ = device(t['customerClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
+                                                     expected=(200, 201, 403, 404), idempotent=True)
+        self.check('meetings %s: a user who has not joined cannot send into the meeting chat -> 404/403' % label,
+                   status in (403, 404), status=status)
+        _, minted = self.mint(t, t['customer'], dict(grants))
+        Client().call('POST', '/api/v2/conferences/%s/join' % conf, {}, token=minted.get('token'), expected=(200, 201))
+        self.check('meetings %s: the customer who joined becomes a member of the meeting chat' % label,
+                   bool(retry(lambda: self.meeting_conversation(t['customerClient'], conf), *MEETING_CHAT_WAIT)))
+        message_id = str(uuid.uuid4())
+        device(t['riderClient']).call('POST', path, {'clientMessageId': message_id, 'text': 'meeting %s' % self.tag},
+                                      expected=(200, 201), idempotent=True)
+
+        def received():
+            _, page = device(t['customerClient']).call('GET', path)
+            return any(m.get('clientMessageId') == message_id for m in page.get('messages', []))
+        self.check('meetings %s: rider\'s device sends, customer\'s device receives in the meeting chat' % label,
+                   bool(retry(received, *MEETING_CHAT_WAIT)))
+        t.update(meetingConversation=mconv)
 
     def meetings_isolation(self, a, b):
         status, value = self.mint(b, b['rider'], dict(mtg=[{'c': a['conference'], 'r': 'HOST'}]),
@@ -615,6 +668,16 @@ class Journey:
             self.check('isolation meetings: B cannot mint a grant for A\'s conference', status in (403, 404, 422))
         status, _ = b['relay'].call('GET', '/api/v2/conferences/%s' % a['conference'], expected=(200, 403, 404))
         self.check('isolation meetings: B\'s server reads A\'s conference -> 404', status == 404)
+        if a.get('meetingConversation') and b.get('riderClient'):
+            path = '/v1/conversations/%s/messages' % a['meetingConversation']
+            status, _ = device(b['riderClient']).call('GET', path, expected=(200, 403, 404))
+            self.check('isolation meetings: B\'s device reads A\'s meeting chat -> 404/403', status in (403, 404))
+            status, _ = device(b['riderClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
+                                                      expected=(200, 201, 403, 404), idempotent=True)
+            self.check('isolation meetings: B\'s device sends into A\'s meeting chat -> 404/403', status in (403, 404))
+            status, _ = b['machine'].call('GET', '/v1/conversations/%s' % a['meetingConversation'],
+                                          expected=(200, 403, 404))
+            self.check('isolation meetings: B\'s server reads A\'s meeting chat -> 404', status == 404)
 
     # --- CF Meet Apps (ADR 0064 / 0065) --------------------------------------------------------
 

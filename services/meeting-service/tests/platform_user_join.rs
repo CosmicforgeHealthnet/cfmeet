@@ -805,3 +805,142 @@ async fn chat_unavailable_never_fails_a_join_and_the_pass_catches_up() {
     );
     assert_eq!(gateway.member_updates(user.principal)[0]["state"], "ACTIVE");
 }
+
+/// Two partner environments run meetings side by side: each meeting's chat is linked,
+/// owned and synchronised only in its own environment's signed scope, a user of one
+/// environment never reaches the other's meeting (or its chat), and removing a user
+/// takes them out of the conversation.
+#[tokio::test]
+async fn partner_meeting_chat_of_two_tenants_stays_in_each_tenants_own_scope() {
+    let mut h = harness!();
+    let tokens = Arc::new(FakeTokens::default());
+    let gateway = Arc::new(FakeChat::default());
+    enable(&mut h, tokens.clone(), Some(gateway.clone()));
+    let chat = h
+        .app
+        .state
+        .platform_users
+        .as_ref()
+        .and_then(|u| u.chat.clone())
+        .unwrap();
+    let (a, b) = (Machine::new(RW), Machine::new(RW));
+    h.register(&a);
+    h.register(&b);
+    let (_, conf_a) = partner_meeting(&h, &a, json!({ "title": "A" })).await;
+    let (_, conf_b) = partner_meeting(&h, &b, json!({ "title": "B" })).await;
+    let (host_a, rider_a, rider_b) = (
+        PartnerUser::new(Some("Host A")),
+        PartnerUser::new(Some("Rider A")),
+        PartnerUser::new(Some("Rider B")),
+    );
+    let (t, _) = tokens.mint(&a, &host_a, grant(conf_a, "HOST"));
+    let (s, v) = join_with(&h, conf_a, &t, json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let host_pt = v["participantToken"].as_str().unwrap().to_string();
+    let (t, _) = tokens.mint(&a, &rider_a, grant(conf_a, "PARTICIPANT"));
+    let (s, v) = join_with(&h, conf_a, &t, json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let rider_a_participant = uuid(&v["participant"]["id"]);
+    let (t, _) = tokens.mint(&b, &rider_b, grant(conf_b, "PARTICIPANT"));
+    let (s, v) = join_with(&h, conf_b, &t, json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // B's user, even holding a grant naming A's conference, is refused before any chat call.
+    let before = gateway.calls.lock().unwrap().len();
+    let (t, _) = tokens.mint(&b, &rider_b, grant(conf_a, "HOST"));
+    let (s, v) = join_with(&h, conf_a, &t, json!({})).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    assert_eq!(gateway.calls.lock().unwrap().len(), before);
+
+    // Every chat call is signed in the scope of the environment that owns the meeting.
+    let scope_of = |m: &Machine| {
+        (
+            m.actor.tenant_id,
+            m.actor.application_id,
+            m.actor.environment_id,
+            m.actor.service_account_id,
+        )
+    };
+    {
+        let calls = gateway.calls.lock().unwrap();
+        for (conference, owner) in [(conf_a, &a), (conf_b, &b)] {
+            let resolves: Vec<_> = calls
+                .iter()
+                .filter(|c| {
+                    c.3 == CONVERSATIONS_PATH
+                        && c.4["meetingRef"] == format!("conference:{conference}")
+                })
+                .collect();
+            assert_eq!(resolves.len(), 1, "{conference}");
+            assert_eq!(resolves[0].4["securityProfile"], "MANAGED");
+            let s = resolves[0].1;
+            assert_eq!(
+                (
+                    s.tenant_id,
+                    s.application_id,
+                    s.environment_id,
+                    s.service_account_id
+                ),
+                scope_of(owner)
+            );
+        }
+        let ensures: Vec<_> = calls
+            .iter()
+            .filter(|c| c.3 == ENSURE_PRINCIPAL_PATH)
+            .map(|c| (c.1.environment_id, c.4["environmentId"].clone()))
+            .collect();
+        assert_eq!(ensures.len(), 2);
+        for (signed, asked) in ensures {
+            assert_eq!(asked, json!(signed));
+        }
+        for (user, owner) in [(&host_a, &a), (&rider_a, &a), (&rider_b, &b)] {
+            let suffix = format!("/members/{}", user.principal);
+            let updates: Vec<_> = calls.iter().filter(|c| c.3.ends_with(&suffix)).collect();
+            assert_eq!(updates.len(), 1, "{suffix}");
+            let s = updates[0].1;
+            assert_eq!(
+                (
+                    s.tenant_id,
+                    s.application_id,
+                    s.environment_id,
+                    s.service_account_id
+                ),
+                scope_of(owner)
+            );
+            assert_eq!(updates[0].4["state"], "ACTIVE");
+        }
+    }
+    for (conference, owner) in [(conf_a, &a), (conf_b, &b)] {
+        assert_eq!(
+            h.app
+                .scalar(&format!(
+                    "SELECT count(*) FROM meeting_platform_chat_links WHERE conference_id = '{conference}' \
+                     AND tenant_id = '{}' AND environment_id = '{}'",
+                    owner.actor.tenant_id, owner.actor.environment_id
+                ))
+                .await,
+            1
+        );
+    }
+
+    // A removed user leaves the conversation on the next pass; the other tenant is untouched.
+    let (s, v) = h
+        .app
+        .post(
+            format!("/api/v2/conferences/{conf_a}/participants/{rider_a_participant}/remove"),
+            Auth::Participant(&host_pt),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let report = chat.sync_once().await;
+    assert_eq!(
+        (report.members_synced, report.failures),
+        (1, 0),
+        "{report:?}"
+    );
+    let last = gateway.member_updates(rider_a.principal);
+    assert_eq!(last.last().unwrap()["state"], "REMOVED");
+    assert_eq!(last.last().unwrap()["reason"], "MEETING_REMOVED");
+    assert_eq!(gateway.member_updates(rider_b.principal).len(), 1);
+}
