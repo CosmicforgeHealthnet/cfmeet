@@ -411,7 +411,7 @@ mod tests {
         let key = SealingKey::parse(&public).unwrap();
         let (tenant, invitation) = (Uuid::new_v4(), Uuid::new_v4());
         let now = Utc::now();
-        let token = "cfinv_0123456789abcdefghijABCDEFGHIJ";
+        let token = "cfinv_fixture_0123456789abcdefghijABCDEF";
         let (event, v) = seal_owner_invitation(
             &key,
             tenant,

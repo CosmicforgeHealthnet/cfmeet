@@ -20,8 +20,8 @@
 //!   estimated charges, plan spread). Figures are in minor units of one currency, never
 //!   converted, never called revenue.
 //!
-//! Nothing here charges anyone: there is no card, invoice, tax or balance until a
-//! payment provider is decided. Enforcement of plan limits belongs to the Meeting Service
+//! Nothing here charges anyone: billing (cards, tax, balances) stays outside the
+//! Developer Platform and is not decided. Enforcement of plan limits belongs to the Meeting Service
 //! and Messaging (they will read the holder's effective plan); this module only owns the
 //! data.
 //!
