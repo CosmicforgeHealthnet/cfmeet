@@ -6,10 +6,8 @@ name: Build CF Meet core service images
 # every image's revision label and transfers the exact images to the VPS.
 # An image that already exists for this SHA with the matching revision label is reused.
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/cfmeet-core-images.yml"
+  # All production image builds are scheduled by the selective release plan.
+  # Direct dispatch remains an explicit emergency/manual build option only.
   workflow_dispatch:
   workflow_call:
     inputs:
