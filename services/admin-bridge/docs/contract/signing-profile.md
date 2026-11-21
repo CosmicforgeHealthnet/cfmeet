@@ -390,6 +390,10 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `privacy.request.register`
 - `privacy.request.complete-service`
 - `operations.health.read`
+- `operations.incidents.list`
+- `operations.incident.resolve`
+- `operations.switches.list`
+- `operations.switch.change`
 - `operations.activations.list`
 - `operations.activation.request`
 - `operations.releases.list`

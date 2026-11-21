@@ -4,6 +4,7 @@
 pub mod calling;
 pub mod commands;
 pub mod communications;
+pub mod cross_ops;
 pub mod hq;
 pub mod identity;
 pub mod local;
@@ -74,6 +75,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = hq::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = cross_ops::dispatch(bridge, auth).await {
         return answer;
     }
     if let Some(answer) = operations::dispatch(bridge, auth).await {

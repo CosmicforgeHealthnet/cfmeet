@@ -5077,8 +5077,8 @@
     "owner": "admin-bridge",
     "method": "GET",
     "bridge_endpoint": "/operations/incidents",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /internal/v1/operator/incidents (messaging, calling, developer-platform)",
+    "state": "READ_ONLY",
     "permission": "operations.incidents.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -5087,8 +5087,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-    "blocker": "Phase A2: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "operations_incidents_aggregate_the_owners"
+    ]
   },
   {
     "id": "operations.incident.resolve",
@@ -5096,8 +5098,8 @@
     "owner": "admin-bridge",
     "method": "POST",
     "bridge_endpoint": "/operations/incidents/{incident_id}/resolve",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/incidents/{incident_id}/resolve (messaging, calling)",
+    "state": "AVAILABLE",
     "permission": "operations.incident.resolve",
     "risk": "R2",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -5106,8 +5108,10 @@
     "idempotency_required": true,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A8: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "operations_incident_resolve_routes_to_the_owner"
+    ]
   },
   {
     "id": "operations.switches.list",
@@ -5115,8 +5119,8 @@
     "owner": "admin-bridge",
     "method": "GET",
     "bridge_endpoint": "/operations/switches",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /internal/v1/operator/switches (messaging), GET /internal/v1/admin/routing (notifications)",
+    "state": "READ_ONLY",
     "permission": "operations.switches.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -5125,8 +5129,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-    "blocker": "Phase A2: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "operations_switches_join_kill_switches_and_routing_modes"
+    ]
   },
   {
     "id": "operations.switch.change",
@@ -5134,8 +5140,8 @@
     "owner": "admin-bridge",
     "method": "POST",
     "bridge_endpoint": "/operations/switches/{switch_id}",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/switches/{name} (messaging), POST /internal/v1/operator/routing/{category}/{channel}/mode (notifications)",
+    "state": "AVAILABLE",
     "permission": "operations.switch.change",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -5144,8 +5150,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A8: bridge route not implemented yet; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "operations_switch_change_routes_to_the_owner"
+    ]
   },
   {
     "id": "operations.activations.list",

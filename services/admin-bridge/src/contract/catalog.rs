@@ -2975,7 +2975,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .source("GET /internal/v1/operator/incidents (messaging, calling, developer-platform)")
+        .result("OperationsIncidentPage")
+        .served(&["operations_incidents_aggregate_the_owners"]),
     );
     c.push(
         op(
@@ -2986,7 +2989,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R2, V::OperationsMinimized)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+        .source("POST /internal/v1/operator/incidents/{incident_id}/resolve (messaging, calling)")
+        .body("OperationsIncidentResolveRequest")
+        .result("OperationsIncidentResolveResult")
+        .served(&["operations_incident_resolve_routes_to_the_owner"]),
     );
     c.push(
         op(
@@ -2997,7 +3004,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+            .source("GET /internal/v1/operator/switches (messaging), GET /internal/v1/admin/routing (notifications)")
+            .result("OperationsSwitchPage")
+            .served(&["operations_switches_join_kill_switches_and_routing_modes"]),
     );
     c.push(
         op(
@@ -3008,7 +3018,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R3, V::Internal)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+            .source("POST /internal/v1/operator/switches/{name} (messaging), POST /internal/v1/operator/routing/{category}/{channel}/mode (notifications)")
+            .body("OperationsSwitchChangeRequest")
+            .result("OperationsSwitchChangeResult")
+            .served(&["operations_switch_change_routes_to_the_owner"]),
     );
     c.push(
         op(

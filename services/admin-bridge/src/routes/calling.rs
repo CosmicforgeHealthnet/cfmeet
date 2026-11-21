@@ -349,7 +349,7 @@ fn retention_hold(h: &Value) -> T<Value> {
     ]))
 }
 
-fn incident(i: &Value) -> T<Value> {
+pub fn incident(i: &Value) -> T<Value> {
     Ok(obj(vec![
         ("incident_id", t::uuid(i, "incidentId")?),
         ("scope", t::string(i, "scope")?),

@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "description": "The owner's incident after the resolve.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incident_id",
+        "owner",
+        "incident_status",
+        "resolved_at"
+      ],
+      "properties": {
+        "incident_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z-]{0,31}:[A-Za-z0-9._:-]{1,160}$"
+        },
+        "owner": {
+          "enum": [
+            "messaging",
+            "calling"
+          ]
+        },
+        "incident_status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "resolved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
