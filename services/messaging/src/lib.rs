@@ -47,6 +47,7 @@ pub mod operator_commands;
 pub mod operator_datasets;
 pub mod operator_reads;
 pub mod partner;
+pub mod plans;
 pub mod push_mirror;
 pub mod realtime;
 pub mod reference_reconciliation;
