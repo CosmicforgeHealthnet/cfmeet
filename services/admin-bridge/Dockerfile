@@ -36,5 +36,5 @@ USER admin-bridge
 # loopback-only (enforced by configuration).
 ENV ADMIN_BRIDGE_HQ_BIND_ADDRESS=0.0.0.0:8443 \
     LOG_FORMAT=json
-EXPOSE 8443
+EXPOSE 8190 8443
 CMD ["./admin-bridge"]
