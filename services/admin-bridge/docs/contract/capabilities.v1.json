@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.15.0",
+  "contract_version": "1.16.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "01f84633c0b473e31104e2059e44283b17f3a3db4e6e4369c3a8d9ad4b40ce5b",
-    "capability_matrix_sha256": "b02ffe4c13ccb0e5733304daadc739f664aa3ba127e1d08dd078ed6738686fd6"
+    "openapi_sha256": "4bdbea7903d8fcdeb2ff7f7c4b1e7a06802eaed73237ffeb4e4f755cb8f8baae",
+    "capability_matrix_sha256": "cbd945c41f35aabc803a6cf3ecbb22e00238638743a143a4a57f17253105003b"
   },
   "query_shapes": {
     "SCOPED": [
@@ -49,11 +49,11 @@
     ]
   },
   "totals": {
-    "capabilities": 247,
+    "capabilities": 255,
     "by_state": {
-      "READ_ONLY": 117,
+      "READ_ONLY": 123,
       "AVAILABLE": 102,
-      "DISABLED": 12,
+      "DISABLED": 14,
       "BLOCKED_DEPENDENCY": 16
     }
   },
@@ -1185,7 +1185,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/accounts/duplicates/{group_id}/enforce",
-      "source_endpoint": "POST /internal/v1/operator/accounts/duplicates/enforce",
+      "source_endpoint": null,
       "path_params": [
         {
           "name": "group_id",
@@ -1211,7 +1211,57 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "$ref": "#/components/schemas/AccountDuplicatesEnforceRequest"
+        "not": {}
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "not": {}
+      },
+      "matrix_state": "DISABLED",
+      "permission": "accounts.duplicates.enforce",
+      "risk": "R3",
+      "privacy": "PERSONAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
+      "source_tests": [],
+      "contact_search": false
+    },
+    {
+      "id": "accounts.duplicates.enforce-all",
+      "version": "1.0",
+      "module": "accounts",
+      "kind": "COMMAND",
+      "owner": "meeting-service",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/accounts/duplicates/enforce",
+      "source_endpoint": "POST /internal/v1/operator/accounts/duplicates/enforce",
+      "path_params": [],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "abuse-review",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.security_admin",
+        "cfmeet.trust_safety"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/AccountDuplicatesEnforceAllRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
@@ -1219,7 +1269,7 @@
         "$ref": "#/components/schemas/AccountDuplicatesEnforceResult"
       },
       "matrix_state": "AVAILABLE",
-      "permission": "accounts.duplicates.enforce",
+      "permission": "accounts.duplicates.enforce-all",
       "risk": "R3",
       "privacy": "PERSONAL",
       "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
@@ -2011,6 +2061,64 @@
       "contact_search": false
     },
     {
+      "id": "meetings.meeting-recordings.list",
+      "version": "1.0",
+      "module": "meetings",
+      "kind": "READ",
+      "owner": "meeting-service",
+      "owner_status": "NEW",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/meetings/meetings/{meeting_id}/recordings",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "meeting_id",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "max_length": 128
+        }
+      ],
+      "query_shape": "SCOPED_PAGE",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.support",
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MeetingArtifactPage"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "meetings.meeting-recordings.read",
+      "risk": "R1",
+      "privacy": "PERSONAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
+      "blocker": null,
+      "source_tests": [
+        "meetings_artifacts_and_deliveries_by_id"
+      ],
+      "contact_search": false
+    },
+    {
       "id": "meetings.transcripts.list",
       "version": "1.0",
       "module": "meetings",
@@ -2118,6 +2226,64 @@
       "blocker": null,
       "source_tests": [
         "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "meetings.meeting-transcripts.list",
+      "version": "1.0",
+      "module": "meetings",
+      "kind": "READ",
+      "owner": "meeting-service",
+      "owner_status": "NEW",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/meetings/meetings/{meeting_id}/transcripts",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "meeting_id",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "max_length": 128
+        }
+      ],
+      "query_shape": "SCOPED_PAGE",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.support",
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MeetingArtifactPage"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "meetings.meeting-transcripts.read",
+      "risk": "R1",
+      "privacy": "PERSONAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
+      "blocker": null,
+      "source_tests": [
+        "meetings_artifacts_and_deliveries_by_id"
       ],
       "contact_search": false
     },
@@ -2550,6 +2716,63 @@
       "contact_search": false
     },
     {
+      "id": "meetings.email-deliveries.read",
+      "version": "1.0",
+      "module": "meetings",
+      "kind": "READ",
+      "owner": "meeting-service",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/meetings/email-deliveries/{delivery_id}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "delivery_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.support",
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MeetingEmailDelivery"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "meetings.email-deliveries.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
+      "blocker": null,
+      "source_tests": [
+        "meetings_artifacts_and_deliveries_by_id"
+      ],
+      "contact_search": false
+    },
+    {
       "id": "meetings.critical-lane.read",
       "version": "1.0",
       "module": "meetings",
@@ -2756,6 +2979,121 @@
       "blocker": null,
       "source_tests": [
         "messaging_report_detail_carries_actions_not_evidence"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.conversations.read",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "NEW",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/conversations/{conversation_id}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "conversation_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingConversation"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.conversations.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_conversation_and_member_carry_versions"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.members.read",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "NEW",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/conversations/{conversation_id}/members/{principal_id}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "conversation_id",
+          "format": "uuid"
+        },
+        {
+          "name": "principal_id",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "max_length": 128
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingMember"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.members.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_conversation_and_member_carry_versions"
       ],
       "contact_search": false
     },
@@ -3100,6 +3438,61 @@
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
       "source_tests": [],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.environment-policy.read",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "NEW",
+      "phase": "A5",
+      "method": "GET",
+      "path": "/messaging/environments/{environment_id}/policy",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "environment_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety",
+        "cfmeet.platform_ops"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingEnvironmentPolicy"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.environment-policy.read",
+      "risk": "R1",
+      "privacy": "INTERNAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_environment_policy_is_tenant_scoped_and_closed"
+      ],
       "contact_search": false
     },
     {
@@ -5224,11 +5617,11 @@
       "module": "calling",
       "kind": "COMMAND",
       "owner": "calling",
-      "owner_status": "EXISTS",
+      "owner_status": "CLI_TO_API",
       "phase": "A5",
       "method": "POST",
       "path": "/calling/webhook-keys/{key_id}/reseal",
-      "source_endpoint": "POST /internal/v1/operator/webhook-keys/reseal",
+      "source_endpoint": null,
       "path_params": [
         {
           "name": "key_id",
@@ -5253,15 +5646,64 @@
         "cfmeet.platform_ops"
       ],
       "request_body": {
-        "$ref": "#/components/schemas/CallingWebhookKeyResealRequest"
+        "not": {}
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "$ref": "#/components/schemas/CallingWebhookKeyResealResult"
+        "not": {}
+      },
+      "matrix_state": "DISABLED",
+      "permission": "calling.webhook-key.reseal",
+      "risk": "R3",
+      "privacy": "INTERNAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
+      "source_tests": [],
+      "contact_search": false
+    },
+    {
+      "id": "calling.webhook-keys.reseal",
+      "version": "1.0",
+      "module": "calling",
+      "kind": "COMMAND",
+      "owner": "calling",
+      "owner_status": "EXISTS",
+      "phase": "A5",
+      "method": "POST",
+      "path": "/calling/webhook-keys/reseal",
+      "source_endpoint": "POST /internal/v1/operator/webhook-keys/reseal",
+      "path_params": [],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.platform_ops"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/CallingWebhookKeysResealRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/CallingWebhookKeysResealResult"
       },
       "matrix_state": "AVAILABLE",
-      "permission": "calling.webhook-key.reseal",
+      "permission": "calling.webhook-keys.reseal",
       "risk": "R3",
       "privacy": "INTERNAL",
       "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",

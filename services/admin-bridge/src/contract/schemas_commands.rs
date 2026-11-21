@@ -69,7 +69,8 @@ fn out_schema(f: &OutField) -> Value {
     s
 }
 
-fn object(fields: &[OutField]) -> Value {
+/// The closed schema of an object of `fields` (also used by data-described reads).
+pub fn object(fields: &[OutField]) -> Value {
     let props: Map<String, Value> = fields
         .iter()
         .map(|f| (f.hq.to_string(), out_schema(f)))

@@ -452,7 +452,7 @@ async fn partner_book(
     bridge: &Bridge,
     auth: &Authorized,
     operator: &str,
-) -> Result<String, ErrorCode> {
+) -> Result<(String, Value), ErrorCode> {
     let mut cursor: Option<String> = None;
     for _ in 0..5 {
         let mut query = vec![
@@ -465,14 +465,16 @@ async fn partner_book(
             .read(O, &format!("{BASE}/price-books"), &query, operator)
             .await?;
         let (books, next) = t::page(&v, price_book)?;
-        if let Some(b) = books
-            .iter()
-            .find(|b| b["market_code"].as_str() == Some(auth.query.market.as_str()))
-        {
-            return b["price_book_id"]
+        // Never another market's or product line's book.
+        if let Some(b) = books.iter().find(|b| {
+            b["product_line"] == "PARTNER_PLATFORM"
+                && b["market_code"].as_str() == Some(auth.query.market.as_str())
+        }) {
+            let id = b["price_book_id"]
                 .as_str()
                 .map(str::to_string)
-                .ok_or(ErrorCode::Internal);
+                .ok_or(ErrorCode::Internal)?;
+            return Ok((id, b["version"].clone()));
         }
         match next {
             Value::String(c) => cursor = Some(c),
@@ -566,13 +568,19 @@ async fn serve(bridge: &Bridge, auth: &Authorized) -> Result<Value, ErrorCode> {
         }
         "finance.estimated-charges.report" => {
             let mut query = window(auth)?;
-            let book = partner_book(bridge, auth, &operator).await?;
-            query.insert(0, ("priceBookId", book));
+            let (book, book_version) = partner_book(bridge, auth, &operator).await?;
+            query.insert(0, ("priceBookId", book.clone()));
             query.extend(paging(auth));
             let v = read(format!("{FINANCE}/estimated-charges"), query).await?;
             estimate(&v)?;
             report(&v, workspace_charges).and_then(|mut out| {
-                out["price_book_id"] = t::uuid(&v, "priceBookId")?;
+                // The estimate must be of the book the bridge chose.
+                let answered = t::uuid(&v, "priceBookId")?;
+                if answered.as_str() != Some(book.as_str()) {
+                    return Err(OwnerError::Contract);
+                }
+                out["price_book_id"] = answered;
+                out["price_book_version"] = book_version;
                 out["version_id"] = t::opt_uuid(&v, "versionId")?;
                 out["currency"] = t::string(&v, "currency")?;
                 out["estimate"] = Value::Bool(true);

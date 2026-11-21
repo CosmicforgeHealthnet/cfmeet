@@ -46,7 +46,7 @@
           }
         }
       },
-      "description": "The resource after calling.webhook-key.reseal; status: RESEALED."
+      "description": "The resource after calling.webhook-keys.reseal; status: RESEALED."
     }
   }
 }

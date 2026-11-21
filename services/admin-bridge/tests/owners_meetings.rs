@@ -177,6 +177,23 @@ impl OwnerPort for FakeMeetingService {
                 "linkedConferences": 9, "changedBy": "guest-token",
                 "latestParityRun": {"parityRunId": ID, "status": "PASSED", "startedAt": T0, "finishedAt": T0,
                     "conferencesChecked": 9, "messagesChecked": 120, "mismatches": 0}}),
+            x if x == format!("/meetings/conferences/{ID}/recordings")
+                || x == format!("/meetings/conferences/{ID}/transcripts") =>
+            {
+                page(
+                    vec![
+                        json!({"artifactId": USER, "conferenceId": ID, "spaceId": USER,
+                        "artifactStatus": "available", "sizeBytes": 2048, "createdAt": T0, "availableAt": T0,
+                        "retentionAt": null, "deleteRequestedAt": null, "deletedAt": null, "version": 3,
+                        "objectKey": "secret-meta"}),
+                    ],
+                    json!(USER),
+                )
+            }
+            x if x == format!("/meetings/email-deliveries/{ID}") => json!({
+                "id": ID, "category": "meeting_invite", "status": "delivered", "provider": "resend",
+                "attempts": 1, "lastErrorClass": null, "lastErrorStatus": null, "createdAt": T0,
+                "acceptedAt": T0, "deliveredAt": T0, "recipient": EMAIL}),
             "/meetings/critical-lane" => json!({"fallbackKey": true, "pending": 2, "dead": 0,
                 "leasedUncompletedDecisions": [ID]}),
             _ => return Err(OwnerError::NotFound),
@@ -619,4 +636,59 @@ async fn meetings_webinars_keep_the_window() {
     );
     assert_eq!(items[0]["registrations_active"], 12);
     assert_eq!(v["result"]["next_cursor"], ID, "paging continues");
+}
+
+#[tokio::test]
+async fn meetings_artifacts_and_deliveries_by_id() {
+    let (h, fake) = harness().await;
+    for (suffix, perm) in [
+        ("recordings", "meetings.meeting-recordings.read"),
+        ("transcripts", "meetings.meeting-transcripts.read"),
+    ] {
+        let c = call(
+            &format!("/meetings/meetings/{ID}/{suffix}"),
+            &format!("{}&limit=10&cursor={USER}", scoped("privacy-request")),
+            perm,
+            &["cfmeet.trust_safety"],
+        );
+        let (status, v) = send(&h, &c).await;
+        assert_eq!(status, 200, "{suffix}: {v}");
+        let (_, path, query, _) = last(&fake);
+        assert_eq!(
+            path,
+            format!("/internal/v1/operator/meetings/conferences/{ID}/{suffix}")
+        );
+        assert_eq!(
+            query,
+            vec![
+                ("limit".into(), "10".into()),
+                ("cursor".into(), USER.into())
+            ]
+        );
+        let a = &v["result"]["items"][0];
+        assert_eq!(
+            (a["version"].clone(), a["artifact_state"].clone()),
+            (json!(3), json!("AVAILABLE"))
+        );
+        assert_no_leaks(&v);
+    }
+    let c = call(
+        &format!("/meetings/email-deliveries/{ID}"),
+        &scoped("ops-incident"),
+        "meetings.email-deliveries.read",
+        &["cfmeet.platform_ops"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last(&fake).1,
+        format!("/internal/v1/operator/meetings/email-deliveries/{ID}")
+    );
+    let r = &v["result"];
+    assert_eq!(
+        (r["category"].clone(), r["status"].clone()),
+        (json!("MEETING_INVITE"), json!("DELIVERED"))
+    );
+    assert_eq!(r["provider"], "resend");
+    assert_no_leaks(&v);
 }

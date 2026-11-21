@@ -1,5 +1,5 @@
 {
-  "description": "Request of accounts.duplicates.enforce (POST /internal/v1/operator/accounts/duplicates/enforce).",
+  "description": "Request of accounts.duplicates.enforce-all (POST /internal/v1/operator/accounts/duplicates/enforce).",
   "type": "object",
   "additionalProperties": false,
   "required": [

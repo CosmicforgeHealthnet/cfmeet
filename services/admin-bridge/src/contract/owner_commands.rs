@@ -190,7 +190,7 @@ const fn bt(hq: &'static str, owner: &'static str, kind: In) -> BodyField {
     }
 }
 
-const fn o(hq: &'static str, owner: &'static str, kind: Out, nullable: bool) -> OutField {
+pub const fn o(hq: &'static str, owner: &'static str, kind: Out, nullable: bool) -> OutField {
     OutField {
         hq,
         owner,
@@ -417,7 +417,12 @@ const PA_SIGNED_OUT: &[OutField] = &[
     o("application_id", "applicationId", Out::Uuid, true),
     o("environment_id", "environmentId", Out::Uuid, true),
     o("kind", "kind", Out::Code, false),
-    o("sessions_invalid_before", "tokensNotBefore", Out::Time, true),
+    o(
+        "sessions_invalid_before",
+        "tokensNotBefore",
+        Out::Time,
+        true,
+    ),
 ];
 const SCOPE_BODY: &[BodyField] = &[
     p("application_id", In::Uuid),
@@ -2068,16 +2073,16 @@ pub const COMMANDS: &[OwnerCommand] = &[
         "CallingIncidentRecordResult",
     ),
     cl(
-        "calling.webhook-key.reseal",
-        // Reseals every webhook subscription of the tenant under the current sealing
-        // key; `{key_id}` names the key HQ reviewed and is kept in the ledger target.
+        // Reseals every webhook subscription of the tenant under the current sealing key
+        // (the target is the tenant; the per-key calling.webhook-key.reseal is not served).
+        "calling.webhook-keys.reseal",
         "POST /internal/v1/operator/webhook-keys/reseal",
         None,
         &[CL_TENANT],
         &["RESEALED"],
         CL_RESEALED,
-        "CallingWebhookKeyResealRequest",
-        "CallingWebhookKeyResealResult",
+        "CallingWebhookKeysResealRequest",
+        "CallingWebhookKeysResealResult",
     ),
     // Meeting Service: accounts.
     ms(
@@ -2149,15 +2154,16 @@ pub const COMMANDS: &[OwnerCommand] = &[
         "AccountUserCommandResult",
     ),
     ms(
-        "accounts.duplicates.enforce",
-        // Enforces identity uniqueness across the account authority (every group);
-        // `{group_id}` names the group HQ reviewed and is kept in the ledger target.
+        // Enforces identity uniqueness across the account authority (every group at
+        // once: the owner cannot enforce one group, so the per-group
+        // accounts.duplicates.enforce is not served).
+        "accounts.duplicates.enforce-all",
         "POST /internal/v1/operator/accounts/duplicates/enforce",
         None,
         &[],
         &["ENFORCED", "PARTIALLY_ENFORCED", "NOT_ENFORCED"],
         MEET_DUPLICATES,
-        "AccountDuplicatesEnforceRequest",
+        "AccountDuplicatesEnforceAllRequest",
         "AccountDuplicatesEnforceResult",
     ),
     ms(

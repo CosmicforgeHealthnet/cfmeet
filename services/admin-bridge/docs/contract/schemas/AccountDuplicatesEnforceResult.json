@@ -68,7 +68,7 @@
           }
         }
       },
-      "description": "The resource after accounts.duplicates.enforce; status: ENFORCED, PARTIALLY_ENFORCED, NOT_ENFORCED."
+      "description": "The resource after accounts.duplicates.enforce-all; status: ENFORCED, PARTIALLY_ENFORCED, NOT_ENFORCED."
     }
   }
 }

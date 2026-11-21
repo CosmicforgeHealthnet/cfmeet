@@ -282,7 +282,7 @@ pub fn insert(m: &mut Map<String, Value>) {
     );
     let mut charges = report(
         "FinanceWorkspaceCharges",
-        "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market, over the window's UTC days [from, to].",
+        "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market (price_book_id at price_book_version; no such book: RESOURCE_NOT_FOUND, never another market's book), over the window's UTC days [from, to].",
     );
     charges["required"] = json!([
         "items",
@@ -290,11 +290,13 @@ pub fn insert(m: &mut Map<String, Value>) {
         "from",
         "to",
         "price_book_id",
+        "price_book_version",
         "version_id",
         "currency",
         "estimate"
     ]);
     charges["properties"]["price_book_id"] = uuid.clone();
+    charges["properties"]["price_book_version"] = json!({"type": "integer", "minimum": 1, "description": "The chosen price book's version when the bridge chose it."});
     charges["properties"]["version_id"] = nullable_uuid.clone();
     charges["properties"]["currency"] = json!({"type": "string", "pattern": "^[A-Z]{3}$"});
     charges["properties"]["estimate"] = json!({"const": true});

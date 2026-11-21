@@ -29,6 +29,8 @@ type Recorded = (String, Vec<(String, String)>, Option<Value>);
 struct FakePricing {
     calls: Mutex<Vec<Recorded>>,
     refuse_simulation: Mutex<bool>,
+    /// The price books hold no PARTNER_PLATFORM book for the GLOBAL market.
+    no_global_partner_book: Mutex<bool>,
 }
 
 fn page(items: Vec<Value>, next: Value) -> Value {
@@ -70,6 +72,15 @@ impl OwnerPort for FakePricing {
         ));
         let p = owner_path(path);
         Ok(match p.as_str() {
+            "/pricing/price-books" if *self.no_global_partner_book.lock().unwrap() => page(
+                vec![
+                    json!({"priceBookId": ID, "productLine": "PARTNER_PLATFORM", "currency": "USD", "marketCode": "EU",
+                       "effectiveVersionId": null, "frozen": false, "updatedAt": T0, "version": 1}),
+                    json!({"priceBookId": BOOK, "productLine": "CONSUMER", "currency": "USD", "marketCode": "GLOBAL",
+                       "effectiveVersionId": ID, "frozen": false, "updatedAt": T0, "version": 3}),
+                ],
+                Value::Null,
+            ),
             "/pricing/price-books" => page(
                 vec![
                     json!({"priceBookId": ID, "productLine": "PARTNER_PLATFORM", "currency": "USD", "marketCode": "EU",
@@ -530,7 +541,29 @@ async fn finance_estimated_charges_use_the_market_partner_book() {
     assert_eq!(pairs(q)[0], ("priceBookId", BOOK));
     let r = &v["result"];
     assert_eq!(r["price_book_id"], BOOK);
+    // The book the bridge chose, at the version it had when chosen.
+    assert_eq!(r["price_book_version"], 3);
     assert_eq!(r["estimate"], true);
     assert_eq!(r["items"][0]["total_minor"], 250);
     assert_eq!(r["items"][0]["lines"][0]["amount_minor"], 250);
+}
+
+#[tokio::test]
+async fn finance_estimated_charges_never_use_another_book() {
+    let e = env().await;
+    *e.fake.no_global_partner_book.lock().unwrap() = true;
+    let (_, v) = e
+        .get(
+            "/finance/estimated-charges",
+            &window("billing-review"),
+            "finance.estimated-charges.read",
+            "cfmeet.finance",
+        )
+        .await;
+    // Neither the EU partner book nor the GLOBAL consumer book: a definite refusal.
+    assert_eq!(code(&v), "RESOURCE_NOT_FOUND");
+    let calls = e.fake.calls.lock().unwrap().clone();
+    assert!(calls
+        .iter()
+        .all(|(p, _, _)| owner_path(p) == "/pricing/price-books"));
 }

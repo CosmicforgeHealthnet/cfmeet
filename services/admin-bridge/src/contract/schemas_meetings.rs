@@ -265,4 +265,31 @@ pub fn insert(m: &mut Map<String, Value>) {
             }),
         ),
     );
+
+    m.insert(
+        "MeetingArtifact".into(),
+        object(
+            "One recording or transcript of a meeting: state, size, times and version. Never an object key or media URL.",
+            json!({
+                "artifact_id": uuid, "meeting_id": uuid, "space_id": uuid, "artifact_state": code,
+                "size_bytes": {"type": ["integer", "null"], "minimum": 0}, "created_at": ts,
+                "available_at": nullable_ts, "retention_at": nullable_ts, "delete_requested_at": nullable_ts,
+                "deleted_at": nullable_ts,
+                "version": {"type": "integer", "minimum": 1, "description": "The artifact's version (expected_version of its delete command)."}
+            }),
+        ),
+    );
+    m.insert("MeetingArtifactPage".into(), page("MeetingArtifact"));
+    m.insert(
+        "MeetingEmailDelivery".into(),
+        object(
+            "One email delivery's status (no recipient, subject or body).",
+            json!({
+                "delivery_id": uuid, "category": code, "status": code, "provider": nullable_name(32),
+                "attempts": count, "last_error_class": nullable_code,
+                "last_error_status": {"type": ["integer", "null"]}, "created_at": ts,
+                "accepted_at": nullable_ts, "delivered_at": nullable_ts
+            }),
+        ),
+    );
 }

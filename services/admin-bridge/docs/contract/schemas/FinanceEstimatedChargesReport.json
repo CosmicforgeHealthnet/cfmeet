@@ -7,6 +7,7 @@
     "from",
     "to",
     "price_book_id",
+    "price_book_version",
     "version_id",
     "currency",
     "estimate"
@@ -40,6 +41,11 @@
       "type": "string",
       "format": "uuid"
     },
+    "price_book_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The chosen price book's version when the bridge chose it."
+    },
     "version_id": {
       "type": [
         "string",
@@ -55,5 +61,5 @@
       "const": true
     }
   },
-  "description": "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market, over the window's UTC days [from, to]."
+  "description": "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market (price_book_id at price_book_version; no such book: RESOURCE_NOT_FOUND, never another market's book), over the window's UTC days [from, to]."
 }
