@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.10.0"
+    "version": "1.11.0"
   },
   "paths": {
     "/": {
@@ -17522,6 +17522,142 @@
         ]
       }
     },
+    "/api/v2/messaging/export-deliveries": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Data exports waiting for me (Messaging)",
+        "description": "ADR 0068 (owner-delivered exports): the Messaging exports CF Meet support requested for\nthe signed-in account, newest first (at most 20), as references (ids, state, size, SHA-256,\ntimes; never the export or a link). Relayed to Messaging's delegated surface with the\ncaller's own principal signed in; Messaging answers only the recipient's own exports.",
+        "operationId": "v2_messaging_export_deliveries",
+        "responses": {
+          "200": {
+            "description": "`{items: [ExportDelivery]}` (Messaging's answer)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED (Unified Messaging is not enabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/exports/{exportId}/claim": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Claim a Messaging data export once",
+        "description": "ADR 0068 (owner-delivered exports): the signed-in recipient's single claim of a READY\nexport: one short-lived forced-download grant (`{exportId, deliveryRef, method, url,\nexpiresAt, size, sha256}`) to use straight away; the export is DELIVERED at once. 409\nEXPORT_NOT_READY, EXPORT_ALREADY_DELIVERED (nothing is re-sent) or EXPORT_EXPIRED; anyone\nbut the recipient gets 404. Relayed with the caller's own principal signed in.",
+        "operationId": "v2_messaging_claim_export",
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "description": "The export's id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The one download grant (Messaging's ExportClaimGrant)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the caller's export, or FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXPORT_NOT_READY / EXPORT_ALREADY_DELIVERED / EXPORT_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/messaging/me": {
       "get": {
         "tags": [
@@ -20685,6 +20821,115 @@
           },
           "404": {
             "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/exports/{exportId}/download": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Download an owner-delivered organization export.",
+        "description": "ADR 0068: the organization export CF Meet support requested, downloaded once by the OWNER\nwhose emailed link it is (`/organizations/exports/download#org=…&export=…&token=…`), signed\nin. Relayed to the Organizations Service with the verified acting user; the token travels\nonly in this body. Answers the export document (JSON attachment). 404 EXPORT_LINK_INVALID\n(wrong, used or foreign link, or no longer an active OWNER), 410 EXPORT_LINK_EXPIRED;\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_download_organization_export",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "exportId",
+            "in": "path",
+            "description": "Export id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationExportDownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The organization's export document (attachment)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "EXPORT_LINK_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "EXPORT_LINK_EXPIRED",
             "content": {
               "application/json": {
                 "schema": {
@@ -29333,6 +29578,8 @@
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
           "CALENDAR_FEED_NOT_FOUND",
+          "EXPORT_LINK_INVALID",
+          "EXPORT_LINK_EXPIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -31479,6 +31726,20 @@
             "nullable": true
           }
         }
+      },
+      "OrganizationExportDownloadRequest": {
+        "type": "object",
+        "description": "ADR 0068: the single-use token of an organization export's emailed link.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The `token` of the download link (from the link's fragment; never logged or stored)."
+          }
+        },
+        "additionalProperties": false
       },
       "OrganizationInstallDecision": {
         "type": "object",

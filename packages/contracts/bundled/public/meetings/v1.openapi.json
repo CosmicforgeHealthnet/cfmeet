@@ -10,9 +10,9 @@
     "license": {
       "name": ""
     },
-    "version": "1.10.0",
+    "version": "1.11.0",
     "x-cfmeet-source-contract": "cfmeet.meeting-service.http-api",
-    "x-cfmeet-source-version": "1.10.0"
+    "x-cfmeet-source-version": "1.11.0"
   },
   "servers": [
     {
@@ -15589,6 +15589,8 @@
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
           "CALENDAR_FEED_NOT_FOUND",
+          "EXPORT_LINK_INVALID",
+          "EXPORT_LINK_EXPIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]

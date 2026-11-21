@@ -222,6 +222,8 @@ use utoipa::OpenApi;
         crate::handlers::v2::unified_messaging::directory,
         crate::handlers::v2::unified_messaging::resolve,
         crate::handlers::v2::unified_messaging::principal_names,
+        crate::handlers::v2::unified_messaging::export_deliveries,
+        crate::handlers::v2::unified_messaging::claim_export,
         crate::handlers::v2::unified_messaging::relay_get,
         crate::handlers::v2::unified_messaging::relay_post,
         crate::handlers::v2::unified_messaging::relay_put,
@@ -237,6 +239,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::organizations::list_organization_members,
         crate::handlers::v2::organizations::list_organization_meeting_spaces,
         crate::handlers::v2::organizations::export_organization,
+        crate::handlers::v2::organizations::download_organization_export,
         crate::handlers::v2::organizations::get_organization_meeting_profile_policy,
         crate::handlers::v2::organizations::put_organization_meeting_profile_policy,
         crate::handlers::v2::organizations::upsert_organization_member,
@@ -697,6 +700,7 @@ use utoipa::OpenApi;
             crate::handlers::v2::account_sessions::SecurityEventPage,
             crate::handlers::v2::account_identity::StepUpRequest,
             crate::handlers::v2::account_identity::DeleteAccountRequest,
+            crate::handlers::v2::organizations::OrganizationExportDownloadRequest,
             crate::handlers::v2::account_identity::MfaSetupResponse,
             crate::handlers::v2::account_identity::MfaConfirmRequest,
             crate::handlers::v2::account_identity::MfaRecoveryCodes,
@@ -883,7 +887,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.10.0",
+        version = "1.11.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",

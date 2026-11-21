@@ -1116,3 +1116,67 @@ async fn deactivation_revokes_the_bridge_principal_messaging_sessions() {
     );
     assert_eq!(row.try_get::<String>("", "status").unwrap(), "DONE");
 }
+
+/// ADR 0068: owner-delivered Messaging exports are listed and claimed for the signed-in
+/// recipient only, on Messaging's delegated mirror, with the caller's principal signed in.
+#[tokio::test]
+async fn owner_delivered_exports_are_relayed_for_the_recipient() {
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("export-recipient").await;
+    let export = Uuid::new_v4();
+    let (s, v) = app
+        .get(
+            format!("{BRIDGE}/export-deliveries"),
+            Auth::Bearer(&user.token),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/exports/{export}/claim"),
+            Auth::Bearer(&user.token),
+            json!({ "actingPrincipalId": Uuid::new_v4() }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
+    let relayed: Vec<Call> = gw
+        .calls()
+        .into_iter()
+        .filter(|c| c.peer == Peer::Messaging)
+        .collect();
+    assert_eq!(relayed.len(), 2, "{relayed:?}");
+    assert_eq!(relayed[0].method, Method::GET);
+    assert_eq!(
+        relayed[0].path,
+        "/internal/v1/delegated/v1/messaging/export-deliveries"
+    );
+    assert_eq!(relayed[1].method, Method::POST);
+    assert_eq!(
+        relayed[1].path,
+        format!("/internal/v1/delegated/v1/messaging/exports/{export}/claim")
+    );
+    assert_eq!(
+        relayed[1].body,
+        Some(json!({})),
+        "nothing from the client body"
+    );
+    for c in &relayed {
+        assert_eq!(c.acting.as_ref().map(|a| a.principal_id), Some(principal));
+    }
+    // Without a sign-in nothing is relayed.
+    let (s, _) = app
+        .get(format!("{BRIDGE}/export-deliveries"), Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        gw.calls()
+            .iter()
+            .filter(|c| c.peer == Peer::Messaging)
+            .count(),
+        2
+    );
+}
