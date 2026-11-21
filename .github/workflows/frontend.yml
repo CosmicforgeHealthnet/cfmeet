@@ -106,6 +106,8 @@ jobs:
       # workspace context, stable error envelopes, optimistic-concurrency bodies.
       - name: Account and organization administration tests
         run: node --experimental-strip-types --test tests/organization-admin.test.mjs
+      - name: Owner-delivered export links and lists (ADR 0068)
+        run: node --experimental-strip-types --test tests/owner-exports.test.mjs
 
       # Organization-scope Messaging (final closure, J-10): organization paths, refusal
       # explanations and the colleague rules of the organization Messages view.
