@@ -1,0 +1,25 @@
+{
+  "description": "Resolve one owner incident (the path's <owner>:<uuid>): messaging -> Messaging's incident resolve (the reason is sent), calling -> Calling's incident resolve for the request's tenant (the reason stays in the bridge's record). Unversioned. A partner incident record has nothing to resolve (RESOURCE_NOT_FOUND).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "reason_code"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

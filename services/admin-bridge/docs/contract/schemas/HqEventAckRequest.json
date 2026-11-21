@@ -1,0 +1,19 @@
+{
+  "description": "Acknowledge the feed up to sequence for one consumer. Not a command: no Idempotency-Key; repeating it is harmless. A sequence beyond the last appended one is COMMAND_BODY_INVALID.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "consumer",
+    "sequence"
+  ],
+  "properties": {
+    "consumer": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_id",
+        "public_id",
+        "last4",
+        "tenant_id",
+        "application_id",
+        "environment_id",
+        "service_account_id",
+        "key_state",
+        "version",
+        "key_expires_at",
+        "rotated_from_key_id",
+        "delivery",
+        "delivery_channel",
+        "delivery_ref",
+        "delivery_state",
+        "expires_at",
+        "revealed_at"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "public_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "last4": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "application_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "service_account_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "key_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "key_expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rotated_from_key_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "delivery": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "delivery_channel": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "delivery_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "delivery_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revealed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after identity.key.rotate; status: ROTATED."
+    }
+  }
+}

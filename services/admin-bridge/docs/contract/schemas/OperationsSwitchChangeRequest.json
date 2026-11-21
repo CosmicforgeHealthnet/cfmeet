@@ -1,0 +1,52 @@
+{
+  "description": "Change one switch (the path's switch_id): messaging:<NAME>[:<environment id>] takes engaged (messaging.switch.change semantics; expected_version 0 while the switch has no row); notifications:<CATEGORY>:<CHANNEL> takes mode (notifications.routing.change semantics; expected_version >= 1). The target is the owner's switch at its scope. TWO_PERSON.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_version",
+    "reason_code"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "expected_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "engaged": {
+      "type": "boolean"
+    },
+    "mode": {
+      "enum": [
+        "OFF",
+        "SHADOW",
+        "ACTIVE"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "engaged"
+      ]
+    },
+    {
+      "required": [
+        "mode"
+      ]
+    }
+  ]
+}

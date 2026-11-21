@@ -27,6 +27,12 @@ struct Inner {
     projections: Vec<ProjectionRow>,
     operations: Vec<Operation>,
     privacy: Vec<PrivacyRequest>,
+    inbox: HashMap<(String, uuid::Uuid), &'static str>,
+    /// `received_at` of every quarantined owner event.
+    quarantined_at: Vec<DateTime<Utc>>,
+    outbox: Vec<FeedEvent>,
+    cursors: HashMap<String, i64>,
+    activations: Vec<ActivationRequest>,
 }
 
 #[derive(Default)]
@@ -56,6 +62,10 @@ impl MemoryStore {
 
     pub fn operations(&self) -> Vec<Operation> {
         self.inner.lock().unwrap().operations.clone()
+    }
+
+    pub fn activations(&self) -> Vec<ActivationRequest> {
+        self.inner.lock().unwrap().activations.clone()
     }
 
     pub fn enroll(&self, p: Principal) {
@@ -232,6 +242,97 @@ impl Store for MemoryStore {
         let mut v = self.inner.lock().unwrap().projections.clone();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
+    }
+
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let i = match g
+            .datasets
+            .iter()
+            .position(|d| d.dataset_id == dataset_id && d.day == day)
+        {
+            Some(i) => i,
+            None => {
+                g.datasets.push(DatasetDay {
+                    dataset_id: dataset_id.to_string(),
+                    day,
+                    metrics: serde_json::Map::new(),
+                    sources_reported: Vec::new(),
+                    updated_at: at,
+                });
+                g.datasets.len() - 1
+            }
+        };
+        let d = &mut g.datasets[i];
+        for (k, v) in metrics {
+            d.metrics.insert(k.clone(), v.clone());
+        }
+        d.sources_reported.extend(sources.iter().cloned());
+        d.sources_reported.sort();
+        d.sources_reported.dedup();
+        d.updated_at = at;
+        Ok(())
+    }
+
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        let mut latest: HashMap<(String, String, String), (i64, String)> = HashMap::new();
+        for f in g
+            .outbox
+            .iter()
+            .filter(|f| f.event.event_type == event_type && f.event.occurred_at < end)
+        {
+            let e = &f.event;
+            let key = (
+                e.producer.clone(),
+                e.subject_kind.clone(),
+                e.subject_id.clone(),
+            );
+            let newer = latest.get(&key).is_none_or(|(v, _)| e.version > *v);
+            if newer {
+                latest.insert(key, (e.version, e.state.clone()));
+            }
+        }
+        let mut counts: HashMap<(String, String), i64> = HashMap::new();
+        for ((producer, _, _), (_, state)) in latest {
+            *counts.entry((producer, state)).or_default() += 1;
+        }
+        let mut v: Vec<EventStateCount> = counts
+            .into_iter()
+            .map(|((producer, state), subjects)| EventStateCount {
+                producer,
+                state,
+                subjects,
+            })
+            .collect();
+        v.sort_by(|a, b| (&a.producer, &a.state).cmp(&(&b.producer, &b.state)));
+        Ok(v)
+    }
+
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        Ok(g.quarantined_at
+            .iter()
+            .filter(|t| **t >= start && **t < end)
+            .count() as i64)
     }
 
     async fn audit_window(
@@ -490,6 +591,250 @@ impl Store for MemoryStore {
             .iter()
             .find(|p| p.request_id == id)
             .cloned())
+    }
+
+    async fn ingest_event(
+        &self,
+        event: &OwnerEvent,
+        accepted: bool,
+        received_at: DateTime<Utc>,
+    ) -> StoreResult<IngestOutcome> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let key = (event.producer.clone(), event.event_id);
+        if g.inbox.contains_key(&key) {
+            return Ok(IngestOutcome::Duplicate);
+        }
+        let outcome = if !accepted {
+            IngestOutcome::Quarantined
+        } else if g.outbox.iter().any(|f| {
+            f.event.producer == event.producer
+                && f.event.subject_kind == event.subject_kind
+                && f.event.subject_id == event.subject_id
+                && f.event.version >= event.version
+        }) {
+            IngestOutcome::Stale
+        } else {
+            let sequence = g.outbox.last().map_or(1, |f| f.sequence + 1);
+            g.outbox.push(FeedEvent {
+                sequence,
+                event: event.clone(),
+                appended_at: received_at,
+            });
+            IngestOutcome::Appended(sequence)
+        };
+        g.inbox.insert(key, outcome.as_str());
+        if outcome == IngestOutcome::Quarantined {
+            g.quarantined_at.push(received_at);
+        }
+        let name = crate::routes::EVENT_INBOX_PROJECTION;
+        let mut row = g
+            .projections
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .unwrap_or(ProjectionRow {
+                name: name.to_string(),
+                last_event_at: None,
+                open_gaps: 0,
+                quarantined: 0,
+                updated_at: received_at,
+            });
+        match outcome {
+            IngestOutcome::Quarantined => row.quarantined += 1,
+            _ => {
+                row.last_event_at = Some(
+                    row.last_event_at
+                        .map_or(received_at, |t| t.max(received_at)),
+                )
+            }
+        }
+        row.updated_at = received_at;
+        g.projections.retain(|p| p.name != name);
+        g.projections.push(row);
+        Ok(outcome)
+    }
+
+    async fn event_feed(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<FeedEvent>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .outbox
+            .iter()
+            .filter(|f| {
+                f.appended_at >= start
+                    && f.appended_at < end
+                    && after.is_none_or(|a| f.sequence > a)
+            })
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
+    async fn acknowledge_events(
+        &self,
+        consumer: &str,
+        sequence: i64,
+        _at: DateTime<Utc>,
+    ) -> StoreResult<AckOutcome> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let head = g.outbox.last().map_or(0, |f| f.sequence);
+        if sequence > head {
+            return Ok(AckOutcome::BeyondHead);
+        }
+        let stored = g.cursors.entry(consumer.to_string()).or_insert(sequence);
+        *stored = (*stored).max(sequence);
+        Ok(AckOutcome::Acknowledged(*stored))
+    }
+
+    async fn begin_activation(
+        &self,
+        op: &Operation,
+        request: &ActivationRequest,
+    ) -> StoreResult<BeginOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(BeginOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) || inner
+            .activations
+            .iter()
+            .any(|a| a.request_id == request.request_id)
+        {
+            return Ok(BeginOutcome::VersionTaken);
+        }
+        let mut row = op.clone();
+        row.status = OpStatus::Pending;
+        row.sent_at = None;
+        row.settled_at = None;
+        inner.operations.push(row);
+        let mut rec = request.clone();
+        rec.state = "REQUESTED".into();
+        rec.dispatched_at = None;
+        rec.run_id = None;
+        inner.activations.push(rec);
+        Ok(BeginOutcome::Started)
+    }
+
+    async fn settle_activation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        st: &Settlement,
+        update: &ActivationUpdate,
+    ) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(run) = update.run_id {
+            if inner.activations.iter().any(|a| a.run_id == Some(run)) {
+                return Err(StoreError::Invalid("run already linked"));
+            }
+        }
+        let Some(o) = inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        else {
+            return Ok(false);
+        };
+        if !o.status.may_become(st.status) {
+            return Ok(false);
+        }
+        o.status = st.status;
+        o.source_status = st.source_status.clone();
+        o.source_version = st.source_version.clone();
+        o.error_code = st.error_code.clone();
+        if st.status.settled() {
+            o.settled_at = Some(st.at);
+        }
+        let id = o.operation_id;
+        if let Some(a) = inner
+            .activations
+            .iter_mut()
+            .find(|a| a.request_id == id && a.state == "REQUESTED")
+        {
+            if let Some(state) = update.state {
+                a.state = state.to_string();
+            }
+            a.dispatched_at = a.dispatched_at.or(update.dispatched_at);
+            a.run_id = a.run_id.or(update.run_id);
+        }
+        Ok(true)
+    }
+
+    async fn link_activation_run(&self, request_id: uuid::Uuid, run_id: i64) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if inner.activations.iter().any(|a| a.run_id == Some(run_id)) {
+            return Ok(false);
+        }
+        match inner
+            .activations
+            .iter_mut()
+            .find(|a| a.request_id == request_id && a.state == "DISPATCHED" && a.run_id.is_none())
+        {
+            Some(a) => {
+                a.run_id = Some(run_id);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    async fn activation_requests(
+        &self,
+        before: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationRequest>> {
+        self.check()?;
+        let mut all = self.inner.lock().unwrap().activations.clone();
+        all.sort_by_key(|a| std::cmp::Reverse((a.created_at, a.request_id)));
+        Ok(all
+            .into_iter()
+            .filter(|a| before.is_none_or(|b| (a.created_at, a.request_id) < b))
+            .take(limit as usize)
+            .collect())
+    }
+
+    async fn activation_request(&self, id: uuid::Uuid) -> StoreResult<Option<ActivationRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .activations
+            .iter()
+            .find(|a| a.request_id == id)
+            .cloned())
+    }
+
+    async fn activations_for_runs(&self, run_ids: &[i64]) -> StoreResult<Vec<ActivationRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .activations
+            .iter()
+            .filter(|a| a.run_id.is_some_and(|r| run_ids.contains(&r)))
+            .cloned()
+            .collect())
     }
 
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {

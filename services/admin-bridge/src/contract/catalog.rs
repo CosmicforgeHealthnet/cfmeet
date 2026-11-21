@@ -330,7 +330,12 @@ pub fn catalog() -> Vec<Capability> {
             .risk(R::R0, V::OperationsMinimized)
             .perm("hq.events.read")
             .roles(&[L::SourceSync])
-            .purposes(&[U::EventSync]),
+            .purposes(&[U::EventSync])
+            .result("HqEventPage")
+            .served(&[
+                "owner_events_are_deduplicated_versioned_and_quarantined",
+                "the_feed_pages_in_sequence_and_acknowledgements_never_move_back",
+            ]),
     );
     c.push(
         B::new(
@@ -344,7 +349,10 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R0, V::OperationsMinimized)
         .perm("hq.events.ack")
         .roles(&[L::SourceSync])
-        .purposes(&[U::EventSync]),
+        .purposes(&[U::EventSync])
+        .body("HqEventAckRequest")
+        .result("HqEventAck")
+        .served(&["the_feed_pages_in_sequence_and_acknowledgements_never_move_back"]),
     );
     c.push(
         get("hq.projections.status", "/hq/projections/status", Q::Scoped)
@@ -2967,7 +2975,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .source("GET /internal/v1/operator/incidents (messaging, calling, developer-platform)")
+        .result("OperationsIncidentPage")
+        .served(&["operations_incidents_aggregate_the_owners"]),
     );
     c.push(
         op(
@@ -2978,7 +2989,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R2, V::OperationsMinimized)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+        .source("POST /internal/v1/operator/incidents/{incident_id}/resolve (messaging, calling)")
+        .body("OperationsIncidentResolveRequest")
+        .result("OperationsIncidentResolveResult")
+        .served(&["operations_incident_resolve_routes_to_the_owner"]),
     );
     c.push(
         op(
@@ -2989,7 +3004,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+            .source("GET /internal/v1/operator/switches (messaging), GET /internal/v1/admin/routing (notifications)")
+            .result("OperationsSwitchPage")
+            .served(&["operations_switches_join_kill_switches_and_routing_modes"]),
     );
     c.push(
         op(
@@ -3000,7 +3018,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R3, V::Internal)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+            .source("POST /internal/v1/operator/switches/{name} (messaging), POST /internal/v1/operator/routing/{category}/{channel}/mode (notifications)")
+            .body("OperationsSwitchChangeRequest")
+            .result("OperationsSwitchChangeResult")
+            .served(&["operations_switch_change_routes_to_the_owner"]),
     );
     c.push(
         op(
@@ -3011,7 +3033,9 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A8,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+        .result("OperationsActivationPage")
+        .served(&["activation_requests_dispatch_once_and_list_their_runs"]),
     );
     c.push(
         op(
@@ -3020,7 +3044,17 @@ pub fn catalog() -> Vec<Capability> {
         )
         .risk(R::R4, V::Internal)
         .roles(&[L::ReleaseManager])
-        .purposes(&[U::ReleaseRequest]),
+        .purposes(&[U::ReleaseRequest])
+        .source(
+            "POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches",
+        )
+        .body("OperationsActivationRequest")
+        .result("OperationsActivationCommandResult")
+        .served(&[
+            "activation_requests_dispatch_once_and_list_their_runs",
+            "an_unknown_dispatch_settles_from_the_runs_list_and_is_never_resent",
+            "activation_requests_are_disabled_without_github",
+        ]),
     );
     c.push(
         op(
@@ -3031,7 +3065,13 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A8,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+        .source("GET /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/runs")
+        .result("OperationsReleasePage")
+        .served(&[
+            "release_history_is_the_workflow_runs_without_logs",
+            "activation_requests_are_disabled_without_github",
+        ]),
     );
 
     // ---- 6.16 Audit ------------------------------------------------------------

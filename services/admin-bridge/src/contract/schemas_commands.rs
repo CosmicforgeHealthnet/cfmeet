@@ -35,6 +35,9 @@ fn in_schema(kind: In) -> Value {
         In::Date => {
             json!({"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"})
         }
+        In::StrList(max, len) => {
+            json!({"type": "array", "maxItems": max, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": len}})
+        }
         In::NullableObject => {
             json!({"type": ["object", "null"], "description": "Validated by the owning service; null clears it."})
         }
@@ -54,6 +57,9 @@ fn out_schema(f: &OutField) -> Value {
             json!({"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Za-z0-9._:@-]{1,128}$"}})
         }
         Out::Obj(inner) => object(inner),
+        Out::EmailMasked => {
+            json!({"type": "string", "maxLength": 120, "pattern": r"^(\*\*\*|[^@\s*]\*\*\*@[^@\s*.]\*\*\*(\.[^@\s*.]{1,63})?)$", "description": "A masked address (first character of the local part and of the domain label), never the address."})
+        }
         Out::UuidGroups => {
             json!({"type": "array", "maxItems": 100, "items": {"type": "array", "maxItems": 100, "items": {"type": "string", "format": "uuid"}}})
         }
@@ -102,7 +108,7 @@ pub fn insert(m: &mut Map<String, Value>) {
         for f in c
             .body
             .iter()
-            .filter(|f| !matches!(f.place, Place::Fixed(_) | Place::Tenant))
+            .filter(|f| !matches!(f.place, Place::Fixed(_) | Place::Tenant | Place::Param(_)))
         {
             props[f.hq] = in_schema(f.kind);
             if f.required {

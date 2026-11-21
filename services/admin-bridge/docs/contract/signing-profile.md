@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.16.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.17.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -168,6 +168,8 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `bridge.health.read`
 - `bridge.datasets.read`
 - `bridge.operations.read`
+- `hq.events.feed`
+- `hq.events.ack`
 - `hq.projections.status`
 - `accounts.users.search`
 - `accounts.users.read`
@@ -183,6 +185,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `accounts.security-history.list`
 - `accounts.duplicates.list`
 - `accounts.duplicates.enforce-all`
+- `accounts.user.export`
 - `accounts.user.delete`
 - `accounts.test-accounts.list`
 - `meetings.spaces.search`
@@ -221,6 +224,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `messaging.hold.place`
 - `messaging.hold.release`
 - `messaging.exports.list`
+- `messaging.export.request`
 - `messaging.deletion-requests.list`
 - `messaging.deletion-request.create`
 - `messaging.audit.list`
@@ -277,6 +281,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `organizations.ownership.recover`
 - `organizations.bindings.list`
 - `organizations.binding.change`
+- `organizations.organization.export`
 - `organizations.audit.list`
 - `organizations.global-audit.list`
 - `organizations.provisioning.retry`
@@ -291,6 +296,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `partners.workspaces.read`
 - `partners.workspace-activity.list`
 - `partners.workspace.state.change`
+- `partners.workspace.register-first-party`
 - `partners.projects.list`
 - `partners.environments.list`
 - `partners.members.list`
@@ -322,6 +328,8 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `identity.scope-grant.change`
 - `identity.privileged-scope-grant.change`
 - `identity.keys.list`
+- `identity.key.issue`
+- `identity.key.rotate`
 - `identity.key.revoke`
 - `identity.key.suspend`
 - `identity.key.resume`
@@ -388,4 +396,11 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `privacy.request.register`
 - `privacy.request.complete-service`
 - `operations.health.read`
+- `operations.incidents.list`
+- `operations.incident.resolve`
+- `operations.switches.list`
+- `operations.switch.change`
+- `operations.activations.list`
+- `operations.activation.request`
+- `operations.releases.list`
 - `audit.entries.list`

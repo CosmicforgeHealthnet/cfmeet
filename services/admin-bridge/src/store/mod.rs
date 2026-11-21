@@ -173,6 +173,14 @@ pub struct DatasetDay {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Subjects of one owner event type per producer and latest state ([`Store::event_states`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventStateCount {
+    pub producer: String,
+    pub state: String,
+    pub subjects: i64,
+}
+
 /// Freshness of one projection (`admin_projections`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionRow {
@@ -349,6 +357,102 @@ pub enum LocalOutcome {
     VersionTaken,
 }
 
+/// The owner event types the bridge appends to the HQ feed (design §11).
+pub const EVENT_TYPES: [&str; 6] = [
+    "verification.case.changed.v1",
+    "abuse.report.changed.v1",
+    "partner.workspace.changed.v1",
+    "app.review.changed.v1",
+    "incident.changed.v1",
+    "pricing.version.changed.v1",
+];
+
+/// One owner event as received (ids, states, versions and times only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerEvent {
+    /// The authenticated producer (owner name, e.g. `developer-platform`).
+    pub producer: String,
+    pub event_id: uuid::Uuid,
+    pub event_type: String,
+    pub subject_kind: String,
+    pub subject_id: String,
+    pub state: String,
+    pub version: i64,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// What became of an owner event ([`Store::ingest_event`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestOutcome {
+    /// Appended to the feed with this sequence.
+    Appended(i64),
+    /// This producer already sent this event id: nothing changed.
+    Duplicate,
+    /// Accepted, but its version is not newer than the subject's last one: not appended.
+    Stale,
+    /// A type the bridge does not accept from this producer: counted, never appended.
+    Quarantined,
+}
+
+impl IngestOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            IngestOutcome::Appended(_) => "APPENDED",
+            IngestOutcome::Duplicate => "DUPLICATE",
+            IngestOutcome::Stale => "STALE",
+            IngestOutcome::Quarantined => "QUARANTINED",
+        }
+    }
+}
+
+/// One entry of the HQ feed (`admin_hq_outbox`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedEvent {
+    pub sequence: i64,
+    pub event: OwnerEvent,
+    pub appended_at: DateTime<Utc>,
+}
+
+/// What became of an acknowledgement ([`Store::acknowledge_events`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckOutcome {
+    /// The consumer's acknowledged sequence now (never lower than before).
+    Acknowledged(i64),
+    /// The sequence is beyond the last appended one: nothing changed.
+    BeyondHead,
+}
+
+/// One feature switch-on request (`admin_activation_requests`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationRequest {
+    /// = the HQ operation id.
+    pub request_id: uuid::Uuid,
+    /// A release workflow operation.
+    pub operation: String,
+    pub release_sha: String,
+    pub confirm: Option<String>,
+    /// `hq:<sub>`.
+    pub requested_by: String,
+    /// `hq:<sub>` of the second person.
+    pub approver: String,
+    pub approval_id: String,
+    /// REQUESTED (dispatch in flight or outcome unknown), DISPATCHED or FAILED.
+    pub state: String,
+    pub created_at: DateTime<Utc>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    /// The workflow run, once linked (set once).
+    pub run_id: Option<i64>,
+}
+
+/// The activation record's side of a settlement ([`Store::settle_activation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationUpdate {
+    /// `DISPATCHED` or `FAILED`; `None` keeps REQUESTED (unknown outcome).
+    pub state: Option<&'static str>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    pub run_id: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CleanupStats {
     pub claims: u64,
@@ -396,6 +500,34 @@ pub trait Store: Send + Sync + 'static {
 
     async fn projections(&self) -> StoreResult<Vec<ProjectionRow>>;
 
+    /// Merges reported metrics into one dataset day in ONE statement (idempotent, so
+    /// replicas collecting at once are harmless): `metrics` replace the stored values of
+    /// the same names, `sources` join the reported set (sorted, distinct).
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()>;
+
+    /// Subjects of `event_type` on the HQ feed per producer and latest state as of `end`
+    /// (each subject's highest version among the events that occurred before `end`). A
+    /// producer is listed only once it had sent such an event before `end`.
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>>;
+
+    /// Owner events quarantined with `start <= received_at < end`.
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64>;
+
     /// Records a new `PENDING` operation, or reports why it cannot be.
     async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome>;
 
@@ -437,6 +569,71 @@ pub trait Store: Send + Sync + 'static {
     ) -> StoreResult<Vec<PrivacyRequest>>;
 
     async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>>;
+
+    /// Records an owner event in ONE transaction, serialized with every other append:
+    /// a duplicate `(producer, event_id)` changes nothing; a type not `accepted` is
+    /// quarantined (counted on the `events.inbox` projection); an accepted event whose
+    /// version is not newer than the last appended one of the same `(producer, subject)` is
+    /// STALE; otherwise it is appended (feed sequences commit in increasing order).
+    async fn ingest_event(
+        &self,
+        event: &OwnerEvent,
+        accepted: bool,
+        received_at: DateTime<Utc>,
+    ) -> StoreResult<IngestOutcome>;
+
+    /// Feed entries with `start <= appended_at < end` and `sequence > after`, in
+    /// increasing sequence.
+    async fn event_feed(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<FeedEvent>>;
+
+    /// Moves `consumer`'s acknowledged sequence forward to `sequence` (never backwards: a
+    /// lower value leaves the stored one).
+    async fn acknowledge_events(
+        &self,
+        consumer: &str,
+        sequence: i64,
+        at: DateTime<Utc>,
+    ) -> StoreResult<AckOutcome>;
+
+    /// Records a new `PENDING` operation and its activation request (REQUESTED) in ONE
+    /// transaction, or reports why it cannot be (as [`Store::begin_operation`]).
+    async fn begin_activation(
+        &self,
+        op: &Operation,
+        request: &ActivationRequest,
+    ) -> StoreResult<BeginOutcome>;
+
+    /// Records an operation outcome and its activation request's state in ONE transaction,
+    /// if the operation transition is allowed; false (nothing changed) otherwise.
+    async fn settle_activation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        s: &Settlement,
+        update: &ActivationUpdate,
+    ) -> StoreResult<bool>;
+
+    /// Links a DISPATCHED request to its workflow run, once; false when it already has a
+    /// run, is not DISPATCHED, or the run belongs to another request.
+    async fn link_activation_run(&self, request_id: uuid::Uuid, run_id: i64) -> StoreResult<bool>;
+
+    /// Activation requests, newest first, before `(created_at, request_id)`.
+    async fn activation_requests(
+        &self,
+        before: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationRequest>>;
+
+    async fn activation_request(&self, id: uuid::Uuid) -> StoreResult<Option<ActivationRequest>>;
+
+    /// The activation requests linked to any of `run_ids`.
+    async fn activations_for_runs(&self, run_ids: &[i64]) -> StoreResult<Vec<ActivationRequest>>;
 
     /// Unsettled operations created before `before`, oldest first.
     async fn open_operations(

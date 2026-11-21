@@ -1,0 +1,21 @@
+{
+  "description": "Every switch in one bounded page (next_cursor is always null). freshness PARTIAL: an owner did not answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "$ref": "#/components/schemas/OperationsSwitch"
+      }
+    },
+    "next_cursor": {
+      "type": "null"
+    }
+  }
+}

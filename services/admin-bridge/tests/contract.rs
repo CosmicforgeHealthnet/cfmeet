@@ -127,6 +127,8 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "bridge.health.read",
             "bridge.datasets.read",
             "bridge.operations.read",
+            "hq.events.feed",
+            "hq.events.ack",
             "hq.projections.status",
             "accounts.users.search",
             "accounts.users.read",
@@ -142,6 +144,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "accounts.security-history.list",
             "accounts.duplicates.list",
             "accounts.duplicates.enforce-all",
+            "accounts.user.export",
             "accounts.user.delete",
             "accounts.test-accounts.list",
             "meetings.spaces.search",
@@ -180,6 +183,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "messaging.hold.place",
             "messaging.hold.release",
             "messaging.exports.list",
+            "messaging.export.request",
             "messaging.deletion-requests.list",
             "messaging.deletion-request.create",
             "messaging.audit.list",
@@ -236,6 +240,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "organizations.ownership.recover",
             "organizations.bindings.list",
             "organizations.binding.change",
+            "organizations.organization.export",
             "organizations.audit.list",
             "organizations.global-audit.list",
             "organizations.provisioning.retry",
@@ -250,6 +255,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "partners.workspaces.read",
             "partners.workspace-activity.list",
             "partners.workspace.state.change",
+            "partners.workspace.register-first-party",
             "partners.projects.list",
             "partners.environments.list",
             "partners.members.list",
@@ -281,6 +287,8 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "identity.scope-grant.change",
             "identity.privileged-scope-grant.change",
             "identity.keys.list",
+            "identity.key.issue",
+            "identity.key.rotate",
             "identity.key.revoke",
             "identity.key.suspend",
             "identity.key.resume",
@@ -347,6 +355,13 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "privacy.request.register",
             "privacy.request.complete-service",
             "operations.health.read",
+            "operations.incidents.list",
+            "operations.incident.resolve",
+            "operations.switches.list",
+            "operations.switch.change",
+            "operations.activations.list",
+            "operations.activation.request",
+            "operations.releases.list",
             "audit.entries.list",
         ]
     );
@@ -578,14 +593,15 @@ fn datasets_and_event_adapters_are_as_agreed_with_hq() {
             "cfmeet.operations_health",
         ]
     );
-    assert_eq!(ADAPTERS.len(), 13);
+    assert_eq!(ADAPTERS.len(), 12);
     let mut keys = HashSet::new();
     for a in ADAPTERS {
         assert!(keys.insert((a.source, a.export_type)), "duplicate adapter");
     }
     let count = |t: &str| ADAPTERS.iter().filter(|a| a.export_type == t).count();
     assert_eq!(count("abuse.report.changed.v1"), 4);
-    assert_eq!(count("incident.changed.v1"), 5);
+    // Notifications has no incident entity (agreed with HQ).
+    assert_eq!(count("incident.changed.v1"), 4);
     assert_eq!(count("pricing.version.changed.v1"), 1);
 }
 
