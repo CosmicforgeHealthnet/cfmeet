@@ -2851,6 +2851,20 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/messaging/export-deliveries",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/exports/{exportId}/claim",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/messaging/relay/{path}",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_BACKEND"
@@ -2896,6 +2910,13 @@
       "path": "/api/v2/organizations/{id}/export",
       "class": "EXCLUDED",
       "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/exports/{exportId}/download",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
     },
     {
       "domain": "meetings",

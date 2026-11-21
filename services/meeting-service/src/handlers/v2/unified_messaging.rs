@@ -614,6 +614,77 @@ pub async fn principal_names(
     Ok(Json(answer))
 }
 
+/// Messaging's relayed answer, never cached (it may carry a one-time download grant).
+fn no_store(status: u16, value: Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let mut r = (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    )
+        .into_response();
+    r.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    r
+}
+
+/// Data exports waiting for me (Messaging)
+///
+/// ADR 0068 (owner-delivered exports): the Messaging exports CF Meet support requested for
+/// the signed-in account, newest first (at most 20), as references (ids, state, size, SHA-256,
+/// times; never the export or a link). Relayed to Messaging's delegated surface with the
+/// caller's own principal signed in; Messaging answers only the recipient's own exports.
+#[utoipa::path(
+    get, path = "/api/v2/messaging/export-deliveries", tag = "Messaging (v2)", operation_id = "v2_messaging_export_deliveries",
+    responses(
+        (status = 200, description = "`{items: [ExportDelivery]}` (Messaging's answer)", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "FEATURE_DISABLED (Unified Messaging is not enabled)", body = ErrorEnvelope),
+        (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_deliveries(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<axum::response::Response> {
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    let (status, value) = um.export_deliveries(user).await?;
+    Ok(no_store(status, value))
+}
+
+/// Claim a Messaging data export once
+///
+/// ADR 0068 (owner-delivered exports): the signed-in recipient's single claim of a READY
+/// export: one short-lived forced-download grant (`{exportId, deliveryRef, method, url,
+/// expiresAt, size, sha256}`) to use straight away; the export is DELIVERED at once. 409
+/// EXPORT_NOT_READY, EXPORT_ALREADY_DELIVERED (nothing is re-sent) or EXPORT_EXPIRED; anyone
+/// but the recipient gets 404. Relayed with the caller's own principal signed in.
+#[utoipa::path(
+    post, path = "/api/v2/messaging/exports/{exportId}/claim", tag = "Messaging (v2)", operation_id = "v2_messaging_claim_export",
+    params(("exportId" = Uuid, Path, description = "The export's id")),
+    responses(
+        (status = 200, description = "The one download grant (Messaging's ExportClaimGrant)", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "Not the caller's export, or FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "EXPORT_NOT_READY / EXPORT_ALREADY_DELIVERED / EXPORT_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn claim_export(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(export_id): V2Path<Uuid>,
+) -> ApiResult<axum::response::Response> {
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    let (status, value) = um.claim_export(user, export_id).await?;
+    Ok(no_store(status, value))
+}
+
 pub(crate) fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
     let Some(raw) = raw.filter(|r| !r.is_empty()) else {
         return Ok(vec![]);

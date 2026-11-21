@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.10.0"
+      "description": "cfmeet.meeting-service.http-api 1.11.0"
     },
     {
       "name": "calling",
@@ -64056,6 +64056,8 @@
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
           "CALENDAR_FEED_NOT_FOUND",
+          "EXPORT_LINK_INVALID",
+          "EXPORT_LINK_EXPIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]

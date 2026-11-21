@@ -2633,6 +2633,83 @@ pub async fn put_organization_meeting_profile_policy(
     Ok(Json(profile_policy_view(v)?))
 }
 
+/// ADR 0068: the single-use token of an organization export's emailed link.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrganizationExportDownloadRequest {
+    /// The `token` of the download link (from the link's fragment; never logged or stored).
+    pub token: String,
+}
+
+/// Download an owner-delivered organization export.
+///
+/// ADR 0068: the organization export CF Meet support requested, downloaded once by the OWNER
+/// whose emailed link it is (`/organizations/exports/download#org=…&export=…&token=…`), signed
+/// in. Relayed to the Organizations Service with the verified acting user; the token travels
+/// only in this body. Answers the export document (JSON attachment). 404 EXPORT_LINK_INVALID
+/// (wrong, used or foreign link, or no longer an active OWNER), 410 EXPORT_LINK_EXPIRED;
+/// FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/exports/{exportId}/download", tag = "Organizations (v2)", operation_id = "v2_download_organization_export",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("exportId" = Uuid, Path, description = "Export id"),
+    ),
+    request_body = OrganizationExportDownloadRequest,
+    responses(
+        (status = 200, description = "The organization's export document (attachment)", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "EXPORT_LINK_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 410, description = "EXPORT_LINK_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn download_organization_export(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, export_id)): V2Path<(Uuid, Uuid)>,
+    V2Json(req): V2Json<OrganizationExportDownloadRequest>,
+) -> ApiResult<Response> {
+    let token = req.token.trim();
+    if !(16..=512).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(validation("token is invalid"));
+    }
+    let authority = require_authoritative(&state)?;
+    let user = relay_actor(&actor)?;
+    let acting = ActingUser::of(user);
+    let mut call = Call::new(
+        Method::POST,
+        format!("/internal/v1/organizations/{id}/exports/{export_id}/download"),
+    )
+    .actor(&acting);
+    call.body = Some(json!({ "token": token }));
+    // No projection and no logging: the answer is the export document itself.
+    let reply = authority.send(&call).await.map_err(|_| unavailable())?;
+    if !reply.is_success() {
+        return Err(match (reply.status, reply.error_code()) {
+            (404, Some("EXPORT_LINK_INVALID")) => ApiError::domain(
+                ErrorCode::ExportLinkInvalid,
+                "This download link is invalid, already used or not yours",
+            ),
+            (410, Some("EXPORT_LINK_EXPIRED")) => ApiError::domain(
+                ErrorCode::ExportLinkExpired,
+                "This download link has expired; ask CF Meet support to request the export again",
+            ),
+            _ => relayed_error(&reply),
+        });
+    }
+    let mut response = (StatusCode::OK, Json(reply.body)).into_response();
+    let h = response.headers_mut();
+    h.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    h.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=\"cfmeet-organization-export.json\""),
+    );
+    Ok(response)
+}
+
 /// Export the organization's data.
 ///
 /// Gap audit G11: everything the Organizations Service holds about the organization as one JSON
