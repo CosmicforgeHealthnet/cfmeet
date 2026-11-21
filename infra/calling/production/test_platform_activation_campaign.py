@@ -124,9 +124,27 @@ class RepairGateTests(unittest.TestCase):
 
     def test_the_repair_table_is_finite_and_each_entry_is_one_attempt(self):
         self.assertEqual(len(campaign.REPAIRS), len(set(campaign.REPAIRS)))
-        attempts = sorted(a for _, _, a in campaign.REPAIRS)
+        attempts = sorted(a for _, _, a, _ in campaign.REPAIRS)
         self.assertEqual(attempts, list(range(len(campaign.REPAIRS))))
-        self.assertTrue(all(op in campaign.APPROVED for op, _, _ in campaign.REPAIRS))
+        self.assertTrue(all(op in campaign.APPROVED for op, _, _, _ in campaign.REPAIRS))
+
+    def test_the_app_events_rate_limit_failure_is_repaired_exactly_once(self):
+        events = dict(MEETINGS_FAILED, failedOperation="activate-app-events", errorClass="HTTPError",
+                      repairSha="b11cec2a19be26504404026d84f594ba181636ad", repairAttempts=3)
+        operation, record = self.authorize(events)
+        self.assertEqual((operation, record["repairAttempts"]), ("activate-app-events", 4))
+        record.update(status="failed")
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(record, sha="c" * 40)
+        for change in ({"errorClass": "RuntimeError"}, {"repairAttempts": 2}, {"repairSha": "d" * 40},
+                       {"failedOperation": "activate-app-directory"}):
+            with self.assertRaisesRegex(RuntimeError, "not authorized"):
+                self.authorize(dict(events, **change))
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(events, sha=events["repairSha"])
+        # The rollback must be attested: developer-platform(-worker) flags absent, journal failed.
+        with self.assertRaisesRegex(RuntimeError, "rollback not independently verified"):
+            self.authorize(events, flags=(["developer-platform:DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED"], [], []))
 
     def test_unlisted_operations_and_error_classes_are_refused(self):
         for change in ({"failedOperation": "activate-oauth"}, {"errorClass": "KeyError"},
