@@ -28,6 +28,9 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated organization-event consumers (today only `cfmeet.meeting-service`, with `CF_MEETING_SERVICE_BASE_URL`); empty: events stay PENDING |
 | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (https outside local / test). When set, the catalogue events `organizations.*` are published to its I1 (see below); unset (default): nothing is published and nothing is written |
 | `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED` | no | `true` / `false` (default `false`; gap audit G19): with `CF_NOTIFICATIONS_BASE_URL`, also publish `organizations.organization.{archived, reactivated}` to the organization's ACTIVE members. The Notification Service catalogue carries both types since notification event contract 1.4.0 (#39 / #40; before it an enabled event was recorded `SKIPPED NOT_IN_CATALOGUE`, never sent). Turning it on also needs the pending migration `migration/pending/m20261118_000007_lifecycle_notification_types.rs` released first (kept out of the history for rollback safety); without it the service refuses to start |
+| `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED` | no | `true` / `false` (default `false`; ADR 0068 A4): owner-delivered exports for the admin bridge (see below). Needs `CF_NOTIFICATIONS_BASE_URL`, `CF_NOTIFICATIONS_SEALING_KEY`, `ORGANIZATIONS_EXPORT_KEYS_FILE` and the Notification Service catalogue type `organizations.organization.export_ready` (not published yet): the service refuses to start otherwise. Off: the bridge's export command answers 409 `EXPORT_DELIVERY_UNAVAILABLE` |
+| `CF_NOTIFICATIONS_SEALING_KEY` | with export delivery | the Notification Service's public HPKE key `<kid>:<base64url>` (each export link's token is sealed to it) |
+| `ORGANIZATIONS_EXPORT_KEYS_FILE` | with export delivery | file (0400) of `<key id>:<base64url of 32 random bytes>` lines: the at-rest keys of exports (XChaCha20-Poly1305). The first line seals, every line opens: rotate by adding the new key first and keep the old one 7 days |
 | `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
 | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key file |
 | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (https outside local / test) |
@@ -113,6 +116,18 @@ everything it publishes is new-only.
 SELECT event_type, state, last_error, count(*) FROM organization_notification_publications
  GROUP BY 1, 2, 3 ORDER BY 1, 2;
 ```
+
+## Owner-delivered exports (`src/exports.rs`, ADR 0068 A4)
+
+The admin bridge's R4 export never returns the document to HQ. The command builds it, keeps an
+encrypted copy (`organization_exports`) for 7 days and queues one single-use link notice per
+ACTIVE OWNER (`organization_export_deliveries`: token SHA-256 only; the HPKE-sealed notice is
+dropped once the Notification Service acknowledged it). Every worker tick expires links and
+exports, purges encrypted copies (at expiry, on `FAILED`, or once every link is settled) and
+deletes rows after 90 days; with `CF_NOTIFICATIONS_BASE_URL` it also relays pending notices to
+I1 (same classification, backoff and attempt limit as the publications). Logs carry export and
+delivery ids only. A link that cannot open (`owner-delivered export does not open`) means a
+retired key was removed too early: the owner gets 503 and HQ issues the command again.
 
 ## Provisioning saga (`src/provisioning.rs::run_once`, Section 7, ADR 0058)
 

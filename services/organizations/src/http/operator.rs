@@ -12,7 +12,10 @@ use axum::{
 };
 use uuid::Uuid;
 
+use cf_service_auth::InternalPermission;
+
 use super::{
+    admin_bridge,
     authorization::{self, OperatorAuditQuery},
     members,
     middleware::Caller,
@@ -102,4 +105,25 @@ pub async fn audit_events(
 ) -> ApiResult<Response> {
     caller.require_operator_read()?;
     authorization::operator_audit_page(&state, &q).await
+}
+
+/// `GET /internal/v1/operator/operations/{idempotencyKey}` — the admin bridge's settlement
+/// read of a command it sent (ADR 0068 A3.0): `{idempotency_key, outcome: APPLIED,
+/// source_status, source_version}` with the state and version the command answered.
+/// `organization.administer` (the commands' permission) and bridge attribution; any other
+/// caller, and an unknown key, get 404.
+pub async fn operation(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(key): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    if caller.operator.is_none() {
+        // Only the bridge's own commands are recorded; nobody else has anything to settle.
+        return Err(ApiError::new(ErrorCode::NotFound));
+    }
+    Ok(respond(
+        StatusCode::OK,
+        admin_bridge::operation_record(&state.db, key).await?,
+    ))
 }

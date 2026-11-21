@@ -32,6 +32,10 @@ async fn main() -> anyhow::Result<()> {
     let notifications = config
         .notification_sink(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("notification publication configuration error", e));
+    // ADR 0068 A4: fails closed while the notice type is not in the catalogue.
+    let export_delivery = config
+        .export_delivery()
+        .unwrap_or_else(|e| fatal("export delivery configuration error", e));
     if check_only {
         println!(
             "{}",
@@ -46,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
                 "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
                 "serviceBindings": if config.service_bindings_enabled { "enabled" } else { "disabled" },
                 "appInstalls": if config.app_installs_enabled { "enabled" } else { "disabled" },
+                "exportDelivery": if export_delivery.is_some() { "enabled" } else { "disabled" },
             })
         );
         return Ok(());
@@ -56,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         service_bindings = config.service_bindings_enabled,
         event_destinations = ?dispatcher.destinations(),
         notification_publications = notifications.is_some(),
+        export_delivery = export_delivery.is_some(),
         "organizations configuration loaded"
     );
     if notifications.is_none() {
@@ -91,7 +97,8 @@ async fn main() -> anyhow::Result<()> {
             .with_provisioning(provisioning_enabled)
             .with_platform(platform_port)
             .with_event_destinations(event_destinations)
-            .with_app_installs(config.app_installs_enabled),
+            .with_app_installs(config.app_installs_enabled)
+            .with_exports(export_delivery),
     );
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "organizations listening");
