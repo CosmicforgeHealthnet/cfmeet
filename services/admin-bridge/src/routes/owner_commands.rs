@@ -207,6 +207,19 @@ fn extract(fields: &[OutField], v: &Value) -> Result<Value, OwnerError> {
                     _ => return Err(OwnerError::Contract),
                 },
                 Out::Obj(inner) => extract(inner, x)?,
+                Out::UuidGroups => match x.as_array() {
+                    Some(groups)
+                        if groups.len() <= 100
+                            && groups.iter().all(|g| {
+                                g.as_array().is_some_and(|ids| {
+                                    ids.len() <= 100 && ids.iter().all(|i| valid(In::Uuid, i))
+                                })
+                            }) =>
+                    {
+                        x.clone()
+                    }
+                    _ => return Err(OwnerError::Contract),
+                },
                 Out::ObjList(inner) => match x.as_array() {
                     Some(a) if a.len() <= 100 => Value::Array(
                         a.iter()

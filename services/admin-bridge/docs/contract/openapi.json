@@ -2366,7 +2366,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -2492,14 +2492,14 @@
         "x-cfmeet-permission": "accounts.user.status.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountUserStatusChangeRequest"
               }
             }
           }
@@ -2627,7 +2627,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -2753,14 +2753,14 @@
         "x-cfmeet-permission": "accounts.user.role.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountUserRoleChangeRequest"
               }
             }
           }
@@ -2888,7 +2888,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -3014,14 +3014,14 @@
         "x-cfmeet-permission": "accounts.user.email.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountUserEmailChangeRequest"
               }
             }
           }
@@ -3410,7 +3410,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -3536,14 +3536,14 @@
         "x-cfmeet-permission": "accounts.sessions.revoke-all",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountSessionsRevokeAllRequest"
               }
             }
           }
@@ -3942,7 +3942,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountDeviceRevokeResult"
                     },
                     "error": {
                       "type": "null"
@@ -4068,14 +4068,14 @@
         "x-cfmeet-permission": "accounts.device.revoke",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountDeviceRevokeRequest"
               }
             }
           }
@@ -4445,7 +4445,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -4571,14 +4571,14 @@
         "x-cfmeet-permission": "accounts.mfa.reset",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountMfaResetRequest"
               }
             }
           }
@@ -4986,7 +4986,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountDuplicates"
                     },
                     "error": {
                       "type": "null"
@@ -5112,7 +5112,7 @@
         "x-cfmeet-permission": "accounts.duplicates.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -5238,7 +5238,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountDuplicatesEnforceResult"
                     },
                     "error": {
                       "type": "null"
@@ -5364,14 +5364,14 @@
         "x-cfmeet-permission": "accounts.duplicates.enforce",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountDuplicatesEnforceRequest"
               }
             }
           }
@@ -5756,7 +5756,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -5882,14 +5882,14 @@
         "x-cfmeet-permission": "accounts.user.delete",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AccountUserDeleteRequest"
               }
             }
           }
@@ -6018,7 +6018,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountTestAccountPage"
                     },
                     "error": {
                       "type": "null"
@@ -6144,7 +6144,7 @@
         "x-cfmeet-permission": "accounts.test-accounts.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -7285,7 +7285,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingLiveHealth"
                     },
                     "error": {
                       "type": "null"
@@ -7411,7 +7411,7 @@
         "x-cfmeet-permission": "meetings.live-health.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -7801,7 +7801,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingEndResult"
                     },
                     "error": {
                       "type": "null"
@@ -7927,14 +7927,14 @@
         "x-cfmeet-permission": "meetings.meeting.end",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingEndRequest"
               }
             }
           }
@@ -8064,7 +8064,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingSpaceCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -8190,14 +8190,14 @@
         "x-cfmeet-permission": "meetings.space.archive",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingSpaceArchiveRequest"
               }
             }
           }
@@ -8327,7 +8327,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingSpaceCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -8453,14 +8453,14 @@
         "x-cfmeet-permission": "meetings.space.transfer",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingSpaceTransferRequest"
               }
             }
           }
@@ -8861,7 +8861,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingArtifactDeleteResult"
                     },
                     "error": {
                       "type": "null"
@@ -8987,14 +8987,14 @@
         "x-cfmeet-permission": "meetings.recording.delete",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingRecordingDeleteRequest"
               }
             }
           }
@@ -9395,7 +9395,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingArtifactDeleteResult"
                     },
                     "error": {
                       "type": "null"
@@ -9521,14 +9521,14 @@
         "x-cfmeet-permission": "meetings.transcript.delete",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingTranscriptDeleteRequest"
               }
             }
           }
@@ -9676,7 +9676,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingWebinarPage"
                     },
                     "error": {
                       "type": "null"
@@ -9802,7 +9802,7 @@
         "x-cfmeet-permission": "meetings.webinars.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -9939,7 +9939,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingWebinarRegistrationPage"
                     },
                     "error": {
                       "type": "null"
@@ -10065,7 +10065,7 @@
         "x-cfmeet-permission": "meetings.webinar-registrations.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -10960,7 +10960,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingChatMigration"
                     },
                     "error": {
                       "type": "null"
@@ -11086,7 +11086,7 @@
         "x-cfmeet-permission": "meetings.chat-migration.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -11203,7 +11203,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingChatMigrationChangeResult"
                     },
                     "error": {
                       "type": "null"
@@ -11329,14 +11329,14 @@
         "x-cfmeet-permission": "meetings.chat-migration.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingChatMigrationChangeRequest"
               }
             }
           }
@@ -11718,7 +11718,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingCriticalLane"
                     },
                     "error": {
                       "type": "null"
@@ -11844,7 +11844,7 @@
         "x-cfmeet-permission": "meetings.critical-lane.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -11961,7 +11961,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingCriticalLaneChangeResult"
                     },
                     "error": {
                       "type": "null"
@@ -12087,14 +12087,14 @@
         "x-cfmeet-permission": "meetings.critical-lane.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "meeting-service",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MeetingCriticalLaneChangeRequest"
               }
             }
           }
@@ -69873,7 +69873,8 @@
           "role",
           "status",
           "created_at",
-          "last_login_at"
+          "last_login_at",
+          "version"
         ],
         "properties": {
           "user_id": {
@@ -69910,6 +69911,11 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The account's version (expected_version of the account commands)."
           }
         }
       },
@@ -69949,6 +69955,7 @@
           "status",
           "created_at",
           "last_login_at",
+          "version",
           "email_masked",
           "email_verified",
           "auth_type",
@@ -69990,6 +69997,11 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The account's version (expected_version of the account commands)."
           },
           "email_masked": {
             "type": "string",
@@ -70737,6 +70749,464 @@
               "null"
             ],
             "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "AccountDuplicates": {
+        "description": "Accounts sharing a normalized email address or username (account ids only; never the value). One bounded answer.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email_uniqueness",
+          "username_uniqueness"
+        ],
+        "properties": {
+          "email_uniqueness": {
+            "description": "Whether uniqueness is enforced, and the groups of accounts that share a value (ids only).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enforced",
+              "duplicate_groups"
+            ],
+            "properties": {
+              "enforced": {
+                "type": "boolean"
+              },
+              "duplicate_groups": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          },
+          "username_uniqueness": {
+            "description": "Whether uniqueness is enforced, and the groups of accounts that share a value (ids only).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enforced",
+              "duplicate_groups"
+            ],
+            "properties": {
+              "enforced": {
+                "type": "boolean"
+              },
+              "duplicate_groups": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AccountTestAccount": {
+        "description": "One review test account: its address masked, and the account it belongs to (never the code).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email_masked",
+          "registered",
+          "user_id",
+          "account_status",
+          "role"
+        ],
+        "properties": {
+          "email_masked": {
+            "type": "string",
+            "maxLength": 120,
+            "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "account_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "AccountTestAccountPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AccountTestAccount"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingLiveHealth": {
+        "description": "A live meeting's evaluated health.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "meeting_id",
+          "space_id",
+          "lifecycle_state",
+          "health_state",
+          "evaluated_at"
+        ],
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycle_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "health_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MeetingWebinar": {
+        "description": "One webinar or town hall space with its registration counts.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "space_id",
+          "meeting_code",
+          "meeting_type",
+          "status",
+          "owner_user_id",
+          "organization_id",
+          "registrations_active",
+          "registrations_cancelled",
+          "created_at",
+          "version"
+        ],
+        "properties": {
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meeting_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "meeting_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "registrations_active": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "registrations_cancelled": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MeetingWebinarPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingWebinar"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        },
+        "description": "Webinars created in [start, end): the window is applied to each owner page, so a page may hold fewer than limit; follow next_cursor."
+      },
+      "MeetingWebinarRegistration": {
+        "description": "One webinar registration: ids, state and times (no registrant name or address).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "registration_id",
+          "space_id",
+          "meeting_id",
+          "status",
+          "user_id",
+          "created_at",
+          "cancelled_at"
+        ],
+        "properties": {
+          "registration_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meeting_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MeetingWebinarRegistrationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingWebinarRegistration"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingChatMigration": {
+        "description": "The meeting-chat migration state, version and gates (counts and the latest parity run).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "migration_state",
+          "version",
+          "changed_at",
+          "pending_mirror",
+          "pending_rollback_copies",
+          "pending_session_revocations",
+          "linked_meetings",
+          "latest_parity_run"
+        ],
+        "properties": {
+          "migration_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending_mirror": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_rollback_copies": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_session_revocations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "linked_meetings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latest_parity_run": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "parity_run_id",
+              "status",
+              "started_at",
+              "finished_at",
+              "meetings_checked",
+              "messages_checked",
+              "mismatches"
+            ],
+            "properties": {
+              "parity_run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "finished_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "meetings_checked": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "messages_checked": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mismatches": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "MeetingCriticalLane": {
+        "description": "The account CRITICAL notification lane: counts, the fallback key's readiness and the leased, uncompleted decision ids.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fallback_key",
+          "pending",
+          "dead",
+          "leased_uncompleted_decisions"
+        ],
+        "properties": {
+          "fallback_key": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leased_uncompleted_decisions": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -79668,6 +80138,910 @@
               }
             },
             "description": "The resource after calling.webhook-key.reseal; status: RESEALED."
+          }
+        }
+      },
+      "AccountUserStatusChangeRequest": {
+        "description": "Request of accounts.user.status.change (POST /internal/v1/operator/accounts/users/{user_id}/status).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "account_status"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "account_status": {
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "SUSPENDED"
+            ]
+          }
+        }
+      },
+      "AccountUserCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "user_id",
+              "account_status",
+              "role",
+              "email_verified",
+              "open_sessions",
+              "mfa_enabled"
+            ],
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "account_status": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "role": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "email_verified": {
+                "type": "boolean"
+              },
+              "open_sessions": {
+                "type": "integer"
+              },
+              "mfa_enabled": {
+                "type": "boolean"
+              }
+            },
+            "description": "The resource after accounts.user.delete; status: DELETED."
+          }
+        }
+      },
+      "AccountUserRoleChangeRequest": {
+        "description": "Request of accounts.user.role.change (POST /internal/v1/operator/accounts/users/{user_id}/role).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "role"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "role": {
+            "enum": [
+              "USER",
+              "ADMIN",
+              "GUEST"
+            ]
+          }
+        }
+      },
+      "AccountUserEmailChangeRequest": {
+        "description": "Request of accounts.user.email.change (POST /internal/v1/operator/accounts/users/{user_id}/email).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "new_email"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "new_email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 255
+          }
+        }
+      },
+      "AccountSessionsRevokeAllRequest": {
+        "description": "Request of accounts.sessions.revoke-all (POST /internal/v1/operator/accounts/users/{user_id}/sessions/revoke-all).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "AccountDeviceRevokeRequest": {
+        "description": "Request of accounts.device.revoke (POST /internal/v1/operator/accounts/users/{user_id}/devices/{device_id}/revoke).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "AccountDeviceRevokeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "user_id",
+              "device_id",
+              "device_state",
+              "revoked_at",
+              "revoke_reason"
+            ],
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "device_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "device_state": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "revoked_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "revoke_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              }
+            },
+            "description": "The resource after accounts.device.revoke; status: REVOKED."
+          }
+        }
+      },
+      "AccountMfaResetRequest": {
+        "description": "Request of accounts.mfa.reset (POST /internal/v1/operator/accounts/users/{user_id}/mfa/reset).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "AccountDuplicatesEnforceRequest": {
+        "description": "Request of accounts.duplicates.enforce (POST /internal/v1/operator/accounts/duplicates/enforce).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "AccountDuplicatesEnforceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "email_uniqueness",
+              "username_uniqueness"
+            ],
+            "properties": {
+              "email_uniqueness": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enforced",
+                  "duplicate_groups"
+                ],
+                "properties": {
+                  "enforced": {
+                    "type": "boolean"
+                  },
+                  "duplicate_groups": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  }
+                }
+              },
+              "username_uniqueness": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enforced",
+                  "duplicate_groups"
+                ],
+                "properties": {
+                  "enforced": {
+                    "type": "boolean"
+                  },
+                  "duplicate_groups": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "description": "The resource after accounts.duplicates.enforce; status: ENFORCED, PARTIALLY_ENFORCED, NOT_ENFORCED."
+          }
+        }
+      },
+      "AccountUserDeleteRequest": {
+        "description": "Request of accounts.user.delete (POST /internal/v1/operator/accounts/users/{user_id}/delete).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MeetingEndRequest": {
+        "description": "Request of meetings.meeting.end (POST /internal/v1/operator/meetings/conferences/{meeting_id}/end).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MeetingEndResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "meeting_id",
+              "space_id",
+              "meeting_state",
+              "termination_reason",
+              "ending_requested_at",
+              "ended_at"
+            ],
+            "properties": {
+              "meeting_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "space_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "meeting_state": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "termination_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "ending_requested_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "ended_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after meetings.meeting.end; status: ENDING."
+          }
+        }
+      },
+      "MeetingSpaceArchiveRequest": {
+        "description": "Request of meetings.space.archive (POST /internal/v1/operator/meetings/spaces/{space_id}/archive).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MeetingSpaceCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "space_id",
+              "space_state",
+              "owner_user_id",
+              "archived_at"
+            ],
+            "properties": {
+              "space_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "space_state": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "owner_user_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "archived_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after meetings.space.transfer; status: TRANSFERRED."
+          }
+        }
+      },
+      "MeetingSpaceTransferRequest": {
+        "description": "Request of meetings.space.transfer (POST /internal/v1/operator/meetings/spaces/{space_id}/owner-transfer).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "new_owner_user_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "new_owner_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retain_previous_owner": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MeetingRecordingDeleteRequest": {
+        "description": "Request of meetings.recording.delete (POST /internal/v1/operator/meetings/conferences/{meeting_id}/recordings/{recording_id}/delete).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "meeting_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "meeting_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MeetingArtifactDeleteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifact_id",
+              "meeting_id",
+              "artifact_type",
+              "artifact_state",
+              "delete_requested_at",
+              "deleted_at"
+            ],
+            "properties": {
+              "artifact_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "meeting_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "artifact_type": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "artifact_state": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "delete_requested_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "deleted_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after meetings.transcript.delete; status: DELETE_REQUESTED."
+          }
+        }
+      },
+      "MeetingTranscriptDeleteRequest": {
+        "description": "Request of meetings.transcript.delete (POST /internal/v1/operator/meetings/conferences/{meeting_id}/transcripts/{transcript_id}/delete).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "meeting_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "meeting_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MeetingChatMigrationChangeRequest": {
+        "description": "Request of meetings.chat-migration.change (POST /internal/v1/operator/meetings/chat-migration/transitions).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "target_state"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "target_state": {
+            "enum": [
+              "LEGACY_PRIMARY",
+              "SHADOW_VALIDATION",
+              "MESSAGING_PRIMARY",
+              "LEGACY_RETIRED"
+            ]
+          }
+        }
+      },
+      "MeetingChatMigrationChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "migration_state",
+              "migration_version",
+              "changed_at"
+            ],
+            "properties": {
+              "migration_state": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "migration_version": {
+                "type": "integer"
+              },
+              "changed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after meetings.chat-migration.change; status: LEGACY_PRIMARY, SHADOW_VALIDATION, MESSAGING_PRIMARY, LEGACY_RETIRED."
+          }
+        }
+      },
+      "MeetingCriticalLaneChangeRequest": {
+        "description": "Request of meetings.critical-lane.change (POST /internal/v1/operator/meetings/critical-lane/decisions/{decision_id}/reroute).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "decision_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "decision_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MeetingCriticalLaneChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision_id",
+              "category",
+              "route",
+              "reason"
+            ],
+            "properties": {
+              "decision_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "route": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "description": "The resource after meetings.critical-lane.change; status: REROUTED."
           }
         }
       },

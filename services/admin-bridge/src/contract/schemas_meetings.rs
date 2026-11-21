@@ -38,7 +38,8 @@ pub fn insert(m: &mut Map<String, Value>) {
 
     let user_props = json!({
         "user_id": uuid, "username": name(50), "display_name": nullable_name(200), "role": code, "status": code,
-        "created_at": ts, "last_login_at": nullable_ts
+        "created_at": ts, "last_login_at": nullable_ts,
+        "version": {"type": "integer", "minimum": 1, "description": "The account's version (expected_version of the account commands)."}
     });
     m.insert(
         "AccountUser".into(),
@@ -176,4 +177,92 @@ pub fn insert(m: &mut Map<String, Value>) {
         ),
     );
     m.insert("MeetingAuditEventPage".into(), page("MeetingAuditEvent"));
+
+    let groups = json!({"type": "array", "maxItems": 100, "items": {"type": "array", "maxItems": 100, "items": uuid}});
+    let uniqueness = object(
+        "Whether uniqueness is enforced, and the groups of accounts that share a value (ids only).",
+        json!({"enforced": {"type": "boolean"}, "duplicate_groups": groups}),
+    );
+    m.insert(
+        "AccountDuplicates".into(),
+        object(
+            "Accounts sharing a normalized email address or username (account ids only; never the value). One bounded answer.",
+            json!({"email_uniqueness": uniqueness.clone(), "username_uniqueness": uniqueness}),
+        ),
+    );
+    m.insert(
+        "AccountTestAccount".into(),
+        object(
+            "One review test account: its address masked, and the account it belongs to (never the code).",
+            json!({
+                "email_masked": {"type": "string", "maxLength": 120, "pattern": r"^(\*\*\*|[^@\s*]\*\*\*@[^@\s*.]\*\*\*(\.[^@\s*.]{1,63})?)$"},
+                "registered": {"type": "boolean"}, "user_id": nullable_uuid, "account_status": nullable_code, "role": nullable_code
+            }),
+        ),
+    );
+    m.insert("AccountTestAccountPage".into(), page("AccountTestAccount"));
+    m.insert(
+        "MeetingLiveHealth".into(),
+        object(
+            "A live meeting's evaluated health.",
+            json!({"meeting_id": uuid, "space_id": uuid, "lifecycle_state": code, "health_state": code, "evaluated_at": ts}),
+        ),
+    );
+    m.insert(
+        "MeetingWebinar".into(),
+        object(
+            "One webinar or town hall space with its registration counts.",
+            json!({
+                "space_id": uuid, "meeting_code": name(32), "meeting_type": code, "status": code,
+                "owner_user_id": nullable_uuid, "organization_id": nullable_uuid,
+                "registrations_active": count, "registrations_cancelled": count, "created_at": ts, "version": version
+            }),
+        ),
+    );
+    let mut webinars = page("MeetingWebinar");
+    webinars["description"] = json!("Webinars created in [start, end): the window is applied to each owner page, so a page may hold fewer than limit; follow next_cursor.");
+    m.insert("MeetingWebinarPage".into(), webinars);
+    m.insert(
+        "MeetingWebinarRegistration".into(),
+        object(
+            "One webinar registration: ids, state and times (no registrant name or address).",
+            json!({
+                "registration_id": uuid, "space_id": uuid, "meeting_id": nullable_uuid, "status": code,
+                "user_id": nullable_uuid, "created_at": ts, "cancelled_at": nullable_ts
+            }),
+        ),
+    );
+    m.insert(
+        "MeetingWebinarRegistrationPage".into(),
+        page("MeetingWebinarRegistration"),
+    );
+    let parity = json!({
+        "type": ["object", "null"], "additionalProperties": false,
+        "required": ["parity_run_id", "status", "started_at", "finished_at", "meetings_checked", "messages_checked", "mismatches"],
+        "properties": {
+            "parity_run_id": uuid, "status": code, "started_at": ts, "finished_at": nullable_ts,
+            "meetings_checked": count, "messages_checked": count, "mismatches": count
+        }
+    });
+    m.insert(
+        "MeetingChatMigration".into(),
+        object(
+            "The meeting-chat migration state, version and gates (counts and the latest parity run).",
+            json!({
+                "migration_state": code, "version": version, "changed_at": ts, "pending_mirror": count,
+                "pending_rollback_copies": count, "pending_session_revocations": count, "linked_meetings": count,
+                "latest_parity_run": parity
+            }),
+        ),
+    );
+    m.insert(
+        "MeetingCriticalLane".into(),
+        object(
+            "The account CRITICAL notification lane: counts, the fallback key's readiness and the leased, uncompleted decision ids.",
+            json!({
+                "fallback_key": {"type": "boolean"}, "pending": count, "dead": count,
+                "leased_uncompleted_decisions": {"type": "array", "maxItems": 500, "items": uuid}
+            }),
+        ),
+    );
 }

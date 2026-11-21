@@ -54,6 +54,9 @@ fn out_schema(f: &OutField) -> Value {
             json!({"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Za-z0-9._:@-]{1,128}$"}})
         }
         Out::Obj(inner) => object(inner),
+        Out::UuidGroups => {
+            json!({"type": "array", "maxItems": 100, "items": {"type": "array", "maxItems": 100, "items": {"type": "string", "format": "uuid"}}})
+        }
         Out::ObjList(inner) => json!({"type": "array", "maxItems": 100, "items": object(inner)}),
     };
     if f.nullable {

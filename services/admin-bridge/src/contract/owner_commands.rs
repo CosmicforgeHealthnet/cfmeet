@@ -97,6 +97,8 @@ pub enum Out {
     Obj(&'static [OutField]),
     /// Objects of these fields, at most 100.
     ObjList(&'static [OutField]),
+    /// Groups of UUIDs (at most 100 groups of at most 100).
+    UuidGroups,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -891,6 +893,114 @@ const fn cl(
         source,
         version,
         reason: Reason::Ledger,
+        body,
+        statuses,
+        resource,
+        body_schema,
+        result_schema,
+    }
+}
+
+// ---- Meeting Service (A4 - A7): accounts and meetings ----------------------------------
+// The account authority stores some states in lower case: they are relayed as opaque
+// identifiers (`Out::Str`), never re-cased in a command answer.
+
+const MEET_USER: &[OutField] = &[
+    o("user_id", "userId", Out::Uuid, false),
+    o("account_status", "accountStatus", Out::Str, false),
+    o("role", "role", Out::Str, false),
+    o("email_verified", "emailVerified", Out::Bool, false),
+    o("open_sessions", "openSessions", Out::Int, false),
+    o("mfa_enabled", "mfaEnabled", Out::Bool, false),
+];
+const MEET_DEVICE: &[OutField] = &[
+    o("user_id", "userId", Out::Uuid, false),
+    o("device_id", "deviceId", Out::Uuid, false),
+    o("device_state", "state", Out::Str, false),
+    o("revoked_at", "revokedAt", Out::Time, true),
+    o("revoke_reason", "revokeReason", Out::Str, true),
+];
+const MEET_UNIQUENESS: &[OutField] = &[
+    o("enforced", "enforced", Out::Bool, false),
+    o(
+        "duplicate_groups",
+        "duplicateGroups",
+        Out::UuidGroups,
+        false,
+    ),
+];
+const MEET_DUPLICATES: &[OutField] = &[
+    o(
+        "email_uniqueness",
+        "email",
+        Out::Obj(MEET_UNIQUENESS),
+        false,
+    ),
+    o(
+        "username_uniqueness",
+        "username",
+        Out::Obj(MEET_UNIQUENESS),
+        false,
+    ),
+];
+const MEET_CONFERENCE: &[OutField] = &[
+    o("meeting_id", "conferenceId", Out::Uuid, false),
+    o("space_id", "spaceId", Out::Uuid, false),
+    o("meeting_state", "conferenceStatus", Out::Str, false),
+    o("termination_reason", "terminationReason", Out::Str, true),
+    o("ending_requested_at", "endingRequestedAt", Out::Time, true),
+    o("ended_at", "endedAt", Out::Time, true),
+];
+const MEET_SPACE: &[OutField] = &[
+    o("space_id", "spaceId", Out::Uuid, false),
+    o("space_state", "spaceStatus", Out::Str, false),
+    o("owner_user_id", "ownerUserId", Out::Uuid, true),
+    o("archived_at", "archivedAt", Out::Time, true),
+];
+const MEET_ARTIFACT: &[OutField] = &[
+    o("artifact_id", "artifactId", Out::Uuid, false),
+    o("meeting_id", "conferenceId", Out::Uuid, false),
+    o("artifact_type", "artifactType", Out::Str, false),
+    o("artifact_state", "artifactStatus", Out::Str, false),
+    o("delete_requested_at", "deleteRequestedAt", Out::Time, true),
+    o("deleted_at", "deletedAt", Out::Time, true),
+];
+const MEET_CHAT_MIGRATION: &[OutField] = &[
+    o("migration_state", "migrationState", Out::Str, false),
+    o("migration_version", "migrationVersion", Out::Int, false),
+    o("changed_at", "changedAt", Out::Time, true),
+];
+const MEET_DECISION: &[OutField] = &[
+    o("decision_id", "decisionId", Out::Uuid, false),
+    o("category", "category", Out::Str, false),
+    o("route", "route", Out::Str, false),
+    o("reason", "reason", Out::Text, false),
+];
+const CHAT_MIGRATION_STATES: &[&str] = &[
+    "LEGACY_PRIMARY",
+    "SHADOW_VALIDATION",
+    "MESSAGING_PRIMARY",
+    "LEGACY_RETIRED",
+];
+
+/// A Meeting Service command (its bodies take an optional `reasonCode`).
+#[allow(clippy::too_many_arguments)]
+const fn ms(
+    id: &'static str,
+    source: &'static str,
+    version: Option<i64>,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    resource: &'static [OutField],
+    body_schema: &'static str,
+    result_schema: &'static str,
+) -> OwnerCommand {
+    OwnerCommand {
+        id,
+        owner: Owner::MeetingService,
+        source,
+        version,
+        reason: Reason::Forward,
         body,
         statuses,
         resource,
@@ -1968,6 +2078,179 @@ pub const COMMANDS: &[OwnerCommand] = &[
         CL_RESEALED,
         "CallingWebhookKeyResealRequest",
         "CallingWebhookKeyResealResult",
+    ),
+    // Meeting Service: accounts.
+    ms(
+        "accounts.user.status.change",
+        "POST /internal/v1/operator/accounts/users/{user_id}/status",
+        // The account's version (accounts.users.read).
+        Some(1),
+        &[b(
+            "account_status",
+            "status",
+            In::Enum(&["ACTIVE", "INACTIVE", "SUSPENDED"]),
+            true,
+        )],
+        &["ACTIVE", "INACTIVE", "SUSPENDED"],
+        MEET_USER,
+        "AccountUserStatusChangeRequest",
+        "AccountUserCommandResult",
+    ),
+    ms(
+        "accounts.user.role.change",
+        "POST /internal/v1/operator/accounts/users/{user_id}/role",
+        Some(1),
+        &[b("role", "role", In::Enum(&["USER", "ADMIN", "GUEST"]), true)],
+        &["USER", "ADMIN", "GUEST"],
+        MEET_USER,
+        "AccountUserRoleChangeRequest",
+        "AccountUserCommandResult",
+    ),
+    ms(
+        "accounts.user.email.change",
+        "POST /internal/v1/operator/accounts/users/{user_id}/email",
+        // The new address goes to the owner only: never in the answer, the ledger target
+        // or the bridge's record.
+        Some(1),
+        &[b("new_email", "newEmail", In::Str(3, 255), true)],
+        &["EMAIL_CHANGED"],
+        MEET_USER,
+        "AccountUserEmailChangeRequest",
+        "AccountUserCommandResult",
+    ),
+    ms(
+        "accounts.sessions.revoke-all",
+        "POST /internal/v1/operator/accounts/users/{user_id}/sessions/revoke-all",
+        None,
+        &[],
+        &["REVOKED"],
+        MEET_USER,
+        "AccountSessionsRevokeAllRequest",
+        "AccountUserCommandResult",
+    ),
+    ms(
+        "accounts.device.revoke",
+        "POST /internal/v1/operator/accounts/users/{user_id}/devices/{device_id}/revoke",
+        None,
+        &[],
+        &["REVOKED"],
+        MEET_DEVICE,
+        "AccountDeviceRevokeRequest",
+        "AccountDeviceRevokeResult",
+    ),
+    ms(
+        "accounts.mfa.reset",
+        "POST /internal/v1/operator/accounts/users/{user_id}/mfa/reset",
+        None,
+        &[],
+        &["NOT_ENROLLED"],
+        MEET_USER,
+        "AccountMfaResetRequest",
+        "AccountUserCommandResult",
+    ),
+    ms(
+        "accounts.duplicates.enforce",
+        // Enforces identity uniqueness across the account authority (every group);
+        // `{group_id}` names the group HQ reviewed and is kept in the ledger target.
+        "POST /internal/v1/operator/accounts/duplicates/enforce",
+        None,
+        &[],
+        &["ENFORCED", "PARTIALLY_ENFORCED", "NOT_ENFORCED"],
+        MEET_DUPLICATES,
+        "AccountDuplicatesEnforceRequest",
+        "AccountDuplicatesEnforceResult",
+    ),
+    ms(
+        "accounts.user.delete",
+        "POST /internal/v1/operator/accounts/users/{user_id}/delete",
+        Some(1),
+        &[],
+        &["DELETED"],
+        MEET_USER,
+        "AccountUserDeleteRequest",
+        "AccountUserCommandResult",
+    ),
+    // Meeting Service: meetings.
+    ms(
+        "meetings.meeting.end",
+        "POST /internal/v1/operator/meetings/conferences/{meeting_id}/end",
+        Some(1),
+        &[],
+        &["ENDING"],
+        MEET_CONFERENCE,
+        "MeetingEndRequest",
+        "MeetingEndResult",
+    ),
+    ms(
+        "meetings.space.archive",
+        "POST /internal/v1/operator/meetings/spaces/{space_id}/archive",
+        Some(1),
+        &[],
+        &["ARCHIVED"],
+        MEET_SPACE,
+        "MeetingSpaceArchiveRequest",
+        "MeetingSpaceCommandResult",
+    ),
+    ms(
+        "meetings.space.transfer",
+        "POST /internal/v1/operator/meetings/spaces/{space_id}/owner-transfer",
+        Some(1),
+        &[
+            b("new_owner_user_id", "newOwnerUserId", In::Uuid, true),
+            b("retain_previous_owner", "retainPreviousOwner", In::Bool, false),
+        ],
+        &["TRANSFERRED"],
+        MEET_SPACE,
+        "MeetingSpaceTransferRequest",
+        "MeetingSpaceCommandResult",
+    ),
+    ms(
+        "meetings.recording.delete",
+        "POST /internal/v1/operator/meetings/conferences/{meeting_id}/recordings/{recording_id}/delete",
+        // The recording's version; the meeting it belongs to comes from the body.
+        Some(1),
+        &[p("meeting_id", In::Uuid)],
+        &["DELETE_REQUESTED"],
+        MEET_ARTIFACT,
+        "MeetingRecordingDeleteRequest",
+        "MeetingArtifactDeleteResult",
+    ),
+    ms(
+        "meetings.transcript.delete",
+        "POST /internal/v1/operator/meetings/conferences/{meeting_id}/transcripts/{transcript_id}/delete",
+        Some(1),
+        &[p("meeting_id", In::Uuid)],
+        &["DELETE_REQUESTED"],
+        MEET_ARTIFACT,
+        "MeetingTranscriptDeleteRequest",
+        "MeetingArtifactDeleteResult",
+    ),
+    ms(
+        "meetings.chat-migration.change",
+        "POST /internal/v1/operator/meetings/chat-migration/transitions",
+        // The migration's version (meetings.chat-migration.read).
+        Some(1),
+        &[b(
+            "target_state",
+            "targetState",
+            In::Enum(CHAT_MIGRATION_STATES),
+            true,
+        )],
+        CHAT_MIGRATION_STATES,
+        MEET_CHAT_MIGRATION,
+        "MeetingChatMigrationChangeRequest",
+        "MeetingChatMigrationChangeResult",
+    ),
+    ms(
+        "meetings.critical-lane.change",
+        "POST /internal/v1/operator/meetings/critical-lane/decisions/{decision_id}/reroute",
+        // The decision's version; the decision comes from the body.
+        Some(1),
+        &[p("decision_id", In::Uuid)],
+        &["REROUTED"],
+        MEET_DECISION,
+        "MeetingCriticalLaneChangeRequest",
+        "MeetingCriticalLaneChangeResult",
     ),
 ];
 
