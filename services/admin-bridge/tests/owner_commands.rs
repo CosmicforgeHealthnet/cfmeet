@@ -310,6 +310,34 @@ async fn reason_codes_follow_the_row() {
     }
 }
 
+#[tokio::test]
+async fn tenant_fields_come_from_the_scope_only() {
+    let owner = Arc::new(FakeOwner::default());
+    let h = start(Options {
+        owners: Some(owner.clone()),
+        switches_all_on: true,
+        ..Default::default()
+    })
+    .await;
+    let row = COMMANDS
+        .iter()
+        .find(|r| r.body.iter().any(|f| f.place == Place::Tenant))
+        .unwrap();
+    let before = owner.sent.lock().unwrap().len();
+    // HQ never names the tenant in the body.
+    let (mut c, _, _) = hq_call(row, "staff-3001");
+    let mut body: Value = serde_json::from_slice(&c.body).unwrap();
+    body["tenantId"] = json!(ID);
+    c.body = serde_json::to_vec(&body).unwrap();
+    assert_eq!(code(&send(&h, &c).await.1), "COMMAND_BODY_INVALID");
+    // A tenant scope that is not a Platform Access tenant id names nothing.
+    let (mut c, _, _) = hq_call(row, "staff-3002");
+    c.uri = c.uri.replace(TENANT_ID, TENANT);
+    c.tenant_scopes = vec![TENANT];
+    assert_eq!(code(&send(&h, &c).await.1), "RESOURCE_NOT_FOUND");
+    assert_eq!(owner.sent.lock().unwrap().len(), before, "{}", row.id);
+}
+
 #[test]
 fn every_row_is_a_served_command_with_its_schemas() {
     let caps = catalog();

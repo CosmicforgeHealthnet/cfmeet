@@ -1,0 +1,66 @@
+{
+  "description": "Request of messaging.hold.place (POST /internal/v1/operator/holds). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "environment_id",
+    "scope_kind",
+    "reason_category"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+      "description": "Kept in the bridge's operation record; not sent to the owning service."
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope_kind": {
+      "enum": [
+        "CONVERSATION",
+        "PRINCIPAL",
+        "ENVIRONMENT"
+      ]
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason_category": {
+      "enum": [
+        "LITIGATION",
+        "REGULATORY",
+        "INVESTIGATION",
+        "INTERNAL_POLICY"
+      ]
+    },
+    "case_reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 40,
+      "pattern": "Z$"
+    }
+  }
+}

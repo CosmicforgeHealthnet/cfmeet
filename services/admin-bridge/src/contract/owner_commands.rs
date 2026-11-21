@@ -164,6 +164,17 @@ const fn fixed(owner: &'static str, value: &'static str) -> BodyField {
     }
 }
 
+/// The request's tenant scope, sent to the owner as `owner` (HQ never sends it).
+const fn tenant(owner: &'static str) -> BodyField {
+    BodyField {
+        hq: owner,
+        owner,
+        kind: In::Uuid,
+        required: false,
+        place: Place::Tenant,
+    }
+}
+
 /// A body field that also names the resource in the ledger target (always required).
 const fn bt(hq: &'static str, owner: &'static str, kind: In) -> BodyField {
     BodyField {
@@ -611,6 +622,150 @@ const fn price_version(
         body_schema,
         "PricingVersionCommandResult",
     )
+}
+
+// ---- Messaging (A4 / A5 / A7) ---------------------------------------------------------
+// Tenant-scoped commands carry the request's tenant scope as `tenantId`; platform
+// operations (switches, incidents, failed messages, key transparency) carry none.
+
+const MSG_TENANT: BodyField = tenant("tenantId");
+const MSG_REMOVED: &[OutField] = &[
+    o("report_id", "reportId", Out::Uuid, false),
+    o("report_status", "reportStatus", Out::Code, false),
+    o("conversation_id", "conversationId", Out::Uuid, false),
+    o("message_id", "messageId", Out::Uuid, false),
+    o("message_lifecycle", "messageLifecycle", Out::Code, false),
+    o("action_id", "actionId", Out::Uuid, false),
+    o("acted_at", "actedAt", Out::Time, false),
+];
+const MSG_DISMISSED: &[OutField] = &[
+    o("report_id", "reportId", Out::Uuid, false),
+    o("report_status", "reportStatus", Out::Code, false),
+    o("resolution", "resolution", Out::Code, false),
+    o("action_id", "actionId", Out::Uuid, false),
+    o("acted_at", "actedAt", Out::Time, false),
+];
+const MSG_MUTED: &[OutField] = &[
+    o("conversation_id", "conversationId", Out::Uuid, false),
+    o("principal_id", "principalId", Out::Uuid, false),
+    o("member_state", "memberState", Out::Code, false),
+    o(
+        "send_restricted_until",
+        "sendRestrictedUntil",
+        Out::Time,
+        true,
+    ),
+    o("action_id", "actionId", Out::Uuid, false),
+    o("acted_at", "actedAt", Out::Time, false),
+];
+const MSG_MEMBER_REMOVED: &[OutField] = &[
+    o("conversation_id", "conversationId", Out::Uuid, false),
+    o("principal_id", "principalId", Out::Uuid, false),
+    o("member_state", "memberState", Out::Code, false),
+    o("action_id", "actionId", Out::Uuid, false),
+    o("acted_at", "actedAt", Out::Time, false),
+];
+const MSG_RESTRICTED: &[OutField] = &[
+    o("conversation_id", "conversationId", Out::Uuid, false),
+    o("lifecycle_state", "lifecycleState", Out::Code, false),
+    o("lifecycle_reason", "lifecycleReason", Out::Code, true),
+    o("state_changed_at", "stateChangedAt", Out::Time, false),
+];
+const MSG_POLICY: &[OutField] = &[
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("digest", "digest", Out::Str, false),
+    o(
+        "platform_policy_version",
+        "platformPolicyVersion",
+        Out::Int,
+        false,
+    ),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const MSG_HOLD: &[OutField] = &[
+    o("hold_id", "holdId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("scope_kind", "scopeKind", Out::Code, false),
+    o("conversation_id", "conversationId", Out::Uuid, true),
+    o("principal_id", "principalId", Out::Uuid, true),
+    o("reason_category", "reasonCategory", Out::Code, false),
+    o("hold_status", "holdStatus", Out::Code, false),
+    o("created_at", "createdAt", Out::Time, false),
+    o("expires_at", "expiresAt", Out::Time, true),
+];
+const MSG_HOLD_RELEASED: &[OutField] = &[
+    o("hold_id", "holdId", Out::Uuid, false),
+    o("hold_status", "holdStatus", Out::Code, false),
+    o("release_reason", "releaseReason", Out::Code, false),
+    o("released_at", "releasedAt", Out::Time, false),
+];
+const MSG_SWITCH: &[OutField] = &[
+    o("switch_name", "switchName", Out::Code, false),
+    o("scope_key", "scopeKey", Out::Str, false),
+    o("engaged", "engaged", Out::Bool, false),
+    o("reason", "reason", Out::Code, false),
+    o("changed_at", "changedAt", Out::Time, false),
+];
+const MSG_INCIDENT: &[OutField] = &[
+    o("incident_id", "incidentId", Out::Uuid, false),
+    o("category", "category", Out::Code, false),
+    o("incident_status", "incidentStatus", Out::Code, false),
+    o("resolved_at", "resolvedAt", Out::Time, false),
+];
+const MSG_RETRIED: &[OutField] = &[
+    o("event_id", "eventId", Out::Uuid, false),
+    o("event_type", "eventType", Out::Str, false),
+    o("aggregate_type", "aggregateType", Out::Str, false),
+    o("aggregate_id", "aggregateId", Out::Uuid, false),
+    o("queue_state", "queueState", Out::Code, false),
+    o("retried_at", "retriedAt", Out::Time, false),
+];
+const MSG_CHECKPOINT: &[OutField] = &[
+    o("tree_size", "treeSize", Out::Int, false),
+    o("root_hash", "rootHash", Out::Str, false),
+    o("verdict", "verdict", Out::Code, false),
+    o("checked_at", "checkedAt", Out::Time, false),
+];
+const MSG_DELETION: &[OutField] = &[
+    o("request_id", "requestId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("kind", "kind", Out::Code, false),
+    o("principal_id", "principalId", Out::Uuid, true),
+    o("conversation_id", "conversationId", Out::Uuid, true),
+    o("request_status", "requestStatus", Out::Code, false),
+    o("created_at", "createdAt", Out::Time, false),
+];
+
+#[allow(clippy::too_many_arguments)]
+const fn mg(
+    id: &'static str,
+    source: &'static str,
+    version: Option<i64>,
+    reason: Reason,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    resource: &'static [OutField],
+    body_schema: &'static str,
+    result_schema: &'static str,
+) -> OwnerCommand {
+    OwnerCommand {
+        id,
+        owner: Owner::Messaging,
+        source,
+        version,
+        reason,
+        body,
+        statuses,
+        resource,
+        body_schema,
+        result_schema,
+    }
 }
 
 pub const COMMANDS: &[OwnerCommand] = &[
@@ -1283,6 +1438,195 @@ pub const COMMANDS: &[OwnerCommand] = &[
         PLAN_OVERRIDE,
         "PricingOverrideChangeRequest",
         "PricingOverrideChangeResult",
+    ),
+    // Messaging (the owner requires a reason code on every command but placing a hold).
+    mg(
+        "messaging.message.remove",
+        "POST /internal/v1/operator/reports/{report_id}/remove-message",
+        // The report's version.
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT, b("message_id", "messageId", In::Uuid, true)],
+        &["REMOVED"],
+        MSG_REMOVED,
+        "MessagingMessageRemoveRequest",
+        "MessagingMessageRemoveResult",
+    ),
+    mg(
+        "messaging.report.dismiss",
+        "POST /internal/v1/operator/reports/{report_id}/dismiss",
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["DISMISSED"],
+        MSG_DISMISSED,
+        "MessagingReportDismissRequest",
+        "MessagingReportDismissResult",
+    ),
+    mg(
+        "messaging.member.mute",
+        "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/mute",
+        // The membership's version.
+        Some(1),
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b("duration_seconds", "durationSeconds", In::Int(60, 2_592_000), true),
+        ],
+        &["MUTED"],
+        MSG_MUTED,
+        "MessagingMemberMuteRequest",
+        "MessagingMemberMuteResult",
+    ),
+    mg(
+        "messaging.member.remove",
+        "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/remove",
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["REMOVED"],
+        MSG_MEMBER_REMOVED,
+        "MessagingMemberRemoveRequest",
+        "MessagingMemberRemoveResult",
+    ),
+    mg(
+        "messaging.conversation.restrict",
+        "POST /internal/v1/operator/conversations/{conversation_id}/restrict",
+        // The conversation's version.
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["LOCKED"],
+        MSG_RESTRICTED,
+        "MessagingConversationRestrictRequest",
+        "MessagingConversationRestrictResult",
+    ),
+    mg(
+        "messaging.policy.change",
+        "POST /internal/v1/operator/policy",
+        // The environment's application policy version, 0 while it has none.
+        Some(0),
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            bt("environment_id", "environmentId", In::Uuid),
+            b("policy", "policy", In::Object, true),
+        ],
+        &["UPDATED"],
+        MSG_POLICY,
+        "MessagingPolicyChangeRequest",
+        "MessagingPolicyChangeResult",
+    ),
+    mg(
+        "messaging.hold.place",
+        "POST /internal/v1/operator/holds",
+        None,
+        Reason::Ledger,
+        &[
+            MSG_TENANT,
+            b("environment_id", "environmentId", In::Uuid, true),
+            b(
+                "scope_kind",
+                "scopeKind",
+                In::Enum(&["CONVERSATION", "PRINCIPAL", "ENVIRONMENT"]),
+                true,
+            ),
+            b("conversation_id", "conversationId", In::Uuid, false),
+            b("principal_id", "principalId", In::Uuid, false),
+            b(
+                "reason_category",
+                "reasonCategory",
+                In::Enum(&["LITIGATION", "REGULATORY", "INVESTIGATION", "INTERNAL_POLICY"]),
+                true,
+            ),
+            b("case_reference", "caseReference", In::Str(1, 128), false),
+            b("expires_at", "expiresAt", In::Time, false),
+        ],
+        &["ACTIVE"],
+        MSG_HOLD,
+        "MessagingHoldPlaceRequest",
+        "MessagingHoldPlaceResult",
+    ),
+    mg(
+        "messaging.hold.release",
+        "POST /internal/v1/operator/holds/{hold_id}/release",
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["RELEASED"],
+        MSG_HOLD_RELEASED,
+        "MessagingHoldReleaseRequest",
+        "MessagingHoldReleaseResult",
+    ),
+    mg(
+        "messaging.switch.change",
+        "POST /internal/v1/operator/switches/{switch_id}",
+        // The switch's version at its scope, 0 while it has no row.
+        Some(0),
+        Reason::Required,
+        &[
+            b("environment_id", "environmentId", In::NullableUuid, false),
+            b("engaged", "engaged", In::Bool, true),
+        ],
+        &["ENGAGED", "RELEASED"],
+        MSG_SWITCH,
+        "MessagingSwitchChangeRequest",
+        "MessagingSwitchChangeResult",
+    ),
+    mg(
+        "messaging.incident.record",
+        "POST /internal/v1/operator/incidents/{incident_id}/resolve",
+        None,
+        Reason::Required,
+        &[p("incident_id", In::Uuid)],
+        &["RESOLVED"],
+        MSG_INCIDENT,
+        "MessagingIncidentRecordRequest",
+        "MessagingIncidentRecordResult",
+    ),
+    mg(
+        "messaging.failed-message.retry",
+        "POST /internal/v1/operator/failed-messages/{message_id}/retry",
+        None,
+        Reason::Required,
+        &[],
+        &["RETRIED"],
+        MSG_RETRIED,
+        "MessagingFailedMessageRetryRequest",
+        "MessagingFailedMessageRetryResult",
+    ),
+    mg(
+        "messaging.key-transparency.checkpoint",
+        "POST /internal/v1/operator/key-transparency/checkpoint",
+        None,
+        Reason::Required,
+        &[],
+        &["CHECKPOINTED", "ROLLBACK_DETECTED", "UNVERIFIABLE"],
+        MSG_CHECKPOINT,
+        "MessagingKeyTransparencyCheckpointRequest",
+        "MessagingKeyTransparencyCheckpointResult",
+    ),
+    mg(
+        "messaging.deletion-request.create",
+        "POST /internal/v1/operator/deletion-requests",
+        None,
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b("environment_id", "environmentId", In::Uuid, true),
+            b(
+                "kind",
+                "kind",
+                In::Enum(&["PRINCIPAL_ERASURE", "CONVERSATION_PURGE"]),
+                true,
+            ),
+            b("principal_id", "principalId", In::Uuid, false),
+            b("conversation_id", "conversationId", In::Uuid, false),
+        ],
+        &["PENDING"],
+        MSG_DELETION,
+        "MessagingDeletionRequestCreateRequest",
+        "MessagingDeletionRequestCreateResult",
     ),
 ];
 

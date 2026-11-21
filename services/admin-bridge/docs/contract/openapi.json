@@ -12718,7 +12718,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingMessageRemoveResult"
                     },
                     "error": {
                       "type": "null"
@@ -12844,14 +12844,14 @@
         "x-cfmeet-permission": "messaging.message.remove",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingMessageRemoveRequest"
               }
             }
           }
@@ -12990,7 +12990,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingMemberMuteResult"
                     },
                     "error": {
                       "type": "null"
@@ -13116,14 +13116,14 @@
         "x-cfmeet-permission": "messaging.member.mute",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingMemberMuteRequest"
               }
             }
           }
@@ -13262,7 +13262,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingMemberRemoveResult"
                     },
                     "error": {
                       "type": "null"
@@ -13388,14 +13388,14 @@
         "x-cfmeet-permission": "messaging.member.remove",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingMemberRemoveRequest"
               }
             }
           }
@@ -13524,7 +13524,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingConversationRestrictResult"
                     },
                     "error": {
                       "type": "null"
@@ -13650,14 +13650,14 @@
         "x-cfmeet-permission": "messaging.conversation.restrict",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingConversationRestrictRequest"
               }
             }
           }
@@ -13786,7 +13786,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingReportDismissResult"
                     },
                     "error": {
                       "type": "null"
@@ -13912,14 +13912,14 @@
         "x-cfmeet-permission": "messaging.report.dismiss",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingReportDismissRequest"
               }
             }
           }
@@ -14269,7 +14269,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingPolicyChangeResult"
                     },
                     "error": {
                       "type": "null"
@@ -14395,14 +14395,14 @@
         "x-cfmeet-permission": "messaging.policy.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingPolicyChangeRequest"
               }
             }
           }
@@ -14771,7 +14771,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingHoldPlaceResult"
                     },
                     "error": {
                       "type": "null"
@@ -14897,14 +14897,14 @@
         "x-cfmeet-permission": "messaging.hold.place",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingHoldPlaceRequest"
               }
             }
           }
@@ -15033,7 +15033,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingHoldReleaseResult"
                     },
                     "error": {
                       "type": "null"
@@ -15159,14 +15159,14 @@
         "x-cfmeet-permission": "messaging.hold.release",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingHoldReleaseRequest"
               }
             }
           }
@@ -16034,7 +16034,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingDeletionRequestCreateResult"
                     },
                     "error": {
                       "type": "null"
@@ -16160,14 +16160,14 @@
         "x-cfmeet-permission": "messaging.deletion-request.create",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingDeletionRequestCreateRequest"
               }
             }
           }
@@ -16816,7 +16816,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingSwitchChangeResult"
                     },
                     "error": {
                       "type": "null"
@@ -16942,14 +16942,14 @@
         "x-cfmeet-permission": "messaging.switch.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingSwitchChangeRequest"
               }
             }
           }
@@ -17334,7 +17334,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingIncidentRecordResult"
                     },
                     "error": {
                       "type": "null"
@@ -17460,14 +17460,14 @@
         "x-cfmeet-permission": "messaging.incident.record",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingIncidentRecordRequest"
               }
             }
           }
@@ -17864,7 +17864,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingFailedMessageRetryResult"
                     },
                     "error": {
                       "type": "null"
@@ -17990,14 +17990,14 @@
         "x-cfmeet-permission": "messaging.failed-message.retry",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingFailedMessageRetryRequest"
               }
             }
           }
@@ -18347,7 +18347,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingKeyTransparencyCheckpointResult"
                     },
                     "error": {
                       "type": "null"
@@ -18473,14 +18473,14 @@
         "x-cfmeet-permission": "messaging.key-transparency.checkpoint",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingKeyTransparencyCheckpointRequest"
               }
             }
           }
@@ -70759,7 +70759,8 @@
           "status",
           "resolution",
           "resolved_at",
-          "created_at"
+          "created_at",
+          "version"
         ],
         "properties": {
           "report_id": {
@@ -70852,6 +70853,11 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The report's row version (expected_version of its moderation commands)."
           }
         }
       },
@@ -71084,7 +71090,8 @@
           "created_at",
           "expires_at",
           "released_at",
-          "release_reason"
+          "release_reason",
+          "version"
         ],
         "properties": {
           "hold_id": {
@@ -71162,6 +71169,10 @@
               "null"
             ],
             "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -77382,6 +77393,1161 @@
               }
             },
             "description": "The resource after pricing.override.change; status: ACTIVE, REVOKED."
+          }
+        }
+      },
+      "MessagingMessageRemoveRequest": {
+        "description": "Request of messaging.message.remove (POST /internal/v1/operator/reports/{report_id}/remove-message). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version",
+          "message_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MessagingMessageRemoveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "report_id",
+              "report_status",
+              "conversation_id",
+              "message_id",
+              "message_lifecycle",
+              "action_id",
+              "acted_at"
+            ],
+            "properties": {
+              "report_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "report_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "conversation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message_lifecycle": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "action_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "acted_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.message.remove; status: REMOVED."
+          }
+        }
+      },
+      "MessagingReportDismissRequest": {
+        "description": "Request of messaging.report.dismiss (POST /internal/v1/operator/reports/{report_id}/dismiss). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MessagingReportDismissResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "report_id",
+              "report_status",
+              "resolution",
+              "action_id",
+              "acted_at"
+            ],
+            "properties": {
+              "report_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "report_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "resolution": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "action_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "acted_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.report.dismiss; status: DISMISSED."
+          }
+        }
+      },
+      "MessagingMemberMuteRequest": {
+        "description": "Request of messaging.member.mute (POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/mute). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version",
+          "duration_seconds"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 2592000
+          }
+        }
+      },
+      "MessagingMemberMuteResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversation_id",
+              "principal_id",
+              "member_state",
+              "send_restricted_until",
+              "action_id",
+              "acted_at"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "principal_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "member_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "send_restricted_until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "action_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "acted_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.member.mute; status: MUTED."
+          }
+        }
+      },
+      "MessagingMemberRemoveRequest": {
+        "description": "Request of messaging.member.remove (POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/remove). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MessagingMemberRemoveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversation_id",
+              "principal_id",
+              "member_state",
+              "action_id",
+              "acted_at"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "principal_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "member_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "action_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "acted_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.member.remove; status: REMOVED."
+          }
+        }
+      },
+      "MessagingConversationRestrictRequest": {
+        "description": "Request of messaging.conversation.restrict (POST /internal/v1/operator/conversations/{conversation_id}/restrict). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MessagingConversationRestrictResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversation_id",
+              "lifecycle_state",
+              "lifecycle_reason",
+              "state_changed_at"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lifecycle_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "lifecycle_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "state_changed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.conversation.restrict; status: LOCKED."
+          }
+        }
+      },
+      "MessagingPolicyChangeRequest": {
+        "description": "Request of messaging.policy.change (POST /internal/v1/operator/policy). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version",
+          "environment_id",
+          "policy"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "type": "object",
+            "description": "Validated by the owning service."
+          }
+        }
+      },
+      "MessagingPolicyChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant_id",
+              "application_id",
+              "environment_id",
+              "digest",
+              "platform_policy_version",
+              "updated_at"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "platform_policy_version": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.policy.change; status: UPDATED."
+          }
+        }
+      },
+      "MessagingHoldPlaceRequest": {
+        "description": "Request of messaging.hold.place (POST /internal/v1/operator/holds). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "environment_id",
+          "scope_kind",
+          "reason_category"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_kind": {
+            "enum": [
+              "CONVERSATION",
+              "PRINCIPAL",
+              "ENVIRONMENT"
+            ]
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason_category": {
+            "enum": [
+              "LITIGATION",
+              "REGULATORY",
+              "INVESTIGATION",
+              "INTERNAL_POLICY"
+            ]
+          },
+          "case_reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40,
+            "pattern": "Z$"
+          }
+        }
+      },
+      "MessagingHoldPlaceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "hold_id",
+              "tenant_id",
+              "application_id",
+              "environment_id",
+              "scope_kind",
+              "conversation_id",
+              "principal_id",
+              "reason_category",
+              "hold_status",
+              "created_at",
+              "expires_at"
+            ],
+            "properties": {
+              "hold_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "scope_kind": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "principal_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "reason_category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "hold_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.hold.place; status: ACTIVE."
+          }
+        }
+      },
+      "MessagingHoldReleaseRequest": {
+        "description": "Request of messaging.hold.release (POST /internal/v1/operator/holds/{hold_id}/release). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "MessagingHoldReleaseResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "hold_id",
+              "hold_status",
+              "release_reason",
+              "released_at"
+            ],
+            "properties": {
+              "hold_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "hold_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "release_reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "released_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.hold.release; status: RELEASED."
+          }
+        }
+      },
+      "MessagingSwitchChangeRequest": {
+        "description": "Request of messaging.switch.change (POST /internal/v1/operator/switches/{switch_id}).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version",
+          "engaged"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "engaged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MessagingSwitchChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "switch_name",
+              "scope_key",
+              "engaged",
+              "reason",
+              "changed_at"
+            ],
+            "properties": {
+              "switch_name": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "scope_key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "engaged": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "changed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.switch.change; status: ENGAGED, RELEASED."
+          }
+        }
+      },
+      "MessagingIncidentRecordRequest": {
+        "description": "Request of messaging.incident.record (POST /internal/v1/operator/incidents/{incident_id}/resolve).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "incident_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MessagingIncidentRecordResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "incident_id",
+              "category",
+              "incident_status",
+              "resolved_at"
+            ],
+            "properties": {
+              "incident_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "category": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "incident_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "resolved_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.incident.record; status: RESOLVED."
+          }
+        }
+      },
+      "MessagingFailedMessageRetryRequest": {
+        "description": "Request of messaging.failed-message.retry (POST /internal/v1/operator/failed-messages/{message_id}/retry).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "MessagingFailedMessageRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "event_id",
+              "event_type",
+              "aggregate_type",
+              "aggregate_id",
+              "queue_state",
+              "retried_at"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "event_type": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "aggregate_type": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "aggregate_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "queue_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "retried_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.failed-message.retry; status: RETRIED."
+          }
+        }
+      },
+      "MessagingKeyTransparencyCheckpointRequest": {
+        "description": "Request of messaging.key-transparency.checkpoint (POST /internal/v1/operator/key-transparency/checkpoint).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "MessagingKeyTransparencyCheckpointResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tree_size",
+              "root_hash",
+              "verdict",
+              "checked_at"
+            ],
+            "properties": {
+              "tree_size": {
+                "type": "integer"
+              },
+              "root_hash": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "verdict": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.key-transparency.checkpoint; status: CHECKPOINTED, ROLLBACK_DETECTED, UNVERIFIABLE."
+          }
+        }
+      },
+      "MessagingDeletionRequestCreateRequest": {
+        "description": "Request of messaging.deletion-request.create (POST /internal/v1/operator/deletion-requests). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "environment_id",
+          "kind"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "PRINCIPAL_ERASURE",
+              "CONVERSATION_PURGE"
+            ]
+          },
+          "principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MessagingDeletionRequestCreateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "request_id",
+              "tenant_id",
+              "application_id",
+              "environment_id",
+              "kind",
+              "principal_id",
+              "conversation_id",
+              "request_status",
+              "created_at"
+            ],
+            "properties": {
+              "request_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "principal_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "request_status": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after messaging.deletion-request.create; status: PENDING."
           }
         }
       },

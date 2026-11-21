@@ -976,8 +976,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/reports/{report_id}/remove-message",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/reports/{report_id}/remove-message",
+    "state": "AVAILABLE",
     "permission": "messaging.message.remove",
     "risk": "R3",
     "privacy": "SAFETY_EVIDENCE",
@@ -986,8 +986,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.member.mute",
@@ -995,8 +997,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/conversations/{conversation_id}/members/{member_id}/mute",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/mute",
+    "state": "AVAILABLE",
     "permission": "messaging.member.mute",
     "risk": "R3",
     "privacy": "SAFETY_EVIDENCE",
@@ -1005,8 +1007,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.member.remove",
@@ -1014,8 +1018,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/conversations/{conversation_id}/members/{member_id}/remove",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/members/{member_id}/remove",
+    "state": "AVAILABLE",
     "permission": "messaging.member.remove",
     "risk": "R3",
     "privacy": "SAFETY_EVIDENCE",
@@ -1024,8 +1028,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.conversation.restrict",
@@ -1033,8 +1039,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/conversations/{conversation_id}/restrict",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/conversations/{conversation_id}/restrict",
+    "state": "AVAILABLE",
     "permission": "messaging.conversation.restrict",
     "risk": "R3",
     "privacy": "SAFETY_EVIDENCE",
@@ -1043,8 +1049,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.report.dismiss",
@@ -1052,8 +1060,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/reports/{report_id}/dismiss",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/reports/{report_id}/dismiss",
+    "state": "AVAILABLE",
     "permission": "messaging.report.dismiss",
     "risk": "R3",
     "privacy": "SAFETY_EVIDENCE",
@@ -1062,8 +1070,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.policy.read",
@@ -1090,8 +1100,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/policy",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/policy",
+    "state": "AVAILABLE",
     "permission": "messaging.policy.change",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -1100,8 +1110,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.holds.list",
@@ -1130,8 +1142,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/holds",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/holds",
+    "state": "AVAILABLE",
     "permission": "messaging.hold.place",
     "risk": "R3",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1140,8 +1152,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.hold.release",
@@ -1149,8 +1163,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/holds/{hold_id}/release",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/holds/{hold_id}/release",
+    "state": "AVAILABLE",
     "permission": "messaging.hold.release",
     "risk": "R3",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1159,8 +1173,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.exports.list",
@@ -1229,8 +1245,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/deletion-requests",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/deletion-requests",
+    "state": "AVAILABLE",
     "permission": "messaging.deletion-request.create",
     "risk": "R4",
     "privacy": "PERSONAL",
@@ -1239,8 +1255,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A7: new messaging operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.audit.list",
@@ -1290,8 +1308,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/switches/{switch_id}",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/switches/{switch_id}",
+    "state": "AVAILABLE",
     "permission": "messaging.switch.change",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -1300,8 +1318,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.incidents.list",
@@ -1330,8 +1350,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/incidents",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/incidents/{incident_id}/resolve",
+    "state": "AVAILABLE",
     "permission": "messaging.incident.record",
     "risk": "R2",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1340,8 +1360,10 @@
     "idempotency_required": true,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.failed-messages.list",
@@ -1370,8 +1392,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/failed-messages/{message_id}/retry",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/failed-messages/{message_id}/retry",
+    "state": "AVAILABLE",
     "permission": "messaging.failed-message.retry",
     "risk": "R2",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1380,8 +1402,10 @@
     "idempotency_required": true,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "messaging.key-transparency.read",
@@ -1410,8 +1434,8 @@
     "owner": "messaging",
     "method": "POST",
     "bridge_endpoint": "/messaging/key-transparency/checkpoint",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/key-transparency/checkpoint",
+    "state": "AVAILABLE",
     "permission": "messaging.key-transparency.checkpoint",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -1420,8 +1444,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "calling.calls.list",

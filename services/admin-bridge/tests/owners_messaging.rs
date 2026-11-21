@@ -44,7 +44,7 @@ fn report_json() -> Value {
         "id": ID, "conversationId": ID, "securityProfile": "PRIVATE_E2EE",
         "reporterPrincipalId": ID, "reportedPrincipalId": null, "messageIds": [ID],
         "category": "HARASSMENT", "evidenceKind": "REPORTER_DISCLOSURE", "status": "OPEN",
-        "resolution": null, "resolvedAt": null, "createdAt": T0,
+        "resolution": null, "resolvedAt": null, "createdAt": T0, "version": 3,
         // Fields the bridge must drop even if an owner ever sent them.
         "sealedEvidence": "c2VhbGVkLWNpcGhlcnRleHQ=", "plaintext": "never-relay-this-text"
     }))
@@ -82,7 +82,7 @@ impl OwnerPort for FakeMessaging {
             "/holds" => json!({"items": [with_scope(json!({
                 "id": ID, "scopeKind": "CONVERSATION", "conversationId": ID, "principalId": null,
                 "reasonCategory": "LITIGATION", "status": "ACTIVE", "createdAt": T0, "expiresAt": null,
-                "releasedAt": null, "releaseReason": null, "caseReference": "CASE-SECRET-42"
+                "releasedAt": null, "releaseReason": null, "caseReference": "CASE-SECRET-42", "version": 2
             }))], "nextCursor": null}),
             "/exports" => json!({"items": [with_scope(json!({
                 "id": ID, "conversationId": ID, "status": "READY", "size": 2048, "messageCount": 12,
@@ -178,6 +178,8 @@ async fn messaging_reports_relay_no_evidence() {
     assert_eq!(item["evidence_kind"], "REPORTER_DISCLOSURE");
     assert_eq!(item["message_ids"][0], ID);
     assert_eq!(item["created_at"], "2026-11-01T10:00:00Z");
+    // The row version the moderation commands act on.
+    assert_eq!(item["version"], 3);
     assert_eq!(v["result"]["next_cursor"], CUR);
     let text = v.to_string();
     assert!(
@@ -235,6 +237,13 @@ async fn messaging_lists_translate_strictly() {
             "/internal/v1/operator/holds",
             "reason_category",
             "LITIGATION",
+        ),
+        (
+            "/messaging/holds",
+            "messaging.holds.read",
+            "/internal/v1/operator/holds",
+            "version",
+            "2",
         ),
         (
             "/messaging/exports",
