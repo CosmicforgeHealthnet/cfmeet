@@ -304,6 +304,8 @@ class FakePlatform:
                 return self.nf()
             if not any(g['c'] == m.group(1) for g in t['grants'].get('mtg', [])):
                 return 403, {'error': {'code': 'FORBIDDEN'}}
+            if conf['status'] != 'LIVE':  # admission requires a LIVE conference
+                return 409, {'error': {'code': 'CONFERENCE_NOT_LIVE'}}
             key = (m.group(1), t['user'])
             pid = self.participants.setdefault(key, self.id('p'))
             pt = 'pt_' + self.id()
@@ -531,12 +533,25 @@ class FakePlatform:
             if m.group(2) == 'archive':
                 return 200, {}
             conf = self.id('conf')
-            self.conferences[conf] = dict(env=env, space=m.group(1))
-            return 201, {'id': conf, 'meetingSpaceId': m.group(1)}
-        m = re.fullmatch(r'/api/v2/conferences/(\w+)(/end)?', path)
+            self.conferences[conf] = dict(env=env, space=m.group(1), status='CREATED')
+            return 201, {'id': conf, 'meetingSpaceId': m.group(1), 'status': 'CREATED'}
+        m = re.fullmatch(r'/api/v2/conferences/(\w+)(/start|/end|/cancel)?', path)
         if m:
             c = self.conferences.get(m.group(1))
-            return (200, {}) if c and c['env'] == env else self.nf()
+            if not c or c['env'] != env:
+                return self.nf()
+            action = m.group(2)
+            if action == '/start' and c['status'] in ('CREATED', 'PREPARING', 'WAITING', 'LIVE'):
+                c['status'] = 'LIVE'
+            elif action == '/end' and c['status'] in ('LIVE', 'ENDING', 'ENDED'):
+                c['status'] = 'ENDED'
+            elif action == '/cancel' and c['status'] in ('CREATED', 'PREPARING', 'WAITING', 'CANCELLED'):
+                c['status'] = 'CANCELLED'
+            elif action == '/end':
+                return 409, {'error': {'code': 'CONFERENCE_NOT_LIVE'}}
+            elif action:
+                return 409, {'error': {'code': 'CONFERENCE_STATE_CONFLICT'}}
+            return 200, {'conference': {'id': m.group(1), 'status': c['status']}, 'changed': True}
         return 404, {}
 
 
@@ -580,6 +595,10 @@ class Journey(unittest.TestCase):
             self.assertLess(order.index(('POST', '/v1/projects/%sproj/archive' % env)), close)
         self.assertEqual(len(api.conferences), 2)
         for conf, value in api.conferences.items():
+            # Started before any join, ended (not left LIVE) at cleanup.
+            self.assertEqual(value['status'], 'ENDED')
+            self.assertLess(order.index(('POST', '/api/v2/conferences/%s/start' % conf)),
+                            order.index(('POST', '/api/v2/conferences/%s/join' % conf)))
             self.assertLess(order.index(('POST', '/api/v2/conferences/%s/end' % conf)),
                             order.index(('POST', '/api/v2/meeting-spaces/%s/archive' % value['space'])))
         self.assertTrue(any(p.endswith('/cancel') for _, p in order))
@@ -645,6 +664,21 @@ class Journey(unittest.TestCase):
         self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'),
                          ["chat A: rider's device sends, customer's device receives",
                           "chat B: rider's device sends, customer's device receives"])
+
+    def test_a_conference_that_cannot_start_fails_meetings_and_is_cancelled_at_cleanup(self):
+        api = FakePlatform()
+        original = api.relay
+
+        def relay(method, path, body, bearer, headers):
+            if path.endswith('/start'):
+                return 409, {'error': {'code': 'CONFERENCE_STATE_CONFLICT'}}
+            return original(method, path, body, bearer, headers)
+        api.relay = relay
+        checks, _, _ = run_flow(api)
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        self.assertTrue(failed and all(k.startswith(('meetings', 'isolation meetings')) for k in failed), failed)
+        self.assertFalse(any(p.endswith('/join') and '/conferences/conf' in p for _, p, _, _ in api.calls))
+        self.assertEqual({c['status'] for c in api.conferences.values()}, {'CANCELLED'})
 
     def test_a_failed_setup_stops_early_and_still_cleans_up(self):
         api = FakePlatform()

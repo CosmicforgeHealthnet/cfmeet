@@ -567,10 +567,18 @@ class Journey:
         _, conference = relay.call('POST', '/api/v2/meeting-spaces/%s/conferences' % space.get('id'), {},
                                    expected=(201,), idempotent=True)
         conference = data(conference)
-        self.undo(relay, 'POST', '/api/v2/conferences/%s/end' % conference.get('id'))
+        # A conference that never goes live is cancelled at cleanup (/end answers CONFERENCE_NOT_LIVE
+        # for it); a live one is ended first, after which the cancel is a tolerated 409 no-op.
+        self.undo(relay, 'POST', '/api/v2/conferences/%s/cancel' % conference.get('id'))
         self.check('meetings %s: partner server creates a space and a conference (gateway)' % label,
                    bool(space.get('id')) and bool(conference.get('id')), fatal=True, conferenceId=conference.get('id'))
         conf = conference['id']
+        # Joins are admitted only while the conference is LIVE (409 CONFERENCE_NOT_LIVE otherwise), so the
+        # partner's server starts it (machine family, meetings.write) before any user token joins.
+        _, started = relay.call('POST', '/api/v2/conferences/%s/start' % conf, {}, expected=(200,))
+        self.undo(relay, 'POST', '/api/v2/conferences/%s/end' % conf)
+        self.check('meetings %s: partner server starts the conference (gateway, LIVE)' % label,
+                   (data(started).get('conference') or {}).get('status') == 'LIVE', fatal=True)
         grants = dict(self.grants(), mtg=[{'c': conf, 'r': 'PARTICIPANT'}])
         _, minted = self.mint(t, t['rider'], grants)
         token = minted.get('token')

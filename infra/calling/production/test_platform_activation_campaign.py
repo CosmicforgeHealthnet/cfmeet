@@ -68,5 +68,57 @@ class CampaignSafetyTests(unittest.TestCase):
             self.assertEqual(campaign.phase_status("activate-partner-calls"), "pending")
 
 
+MEETINGS_FAILED = {"campaign": campaign.CAMPAIGN, "status": "failed",
+                   "baseSha": "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab",
+                   "repairSha": "745f1525d3d1f9d9080f846214bd989e334eccff", "repairAttempts": 1,
+                   "failedOperation": "activate-platform-meetings", "errorClass": "RuntimeError",
+                   "completed": []}
+NEW_SHA = "b" * 40
+
+
+class RepairGateTests(unittest.TestCase):
+    def authorize(self, record, sha=NEW_SHA, journal_status="failed", flags=([], ["off"], [])):
+        record = dict(record)
+        journal = [{"operation": record.get("failedOperation"), "status": journal_status}]
+        with patch.object(campaign.cr, "load_journal", return_value=journal), \
+             patch.object(campaign, "flag_attestation", return_value=flags), \
+             patch.object(campaign.cr, "emit"):
+            return campaign.authorize_repair(record, sha, "1-1"), record
+
+    def test_rolled_back_meetings_failure_is_repaired_once_on_a_newer_release(self):
+        operation, record = self.authorize(MEETINGS_FAILED)
+        self.assertEqual(operation, "activate-platform-meetings")
+        self.assertEqual((record["status"], record["repairAttempts"], record["repairSha"]),
+                         ("running", 2, NEW_SHA))
+        self.assertEqual(record["repairFromSha"], MEETINGS_FAILED["repairSha"])
+
+    def test_the_original_partner_calls_repair_is_still_recognised(self):
+        record = dict(MEETINGS_FAILED, failedOperation="activate-partner-calls", repairAttempts=0)
+        record.pop("repairSha")
+        self.assertEqual(self.authorize(record)[0], "activate-partner-calls")
+
+    def test_a_second_meetings_failure_is_not_retried_again(self):
+        _, repaired = self.authorize(MEETINGS_FAILED)
+        repaired.update(status="failed")
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(repaired, sha="c" * 40)
+
+    def test_the_same_release_is_never_retried(self):
+        with self.assertRaisesRegex(RuntimeError, "not authorized"):
+            self.authorize(MEETINGS_FAILED, sha=MEETINGS_FAILED["repairSha"])
+
+    def test_unlisted_operations_and_error_classes_are_refused(self):
+        for change in ({"failedOperation": "activate-oauth"}, {"errorClass": "KeyError"},
+                       {"status": "running"}, {"repairAttempts": 0}):
+            with self.assertRaisesRegex(RuntimeError, "not authorized"):
+                self.authorize(dict(MEETINGS_FAILED, **change))
+
+    def test_retry_requires_an_attested_rollback(self):
+        for journal_status, flags in (("rolled-back", ([], ["off"], [])), ("failed", (["on"], [], [])),
+                                      ("failed", ([], ["off"], ["meeting-service"])), ("failed", ([], [], []))):
+            with self.assertRaisesRegex(RuntimeError, "rollback not independently verified"):
+                self.authorize(MEETINGS_FAILED, journal_status=journal_status, flags=flags)
+
+
 if __name__ == "__main__":
     unittest.main()

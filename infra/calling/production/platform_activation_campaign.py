@@ -142,6 +142,49 @@ def prerequisite_evidence(operation):
             raise RuntimeError("Activation prerequisite not completed: " + " or ".join(choices))
 
 
+# Owner-approved ONE-TIME repair retries, each for one exact failed attempt whose cause
+# was a defect in the acceptance probe (not in the service) and whose activation was
+# rolled back. (operation, release that failed it, repair attempts already consumed)
+#  * Partner Calls: the acceptance sent {} instead of the required expectedVersion.
+#  * Platform Meetings: the acceptance joined a conference it never started (join is
+#    admitted only while LIVE: 409 CONFERENCE_NOT_LIVE); it now starts it first.
+REPAIRS = (
+    ("activate-partner-calls", "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab", 0),
+    ("activate-platform-meetings", "745f1525d3d1f9d9080f846214bd989e334eccff", 1),
+)
+
+
+def authorize_repair(record, sha, run_id):
+    """Re-open a failed campaign only for a listed repair whose rollback is independently
+    attested; anything else stays failed for investigation, never blindly retried."""
+    failed_sha = record.get("repairSha") or record.get("baseSha")
+    attempts = int(record.get("repairAttempts", 0))
+    operation = record.get("failedOperation")
+    known = (
+        record.get("status") == "failed"
+        and record.get("errorClass") == "RuntimeError"
+        and (operation, failed_sha, attempts) in REPAIRS
+        and sha != failed_sha
+    )
+    if not known:
+        raise RuntimeError("Prior campaign failed or is incomplete; recovery is not authorized")
+    entry = last_entry(cr.load_journal(), operation)
+    passed, absent, missing = flag_attestation(operation)
+    if not entry or entry.get("status") != "failed" or passed or missing or not absent:
+        raise RuntimeError("%s rollback not independently verified; refusing retry" % operation)
+    # An exact, journaled failed state and the absence of live flags are required.
+    # Prior successfully activated components are not changed.
+    record["status"] = "running"
+    record["repairAttempts"] = attempts + 1
+    record["repairFromSha"] = failed_sha
+    record["repairSha"] = sha
+    record["runId"] = run_id
+    record.setdefault("repairs", []).append({"operation": operation, "fromSha": failed_sha, "sha": sha})
+    cr.emit("campaignRepairAuthorized", {"operation": operation, "oldRelease": failed_sha,
+                                         "newRelease": sha, "attempts": attempts + 1})
+    return operation
+
+
 def save(report):
     cr.p.write_private(CAMPAIGN_FILE, json.dumps(report, sort_keys=True, indent=2))
     cr.emit("campaignState", {key: report[key] for key in ("campaign", "status", "completed")})
@@ -161,35 +204,7 @@ def run(sha, run_id):
             cr.emit("campaignComplete", {"campaign": CAMPAIGN, "alreadyComplete": True,
                                           "steps": record.get("completed", [])})
             return
-        # The first campaign failed precisely at Partner Calls because its
-        # acceptance probe sent {} instead of the required expectedVersion.
-        # Calling was rolled back successfully. The owner has approved a
-        # ONE-TIME repair retry, only after a newer production release.
-        original = "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab"
-        is_known_failure = (
-            record.get("status") == "failed"
-            and record.get("baseSha") == original
-            and record.get("failedOperation") == "activate-partner-calls"
-            and record.get("errorClass") == "RuntimeError"
-            and int(record.get("repairAttempts", 0)) == 0
-            and sha != original
-        )
-        if not is_known_failure:
-            raise RuntimeError("Prior campaign failed or is incomplete; recovery is not authorized")
-        entry = last_entry(cr.load_journal(), "activate-partner-calls")
-        passed, absent, missing = flag_attestation("activate-partner-calls")
-        if not entry or entry.get("status") != "failed" or passed or missing or not absent:
-            raise RuntimeError("Partner Calls rollback not independently verified; refusing retry")
-        # An exact, journaled failed state and the absence of live flags are
-        # required. Do not change any prior successfully activated component.
-        recovery = "activate-partner-calls"
-        record["status"] = "running"
-        record["repairAttempts"] = 1
-        record["repairFromSha"] = original
-        record["repairSha"] = sha
-        record["runId"] = run_id
-        cr.emit("campaignRepairAuthorized", {"operation": recovery, "oldRelease": original,
-                                             "newRelease": sha, "attempts": 1})
+        recovery = authorize_repair(record, sha, run_id)
     else:
         record = {"campaign": CAMPAIGN, "status": "running", "baseSha": sha,
                   "runId": run_id, "completed": [], "repairAttempts": 0}
