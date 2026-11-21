@@ -1,0 +1,63 @@
+{
+  "description": "Accounts sharing a normalized email address or username (account ids only; never the value). One bounded answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "email_uniqueness",
+    "username_uniqueness"
+  ],
+  "properties": {
+    "email_uniqueness": {
+      "description": "Whether uniqueness is enforced, and the groups of accounts that share a value (ids only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enforced",
+        "duplicate_groups"
+      ],
+      "properties": {
+        "enforced": {
+          "type": "boolean"
+        },
+        "duplicate_groups": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      }
+    },
+    "username_uniqueness": {
+      "description": "Whether uniqueness is enforced, and the groups of accounts that share a value (ids only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enforced",
+        "duplicate_groups"
+      ],
+      "properties": {
+        "enforced": {
+          "type": "boolean"
+        },
+        "duplicate_groups": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -10,7 +10,9 @@ pub mod meetings;
 pub mod messaging;
 pub mod notifications;
 pub mod organizations;
+pub mod owner_commands;
 pub mod partners;
+pub mod pricing;
 pub mod translate;
 pub mod verification;
 
@@ -33,6 +35,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
     {
         return commands::generic(bridge, auth, *owner, path).await;
     }
+    if let Some(answer) = owner_commands::dispatch(bridge, auth).await {
+        return answer;
+    }
     if let Some(answer) = organizations::dispatch(bridge, auth).await {
         return answer;
     }
@@ -40,6 +45,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = partners::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = pricing::dispatch(bridge, auth).await {
         return answer;
     }
     if let Some(answer) = identity::dispatch(bridge, auth).await {

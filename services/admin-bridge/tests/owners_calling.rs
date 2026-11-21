@@ -85,9 +85,9 @@ impl OwnerPort for FakeCalling {
             ),
             "/limits" => json!({"tenantId": TENANT_ID, "currency": "NGN",
                 "tenant": {"requestsPerMinute": 600, "maxConcurrentCommunications": 50,
-                    "telecomSpendDailyLimitMinor": 500000, "telecomSpendMonthlyLimitMinor": null, "updatedAt": T0},
+                    "telecomSpendDailyLimitMinor": 500000, "telecomSpendMonthlyLimitMinor": null, "updatedAt": T0, "version": 4},
                 "applications": [{"applicationId": ID, "requestsPerMinute": null, "maxConcurrentCommunications": 5,
-                    "telecomSpendDailyLimitMinor": null, "telecomSpendMonthlyLimitMinor": null, "updatedAt": T0}],
+                    "telecomSpendDailyLimitMinor": null, "telecomSpendMonthlyLimitMinor": null, "updatedAt": T0, "version": 1}],
                 "truncated": false}),
             "/routing-policies" => {
                 json!({"environments": [{"environmentId": ID, "applicationId": ID, "revision": 3,
@@ -113,7 +113,7 @@ impl OwnerPort for FakeCalling {
                 vec![
                     json!({"recordingId": ID, "callId": ID, "environmentId": ID, "state": "READY",
                     "captureSource": "MEDIA_SERVER", "durationMs": 61000, "sizeBytes": 1024, "retentionUntil": T0,
-                    "createdAt": T0, "deletedAt": null, "objectKey": "recordings/secret/path.ogg"}),
+                    "createdAt": T0, "deletedAt": null, "objectKey": "recordings/secret/path.ogg", "version": 2}),
                 ],
                 Value::Null,
             ),
@@ -378,6 +378,9 @@ async fn calling_configuration_reads_are_bounded() {
         v["result"]["tenant"]["telecom_spend_daily_limit_minor"],
         500000
     );
+    // The limits version calling.limits.change acts on, per level.
+    assert_eq!(v["result"]["tenant"]["version"], 4);
+    assert_eq!(v["result"]["applications"][0]["version"], 1);
     let (_, v) = send(&h, &calling("/calling/routing", "", "calling.routing.read")).await;
     assert_eq!(
         v["result"]["environments"][0]["allowed_route_classes"],
@@ -428,6 +431,10 @@ async fn calling_media_reads_are_metadata_only() {
             !v.to_string().contains("secret"),
             "{path}: no object key or media URL"
         );
+        if path == "/calling/recordings" {
+            // The recording version calling.recording.delete acts on.
+            assert_eq!(v["result"]["items"][0]["version"], 2);
+        }
     }
 }
 

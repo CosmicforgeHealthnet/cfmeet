@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recording_id",
+        "call_id",
+        "environment_id",
+        "recording_state",
+        "deleted_at",
+        "version"
+      ],
+      "properties": {
+        "recording_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "recording_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "description": "The resource after calling.recording.delete; status: DELETING."
+    }
+  }
+}

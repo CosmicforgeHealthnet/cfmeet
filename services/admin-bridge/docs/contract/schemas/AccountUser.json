@@ -9,7 +9,8 @@
     "role",
     "status",
     "created_at",
-    "last_login_at"
+    "last_login_at",
+    "version"
   ],
   "properties": {
     "user_id": {
@@ -46,6 +47,11 @@
         "null"
       ],
       "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The account's version (expected_version of the account commands)."
     }
   }
 }

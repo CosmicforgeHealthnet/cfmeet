@@ -113,6 +113,8 @@ pub fn user(u: &Value) -> T<Value> {
         ("status", code(u, "status")?),
         ("created_at", t::time(u, "createdAt")?),
         ("last_login_at", t::opt_time(u, "lastLoginAt")?),
+        // The account's version (expected_version of the account commands).
+        ("version", t::int(u, "version")?),
     ]))
 }
 
@@ -250,6 +252,170 @@ pub fn audit_event(r: &Value) -> T<Value> {
     ]))
 }
 
+fn uniqueness(v: &Value, k: &str) -> T<Value> {
+    let u = v.get(k).ok_or(OwnerError::Contract)?;
+    let groups = u
+        .get("duplicateGroups")
+        .and_then(Value::as_array)
+        .filter(|g| g.len() <= 100)
+        .ok_or(OwnerError::Contract)?
+        .iter()
+        .map(|g| {
+            let ids = g
+                .as_array()
+                .filter(|ids| ids.len() <= 100)
+                .ok_or(OwnerError::Contract)?;
+            ids.iter()
+                .map(|i| t::uuid(&json!({"id": i}), "id"))
+                .collect::<T<Vec<_>>>()
+                .map(Value::Array)
+        })
+        .collect::<T<Vec<_>>>()?;
+    Ok(obj(vec![
+        ("enforced", t::boolean(u, "enforced")?),
+        ("duplicate_groups", Value::Array(groups)),
+    ]))
+}
+
+/// Accounts sharing a normalized email address or username: account ids only.
+pub fn duplicates(v: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("email_uniqueness", uniqueness(v, "email")?),
+        ("username_uniqueness", uniqueness(v, "username")?),
+    ]))
+}
+
+pub fn test_account(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("email_masked", masked(r)?),
+        ("registered", t::boolean(r, "registered")?),
+        ("user_id", t::opt_uuid(r, "userId")?),
+        ("account_status", opt_code(r, "accountStatus")?),
+        ("role", opt_code(r, "role")?),
+    ]))
+}
+
+pub fn live_health(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("meeting_id", t::uuid(r, "conferenceId")?),
+        ("space_id", t::uuid(r, "meetingSpaceId")?),
+        ("lifecycle_state", code(r, "lifecycleState")?),
+        ("health_state", code(r, "healthState")?),
+        ("evaluated_at", t::time(r, "evaluatedAt")?),
+    ]))
+}
+
+pub fn webinar(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("space_id", t::uuid(r, "spaceId")?),
+        ("meeting_code", t::string(r, "meetingCode")?),
+        ("meeting_type", code(r, "meetingType")?),
+        ("status", code(r, "status")?),
+        ("owner_user_id", t::opt_uuid(r, "ownerUserId")?),
+        ("organization_id", t::opt_uuid(r, "organizationId")?),
+        ("registrations_active", t::int(r, "registrationsActive")?),
+        (
+            "registrations_cancelled",
+            t::int(r, "registrationsCancelled")?,
+        ),
+        ("created_at", t::time(r, "createdAt")?),
+        ("version", t::int(r, "version")?),
+    ]))
+}
+
+pub fn registration(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("registration_id", t::uuid(r, "registrationId")?),
+        ("space_id", t::uuid(r, "spaceId")?),
+        ("meeting_id", t::opt_uuid(r, "conferenceId")?),
+        ("status", code(r, "status")?),
+        ("user_id", t::opt_uuid(r, "userId")?),
+        ("created_at", t::time(r, "createdAt")?),
+        ("cancelled_at", t::opt_time(r, "cancelledAt")?),
+    ]))
+}
+
+pub fn chat_migration(r: &Value) -> T<Value> {
+    let parity = match r.get("latestParityRun") {
+        None | Some(Value::Null) => Value::Null,
+        Some(p) => obj(vec![
+            ("parity_run_id", t::uuid(p, "parityRunId")?),
+            ("status", code(p, "status")?),
+            ("started_at", t::time(p, "startedAt")?),
+            ("finished_at", t::opt_time(p, "finishedAt")?),
+            ("meetings_checked", t::int(p, "conferencesChecked")?),
+            ("messages_checked", t::int(p, "messagesChecked")?),
+            ("mismatches", t::int(p, "mismatches")?),
+        ]),
+    };
+    Ok(obj(vec![
+        ("migration_state", code(r, "state")?),
+        ("version", t::int(r, "version")?),
+        ("changed_at", t::time(r, "changedAt")?),
+        ("pending_mirror", t::int(r, "pendingMirror")?),
+        (
+            "pending_rollback_copies",
+            t::int(r, "pendingRollbackCopies")?,
+        ),
+        (
+            "pending_session_revocations",
+            t::int(r, "pendingSessionRevocations")?,
+        ),
+        ("linked_meetings", t::int(r, "linkedConferences")?),
+        ("latest_parity_run", parity),
+    ]))
+}
+
+pub fn artifact(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("artifact_id", t::uuid(r, "artifactId")?),
+        ("meeting_id", t::uuid(r, "conferenceId")?),
+        ("space_id", t::uuid(r, "spaceId")?),
+        ("artifact_state", code(r, "artifactStatus")?),
+        ("size_bytes", t::opt_int(r, "sizeBytes")?),
+        ("created_at", t::time(r, "createdAt")?),
+        ("available_at", t::opt_time(r, "availableAt")?),
+        ("retention_at", t::opt_time(r, "retentionAt")?),
+        ("delete_requested_at", t::opt_time(r, "deleteRequestedAt")?),
+        ("deleted_at", t::opt_time(r, "deletedAt")?),
+        // The artifact's version (expected_version of its delete command).
+        ("version", t::int(r, "version")?),
+    ]))
+}
+
+/// One email delivery's status: category, state, provider, attempts, error class, times.
+pub fn email_delivery(r: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("delivery_id", t::uuid(r, "id")?),
+        ("category", code(r, "category")?),
+        ("status", code(r, "status")?),
+        ("provider", t::opt_string(r, "provider")?),
+        ("attempts", t::int(r, "attempts")?),
+        ("last_error_class", opt_code(r, "lastErrorClass")?),
+        ("last_error_status", t::opt_int(r, "lastErrorStatus")?),
+        ("created_at", t::time(r, "createdAt")?),
+        ("accepted_at", t::opt_time(r, "acceptedAt")?),
+        ("delivered_at", t::opt_time(r, "deliveredAt")?),
+    ]))
+}
+
+pub fn critical_lane(r: &Value) -> T<Value> {
+    let leased = r
+        .get("leasedUncompletedDecisions")
+        .and_then(Value::as_array)
+        .filter(|a| a.len() <= 500)
+        .ok_or(OwnerError::Contract)?
+        .iter()
+        .map(|i| t::uuid(&json!({"id": i}), "id"))
+        .collect::<T<Vec<_>>>()?;
+    Ok(obj(vec![
+        ("fallback_key", t::boolean(r, "fallbackKey")?),
+        ("pending", t::int(r, "pending")?),
+        ("dead", t::int(r, "dead")?),
+        ("leased_uncompleted_decisions", Value::Array(leased)),
+    ]))
+}
+
 fn uuid_param(auth: &Authorized, name: &str) -> Result<String, ErrorCode> {
     let raw = auth.params.get(name).ok_or(ErrorCode::Internal)?;
     uuid::Uuid::parse_str(raw)
@@ -269,6 +435,8 @@ enum Cursor {
     Sequence,
     /// `<micros>.<uuid>` (conference audit).
     TimeId,
+    /// The position of the next entry (test accounts).
+    Offset,
 }
 
 fn cursor_ok(form: Cursor, c: &str) -> bool {
@@ -276,6 +444,7 @@ fn cursor_ok(form: Cursor, c: &str) -> bool {
         Cursor::None => false,
         Cursor::Uuid => uuid::Uuid::parse_str(c).is_ok(),
         Cursor::Sequence => c.parse::<i64>().is_ok_and(|n| n > 0),
+        Cursor::Offset => c.parse::<u32>().is_ok_and(|n| n <= 100_000),
         Cursor::TimeId => c.split_once('.').is_some_and(|(m, id)| {
             !m.is_empty()
                 && m.len() <= 20
@@ -375,6 +544,68 @@ fn plan(auth: &Authorized) -> Option<Result<Plan, ErrorCode>> {
             Cursor::Uuid,
             Shape::Page(participant),
         ),
+        "accounts.duplicates.list" => p(
+            Ok(format!("{BASE}/accounts/duplicates")),
+            vec![],
+            Cursor::None,
+            Shape::One(duplicates),
+        ),
+        "accounts.test-accounts.list" => p(
+            Ok(format!("{BASE}/accounts/test-accounts")),
+            vec![],
+            Cursor::Offset,
+            Shape::Page(test_account),
+        ),
+        "meetings.live-health.read" => p(
+            conf_path("/health"),
+            vec![],
+            Cursor::None,
+            Shape::One(live_health),
+        ),
+        "meetings.meeting-recordings.list" => p(
+            conf_path("/recordings"),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(artifact),
+        ),
+        "meetings.meeting-transcripts.list" => p(
+            conf_path("/transcripts"),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(artifact),
+        ),
+        "meetings.email-deliveries.read" => p(
+            uuid_param(auth, "delivery_id")
+                .map(|id| format!("{BASE}/meetings/email-deliveries/{id}")),
+            vec![],
+            Cursor::None,
+            Shape::One(email_delivery),
+        ),
+        "meetings.webinars.list" => p(
+            Ok(format!("{BASE}/meetings/webinars")),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(webinar),
+        ),
+        "meetings.webinar-registrations.list" => p(
+            uuid_param(auth, "webinar_id")
+                .map(|id| format!("{BASE}/meetings/webinars/{id}/registrations")),
+            vec![],
+            Cursor::Uuid,
+            Shape::Page(registration),
+        ),
+        "meetings.chat-migration.read" => p(
+            Ok(format!("{BASE}/meetings/chat-migration")),
+            vec![],
+            Cursor::None,
+            Shape::One(chat_migration),
+        ),
+        "meetings.critical-lane.read" => p(
+            Ok(format!("{BASE}/meetings/critical-lane")),
+            vec![],
+            Cursor::None,
+            Shape::One(critical_lane),
+        ),
         "meetings.audit.list" => p(
             Ok(format!("{BASE}/meetings/audit-events")),
             window(),
@@ -385,6 +616,26 @@ fn plan(auth: &Authorized) -> Option<Result<Plan, ErrorCode>> {
     })
 }
 
+/// The owner lists webinars without a window: the bridge keeps the page's webinars
+/// created in `[start, end)` (a page may then hold fewer than `limit`; follow
+/// `next_cursor`). Other lists pass through.
+fn in_window(auth: &Authorized, items: Vec<Value>) -> Vec<Value> {
+    if auth.capability.id != "meetings.webinars.list" {
+        return items;
+    }
+    let (start, end) = (auth.query.start, auth.query.end);
+    items
+        .into_iter()
+        .filter(|w| {
+            let at = w["created_at"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.with_timezone(&chrono::Utc));
+            at.is_some_and(|at| start.is_none_or(|s| at >= s) && end.is_none_or(|e| at < e))
+        })
+        .collect()
+}
+
 pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answer, ErrorCode>> {
     let plan = match plan(auth)? {
         Ok(p) => p,
@@ -392,6 +643,10 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
     };
     let q = &auth.query;
     let mut query = plan.query;
+    // A single answer takes no cursor (the duplicates list is one bounded answer).
+    if plan.cursor == Cursor::None && q.cursor.is_some() {
+        return Some(Err(ErrorCode::QueryInvalid));
+    }
     if plan.cursor != Cursor::None {
         if q.cursor
             .as_deref()
@@ -407,7 +662,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
         match bridge.owners.read(O, &plan.path, &query, &operator).await {
             Ok(v) => match plan.shape {
                 Shape::Page(item) => t::page(&v, item)
-                    .map(|(items, next)| json!({"items": items, "next_cursor": next}))
+                    .map(|(items, next)| {
+                        json!({"items": in_window(auth, items), "next_cursor": next})
+                    })
                     .map(|result| Answer {
                         result,
                         freshness: "LIVE",

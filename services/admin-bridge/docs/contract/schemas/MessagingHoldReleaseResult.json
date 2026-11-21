@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hold_id",
+        "hold_status",
+        "release_reason",
+        "released_at"
+      ],
+      "properties": {
+        "hold_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hold_status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "release_reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "released_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after messaging.hold.release; status: RELEASED."
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "description": "One CF Meet user plan of a CONSUMER lineage's effective version (FREE always).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "price_book_id",
+    "currency",
+    "market_code",
+    "version_id",
+    "plan_code",
+    "label",
+    "monthly_minor",
+    "yearly_minor",
+    "limits"
+  ],
+  "properties": {
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "market_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "version_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "plan_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "monthly_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "yearly_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "limits": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Plan limits (an override sets a subset; an absent limit is null).",
+      "additionalProperties": false,
+      "required": [
+        "meeting_minutes",
+        "participants",
+        "recording",
+        "storage_bytes",
+        "attachment_bytes",
+        "webinars"
+      ],
+      "properties": {
+        "meeting_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "participants": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recording": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "storage_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "attachment_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "webinars": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

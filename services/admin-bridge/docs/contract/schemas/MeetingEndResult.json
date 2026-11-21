@@ -1,0 +1,61 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meeting_id",
+        "space_id",
+        "meeting_state",
+        "termination_reason",
+        "ending_requested_at",
+        "ended_at"
+      ],
+      "properties": {
+        "meeting_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "space_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "meeting_state": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "termination_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "ending_requested_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after meetings.meeting.end; status: ENDING."
+    }
+  }
+}

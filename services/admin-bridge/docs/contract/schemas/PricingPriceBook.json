@@ -1,0 +1,52 @@
+{
+  "description": "One price book (a lineage of versions for a product line and market).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "price_book_id",
+    "product_line",
+    "currency",
+    "market_code",
+    "effective_version_id",
+    "frozen",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "product_line": {
+      "enum": [
+        "PARTNER_PLATFORM",
+        "CONSUMER"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "market_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "effective_version_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "frozen": {
+      "type": "boolean"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    }
+  }
+}

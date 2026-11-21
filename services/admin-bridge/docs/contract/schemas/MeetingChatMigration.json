@@ -1,0 +1,94 @@
+{
+  "description": "The meeting-chat migration state, version and gates (counts and the latest parity run).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "migration_state",
+    "version",
+    "changed_at",
+    "pending_mirror",
+    "pending_rollback_copies",
+    "pending_session_revocations",
+    "linked_meetings",
+    "latest_parity_run"
+  ],
+  "properties": {
+    "migration_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pending_mirror": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pending_rollback_copies": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pending_session_revocations": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "linked_meetings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "latest_parity_run": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "parity_run_id",
+        "status",
+        "started_at",
+        "finished_at",
+        "meetings_checked",
+        "messages_checked",
+        "mismatches"
+      ],
+      "properties": {
+        "parity_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "meetings_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mismatches": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

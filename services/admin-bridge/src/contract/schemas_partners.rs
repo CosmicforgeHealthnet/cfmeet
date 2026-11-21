@@ -127,11 +127,45 @@ pub fn insert(m: &mut Map<String, Value>) {
                 "bundle_id": nullable_name(155), "apns_host": {"enum": ["SANDBOX", "PRODUCTION", null]},
                 "fcm_project": nullable_name(30), "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "verification": code, "last_verified_at": nullable_ts, "last_error_code": nullable_code,
-                "created_at": ts, "updated_at": ts
+                "created_at": ts, "updated_at": ts, "state": {"enum": ["ACTIVE", "DISABLED"]},
+                "disabled_at": nullable_ts, "version": {"type": "integer", "minimum": 1}
             }),
         ),
     );
     m.insert("PartnerPushKeyPage".into(), page("PartnerPushKey"));
+
+    m.insert(
+        "PartnerUsage".into(),
+        object(
+            "Metered usage of one environment and usage type over the window (quantities only).",
+            json!({
+                "project_id": uuid, "environment_id": uuid, "environment_kind": name(16),
+                "usage_type": name(64), "unit": name(32), "quantity": count, "fact_count": count
+            }),
+        ),
+    );
+    let mut usage_page = page("PartnerUsage");
+    let day =
+        json!({"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"});
+    usage_page["required"] = json!(["items", "next_cursor", "from", "to"]);
+    usage_page["properties"]["from"] = day.clone();
+    usage_page["properties"]["to"] = day;
+    usage_page["description"] =
+        json!("The workspace's usage over the window's UTC days [from, to].");
+    m.insert("PartnerUsagePage".into(), usage_page);
+
+    m.insert(
+        "PartnerIncident".into(),
+        object(
+            "One incident recorded against a workspace's support profile (the reference and time the operator gave).",
+            json!({
+                "incident_record_id": uuid, "workspace_id": uuid,
+                "incident_ref": {"type": ["string", "null"], "maxLength": 160},
+                "occurred_at": nullable_ts, "recorded_at": ts
+            }),
+        ),
+    );
+    m.insert("PartnerIncidentPage".into(), page("PartnerIncident"));
 
     m.insert(
         "PartnerWebhook".into(),

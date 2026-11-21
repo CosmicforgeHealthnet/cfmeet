@@ -1,0 +1,80 @@
+{
+  "description": "One recording or transcript of a meeting: state, size, times and version. Never an object key or media URL.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "meeting_id",
+    "space_id",
+    "artifact_state",
+    "size_bytes",
+    "created_at",
+    "available_at",
+    "retention_at",
+    "delete_requested_at",
+    "deleted_at",
+    "version"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "space_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "artifact_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "size_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "available_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "retention_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "delete_requested_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "deleted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The artifact's version (expected_version of its delete command)."
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "description": "The plan spread as of the window's end (one bounded list).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "as_of"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/components/schemas/FinancePlanSpread"
+      }
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

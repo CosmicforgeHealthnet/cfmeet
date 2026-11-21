@@ -1,0 +1,31 @@
+{
+  "description": "Holders on one plan, and those assigned to it in the window.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_code",
+    "holder_kind",
+    "holders",
+    "assigned_in_window"
+  ],
+  "properties": {
+    "plan_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "holder_kind": {
+      "enum": [
+        "USER",
+        "ORGANIZATION"
+      ]
+    },
+    "holders": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "assigned_in_window": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

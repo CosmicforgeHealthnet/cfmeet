@@ -1,0 +1,47 @@
+{
+  "description": "Metered usage of one environment and usage type over the window (quantities only).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project_id",
+    "environment_id",
+    "environment_kind",
+    "usage_type",
+    "unit",
+    "quantity",
+    "fact_count"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_kind": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16
+    },
+    "usage_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "quantity": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fact_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

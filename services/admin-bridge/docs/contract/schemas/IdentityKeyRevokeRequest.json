@@ -1,0 +1,30 @@
+{
+  "description": "Request of identity.key.revoke (POST /internal/v1/operator/credentials/{key_id}/revoke).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_version"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "expected_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+    }
+  }
+}
