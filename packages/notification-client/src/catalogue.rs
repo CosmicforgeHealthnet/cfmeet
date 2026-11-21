@@ -1,9 +1,10 @@
-//! The closed event catalogue (Document 4 §5.2): 41 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 42 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
 //! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
 //! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
 //! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
-//! Developer Platform's first-party workspace owner invitation #41) and the control event
+//! Developer Platform's first-party workspace owner invitation #41, and since 1.7.0 the
+//! organization export notice #42) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -429,7 +430,7 @@ const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 
-/// The catalogue, in contract order (#1–#41, then the control event).
+/// The catalogue, in contract order (#1–#42, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -928,6 +929,23 @@ pub const CATALOGUE: &[EventSpec] = &[
             "DEVELOPER_UPDATES",
             "ORGANIZATION_INVITATION",
             &["invitationId", "organizationId"],
+        )
+    },
+    // ADR 0068 A4 (contract 1.7.0): an organization export HQ requested through the admin
+    // bridge is ready; its single-use download link goes ONLY to the organization owner's
+    // account (the service resolves the verified address). The link token is sealed; the
+    // ORGANIZATION_EXPORT subject is the export.
+    EventSpec {
+        sealed: &[Token],
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            42,
+            "organizations.organization.export_ready",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_EXPORT",
+            &["deliveryId", "expiresAt", "exportId", "organizationId"],
         )
     },
     EventSpec {
