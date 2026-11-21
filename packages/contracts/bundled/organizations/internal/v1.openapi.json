@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.10.0",
-    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer). 1.8.0 (ADR 0064, CF Meet Apps; ORGANIZATIONS_APP_INSTALLS_ENABLED, default off): the policy section apps {installTier ADMINS | MEMBERS (default ADMINS), allowList [appId] | null (default null), userInstallsAllowed (default true)} (refused while the flag is off) and POST /internal/v1/organizations/{id}/app-install-check (organization-apps.evaluate, Meeting Service only): may this account install this app for the whole organization; off: 404 like any unknown route. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller (403 ACTOR_NOT_ALLOWED); the admin bridge's operator reads GET /internal/v1/operator/organizations/{id} and its /members, /teams and /policies and GET /internal/v1/operator/audit-events (cross-organization, newest first, window at most 31 days), each requiring organization.operator-read and X-CF-Operator. 1.10.0 (ADR 0068 phase A4, admin bridge commands): with organization.administer and verified X-CF-Operator attribution (cfmeet.admin-bridge only), the bridge runs operator commands under its own contract: Idempotency-Key (a UUID) required; expectedVersion where the subject is versioned (the change happens only at that version, else 409 VERSION_CONFLICT); R3 commands require X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest (403 APPROVAL_REQUIRED); the applied command is recorded in organization_admin_operations in the same transaction and read back with GET /internal/v1/operator/operations/{idempotencyKey}; a repeated key answers the current state without applying again (another command or subject: 409 IDEMPOTENCY_CONFLICT); the answer is BridgeCommandResult {status, version (string or null), resource}. Shared routes (organization create, suspend / reactivate / archive, owner recovery, provisioning retry, event replay) keep their answers for every other caller; the staff changes POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change, .../teams/{teamId}/change, .../policies/change and .../scopes/primary/service-bindings/{service}/change are the bridge's alone. New error code APPROVAL_REQUIRED."
+    "version": "1.11.0",
+    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer). 1.8.0 (ADR 0064, CF Meet Apps; ORGANIZATIONS_APP_INSTALLS_ENABLED, default off): the policy section apps {installTier ADMINS | MEMBERS (default ADMINS), allowList [appId] | null (default null), userInstallsAllowed (default true)} (refused while the flag is off) and POST /internal/v1/organizations/{id}/app-install-check (organization-apps.evaluate, Meeting Service only): may this account install this app for the whole organization; off: 404 like any unknown route. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller (403 ACTOR_NOT_ALLOWED); the admin bridge's operator reads GET /internal/v1/operator/organizations/{id} and its /members, /teams and /policies and GET /internal/v1/operator/audit-events (cross-organization, newest first, window at most 31 days), each requiring organization.operator-read and X-CF-Operator. 1.10.0 (ADR 0068 phase A4, admin bridge commands): with organization.administer and verified X-CF-Operator attribution (cfmeet.admin-bridge only), the bridge runs operator commands under its own contract: Idempotency-Key (a UUID) required; expectedVersion where the subject is versioned (the change happens only at that version, else 409 VERSION_CONFLICT); R3 commands require X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest (403 APPROVAL_REQUIRED); the applied command is recorded in organization_admin_operations in the same transaction and read back with GET /internal/v1/operator/operations/{idempotencyKey}; a repeated key answers the current state without applying again (another command or subject: 409 IDEMPOTENCY_CONFLICT); the answer is BridgeCommandResult {status, version (string or null), resource}. Shared routes (organization create, suspend / reactivate / archive, owner recovery, provisioning retry, event replay) keep their answers for every other caller; the staff changes POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change, .../teams/{teamId}/change, .../policies/change and .../scopes/primary/service-bindings/{service}/change are the bridge's alone. New error code APPROVAL_REQUIRED. 1.11.0 (ADR 0068 phase A4, owner-delivered exports): the admin bridge's R4 POST /internal/v1/admin/organizations/{id}/exports (adminRequestOrganizationExport: Idempotency-Key, two-person approval, recorded; HQ gets a reference only — exportId, state, delivery OWNER_DELIVERED, deliveryChannel DOWNLOAD_LINK_EMAIL, deliveryRef, recipientMasked null, expiresAt, sizeBytes, sha256); the export is kept encrypted for 7 days and delivered to the organization's ACTIVE OWNERs as single-use links by email through the Notification Service; the owner's POST /internal/v1/organizations/{id}/exports/{exportId}/download; the bridge's reads GET /internal/v1/operator/organizations/{id}/exports and .../exports/{exportId}; the operator export GET /internal/v1/admin/organizations/{id}/export refused to the admin bridge. New error codes EXPORT_DELIVERY_UNAVAILABLE, EXPORT_NO_RECIPIENT, EXPORT_LINK_INVALID, EXPORT_LINK_EXPIRED."
   },
   "tags": [
     {
@@ -5889,7 +5889,7 @@
       "get": {
         "operationId": "adminExportOrganization",
         "summary": "Export an organization (operator)",
-        "description": "Gap audit G11: the operator's export of an organization in any lifecycle state, archived included (organization.administer). Same document as exportOrganization; recorded as organization.exported.",
+        "description": "Gap audit G11: the operator's export of an organization in any lifecycle state, archived included (organization.administer). Same document as exportOrganization; recorded as organization.exported. Never for the admin bridge (403 ACTOR_NOT_ALLOWED): HQ never receives exported personal data; the bridge uses adminRequestOrganizationExport (owner-delivered).",
         "tags": [
           "Organizations"
         ],
@@ -5926,7 +5926,7 @@
             }
           },
           "403": {
-            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "description": "INTERNAL_PERMISSION_DENIED, or ACTOR_NOT_ALLOWED (the admin bridge, or attribution malformed).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7109,6 +7109,423 @@
           }
         }
       }
+    },
+    "/internal/v1/admin/organizations/{id}/exports": {
+      "post": {
+        "operationId": "adminRequestOrganizationExport",
+        "summary": "Request an owner-delivered export (admin bridge)",
+        "description": "The admin bridge's organizations.organization.export (R4, two people; cfmeet.admin-bridge only). HQ never receives the export: Organizations builds the same document as exportOrganization (it carries invitation addresses), keeps only an XChaCha20-Poly1305 encrypted copy for 7 days, and queues one single-use download link per ACTIVE OWNER (at most 20), sent by email through the Notification Service (organizations.organization.export_ready, the link's token HPKE-sealed to the service; Organizations stores only its SHA-256). The link works once, until expiry, and only for its owner after sign-in (downloadOrganizationExport). Expiry means the command is issued again; nothing is resent. Recorded in organization_admin_operations (subject ORGANIZATION_EXPORT) in the same transaction and audited as organization.export.requested. Answers status READY, version \"1\" and an OrganizationExportReference. No expectedVersion: the export is a new resource. Off by default (ORGANIZATIONS_EXPORT_DELIVERY_ENABLED; it needs the Notification Service catalogue type): 409 EXPORT_DELIVERY_UNAVAILABLE, nothing built or stored.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer (resource: OrganizationExportReference).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a body field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXPORT_DELIVERY_UNAVAILABLE (exports not configured, or the notice cannot be built), EXPORT_NO_RECIPIENT (no ACTIVE OWNER) or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/exports": {
+      "get": {
+        "operationId": "operatorListOrganizationExports",
+        "summary": "List an organization's exports (admin bridge)",
+        "description": "The admin bridge's read of an organization's owner-delivered exports, newest first: the reference each command answered, with the current state and row version (never the document, a token, a URL or an address). Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ExportCursor"
+          },
+          {
+            "$ref": "#/components/parameters/ExportLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of export references.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExportReferenceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): limit outside 1-100, a malformed cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetOrganizationExport",
+        "summary": "Read an export's state (admin bridge)",
+        "description": "The admin bridge's read of one owner-delivered export: the reference the command answered, with the current state (READY, DELIVERED, EXPIRED, FAILED), each link's state and the row version. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export reference.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExportReference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND or NOT_FOUND (no such export of this organization, or deleted after 90 days).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/exports/{exportId}/download": {
+      "post": {
+        "operationId": "downloadOrganizationExport",
+        "summary": "Download an owner-delivered export",
+        "description": "The OWNER behind an emailed export link (ADR 0068 A4), relayed with the verified acting user: the acting user must be the link's recipient and still an ACTIVE OWNER (in any lifecycle state of the organization), and the link unused and unexpired. Answers the export document exactly as stored (the same document as exportOrganization; its SHA-256 in X-CF-Export-Sha256) and uses the link up; the export becomes DELIVERED. Recorded as organization.export.downloaded.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationExportDownloadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The organization's data (Cache-Control: no-store).",
+            "headers": {
+              "X-CF-Export-Sha256": {
+                "description": "SHA-256 (hex) of the body.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no acting user, a missing or unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED or ACTOR_NOT_ALLOWED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "EXPORT_LINK_INVALID: unknown token, someone else's link, no longer an ACTIVE OWNER, already used or undeliverable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXPORT_DELIVERY_UNAVAILABLE (exports not configured).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "EXPORT_LINK_EXPIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7304,7 +7721,7 @@
           "type": "string",
           "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
         },
-        "description": "The second person of HQ's two-person approval (a different staff member than X-CF-Operator); with X-CF-Approval-Ref and X-CF-Intent-Digest, all three or none. Required by the admin bridge's R3 commands (403 APPROVAL_REQUIRED). Accepted only from cfmeet.admin-bridge."
+        "description": "The second person of HQ's two-person approval (a different staff member than X-CF-Operator); with X-CF-Approval-Ref and X-CF-Intent-Digest, all three or none. Required by the admin bridge's R3 and R4 commands (403 APPROVAL_REQUIRED). Accepted only from cfmeet.admin-bridge."
       },
       "ApprovalRef": {
         "name": "X-CF-Approval-Ref",
@@ -7325,6 +7742,38 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "description": "Hex SHA-256 of the approved intent. See X-CF-Approver."
+      },
+      "ExportId": {
+        "name": "exportId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Export id (exportId of OrganizationExportReference)."
+      },
+      "ExportCursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+        },
+        "description": "Keyset cursor (opaque nextCursor of the previous page)."
+      },
+      "ExportLimit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        },
+        "description": "Page size."
       }
     },
     "schemas": {
@@ -7714,7 +8163,7 @@
           "version",
           "resource"
         ],
-        "description": "The admin bridge's answer to a command: the resulting state (UPPER_SNAKE), the resulting row version as a string of the integer (null when the subject is unversioned) and a small closed object of ids, states and timestamps (never a name, email or credential value). Organization: lifecycleStatus (ACTIVE, SUSPENDED, ARCHIVED). Membership: status (ACTIVE, SUSPENDED, REMOVED). Team: status (ACTIVE, ARCHIVED). Policy: UPDATED or UNCHANGED with the revision. Binding: BOUND with its version, REMOVED or REVOKED (version null). Provisioning retry: the provisioningState (version null). Event replay: REPLAYED (version null).",
+        "description": "The admin bridge's answer to a command: the resulting state (UPPER_SNAKE), the resulting row version as a string of the integer (null when the subject is unversioned) and a small closed object of ids, states and timestamps (never a name, email or credential value). Organization: lifecycleStatus (ACTIVE, SUSPENDED, ARCHIVED). Membership: status (ACTIVE, SUSPENDED, REMOVED). Team: status (ACTIVE, ARCHIVED). Policy: UPDATED or UNCHANGED with the revision. Binding: BOUND with its version, REMOVED or REVOKED (version null). Provisioning retry: the provisioningState (version null). Event replay: REPLAYED (version null). Organization export (owner-delivered): READY with version \"1\" and an OrganizationExportReference as resource.",
         "properties": {
           "status": {
             "type": "string",
@@ -7996,6 +8445,10 @@
                   "TEAM_ARCHIVED",
                   "TEAM_NAME_TAKEN",
                   "APPROVAL_REQUIRED",
+                  "EXPORT_DELIVERY_UNAVAILABLE",
+                  "EXPORT_NO_RECIPIENT",
+                  "EXPORT_LINK_INVALID",
+                  "EXPORT_LINK_EXPIRED",
                   "NOT_FOUND",
                   "METHOD_NOT_ALLOWED",
                   "PAYLOAD_TOO_LARGE",
@@ -9062,6 +9515,189 @@
               "type": "object"
             },
             "maxItems": 10000
+          }
+        }
+      },
+      "OrganizationExportDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryRef",
+          "state",
+          "sentAt",
+          "claimedAt"
+        ],
+        "description": "One OWNER's single-use download link, by reference only (never the recipient, the address, the token or the link). PENDING: the notice is being relayed to the Notification Service; SENT: acknowledged; CLAIMED: the owner downloaded the export; FAILED: the notice could not be delivered; EXPIRED: unused at expiry.",
+        "properties": {
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "SENT",
+              "CLAIMED",
+              "FAILED",
+              "EXPIRED"
+            ]
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "claimedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationExportDownloadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "description": "The token of the owner's emailed link (never logged, stored only as its SHA-256).",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 512
+          }
+        }
+      },
+      "OrganizationExportReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "exportId",
+          "state",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientMasked",
+          "recipientCount",
+          "deliveries",
+          "sizeBytes",
+          "sha256",
+          "createdAt",
+          "expiresAt",
+          "deliveredAt",
+          "purgedAt"
+        ],
+        "description": "An owner-delivered export as HQ sees it (ADR 0068 A4): ids, states, size, digest and times only. Never the document, a token, a sealed part, a URL or an address. state: READY (stored encrypted, links queued or sent), DELIVERED (an owner downloaded it), EXPIRED (unused at expiresAt, 7 days after createdAt), FAILED (no owner could be notified); REQUESTED is reserved (the document is built in the command's transaction). deliveryRef is the first entry of deliveries (one per ACTIVE OWNER, at most 20). recipientMasked is always null: Organizations holds no address (the Notification Service resolves each owner's verified address). sizeBytes and sha256 describe the clear document the owner downloads. purgedAt: when the encrypted copy was removed (at expiry, on FAILED, or once every link is settled). version (reads only): the export row version.",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "delivery": {
+            "const": "OWNER_DELIVERED"
+          },
+          "deliveryChannel": {
+            "const": "DOWNLOAD_LINK_EMAIL"
+          },
+          "deliveryRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null"
+          },
+          "recipientCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "deliveries": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationExportDelivery"
+            }
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationExportReferenceList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "description": "A page of export references, newest first.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationExportReference"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
