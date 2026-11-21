@@ -115,8 +115,9 @@ pub struct ReportsQuery {
 }
 
 /// `GET /internal/v1/communications/operator/reports?status&limit&cursor`: profile reports,
-/// oldest first: reason, both parties' current CF Meet IDs, the target's report count and
-/// the review, if any. Reports carry no free text.
+/// oldest first: reason, both parties' current CF Meet IDs, the target's report count, the
+/// review, if any, and the report's version (1 open, 2 reviewed: the `expectedVersion` of
+/// the review command). Reports carry no free text.
 pub async fn reports(
     HttpState(s): HttpState<State>,
     Extension(op): Extension<Operator>,
@@ -139,7 +140,8 @@ pub async fn reports(
            'reporterCfMeetId',(SELECT public_id FROM communication_public_ids WHERE profile_id=r.reporter_profile_id AND current), \
            'targetCfMeetId',(SELECT public_id FROM communication_public_ids WHERE profile_id=r.target_profile_id AND current), \
            'targetReportCount',(SELECT count(*) FROM communication_profile_reports x WHERE x.target_profile_id=r.target_profile_id), \
-           'review',CASE WHEN v.report_id IS NULL THEN NULL ELSE jsonb_build_object('decision',v.decision,'reason',v.reason,'held',v.held,'reviewedAt',v.reviewed_at) END) doc \
+           'review',CASE WHEN v.report_id IS NULL THEN NULL ELSE jsonb_build_object('decision',v.decision,'reason',v.reason,'held',v.held,'reviewedAt',v.reviewed_at) END, \
+           'version',CASE WHEN v.report_id IS NULL THEN 1 ELSE 2 END) doc \
          FROM communication_profile_reports r LEFT JOIN communication_profile_report_reviews v ON v.report_id=r.id \
          WHERE ($1='ALL' OR ($1='OPEN' AND v.report_id IS NULL) OR v.decision=$1) \
            AND ($2::bigint IS NULL OR (r.created_at, r.id) > (to_timestamp($2::bigint / 1000000.0), $3::uuid)) \

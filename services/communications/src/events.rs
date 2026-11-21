@@ -323,6 +323,48 @@ pub async fn backfill(
     }
     let scope = auth::delegated(&ctx)?;
     auth::validate_scope(&s, &scope).await?;
+    let page = backfill_page(&s, &scope, input.limit, input.cursor).await?;
+    let mut count = 0;
+    for account in &page.accounts {
+        let txn = s.store.begin().await?;
+        if backfill_account(
+            &s,
+            &txn,
+            Scope::of(&scope),
+            account,
+            json!({"source":"ACCOUNT"}),
+        )
+        .await?
+        {
+            count += 1;
+        }
+        txn.commit().await?;
+    }
+    Ok(Json(json!({"created":count,"nextCursor":page.next_cursor})))
+}
+
+/// One native account of the Account's backfill page.
+pub struct BackfillAccount {
+    reference: String,
+    principal: Uuid,
+    display_name: String,
+}
+
+/// One validated page of the Account's backfill.
+pub struct BackfillPage {
+    pub accounts: Vec<BackfillAccount>,
+    pub next_cursor: Value,
+}
+
+/// Asks the Account (Meeting Service) for one page of native accounts in `scope` and
+/// validates the WHOLE page before anything is written: at most `limit` accounts, each a
+/// `cfmeet-user:` reference with its principal id.
+pub async fn backfill_page(
+    s: &State,
+    scope: &DelegatedPlatformContext,
+    limit: u64,
+    cursor: Option<Uuid>,
+) -> Result<BackfillPage> {
     let req = OutboundServiceRequest::new_operation(ServiceId::meeting_service())
         .with_delegated_context(scope.clone());
     let r = s
@@ -331,7 +373,7 @@ pub async fn backfill(
         .post_json(
             &req,
             "/internal/v1/accounts/communications/backfill",
-            &json!({"limit":input.limit,"cursor":input.cursor}),
+            &json!({"limit":limit,"cursor":cursor}),
         )
         .await
         .map_err(|_| Error::Unavailable)?;
@@ -341,57 +383,67 @@ pub async fn backfill(
     let page: Value = r.json().map_err(|_| Error::Unavailable)?;
     let accounts = page["accounts"]
         .as_array()
-        .filter(|v| v.len() <= input.limit as usize)
-        .ok_or(Error::Unavailable)?;
-    let mut count = 0;
-    for account in accounts {
-        let reference = account["accountReference"]
-            .as_str()
-            .filter(|v| v.starts_with("cfmeet-user:"))
-            .ok_or(Error::Unavailable)?;
-        // Account owns the mapping. It reuses its existing principal link and ensures
-        // missing native mappings through Platform Access; the Hub never replaces it.
-        let principal = uuid_field(account, "principalId")?;
-        let txn = s.store.begin().await?;
-        let profile = Uuid::new_v4();
-        let mut values = vec![profile.into()];
-        values.extend(store::scoped(Scope::of(&scope)));
-        values.extend([
-            reference.into(),
-            principal.into(),
-            account["displayName"]
+        .filter(|v| v.len() <= limit as usize)
+        .ok_or(Error::Unavailable)?
+        .iter()
+        .map(|account| {
+            let reference = account["accountReference"]
                 .as_str()
-                .unwrap_or("CF Meet member")
-                .chars()
-                .take(160)
-                .collect::<String>()
-                .into(),
-        ]);
-        let created=execute(&txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",values).await?;
-        if created > 0 {
-            execute(
-                &txn,
-                "INSERT INTO communication_privacy(profile_id) VALUES($1)",
-                vec![profile.into()],
-            )
-            .await?;
-            s.new_public_id(&txn, profile).await?;
-            s.store
-                .audit_system(
-                    &txn,
-                    Scope::of(&scope),
-                    "PROFILE_BACKFILLED",
-                    Some(profile),
-                    json!({"source":"ACCOUNT"}),
-                )
-                .await?;
-            count += 1;
-        }
-        txn.commit().await?;
+                .filter(|v| v.starts_with("cfmeet-user:"))
+                .ok_or(Error::Unavailable)?;
+            // Account owns the mapping. It reuses its existing principal link and ensures
+            // missing native mappings through Platform Access; the Hub never replaces it.
+            let principal = uuid_field(account, "principalId")?;
+            Ok(BackfillAccount {
+                reference: reference.to_owned(),
+                principal,
+                display_name: account["displayName"]
+                    .as_str()
+                    .unwrap_or("CF Meet member")
+                    .chars()
+                    .take(160)
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(BackfillPage {
+        accounts,
+        next_cursor: page["nextCursor"].clone(),
+    })
+}
+
+/// Creates the profile of one backfilled account unless it already has one (`true` when
+/// created), audited `PROFILE_BACKFILLED` with `details`.
+pub async fn backfill_account<C: ConnectionTrait>(
+    s: &State,
+    txn: &C,
+    scope: Scope,
+    account: &BackfillAccount,
+    details: Value,
+) -> Result<bool> {
+    let profile = Uuid::new_v4();
+    let mut values = vec![profile.into()];
+    values.extend(store::scoped(scope));
+    values.extend([
+        account.reference.clone().into(),
+        account.principal.into(),
+        account.display_name.clone().into(),
+    ]);
+    let created=execute(txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",values).await?;
+    if created == 0 {
+        return Ok(false);
     }
-    Ok(Json(
-        json!({"created":count,"nextCursor":page["nextCursor"]}),
-    ))
+    execute(
+        txn,
+        "INSERT INTO communication_privacy(profile_id) VALUES($1)",
+        vec![profile.into()],
+    )
+    .await?;
+    s.new_public_id(txn, profile).await?;
+    s.store
+        .audit_system(txn, scope, "PROFILE_BACKFILLED", Some(profile), details)
+        .await?;
+    Ok(true)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -487,6 +539,7 @@ impl State {
         ] {execute(&self.store.db,sql,vec![]).await?;}
         // Roadmap N7: expire overdue notification publications, purge settled ones.
         crate::notification_publications::maintain(self, 1000).await?;
+        crate::admin_events::maintain(self, 1000).await?;
         let txn = self.store.begin().await?;
         let pairs:Vec<Value>=rows(&txn,"SELECT to_jsonb(c) doc FROM communication_connections c WHERE state='REQUEST_PENDING' AND EXISTS(SELECT 1 FROM communication_contact_requests r WHERE r.connection_id=c.id AND r.state='PENDING' AND r.expires_at<=now()) ORDER BY c.id LIMIT 100 FOR UPDATE OF c SKIP LOCKED",vec![]).await?;
         for pair in pairs {
