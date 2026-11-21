@@ -300,9 +300,11 @@ async fn commands_are_the_bridge_s_alone() {
     h.signed(&op, Method::GET, &operation_path(&k), None, &[])
         .await
         .expect_error(404, "NOT_FOUND");
+    // The bridge must always name its operator: without X-CF-Operator the attribution
+    // layer refuses the request (403) before any route runs, the settlement read included.
     h.signed(&bridge, Method::GET, &operation_path(&k), None, &[])
         .await
-        .expect_error(404, "NOT_FOUND");
+        .expect_error(403, "FORBIDDEN");
     h.signed(&bridge, Method::GET, &operation_path(&k), None, &[OPERATOR])
         .await
         .expect_error(404, "NOT_FOUND");
