@@ -17291,7 +17291,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingExportCreateResult"
                     },
                     "error": {
                       "type": "null"
@@ -17417,14 +17417,14 @@
         "x-cfmeet-permission": "messaging.export.request",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "messaging",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/MessagingExportCreateRequest"
               }
             }
           }
@@ -32074,7 +32074,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/OrganizationExportResult"
                     },
                     "error": {
                       "type": "null"
@@ -32200,14 +32200,14 @@
         "x-cfmeet-permission": "organizations.organization.export",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "organizations",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/OrganizationExportRequest"
               }
             }
           }
@@ -35998,7 +35998,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerFirstPartyRegisterResult"
                     },
                     "error": {
                       "type": "null"
@@ -36124,14 +36124,14 @@
         "x-cfmeet-permission": "partners.workspace.register-first-party",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerFirstPartyRegisterRequest"
               }
             }
           }
@@ -44478,7 +44478,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/IdentityDeliveredKeyResult"
                     },
                     "error": {
                       "type": "null"
@@ -44604,14 +44604,14 @@
         "x-cfmeet-permission": "identity.key.issue",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "platform-access",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/IdentityKeyIssueRequest"
               }
             }
           }
@@ -44750,7 +44750,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/IdentityDeliveredKeyResult"
                     },
                     "error": {
                       "type": "null"
@@ -44876,14 +44876,14 @@
         "x-cfmeet-permission": "identity.key.rotate",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "platform-access",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/IdentityKeyRotateRequest"
               }
             }
           }
@@ -83806,6 +83806,638 @@
               }
             },
             "description": "The resource after meetings.critical-lane.change; status: REROUTED."
+          }
+        }
+      },
+      "IdentityKeyIssueRequest": {
+        "description": "Request of identity.key.issue (POST /internal/v1/operator/service-accounts/{service_account_id}/credentials).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "service_account_id",
+          "scopes"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "service_account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scopes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40,
+            "pattern": "Z$"
+          }
+        }
+      },
+      "IdentityDeliveredKeyResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key_id",
+              "public_id",
+              "last4",
+              "tenant_id",
+              "application_id",
+              "environment_id",
+              "service_account_id",
+              "key_state",
+              "version",
+              "key_expires_at",
+              "rotated_from_key_id",
+              "delivery",
+              "delivery_channel",
+              "delivery_ref",
+              "delivery_state",
+              "expires_at",
+              "revealed_at"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "public_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "last4": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "service_account_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "key_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "key_expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "rotated_from_key_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "delivery": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_ref": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "delivery_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "revealed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after identity.key.rotate; status: ROTATED."
+          }
+        }
+      },
+      "IdentityKeyRotateRequest": {
+        "description": "Request of identity.key.rotate (POST /internal/v1/operator/credentials/{key_id}/rotate).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "overlap_minutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 525600
+          },
+          "scopes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40,
+            "pattern": "Z$"
+          }
+        }
+      },
+      "PartnerFirstPartyRegisterRequest": {
+        "description": "Request of partners.workspace.register-first-party (POST /internal/v1/operator/organizations). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "display_name",
+          "owner_email"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "owner_email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254
+          }
+        }
+      },
+      "PartnerFirstPartyRegisterResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workspace_id",
+              "workspace_state",
+              "version",
+              "created_at",
+              "delivery",
+              "delivery_channel",
+              "delivery_ref",
+              "recipient_masked",
+              "delivery_state",
+              "claim_state",
+              "expires_at",
+              "owner_invitation_id"
+            ],
+            "properties": {
+              "workspace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "workspace_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "delivery": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_ref": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "recipient_masked": {
+                "type": "string",
+                "maxLength": 120,
+                "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+                "description": "A masked address (first character of the local part and of the domain label), never the address."
+              },
+              "delivery_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "claim_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "owner_invitation_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "description": "The resource after partners.workspace.register-first-party; status: INVITED."
+          }
+        }
+      },
+      "OrganizationExportRequest": {
+        "description": "Request of organizations.organization.export (POST /internal/v1/admin/organizations/{organization_id}/exports).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "OrganizationExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organization_id",
+              "export_id",
+              "export_state",
+              "delivery",
+              "delivery_channel",
+              "delivery_ref",
+              "recipient_masked",
+              "recipient_count",
+              "size_bytes",
+              "sha256",
+              "created_at",
+              "expires_at",
+              "delivered_at",
+              "purged_at"
+            ],
+            "properties": {
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "export_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "export_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "recipient_masked": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 120,
+                "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+                "description": "A masked address (first character of the local part and of the domain label), never the address."
+              },
+              "recipient_count": {
+                "type": "integer"
+              },
+              "size_bytes": {
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "delivered_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "purged_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after organizations.organization.export; status: READY."
+          }
+        }
+      },
+      "MessagingExportCreateRequest": {
+        "description": "Request of messaging.export.request (POST /internal/v1/operator/exports). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "conversation_id",
+          "recipient_principal_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipient_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MessagingExportCreateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "export_id",
+              "conversation_id",
+              "export_state",
+              "delivery",
+              "delivery_channel",
+              "delivery_ref",
+              "recipient_principal_id",
+              "recipient_masked",
+              "size_bytes",
+              "sha256",
+              "failure",
+              "created_at",
+              "completed_at",
+              "delivered_at",
+              "expires_at",
+              "tenant_id",
+              "application_id",
+              "environment_id"
+            ],
+            "properties": {
+              "export_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "conversation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "export_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_channel": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "delivery_ref": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "recipient_principal_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "recipient_masked": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 120,
+                "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+                "description": "A masked address (first character of the local part and of the domain label), never the address."
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "failure": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "delivered_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "tenant_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "description": "The resource after messaging.export.request; status: REQUESTED."
           }
         }
       },

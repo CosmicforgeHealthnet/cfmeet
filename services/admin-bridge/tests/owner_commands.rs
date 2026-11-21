@@ -62,6 +62,7 @@ fn sample_in(kind: In) -> Value {
         In::Time => json!("2026-12-01T10:00:00Z"),
         In::Date => json!("2026-11-01"),
         In::NullableObject => json!({"participants": 50}),
+        In::StrList(_, _) => json!(["messaging.send"]),
     }
 }
 
@@ -80,6 +81,7 @@ fn sample_out(fields: &[OutField]) -> Value {
             Out::Obj(inner) => sample_out(inner),
             Out::ObjList(inner) => json!([sample_out(inner)]),
             Out::UuidGroups => json!([[ID, ID]]),
+            Out::EmailMasked => json!("a***@e***.com"),
         };
         m.insert(f.owner.into(), v);
     }
@@ -109,8 +111,11 @@ fn hq_call(row: &OwnerCommand, sub: &str) -> (Call, Value, String) {
     let mut path = cap.path.to_string();
     let mut owner_path = row.owner_path().to_string();
     for p in &cap.path_params {
+        // A parameter the owner receives in its body is a UUID.
+        let to_body = row.body.iter().any(|f| f.place == Place::Param(p.name));
         let v = match p.format {
             ParamFormat::Uuid => ID.to_string(),
+            _ if to_body => ID.to_string(),
             _ => "p-1".to_string(),
         };
         path = path.replace(&format!("{{{}}}", p.name), &v);
@@ -134,6 +139,10 @@ fn hq_call(row: &OwnerCommand, sub: &str) -> (Call, Value, String) {
         }
         if f.place == Place::Tenant {
             owner.insert(f.owner.into(), json!(TENANT_ID));
+            continue;
+        }
+        if let Place::Param(_) = f.place {
+            owner.insert(f.owner.into(), json!(ID));
             continue;
         }
         let v = sample_in(f.kind);
@@ -367,4 +376,54 @@ fn every_row_is_a_served_command_with_its_schemas() {
             row.source
         );
     }
+}
+
+#[tokio::test]
+async fn owner_delivered_results_are_references_only() {
+    let owner = Arc::new(FakeOwner::default());
+    let h = start(Options {
+        owners: Some(owner.clone()),
+        switches_all_on: true,
+        ..Default::default()
+    })
+    .await;
+    let row = COMMANDS
+        .iter()
+        .find(|r| r.id == "partners.workspace.register-first-party")
+        .unwrap();
+    let mut resource = sample_out(row.resource);
+    resource["token"] = json!("cfinv_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    resource["claimLink"] = json!("https://console.example/claim#t");
+    *owner.answer.lock().unwrap() =
+        Some(json!({"status": "INVITED", "version": "1", "resource": resource}));
+    let (mut c, _, _) = hq_call(row, "staff-4001");
+    let mut body: Value = serde_json::from_slice(&c.body).unwrap();
+    body["owner_email"] = json!("ada.owner@example.com");
+    c.body = serde_json::to_vec(&body).unwrap();
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let text = v.to_string();
+    assert!(!text.contains("cfinv_") && !text.contains("claim#") && !text.contains("ada.owner"));
+    assert_eq!(v["result"]["resource"]["recipient_masked"], "a***@e***.com");
+    // The address goes to the owner only: never into the ledger target.
+    let sent = owner.sent.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(sent.2["ownerEmail"], "ada.owner@example.com");
+    let key = body["operation_id"].as_str().unwrap();
+    let op = h
+        .store
+        .operations()
+        .into_iter()
+        .find(|o| o.idempotency_key.to_string() == key)
+        .unwrap();
+    assert!(!op.target.contains("ada.owner"), "{}", op.target);
+
+    // A "masked" value that is the address is outside the contract: never relayed.
+    let mut leaked = sample_out(row.resource);
+    leaked["recipientMasked"] = json!("ada.owner@example.com");
+    *owner.answer.lock().unwrap() =
+        Some(json!({"status": "INVITED", "version": "1", "resource": leaked}));
+    let (c, _, _) = hq_call(row, "staff-4002");
+    let (_, v) = send(&h, &c).await;
+    assert_eq!(code(&v), "UNKNOWN_OUTCOME");
+    assert!(!v.to_string().contains("ada.owner"));
 }

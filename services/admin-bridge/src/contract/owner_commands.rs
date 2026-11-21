@@ -40,6 +40,9 @@ pub enum In {
     Date,
     /// A JSON object the owner validates, or null (e.g. "remove the override").
     NullableObject,
+    /// Distinct strings without control characters: at most `.0` items of `1..=.1`
+    /// characters (e.g. scopes the owner validates).
+    StrList(usize, usize),
 }
 
 /// Where a body field goes.
@@ -57,6 +60,9 @@ pub enum Place {
     /// Access tenant id, lowercase UUID; any other tenant names nothing). It also names
     /// the resource in the ledger target.
     Tenant,
+    /// Never sent by HQ: the owner body carries the bridge path parameter of this name (a
+    /// UUID; anything else names nothing). It also names the resource in the ledger target.
+    Param(&'static str),
 }
 
 /// What becomes of the command core's optional `reason_code`.
@@ -99,6 +105,9 @@ pub enum Out {
     ObjList(&'static [OutField]),
     /// Groups of UUIDs (at most 100 groups of at most 100).
     UuidGroups,
+    /// A masked address (`a***@e***.com` or `***`), checked as the read path checks
+    /// `email_masked`: never an address.
+    EmailMasked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +185,17 @@ const fn tenant(owner: &'static str) -> BodyField {
         kind: In::Uuid,
         required: false,
         place: Place::Tenant,
+    }
+}
+
+/// The bridge path parameter `param`, sent to the owner as `owner` (HQ never sends it).
+const fn from_param(param: &'static str, owner: &'static str) -> BodyField {
+    BodyField {
+        hq: owner,
+        owner,
+        kind: In::Uuid,
+        required: false,
+        place: Place::Param(param),
     }
 }
 
@@ -1013,6 +1033,106 @@ const fn ms(
         result_schema,
     }
 }
+
+// ---- Owner-delivered secrets and exports (A4 / A7): references only -------------------
+// The secret or document goes from the owner to its recipient; the answer carries the
+// delivery reference, never a token, link, sealed part or address.
+
+const PA_DELIVERED_KEY: &[OutField] = &[
+    o("key_id", "id", Out::Uuid, false),
+    o("public_id", "publicId", Out::Str, false),
+    o("last4", "last4", Out::Str, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("service_account_id", "serviceAccountId", Out::Uuid, false),
+    o("key_state", "state", Out::Code, false),
+    o("version", "version", Out::Int, false),
+    o("key_expires_at", "credentialExpiresAt", Out::Time, false),
+    o(
+        "rotated_from_key_id",
+        "rotatedFromCredentialId",
+        Out::Uuid,
+        true,
+    ),
+    o("delivery", "delivery", Out::Code, false),
+    o("delivery_channel", "deliveryChannel", Out::Code, false),
+    o("delivery_ref", "deliveryRef", Out::Uuid, false),
+    o("delivery_state", "deliveryState", Out::Code, false),
+    o("expires_at", "expiresAt", Out::Time, false),
+    o("revealed_at", "revealedAt", Out::Time, true),
+];
+const DP_FIRST_PARTY: &[OutField] = &[
+    o("workspace_id", "organizationId", Out::Uuid, false),
+    o("workspace_state", "state", Out::Code, false),
+    o("version", "version", Out::Int, false),
+    o("created_at", "createdAt", Out::Time, false),
+    o("delivery", "delivery", Out::Code, false),
+    o("delivery_channel", "deliveryChannel", Out::Code, false),
+    o("delivery_ref", "deliveryRef", Out::Uuid, false),
+    o(
+        "recipient_masked",
+        "recipientMasked",
+        Out::EmailMasked,
+        false,
+    ),
+    o("delivery_state", "deliveryState", Out::Code, false),
+    o("claim_state", "claimState", Out::Code, false),
+    o("expires_at", "expiresAt", Out::Time, false),
+    o("owner_invitation_id", "ownerInvitationId", Out::Uuid, false),
+];
+const ORG_EXPORT: &[OutField] = &[
+    o("organization_id", "organizationId", Out::Uuid, false),
+    o("export_id", "exportId", Out::Uuid, false),
+    o("export_state", "state", Out::Code, false),
+    o("delivery", "delivery", Out::Code, false),
+    o("delivery_channel", "deliveryChannel", Out::Code, false),
+    o("delivery_ref", "deliveryRef", Out::Uuid, true),
+    o(
+        "recipient_masked",
+        "recipientMasked",
+        Out::EmailMasked,
+        true,
+    ),
+    o("recipient_count", "recipientCount", Out::Int, false),
+    o("size_bytes", "sizeBytes", Out::Int, false),
+    o("sha256", "sha256", Out::Str, false),
+    o("created_at", "createdAt", Out::Time, false),
+    o("expires_at", "expiresAt", Out::Time, false),
+    o("delivered_at", "deliveredAt", Out::Time, true),
+    o("purged_at", "purgedAt", Out::Time, true),
+];
+const MSG_EXPORT: &[OutField] = &[
+    o("export_id", "exportId", Out::Uuid, false),
+    o("conversation_id", "conversationId", Out::Uuid, false),
+    o("export_state", "exportState", Out::Code, false),
+    o("delivery", "delivery", Out::Code, false),
+    o("delivery_channel", "deliveryChannel", Out::Code, false),
+    o("delivery_ref", "deliveryRef", Out::Uuid, false),
+    o(
+        "recipient_principal_id",
+        "recipientPrincipalId",
+        Out::Uuid,
+        false,
+    ),
+    o(
+        "recipient_masked",
+        "recipientMasked",
+        Out::EmailMasked,
+        true,
+    ),
+    o("size_bytes", "size", Out::Int, true),
+    o("sha256", "sha256", Out::Str, true),
+    o("failure", "failure", Out::Code, true),
+    o("created_at", "createdAt", Out::Time, false),
+    o("completed_at", "completedAt", Out::Time, true),
+    o("delivered_at", "deliveredAt", Out::Time, true),
+    o("expires_at", "expiresAt", Out::Time, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+];
+const KEY_SCOPES: In = In::StrList(64, 100);
 
 pub const COMMANDS: &[OwnerCommand] = &[
     OwnerCommand {
@@ -2257,6 +2377,88 @@ pub const COMMANDS: &[OwnerCommand] = &[
         MEET_DECISION,
         "MeetingCriticalLaneChangeRequest",
         "MeetingCriticalLaneChangeResult",
+    ),
+    // Owner-delivered secrets and exports.
+    OwnerCommand {
+        id: "identity.key.issue",
+        owner: Owner::PlatformAccess,
+        source: "POST /internal/v1/operator/service-accounts/{service_account_id}/credentials",
+        // The service account's version; the tenant is the path's.
+        version: Some(1),
+        reason: Reason::Ledger,
+        body: &[
+            from_param("tenant_id", "tenantId"),
+            p("service_account_id", In::Uuid),
+            b("scopes", "scopes", KEY_SCOPES, true),
+            b("expires_at", "expiresAt", In::Time, false),
+        ],
+        statuses: &["ISSUED"],
+        resource: PA_DELIVERED_KEY,
+        body_schema: "IdentityKeyIssueRequest",
+        result_schema: "IdentityDeliveredKeyResult",
+    },
+    OwnerCommand {
+        id: "identity.key.rotate",
+        owner: Owner::PlatformAccess,
+        source: "POST /internal/v1/operator/credentials/{key_id}/rotate",
+        // The key's version; the new key overlaps the old one (default: the delivery window).
+        version: Some(1),
+        reason: Reason::Ledger,
+        body: &[
+            from_param("tenant_id", "tenantId"),
+            b("overlap_minutes", "overlapMinutes", In::Int(0, 525_600), false),
+            b("scopes", "scopes", KEY_SCOPES, false),
+            b("expires_at", "expiresAt", In::Time, false),
+        ],
+        statuses: &["ROTATED"],
+        resource: PA_DELIVERED_KEY,
+        body_schema: "IdentityKeyRotateRequest",
+        result_schema: "IdentityDeliveredKeyResult",
+    },
+    dp(
+        "partners.workspace.register-first-party",
+        // The workspace of the request's tenant; the owner invitation goes to the given
+        // address only (never echoed, recorded or in the ledger target).
+        "POST /internal/v1/operator/organizations",
+        None,
+        Reason::Ledger,
+        &[
+            tenant("tenantId"),
+            b("display_name", "displayName", In::Str(1, 120), true),
+            b("owner_email", "ownerEmail", In::Str(3, 254), true),
+        ],
+        &["INVITED"],
+        DP_FIRST_PARTY,
+        "PartnerFirstPartyRegisterRequest",
+        "PartnerFirstPartyRegisterResult",
+    ),
+    OwnerCommand {
+        id: "organizations.organization.export",
+        owner: Owner::Organizations,
+        source: "POST /internal/v1/admin/organizations/{organization_id}/exports",
+        version: None,
+        // The owner's body is empty.
+        reason: Reason::Ledger,
+        body: &[],
+        statuses: &["READY"],
+        resource: ORG_EXPORT,
+        body_schema: "OrganizationExportRequest",
+        result_schema: "OrganizationExportResult",
+    },
+    mg(
+        "messaging.export.request",
+        "POST /internal/v1/operator/exports",
+        None,
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b("conversation_id", "conversationId", In::Uuid, true),
+            b("recipient_principal_id", "recipientPrincipalId", In::Uuid, true),
+        ],
+        &["REQUESTED"],
+        MSG_EXPORT,
+        "MessagingExportCreateRequest",
+        "MessagingExportCreateResult",
     ),
 ];
 
