@@ -85,7 +85,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
                     .ok_or_else(|| Error::validation("Invalid block projection"))?,
             )
         }
-        "communications.domain-block.changed" => {
+        "communications.domain.block.changed" => {
             let r: DomainRule = serde_json::from_value(data.clone())
                 .map_err(|_| Error::validation("Invalid block projection"))?;
             if r.projection_generation != generation {
@@ -306,7 +306,7 @@ mod tests {
             &f.db,
             f.scope,
             f.generation,
-            "communications.domain-block.changed",
+            "communications.domain.block.changed",
             1,
             &data(rule, None::<Uuid>, true),
         )
@@ -316,7 +316,7 @@ mod tests {
             &f.db,
             f.scope,
             f.generation,
-            "communications.domain-block.changed",
+            "communications.domain.block.changed",
             1,
             &data(other, Some(a), true),
         )
@@ -331,7 +331,7 @@ mod tests {
             &f.db,
             f.scope,
             f.generation,
-            "communications.domain-block.changed",
+            "communications.domain.block.changed",
             2,
             &data(rule, None::<Uuid>, false),
         )

@@ -1164,4 +1164,31 @@ async fn local_direct_send_checks_reuse_eligibility_but_never_a_blocked_pair() {
         .await;
     assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
     assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+
+    // Native Calling application rules use the published event vocabulary and
+    // refuse either member locally, without relying on a lazy Hub profile.
+    let rule = Uuid::new_v4();
+    let native = |version, blocked| {
+        json!({"schemaVersion":1,"eventId":Uuid::new_v4(),
+        "aggregateId":rule,"version":version,"type":"communications.domain.block.changed",
+        "data":{"ruleId":rule,"projectionGeneration":generation,"actorPrincipalId":null,
+            "targetPrincipalId":sender,"blocked":blocked}})
+    };
+    let blocked = native(1, true);
+    conforms_internal("CommittedEvent", &blocked);
+    let applied = hub(&h, &c, bob.principal, "events", blocked).await;
+    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
+    assert_eq!(applied.json["sendPolicyGeneration"], json!(generation));
+    let denied = h
+        .send_e2ee(&c, &conv, &mut alice, "native application block")
+        .await;
+    assert_eq!(denied.code(), "DELIVERY_REFUSED", "{}", denied.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
+    let applied = hub(&h, &c, bob.principal, "events", native(2, false)).await;
+    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
+    let sent = h
+        .send_e2ee(&c, &conv, &mut alice, "native rule released")
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 3);
 }

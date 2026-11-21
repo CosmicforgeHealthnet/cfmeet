@@ -113,6 +113,7 @@ async fn native_application_rule_projects_without_lazy_hub_profiles() {
     assert_eq!(receipt["duplicate"], true);
     let events = h.world.read().unwrap().policy_events.clone();
     assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "communications.domain.block.changed");
     assert_eq!(
         events[0]["data"]["actorPrincipalId"],
         serde_json::Value::Null

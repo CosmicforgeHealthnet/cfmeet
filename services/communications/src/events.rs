@@ -300,7 +300,7 @@ pub async fn block_event(
         if fresh {
             // No lazy Hub profile is required. The native owner authenticated these
             // principal ids; the receiver stores only the rule, version and scope.
-            s.store.messaging_event(&txn, scope, "communications.domain-block.changed", rule,
+            s.store.messaging_event(&txn, scope, "communications.domain.block.changed", rule,
                 event.source_version, json!({"ruleId":rule,
                     "actorPrincipalId":if event.application_block {None} else {Some(event.actor_principal_id)},
                     "targetPrincipalId":event.target_principal_id,"blocked":event.blocked,"projectionGeneration":event.projection_generation})).await?;
