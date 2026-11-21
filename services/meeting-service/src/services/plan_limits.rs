@@ -13,26 +13,28 @@
 //! else its owner account (`USER`); spaces of a Platform Access application environment are
 //! partner usage, not a user plan, and are never limited here.
 //!
-//! **Read** (signed `cf-service+jwt`, audience `cfmeet.developer-platform`):
-//! `GET /internal/v1/plans/holders/{holderKind}/{holderId}/limits` →
-//! `{"planCode": "FREE", "limits": {"<key>": <integer> | null}}` where `null` (or an absent
-//! key) means unlimited; a boolean limit may also be sent as `true` / `false` (1 / 0).
-//! ASSUMED SHAPE: the Developer Platform route is not built yet (its pricing module owns the
-//! data, `PLAN_LIMITS` keys `meetingMinutes`, `participants`, `recording`, `storageBytes`,
-//! `attachmentBytes`, `webinars`). Answers are cached per holder for
-//! `MEETING_PLAN_LIMITS_CACHE_SECS` (default 60).
+//! **Read** (signed `cf-service+jwt`, audience `cfmeet.developer-platform`, permission
+//! `developer-entitlement.read`): `GET /internal/v1/plan-limits/{holderKind}/{holderId}` →
+//! `{holderKind, holderId, planCode, assigned, holderVersion, priceBookId, versionId,
+//! overrideApplied, overrideVersion, limits: {meetingMinutes, participants, recording,
+//! storageBytes, attachmentBytes, webinars}, evaluatedAt, cacheSeconds}` (Developer Platform
+//! internal API 1.18.0, `EffectivePlanLimits`). Integer limits are sizes / counts, `recording`
+//! and `webinars` are booleans; `null` = not set by the plan (today's behaviour). The same
+//! read and conventions as Messaging (`services/messaging/src/plans.rs`). Answers are cached
+//! per holder for `MEETING_PLAN_CACHE_SECONDS` (default 60), never longer than the answer's
+//! `cacheSeconds`.
 //!
-//! **Fail open.** Off unless `MEETING_PLAN_ENFORCEMENT_ENABLED=true` (and
+//! **Fail open.** Off unless `MEETING_PLAN_ENFORCEMENT=on` (and
 //! `CF_DEVELOPER_PLATFORM_BASE_URL` plus the service signing identity are configured). When
-//! off, unconfigured, unreachable, slow (2 s), or answering anything unexpected, nothing
-//! here refuses: today's limits stay the only limits. A failed read is cached briefly (10 s)
-//! so an outage does not add a call to every join.
+//! off, unconfigured, refused, unreachable, slow (2 s), or answering anything unexpected,
+//! nothing here refuses: today's limits stay the only limits. A failed read is cached
+//! briefly (15 s) so an outage does not add a call to every join.
 //!
 //! | Variable | Meaning |
 //! |---|---|
-//! | `MEETING_PLAN_ENFORCEMENT_ENABLED` | `true` turns enforcement on (default off) |
+//! | `MEETING_PLAN_ENFORCEMENT` | `off` (default) or `on` |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | the Developer Platform's internal base URL |
-//! | `MEETING_PLAN_LIMITS_CACHE_SECS` | cache lifetime of an answer (default 60, 5–3600) |
+//! | `MEETING_PLAN_CACHE_SECONDS` | cache lifetime of an answer (default 60, 5–3600; at most `cacheSeconds`) |
 
 use std::{
     collections::HashMap,
@@ -102,6 +104,8 @@ impl Holder {
 pub struct PlanLimits {
     pub plan_code: String,
     limits: HashMap<String, Option<i64>>,
+    /// The Developer Platform's bound on the caller's cache (`cacheSeconds`).
+    pub cache_seconds: Option<u64>,
 }
 
 impl PlanLimits {
@@ -111,6 +115,10 @@ impl PlanLimits {
         if plan_code.is_empty() || plan_code.len() > 64 {
             return None;
         }
+        let cache_seconds = match v.get("cacheSeconds") {
+            None | Some(Value::Null) => None,
+            Some(n) => Some(n.as_u64().filter(|n| *n >= 1)?),
+        };
         let mut limits = HashMap::new();
         for (k, value) in v.get("limits")?.as_object()? {
             let parsed = match value {
@@ -124,6 +132,7 @@ impl PlanLimits {
         Some(Self {
             plan_code: plan_code.to_string(),
             limits,
+            cache_seconds,
         })
     }
 
@@ -163,11 +172,7 @@ pub struct DeveloperPlatformPlans {
 #[async_trait]
 impl PlanSource for DeveloperPlatformPlans {
     async fn limits(&self, holder: Holder) -> Result<Option<PlanLimits>, String> {
-        let path = format!(
-            "/internal/v1/plans/holders/{}/{}/limits",
-            holder.kind(),
-            holder.id()
-        );
+        let path = limits_path(holder);
         let r = self
             .client
             .get(
@@ -185,10 +190,14 @@ impl PlanSource for DeveloperPlatformPlans {
                     .map(Some)
                     .ok_or_else(|| "plan read: unexpected answer".to_string())
             }
-            404 => Ok(None),
             s => Err(format!("plan read answered HTTP {s}")),
         }
     }
+}
+
+/// The Developer Platform read's path for one holder.
+pub fn limits_path(holder: Holder) -> String {
+    format!("/internal/v1/plan-limits/{}/{}", holder.kind(), holder.id())
 }
 
 /// A fixed answer per holder (tests and local tooling).
@@ -202,7 +211,7 @@ impl PlanSource for StaticPlans {
     }
 }
 
-const FAILURE_TTL: Duration = Duration::from_secs(10);
+const FAILURE_TTL: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CACHED: usize = 10_000;
 
@@ -225,15 +234,17 @@ impl PlanEnforcement {
     /// From the environment: `Ok(None)` when off or not configured (fail open); `Err` only
     /// for a configuration that is on but malformed.
     pub fn from_env() -> Result<Option<Self>, String> {
-        if !crate::config::env_bool("MEETING_PLAN_ENFORCEMENT_ENABLED", false) {
-            return Ok(None);
-        }
         let env = |name: &str| {
             std::env::var(name)
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
         };
+        match env("MEETING_PLAN_ENFORCEMENT").as_deref() {
+            None | Some("off") => return Ok(None),
+            Some("on") => {}
+            Some(_) => return Err("MEETING_PLAN_ENFORCEMENT must be off or on".into()),
+        }
         let (Some(url), Some(runtime), Some(kid), Some(key_file)) = (
             env("CF_DEVELOPER_PLATFORM_BASE_URL"),
             env("CF_RUNTIME_ENVIRONMENT"),
@@ -266,12 +277,12 @@ impl PlanEnforcement {
             .map_err(|e| format!("CF_DEVELOPER_PLATFORM_BASE_URL: {e}"))?;
         let client = InternalServiceClient::new(signer, targets, READ_TIMEOUT)
             .map_err(|e| format!("plan read client: {e}"))?;
-        let ttl = env("MEETING_PLAN_LIMITS_CACHE_SECS")
+        let ttl = env("MEETING_PLAN_CACHE_SECONDS")
             .map(|v| {
                 v.parse::<u64>()
                     .ok()
                     .filter(|s| (5..=3600).contains(s))
-                    .ok_or("MEETING_PLAN_LIMITS_CACHE_SECS must be 5-3600")
+                    .ok_or("MEETING_PLAN_CACHE_SECONDS must be an integer between 5 and 3600")
             })
             .transpose()?
             .unwrap_or(60);
@@ -291,7 +302,13 @@ impl PlanEnforcement {
         }
         let (answer, ttl) =
             match tokio::time::timeout(READ_TIMEOUT, self.source.limits(holder)).await {
-                Ok(Ok(limits)) => (limits, self.ttl),
+                Ok(Ok(limits)) => {
+                    let ttl = limits
+                        .as_ref()
+                        .and_then(|l| l.cache_seconds)
+                        .map_or(self.ttl, |s| self.ttl.min(Duration::from_secs(s)));
+                    (limits, ttl)
+                }
                 Ok(Err(e)) => {
                     tracing::warn!(
                         holder = holder.kind(),
@@ -402,6 +419,64 @@ mod tests {
             down.0.load(Ordering::SeqCst),
             1,
             "a failure is cached briefly"
+        );
+    }
+
+    #[test]
+    fn the_developer_platform_answer_parses() {
+        let l = PlanLimits::from_json(&json!({
+            "holderKind": "USER", "holderId": Uuid::nil(), "planCode": "FREE", "assigned": false,
+            "holderVersion": 0, "priceBookId": null, "versionId": null, "overrideApplied": false,
+            "overrideVersion": null,
+            "limits": { "meetingMinutes": 40, "participants": 100, "recording": false,
+                        "storageBytes": null, "attachmentBytes": 10485760, "webinars": null },
+            "evaluatedAt": "2026-11-21T00:00:00Z", "cacheSeconds": 30
+        }))
+        .unwrap();
+        assert_eq!(
+            (l.participants(), l.meeting_minutes(), l.recording_allowed()),
+            (Some(100), Some(40), false)
+        );
+        assert_eq!(l.cache_seconds, Some(30));
+        let unset = PlanLimits::from_json(&json!({
+            "planCode": "PRO", "cacheSeconds": 60,
+            "limits": { "meetingMinutes": null, "participants": null, "recording": null,
+                        "storageBytes": null, "attachmentBytes": null, "webinars": true }
+        }))
+        .unwrap();
+        assert_eq!(
+            (unset.participants(), unset.meeting_minutes()),
+            (None, None)
+        );
+        assert!(unset.recording_allowed());
+        assert!(PlanLimits::from_json(&json!({
+            "planCode": "FREE", "limits": {}, "cacheSeconds": 0
+        }))
+        .is_none());
+        assert_eq!(
+            limits_path(Holder::Organization(Uuid::nil())),
+            format!("/internal/v1/plan-limits/ORGANIZATION/{}", Uuid::nil())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_answer_bounds_the_cache() {
+        let short = PlanLimits::from_json(&json!({
+            "planCode": "FREE", "limits": { "participants": 3 }, "cacheSeconds": 1
+        }))
+        .unwrap();
+        let source = Arc::new(Counting(AtomicUsize::new(0), Ok(Some(short))));
+        let e = PlanEnforcement::new(source.clone(), Duration::from_secs(60));
+        let h = Holder::User(Uuid::new_v4());
+        e.effective(h).await;
+        e.effective(h).await;
+        assert_eq!(source.0.load(Ordering::SeqCst), 1);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        e.effective(h).await;
+        assert_eq!(
+            source.0.load(Ordering::SeqCst),
+            2,
+            "cacheSeconds is the upper bound"
         );
     }
 
