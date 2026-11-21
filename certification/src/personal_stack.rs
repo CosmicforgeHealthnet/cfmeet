@@ -244,7 +244,10 @@ impl PersonalStack {
                 conn.close().await?;
             }
             if name == "messaging" {
-                db::migrate(&self.bin.join("messaging-send-policy-projection-migration"), &owner)?;
+                db::migrate(
+                    &self.bin.join("messaging-send-policy-projection-migration"),
+                    &owner,
+                )?;
             }
             if let Some(feature) = feature {
                 db::migrate(&self.bin.join(feature), &owner)?;
