@@ -712,6 +712,72 @@ fn no_schema_uses_a_key_hq_treats_as_personal_data() {
     assert!(banned.is_empty(), "properties HQ would refuse: {banned:?}");
 }
 
+/// Agreed with HQ (2026-11-21): no schema property may be named like a secret, a link or a
+/// sealed blob. Secrets and exports are delivered by the owner to their recipient; the
+/// bridge carries references only (delivery, delivery_channel, delivery_ref,
+/// recipient_masked, expires_at, ...). HQ refuses such a name at pin time.
+fn looks_like_secret_or_link(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [
+        "secret",
+        "token",
+        "password",
+        "passphrase",
+        "private_key",
+        "key_material",
+        "ciphertext",
+        "sealed",
+        "signed_url",
+        "presigned",
+        "claim_link",
+        "download_link",
+    ]
+    .iter()
+    .any(|w| n.contains(w))
+        || n == "url"
+        || n == "uri"
+        || n.ends_with("_url")
+        || n.ends_with("_uri")
+}
+
+#[test]
+fn no_schema_names_a_secret_or_a_link() {
+    let schemas = rendered("bridge-schemas.v1.json");
+    let mut names = Vec::new();
+    for (name, schema) in schemas["components"]["schemas"].as_object().unwrap() {
+        collect_property_names(schema, name, &mut names);
+    }
+    let refused: Vec<&String> = names
+        .iter()
+        .filter(|p| looks_like_secret_or_link(p.rsplit('.').next().unwrap()))
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "properties HQ refuses (secret or link): {refused:?}"
+    );
+    for ok in [
+        "delivery_ref",
+        "recipient_masked",
+        "expires_at",
+        "public_id",
+        "last4",
+        "sha256",
+        "last_cosigned_size",
+    ] {
+        assert!(!looks_like_secret_or_link(ok), "{ok}");
+    }
+    for bad in [
+        "client_secret",
+        "invitation_token",
+        "claim_url",
+        "download_link",
+        "uri",
+        "sealed_value",
+    ] {
+        assert!(looks_like_secret_or_link(bad), "{bad}");
+    }
+}
+
 /// Agreed with HQ Track B: `x-contact-search` marks exactly the searches whose `q` may carry
 /// an email address or phone number.
 #[test]
