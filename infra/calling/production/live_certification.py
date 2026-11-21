@@ -293,10 +293,13 @@ def upstreams(name, container, env):
         if not owner:
             checks.append(dict(variable=var, result='WARN', reason='not a private service route'))
             continue
-        path = cr.SERVICES[owner]['health']
+        # Through the private TLS route: the route's own probe (the admin bridge's route
+        # serves only its owner events listener, whose GET answers 405); direct: health.
+        s = cr.SERVICES[owner]
+        path, expected = s['probe'] if url.port == s['tls'] else (s['health'], 200)
         status, _ = http_probe(container, '%s://%s:%d%s' % (url.scheme, url.hostname, url.port or 80, path))
         checks.append(dict(variable=var, upstream=owner, path=path, status=status, tls=url.scheme == 'https',
-                           result='PASS' if status == 200 else 'FAIL'))
+                           result='PASS' if status == expected else 'FAIL'))
     failed = [c for c in checks if c['result'] == 'FAIL']
     return dict(result='N/A' if not checks else ('FAIL' if failed else 'PASS'), checks=checks)
 
