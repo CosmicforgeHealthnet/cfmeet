@@ -223,6 +223,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `messaging.hold.place`
 - `messaging.hold.release`
 - `messaging.exports.list`
+- `messaging.export.request`
 - `messaging.deletion-requests.list`
 - `messaging.deletion-request.create`
 - `messaging.audit.list`
@@ -279,6 +280,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `organizations.ownership.recover`
 - `organizations.bindings.list`
 - `organizations.binding.change`
+- `organizations.organization.export`
 - `organizations.audit.list`
 - `organizations.global-audit.list`
 - `organizations.provisioning.retry`
@@ -293,6 +295,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `partners.workspaces.read`
 - `partners.workspace-activity.list`
 - `partners.workspace.state.change`
+- `partners.workspace.register-first-party`
 - `partners.projects.list`
 - `partners.environments.list`
 - `partners.members.list`
@@ -324,6 +327,8 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `identity.scope-grant.change`
 - `identity.privileged-scope-grant.change`
 - `identity.keys.list`
+- `identity.key.issue`
+- `identity.key.rotate`
 - `identity.key.revoke`
 - `identity.key.suspend`
 - `identity.key.resume`
