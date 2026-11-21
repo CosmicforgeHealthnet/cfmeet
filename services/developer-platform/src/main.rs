@@ -173,6 +173,21 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
+    // ADR 0068 A4: secrets produced by admin bridge commands are delivered by the
+    // Developer Platform itself (sealed to the Notification Service), never returned to HQ.
+    match (
+        notifications_configured,
+        config.notifications_sealing_key.clone(),
+    ) {
+        (true, Some(sealing_key)) => {
+            state = state.with_owner_delivery(
+                developer_platform::control::owner_delivery::OwnerDelivery { sealing_key },
+            );
+        }
+        _ => tracing::info!(
+            "owner-delivered secrets need CF_NOTIFICATIONS_BASE_URL and CF_NOTIFICATIONS_SEALING_KEY:              the admin bridge's first-party workspace registration is unavailable"
+        ),
+    }
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     if config.production_access_withheld {

@@ -123,6 +123,7 @@
         "account.security.email-changed",
         "organizations.organization.archived",
         "organizations.organization.reactivated",
+        "developer-platform.workspace.owner-invitation.email-requested",
         "notifications.cancel"
       ]
     },

@@ -9,7 +9,10 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
 use crate::{
-    control::credential_lifecycle::{self, CredentialLifecycleSettings, SweepReport},
+    control::{
+        credential_lifecycle::{self, CredentialLifecycleSettings, SweepReport},
+        owner_delivery,
+    },
     notification_publications::{self, NotificationEventSink, PublicationReport},
     platform_access::PlatformAccessPort,
     reference_reconciliation::{self, ReferenceReport},
@@ -184,6 +187,59 @@ pub async fn notification_publication_pass(
         }
         Err(e) => {
             tracing::warn!(summary = %crate::db::summarize_db_error(&e), "notification publication relay pass failed");
+            None
+        }
+    }
+}
+
+/// The worker schedule key of the owner delivery maintenance.
+pub const OWNER_DELIVERY_MAINTENANCE_JOB: &str = "owner-deliveries";
+
+/// ADR 0068 A4: one relay pass of the owner-delivered secrets (sealed claim links to the
+/// recipient's own address) and their maintenance at most hourly.
+pub async fn owner_delivery_pass(
+    db: &DatabaseConnection,
+    sink: &dyn NotificationEventSink,
+    now: DateTime<Utc>,
+) -> Option<owner_delivery::DeliveryReport> {
+    if let Ok(true) = claim_schedule(
+        db,
+        OWNER_DELIVERY_MAINTENANCE_JOB,
+        Duration::from_secs(3600),
+        now,
+    )
+    .await
+    {
+        let outcome = match owner_delivery::maintain(db, now, 1_000).await {
+            Ok((expired, purged)) => {
+                if expired + purged > 0 {
+                    tracing::info!(expired, purged, "owner delivery maintenance");
+                }
+                "SUCCEEDED"
+            }
+            Err(e) => {
+                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner delivery maintenance failed");
+                "FAILED"
+            }
+        };
+        let _ = complete_schedule(db, OWNER_DELIVERY_MAINTENANCE_JOB, outcome, Utc::now()).await;
+    }
+    match owner_delivery::relay_due(db, sink, now).await {
+        Ok(r) => {
+            if r != owner_delivery::DeliveryReport::default() {
+                // Counts only: never an address, a token or a link.
+                tracing::info!(
+                    sent = r.sent,
+                    failed = r.failed,
+                    retried = r.retried,
+                    expired = r.expired,
+                    "owner delivery relay pass"
+                );
+            }
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner delivery relay pass failed");
             None
         }
     }
@@ -456,6 +512,7 @@ pub async fn run_pass_with_jobs(
             credential_notification_pass(db, p, &jobs.credential_lifecycle, Utc::now()).await;
         }
         notification_publication_pass(db, n.sink.as_ref(), Utc::now()).await;
+        owner_delivery_pass(db, n.sink.as_ref(), Utc::now()).await;
     }
     // ADR 0064: the APP_GRANT projection runs before the delivery pass so its lifecycle
     // events go out in the same pass.

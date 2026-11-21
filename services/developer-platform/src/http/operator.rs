@@ -664,6 +664,15 @@ async fn register_first_party(
     Json(body): Json<RegisterFirstParty>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (op, ctx) = operator_of(&caller, &headers)?;
+    // ADR 0068 A4 (`partners.workspace.register-first-party`, R4): from the admin bridge,
+    // the key and HQ's approver are required, no expectedVersion (the workspace does not
+    // exist yet), and the owner invitation is delivered to the owner only.
+    if let Some(cmd) = BridgeCommand::of_with(&caller, &headers, None, true, Expect::Nothing)? {
+        return Ok((
+            StatusCode::OK,
+            Json(operator::register_first_party_bridge(&s, &op, &ctx, body, &cmd).await?),
+        ));
+    }
     Ok((
         StatusCode::CREATED,
         Json(operator::register_first_party(&s, &op, &ctx, body).await?),

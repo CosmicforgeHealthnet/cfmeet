@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,24 @@ import { ErrorNotice, inputClass, useConsoleMutation } from "../ui";
 
 /**
  * Accept a developer-workspace invitation with the token the owner handed over. The token
- * is typed or pasted (never read from the URL, so it does not land in history or logs).
+ * is typed or pasted, or arrives in the single-use claim link CF Meet emails to a
+ * first-party workspace owner (ADR 0068 A4): only in the URL fragment, which never reaches
+ * a server or its logs, and which is removed from the address bar (and the history entry)
+ * as soon as the page reads it.
  */
 export default function AcceptInvitationPage() {
   const { client, selectWorkspace } = useDeveloperPortal();
   const [token, setToken] = useState("");
+  useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const claimed = fragment.get("token");
+    if (claimed) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+      // The fragment exists only in the browser (read once after mount, never during SSR).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setToken(claimed);
+    }
+  }, []);
   const [joined, setJoined] = useState<string | null>(null);
   const accept = useConsoleMutation(
     () => client.call<Member>({ operation: "acceptInvitation", body: { token: token.trim() } }),

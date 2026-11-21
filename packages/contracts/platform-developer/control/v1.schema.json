@@ -9427,6 +9427,170 @@
         }
       },
       "description": "ADR 0068 A6: a usage vector (PARTNER_PLATFORM) or a plan and cycle (CONSUMER); versionId omitted: the effective version."
+    },
+    "OwnerDelivery": {
+      "description": "ADR 0068 A4: an owner-delivered secret as HQ may see it — a reference only. The secret (today the one-time owner invitation of a first-party workspace) goes directly to its recipient's address as a single-use claim link, sealed for the Notification Service; never the token, the link or the address.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "sentAt",
+        "createdAt",
+        "organizationId",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sentAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "FirstPartyRegistrationResource": {
+      "description": "ADR 0068 A4: the resource of the admin bridge's partners.workspace.register-first-party answer (AdminCommandResult.resource): the workspace (organizationId = the Platform Access tenant id), its state and version, and the owner delivery reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "state",
+        "version",
+        "createdAt",
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
     }
   }
 }

@@ -169,6 +169,16 @@ pub fn undo_link(app_url: &str, token: &str) -> String {
     )
 }
 
+/// The single-use claim link of a developer workspace owner invitation (ADR 0068 A4),
+/// rebuilt from the sealed token; the token travels in the fragment only.
+pub fn workspace_claim_link(app_url: &str, token: &str) -> String {
+    format!(
+        "{}/developers/invitations/accept#token={}",
+        app_url.trim_end_matches('/'),
+        url_encode(token)
+    )
+}
+
 /// The signed-in devices page of security alerts (Meeting `services::email::sessions_link`,
 /// verbatim).
 pub fn sessions_link(app_url: &str) -> String {
@@ -359,6 +369,10 @@ pub fn inbox_text(template: &str, params: &Value) -> (String, String) {
         "developer.credential_expired" => (
             "Credential expired",
             "A developer credential expired.".into(),
+        ),
+        "developer.workspace_owner_invitation" => (
+            "Developer workspace invitation",
+            "You were invited to own a CF Meet developer workspace.".into(),
         ),
         "developer.production_access" => (
             "Production access decided",
@@ -683,6 +697,49 @@ pub fn render_email(
                 text: t.text,
             }
         }
+        "developer.workspace_owner_invitation" => {
+            // ADR 0068 A4: a single-use claim link to the invited address only. The token is
+            // in the fragment, so it never reaches a server log; accepting needs a CF Meet
+            // sign-in with this verified address.
+            let token = secrets
+                .token
+                .as_deref()
+                .ok_or(RenderError::SecretUnavailable)?;
+            let link = workspace_claim_link(app_url, token);
+            let subject = "You're invited to own a CF Meet developer workspace".to_string();
+            let mut paragraphs = vec![
+                "CF Meet registered a developer workspace and invited you as its owner.".into(),
+                "Sign in to CF Meet with this email address to accept. The link works once.".into(),
+            ];
+            if let Some(at) = obj
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+            {
+                paragraphs.push(format!(
+                    "It expires on {}.",
+                    format_time(
+                        at.with_timezone(&Utc),
+                        recipient.time_zone.as_deref(),
+                        "UTC"
+                    )
+                ));
+            }
+            let t = render_notice(&NotificationBody {
+                subject: &subject,
+                greeting_name: None,
+                paragraphs,
+                action: Some(("Accept invitation", &link)),
+                footnote: Some(
+                    "If you did not expect this invitation, you can ignore this email.".into(),
+                ),
+            });
+            RenderedEmail {
+                subject,
+                html: t.html,
+                text: t.text,
+            }
+        }
         "developer.credential_expiring"
         | "developer.credential_expired"
         | "developer.production_access" => {
@@ -779,6 +836,58 @@ mod tests {
             ("accessToken", json!("y")),
         ]));
         assert_eq!(p, json!({"ttlMinutes": 60}));
+    }
+
+    /// ADR 0068 A4: the workspace owner invitation renders only with its sealed token, as a
+    /// single-use claim link whose token is in the fragment, never in params.
+    #[test]
+    fn workspace_owner_invitation_needs_its_token_and_keeps_it_in_the_fragment() {
+        let d = data(&[
+            (
+                "invitationId",
+                json!("5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607"),
+            ),
+            (
+                "organizationId",
+                json!("6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b"),
+            ),
+            ("expiresAt", json!("2026-11-28T12:00:00Z")),
+        ]);
+        let template = "developer.workspace_owner_invitation";
+        assert_eq!(
+            render_email(
+                template,
+                &d,
+                &RecipientFacts::default(),
+                &Secrets::default(),
+                None,
+                "https://cfmeet.com"
+            ),
+            Err(RenderError::SecretUnavailable)
+        );
+        let secrets = Secrets {
+            token: Some("cfinv_0123456789abcdefghij".into()),
+            address: Some("owner@example.com".into()),
+            ..Default::default()
+        };
+        let e = render_email(
+            template,
+            &d,
+            &RecipientFacts::default(),
+            &secrets,
+            None,
+            "https://cfmeet.com/",
+        )
+        .unwrap();
+        let link =
+            "https://cfmeet.com/developers/invitations/accept#token=cfinv_0123456789abcdefghij";
+        assert!(e.text.contains(link) && e.html.contains(link));
+        assert!(e.text.contains("Sat 28 Nov 2026, 12:00 (UTC)"));
+        assert!(!e.text.contains("owner@example.com"));
+        let p = params_of(&d);
+        assert!(!p.to_string().contains("cfinv_"));
+        let (title, _) = inbox_text(template, &p);
+        assert_ne!(title, "Notification");
     }
 
     #[test]
