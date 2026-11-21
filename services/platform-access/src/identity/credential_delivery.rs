@@ -451,7 +451,7 @@ mod tests {
     fn a_sealed_secret_opens_only_with_its_binding_and_pepper() {
         let keyring = ring(1, false);
         let (d, c) = (Uuid::new_v4(), Uuid::new_v4());
-        let secret = "cfmk_test_0123456789abcdef01234567_feedface";
+        let secret = "cfmk_test_fixture_0123456789abcdef_feedface";
         let sealed = seal(&keyring, 1, d, c, secret).unwrap();
         assert!(!sealed
             .bytes
