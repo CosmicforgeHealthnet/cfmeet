@@ -9,7 +9,8 @@
 //!   signature; 404 until a secret is configured; 256 KiB cap). Reached publicly only
 //!   through the Meeting-hosted ingress route added at activation.
 //! * `/internal/v1/**` — service-authenticated (I1–I11, I13, the ADR 0063 partner push
-//!   provider vault and the ADR 0068 admin bridge's operator reads and commands); I12 uses
+//!   provider vault and the ADR 0068 admin bridge's operator reads, commands and daily
+//!   dataset pull); I12 uses
 //!   its own bearer.
 
 pub mod internal;
@@ -100,6 +101,11 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/operator/email-suppressions", get(operator::suppressions))
         .route("/operator/providers", get(operator::providers))
+        // ADR 0068 A7: the daily dataset pull (counts for one UTC day).
+        .route(
+            "/operator/datasets/:dataset_id/days/:date",
+            get(operator::dataset_day),
+        )
         // ADR 0068 A4: the admin bridge's commands (Idempotency-Key, operation record).
         .route(
             "/operator/deliveries/:delivery_id/retry",
