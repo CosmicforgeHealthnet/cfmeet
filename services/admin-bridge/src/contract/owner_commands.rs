@@ -17,6 +17,8 @@ pub enum In {
     Enum(&'static [&'static str]),
     Bool,
     Int(i64, i64),
+    /// An integer as [`In::Int`] or null.
+    NullableInt(i64, i64),
     Uuid,
     /// A UUID or null.
     NullableUuid,
@@ -760,6 +762,135 @@ const fn mg(
         source,
         version,
         reason,
+        body,
+        statuses,
+        resource,
+        body_schema,
+        result_schema,
+    }
+}
+
+// ---- Calling (A4 / A5) ------------------------------------------------------------------
+// Every command carries the request's tenant scope as `tenantId`; the owner answers 404
+// for another tenant's subject. Its bodies have no reason field.
+
+const CL_TENANT: BodyField = tenant("tenantId");
+const MAX_MINOR: i64 = 1_000_000_000_000_000;
+const CL_ABUSE_REPORT: &[OutField] = &[
+    o("abuse_report_id", "abuseReportId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("call_id", "callId", Out::Uuid, false),
+    o("category", "category", Out::Code, false),
+    o("report_state", "status", Out::Code, false),
+    o("reviewed_at", "reviewedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const CL_BLOCK: &[OutField] = &[
+    o("block_rule_id", "blockRuleId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("block_state", "status", Out::Code, false),
+    o("released_at", "releasedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const CL_LIMITS: &[OutField] = &[
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("requests_per_minute", "requestsPerMinute", Out::Int, true),
+    o(
+        "max_concurrent_communications",
+        "maxConcurrentCommunications",
+        Out::Int,
+        true,
+    ),
+    o("updated_at", "updatedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const CL_ROUTING: &[OutField] = &[
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, true),
+];
+const CL_ENTERPRISE: &[OutField] = &[
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("policy_id", "policyId", Out::Uuid, true),
+    o(
+        "admin_capabilities",
+        "adminCapabilities",
+        Out::StrList,
+        false,
+    ),
+    o("version", "version", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, true),
+];
+const CL_SPEND: &[OutField] = &[
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("currency", "currency", Out::Code, true),
+    o("enabled", "enabled", Out::Bool, true),
+    o("daily_limit_minor", "dailyLimitMinor", Out::Int, true),
+    o("monthly_limit_minor", "monthlyLimitMinor", Out::Int, true),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, true),
+];
+const CL_RECORDING: &[OutField] = &[
+    o("recording_id", "recordingId", Out::Uuid, false),
+    o("call_id", "callId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("recording_state", "state", Out::Code, false),
+    o("deleted_at", "deletedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
+const CL_RETENTION_HOLD: &[OutField] = &[
+    o("hold_id", "holdId", Out::Uuid, false),
+    // A data class code, or `*` for every class.
+    o("data_class", "dataClass", Out::Text, false),
+    o("resource_id", "resourceId", Out::Uuid, true),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("reason_code", "reasonCode", Out::Code, false),
+    o("active", "active", Out::Bool, false),
+    o("created_at", "createdAt", Out::Time, false),
+    o("released_at", "releasedAt", Out::Time, true),
+];
+const CL_INCIDENT: &[OutField] = &[
+    o("incident_id", "incidentId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("category", "category", Out::Code, false),
+    o("severity", "severity", Out::Code, false),
+    o("incident_status", "status", Out::Code, false),
+    o("resolved_at", "resolvedAt", Out::Time, true),
+];
+const CL_KEY_COUNT: &[OutField] = &[
+    o("key_id", "keyId", Out::Str, true),
+    o("subscriptions", "subscriptions", Out::Int, false),
+];
+const CL_RESEALED: &[OutField] = &[
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("keys", "keys", Out::ObjList(CL_KEY_COUNT), false),
+];
+
+#[allow(clippy::too_many_arguments)]
+const fn cl(
+    id: &'static str,
+    source: &'static str,
+    version: Option<i64>,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    resource: &'static [OutField],
+    body_schema: &'static str,
+    result_schema: &'static str,
+) -> OwnerCommand {
+    OwnerCommand {
+        id,
+        owner: Owner::Calling,
+        source,
+        version,
+        reason: Reason::Ledger,
         body,
         statuses,
         resource,
@@ -1627,6 +1758,216 @@ pub const COMMANDS: &[OwnerCommand] = &[
         MSG_DELETION,
         "MessagingDeletionRequestCreateRequest",
         "MessagingDeletionRequestCreateResult",
+    ),
+    // Calling.
+    cl(
+        "calling.abuse-report.resolve",
+        "POST /internal/v1/operator/abuse-reports/{report_id}/resolve",
+        Some(1),
+        &[
+            CL_TENANT,
+            b(
+                "report_state",
+                "status",
+                In::Enum(&["REVIEWED", "DISMISSED", "OPEN"]),
+                true,
+            ),
+        ],
+        &["REVIEWED", "DISMISSED", "OPEN"],
+        CL_ABUSE_REPORT,
+        "CallingAbuseReportResolveRequest",
+        "CallingAbuseReportResolveResult",
+    ),
+    cl(
+        "calling.block.release",
+        "POST /internal/v1/operator/blocks/{block_id}/release",
+        Some(1),
+        &[CL_TENANT],
+        &["RELEASED"],
+        CL_BLOCK,
+        "CallingBlockReleaseRequest",
+        "CallingBlockReleaseResult",
+    ),
+    cl(
+        "calling.limits.change",
+        "POST /internal/v1/operator/limits",
+        // The level's limits version (tenant, or the application when named), 0 when
+        // not configured.
+        Some(0),
+        &[
+            CL_TENANT,
+            bt("application_id", "applicationId", In::NullableUuid),
+            b(
+                "requests_per_minute",
+                "requestsPerMinute",
+                In::NullableInt(1, MAX_MINOR),
+                false,
+            ),
+            b(
+                "max_concurrent_communications",
+                "maxConcurrentCommunications",
+                In::NullableInt(0, MAX_MINOR),
+                false,
+            ),
+        ],
+        &["CONFIGURED"],
+        CL_LIMITS,
+        "CallingLimitsChangeRequest",
+        "CallingLimitsChangeResult",
+    ),
+    cl(
+        "calling.routing.change",
+        "POST /internal/v1/operator/routing-policies/{environment_id}",
+        // The environment's routing policy revision, 0 when none is stored.
+        Some(0),
+        &[
+            CL_TENANT,
+            p("environment_id", In::Uuid),
+            b("policy", "policy", In::Object, true),
+        ],
+        &["CONFIGURED"],
+        CL_ROUTING,
+        "CallingRoutingChangeRequest",
+        "CallingRoutingChangeResult",
+    ),
+    cl(
+        "calling.enterprise-features.change",
+        "POST /internal/v1/operator/enterprise-policies/{environment_id}/capabilities",
+        // The baseline policy's version, 0 when there is none.
+        Some(0),
+        &[
+            CL_TENANT,
+            p("environment_id", In::Uuid),
+            b(
+                "capabilities",
+                "capabilities",
+                In::EnumList(
+                    &[
+                        "MANAGE_ROUTING",
+                        "MANAGE_PUBLIC_FORWARDING",
+                        "MANAGE_VOICEMAIL",
+                        "MANAGE_RECORDING",
+                    ],
+                    4,
+                ),
+                true,
+            ),
+        ],
+        &["CONFIGURED"],
+        CL_ENTERPRISE,
+        "CallingEnterpriseFeaturesChangeRequest",
+        "CallingEnterpriseFeaturesChangeResult",
+    ),
+    cl(
+        "calling.spend-limits.change",
+        "POST /internal/v1/operator/spend-policies/{environment_id}",
+        // The environment's spend policy revision, 0 when there is none.
+        Some(0),
+        &[
+            CL_TENANT,
+            p("environment_id", In::Uuid),
+            b("currency", "currency", In::Str(3, 3), true),
+            b("leg_allowance_minor", "legAllowanceMinor", In::Int(0, MAX_MINOR), true),
+            b("max_leg_seconds", "maxLegSeconds", In::Int(1, MAX_MINOR), true),
+            b("daily_limit_minor", "dailyLimitMinor", In::Int(0, MAX_MINOR), true),
+            b("monthly_limit_minor", "monthlyLimitMinor", In::Int(0, MAX_MINOR), true),
+            b("max_concurrent_legs", "maxConcurrentLegs", In::Int(1, MAX_MINOR), true),
+            b(
+                "max_originations_per_minute",
+                "maxOriginationsPerMinute",
+                In::Int(1, MAX_MINOR),
+                true,
+            ),
+            b("max_per_party_per_hour", "maxPerPartyPerHour", In::Int(1, MAX_MINOR), true),
+            b(
+                "max_per_principal_per_hour",
+                "maxPerPrincipalPerHour",
+                In::NullableInt(1, MAX_MINOR),
+                false,
+            ),
+            b(
+                "max_per_service_account_per_hour",
+                "maxPerServiceAccountPerHour",
+                In::NullableInt(1, MAX_MINOR),
+                false,
+            ),
+            b(
+                "max_per_context_per_hour",
+                "maxPerContextPerHour",
+                In::NullableInt(1, MAX_MINOR),
+                false,
+            ),
+            b("enabled", "enabled", In::Bool, true),
+        ],
+        &["ENABLED", "DISABLED"],
+        CL_SPEND,
+        "CallingSpendLimitsChangeRequest",
+        "CallingSpendLimitsChangeResult",
+    ),
+    cl(
+        "calling.recording.delete",
+        "POST /internal/v1/operator/recordings/{recording_id}/delete",
+        // The recording's version (calling.recordings.list).
+        Some(1),
+        &[CL_TENANT],
+        &["DELETING"],
+        CL_RECORDING,
+        "CallingRecordingDeleteRequest",
+        "CallingRecordingDeleteResult",
+    ),
+    cl(
+        "calling.retention-hold.place",
+        "POST /internal/v1/operator/retention-holds",
+        None,
+        &[
+            CL_TENANT,
+            b("application_id", "applicationId", In::Uuid, true),
+            b("environment_id", "environmentId", In::Uuid, true),
+            b("data_class", "dataClass", In::Str(1, 64), true),
+            b("resource_id", "resourceId", In::NullableUuid, false),
+            b(
+                "reason",
+                "reasonCode",
+                In::Enum(&["POLICY_REVIEW", "DISPUTE", "SECURITY_INVESTIGATION", "OTHER"]),
+                true,
+            ),
+        ],
+        &["ACTIVE"],
+        CL_RETENTION_HOLD,
+        "CallingRetentionHoldPlaceRequest",
+        "CallingRetentionHoldResult",
+    ),
+    cl(
+        "calling.retention-hold.release",
+        "POST /internal/v1/operator/retention-holds/{hold_id}/release",
+        None,
+        &[CL_TENANT],
+        &["RELEASED"],
+        CL_RETENTION_HOLD,
+        "CallingRetentionHoldReleaseRequest",
+        "CallingRetentionHoldResult",
+    ),
+    cl(
+        "calling.incident.record",
+        "POST /internal/v1/operator/incidents/{incident_id}/resolve",
+        None,
+        &[CL_TENANT, p("incident_id", In::Uuid)],
+        &["RESOLVED"],
+        CL_INCIDENT,
+        "CallingIncidentRecordRequest",
+        "CallingIncidentRecordResult",
+    ),
+    cl(
+        "calling.webhook-key.reseal",
+        // Reseals every webhook subscription of the tenant under the current sealing
+        // key; `{key_id}` names the key HQ reviewed and is kept in the ledger target.
+        "POST /internal/v1/operator/webhook-keys/reseal",
+        None,
+        &[CL_TENANT],
+        &["RESEALED"],
+        CL_RESEALED,
+        "CallingWebhookKeyResealRequest",
+        "CallingWebhookKeyResealResult",
     ),
 ];
 

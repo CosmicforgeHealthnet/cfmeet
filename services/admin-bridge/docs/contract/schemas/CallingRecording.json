@@ -12,7 +12,8 @@
     "size_bytes",
     "retention_until",
     "created_at",
-    "deleted_at"
+    "deleted_at",
+    "version"
   ],
   "properties": {
     "recording_id": {
@@ -66,6 +67,10 @@
         "null"
       ],
       "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
     }
   }
 }

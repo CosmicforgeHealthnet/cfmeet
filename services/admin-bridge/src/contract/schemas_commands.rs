@@ -12,6 +12,9 @@ fn in_schema(kind: In) -> Value {
         In::Enum(values) => json!({"enum": values}),
         In::Bool => json!({"type": "boolean"}),
         In::Int(min, max) => json!({"type": "integer", "minimum": min, "maximum": max}),
+        In::NullableInt(min, max) => {
+            json!({"type": ["integer", "null"], "minimum": min, "maximum": max})
+        }
         In::Uuid => json!({"type": "string", "format": "uuid"}),
         In::NullableUuid => json!({"type": ["string", "null"], "format": "uuid"}),
         In::Code => json!({"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}),

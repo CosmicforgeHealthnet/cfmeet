@@ -52,7 +52,7 @@ fn sample_in(kind: In) -> Value {
     match kind {
         In::Enum(values) => json!(values[0]),
         In::Bool => json!(true),
-        In::Int(min, _) => json!(min),
+        In::Int(min, _) | In::NullableInt(min, _) => json!(min),
         In::Uuid | In::NullableUuid => json!(ID),
         In::Code => json!("ABUSE"),
         In::Str(min, _) | In::NullableStr(min, _) => json!("x".repeat(min.max(3))),
