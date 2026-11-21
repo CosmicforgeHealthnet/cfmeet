@@ -371,6 +371,9 @@ pub async fn review_report(
     if inserted == 0 {
         return Err(Error::Version);
     }
+    // ADR 0068 A7: the reviewed report (version 2) to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(&s, &txn, input.report_id, Some(&input.decision), 2)
+        .await?;
     if input.hold_target {
         let hold_reason = if input.reason == "SECURITY" || input.reason == "LEGAL" {
             input.reason.clone()

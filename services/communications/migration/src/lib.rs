@@ -497,6 +497,65 @@ pub async fn admin_operations_ready<C: ConnectionTrait>(db: &C) -> Result<bool, 
         .await?;
     Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == AdminOperations.name())
 }
+/// ADR 0068 phase A7: the outbox of owner events to the admin bridge
+/// (`communication_admin_bridge_events`). An ELEVENTH separate history: the previous image
+/// checks the admin-operations history has exactly its one migration, so appending there
+/// would stop it after a rollback. Never merge them.
+pub struct AdminBridgeEventsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminBridgeEventsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(AdminBridgeEvents)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_admin_bridge_events_seaql_migrations").into_iden()
+    }
+}
+struct AdminBridgeEvents;
+impl MigrationName for AdminBridgeEvents {
+    fn name(&self) -> &str {
+        "m20261121_000001_admin_bridge_events"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AdminBridgeEvents {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/012_admin_bridge_events.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the admin-bridge-events history is fully applied.
+pub async fn admin_bridge_events_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_admin_bridge_events_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_admin_bridge_events_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == AdminBridgeEvents.name())
+}
 /// Apply the foundation history, then the unified, device-session, timeline-realtime,
 /// notification-publications, preference-authority and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
@@ -509,7 +568,8 @@ pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Resu
     GroupInvitationPolicyMigrator::up(db, None).await?;
     ShortIdsMigrator::up(db, None).await?;
     ContactsAuditMigrator::up(db, None).await?;
-    AdminOperationsMigrator::up(db, None).await
+    AdminOperationsMigrator::up(db, None).await?;
+    AdminBridgeEventsMigrator::up(db, None).await
 }
 /// Everything this image needs: every earlier history and the N10 preference-authority
 /// one.
@@ -519,6 +579,7 @@ pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
         || !short_ids_ready(db).await?
         || !contacts_audit_ready(db).await?
         || !admin_operations_ready(db).await?
+        || !admin_bridge_events_ready(db).await?
     {
         return Ok(false);
     }

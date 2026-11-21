@@ -539,6 +539,7 @@ impl State {
         ] {execute(&self.store.db,sql,vec![]).await?;}
         // Roadmap N7: expire overdue notification publications, purge settled ones.
         crate::notification_publications::maintain(self, 1000).await?;
+        crate::admin_events::maintain(self, 1000).await?;
         let txn = self.store.begin().await?;
         let pairs:Vec<Value>=rows(&txn,"SELECT to_jsonb(c) doc FROM communication_connections c WHERE state='REQUEST_PENDING' AND EXISTS(SELECT 1 FROM communication_contact_requests r WHERE r.connection_id=c.id AND r.state='PENDING' AND r.expires_at<=now()) ORDER BY c.id LIMIT 100 FOR UPDATE OF c SKIP LOCKED",vec![]).await?;
         for pair in pairs {

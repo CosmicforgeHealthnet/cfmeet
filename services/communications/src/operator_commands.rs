@@ -569,6 +569,15 @@ pub async fn review_report(
         .await?;
     let after = report_state(&txn, report_id, false).await?;
     let (status, version, resource) = report_answer(&after);
+    // ADR 0068 A7: the reviewed report to the admin bridge's event feed (when configured).
+    crate::admin_events::enqueue_report(
+        &s,
+        &txn,
+        report_id,
+        after["decision"].as_str(),
+        version.unwrap_or(2),
+    )
+    .await?;
     if !record(
         &txn, &bridge, command, report_id, &status, version, &resource,
     )

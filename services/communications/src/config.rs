@@ -8,6 +8,7 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL`, `CF_MEETING_SERVICE_BASE_URL` | yes | Platform Access and the Account (Meeting Service) |
 //! | `CF_CALLING_BASE_URL`, `CF_MESSAGING_BASE_URL` | no | Calling and Messaging owners; unset: their features answer `DEPENDENCY_NOT_CONFIGURED` |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service's I1 (`notifications-event.publish`, audience `cfmeet.notifications`; roadmap N7). Set: contact-request notifications are written to `communication_notification_publications` and relayed ([`crate::notification_publications`]). Unset: nothing is written or sent (the Hub behaves exactly as before) |
+//! | `CF_ADMIN_BRIDGE_BASE_URL` | no | the HQ admin bridge's private event listener (`POST /internal/v1/hq-bridge/events`, audience `cfmeet.admin-bridge`, `hq-bridge-events.publish`; ADR 0068 A7). Set: `abuse.report.changed.v1` events of profile reports are written to `communication_admin_bridge_events` and relayed ([`crate::admin_events`]). Unset: nothing is written or sent |
 //! | `COMMUNICATIONS_INVITE_DIGEST_KEY_FILE` | yes | 32-byte hex invitation digest key |
 //! | `CFMEET_PUBLIC_APP_URL` | yes | public application URL (invitations) |
 //! | `DATABASE_URL` | yes | the Hub's own PostgreSQL |
@@ -37,6 +38,9 @@ pub struct Config {
     /// Contact-request publications (N7) are written and relayed: in production exactly when
     /// `notifications_configured` (the same `CF_NOTIFICATIONS_BASE_URL`).
     pub notifications_publications: bool,
+    /// `CF_ADMIN_BRIDGE_BASE_URL` is set: profile report events are written and relayed to
+    /// the admin bridge (ADR 0068 A7). Unset (the default): nothing is stored or sent.
+    pub admin_bridge_events: bool,
 }
 fn required(k: &str) -> Result<String, String> {
     std::env::var(k)
@@ -89,6 +93,9 @@ impl Config {
                 ServiceId::notifications(),
                 false,
             ),
+            // ADR 0068 A7: the admin bridge's private event listener; unset, no owner
+            // events are stored or published.
+            ("CF_ADMIN_BRIDGE_BASE_URL", ServiceId::admin_bridge(), false),
         ] {
             match std::env::var(key).ok().filter(|v| !v.is_empty()) {
                 Some(url) => targets
@@ -101,6 +108,7 @@ impl Config {
         let calling_configured = targets.contains(&ServiceId::calling());
         let messaging_configured = targets.contains(&ServiceId::messaging());
         let notifications_configured = targets.contains(&ServiceId::notifications());
+        let admin_bridge_events = targets.contains(&ServiceId::admin_bridge());
         let client = Arc::new(
             InternalServiceClient::new(signer, targets, Duration::from_secs(5))
                 .map_err(|_| "invalid internal client")?,
@@ -146,6 +154,7 @@ impl Config {
             messaging_configured,
             notifications_configured,
             notifications_publications: notifications_configured,
+            admin_bridge_events,
         })
     }
 }
