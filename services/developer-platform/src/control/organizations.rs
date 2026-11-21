@@ -18,7 +18,9 @@ use uuid::Uuid;
 
 use super::{
     activity::{self, Event},
-    authorize, delegate, display_name, email, id_of,
+    authorize,
+    bridge_command::{self, BridgeCommand, Subject},
+    delegate, display_name, email, id_of,
     pagination::Page,
     stmt, Caller, Principal,
 };
@@ -322,6 +324,13 @@ async fn record_created(
             now.into(),
         ],
     ))
+    .await?;
+    // ADR 0068 A7: a new partner workspace.
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
     .await?;
     let member_id = Uuid::new_v4();
     txn.execute(stmt(
@@ -648,6 +657,12 @@ pub async fn update(
         ))
         .await?
         .ok_or(ApiError(ErrorCode::VersionConflict))?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
     let pending_name = updated
         .try_get::<bool>("", "pending")?
         .then(|| updated.try_get::<String>("", "display_name"))
@@ -714,6 +729,12 @@ pub async fn close(state: &AppState, caller: &Caller, tenant_id: Uuid) -> Result
     if n != 1 {
         return Err(ApiError(ErrorCode::InvalidState));
     }
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
     activity::record(
         &txn,
         caller,
@@ -734,6 +755,7 @@ pub async fn close(state: &AppState, caller: &Caller, tenant_id: Uuid) -> Result
 /// Operator lifecycle transition (restrict / suspend / reactivate / close). Machine
 /// access is withdrawn in Platform Access BEFORE the state records a suspension, and
 /// restored only AFTER it records reactivation (fail closed both ways).
+#[allow(clippy::too_many_arguments)]
 pub async fn operator_set_state(
     state: &AppState,
     operator: &str,
@@ -741,7 +763,23 @@ pub async fn operator_set_state(
     tenant_id: Uuid,
     to: OrganizationState,
     reason: &str,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
+    const COMMAND: &str = "partners.workspace.state.change";
+    if let Some(b) = bridge {
+        if let Some((st, v)) =
+            bridge_command::prior(&state.db, b, COMMAND, Subject::Organization, tenant_id).await?
+        {
+            return Ok(bridge_command::answer(
+                &st,
+                v,
+                bridge_resource(&state.db, tenant_id).await?,
+            ));
+        }
+        // Checked before Platform Access is asked to withdraw machine access; checked
+        // again under the row lock.
+        bridge_command::check_version(&state.db, b, Subject::Organization, tenant_id).await?;
+    }
     let from = super::organization_state(&state.db, tenant_id)
         .await?
         .ok_or(ApiError(ErrorCode::NotFound))?;
@@ -765,10 +803,36 @@ pub async fn operator_set_state(
     }
     let now = Utc::now();
     let txn = state.db.begin().await?;
+    if let Some(b) = bridge {
+        if let Err(e) =
+            bridge_command::lock_version(&txn, b, Subject::Organization, tenant_id).await
+        {
+            drop(txn);
+            if withdraw {
+                // The workspace changed concurrently: give machine access back unless its
+                // current state withholds it (best effort; the refusal stands).
+                let current = super::organization_state(&state.db, tenant_id)
+                    .await
+                    .ok()
+                    .flatten();
+                if !current.is_some_and(|c| c.suspends_machine_access()) {
+                    let _ = super::delegate_with(
+                        state,
+                        &request.correlation_id,
+                        DelegationCall::SetTenantStatus {
+                            actor: DelegationActor::Operator(command),
+                            tenant_id,
+                            suspended: false,
+                        },
+                    )
+                    .await;
+                }
+            }
+            return Err(e);
+        }
+    }
     txn.execute(stmt(
-        "UPDATE devplat_organizations SET state = $2, state_reason = $3, \
-             closed_at = CASE WHEN $2 = 'CLOSED' THEN $4 ELSE NULL END, \
-             updated_at = $4, version = version + 1 WHERE tenant_id = $1",
+        "UPDATE devplat_organizations SET state = $2, state_reason = $3,              closed_at = CASE WHEN $2 = 'CLOSED' THEN $4 ELSE NULL END,              updated_at = $4, version = version + 1 WHERE tenant_id = $1",
         vec![
             tenant_id.into(),
             to.as_str().into(),
@@ -776,6 +840,12 @@ pub async fn operator_set_state(
             now.into(),
         ],
     ))
+    .await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
     .await?;
     activity::record_operator(
         &txn,
@@ -792,9 +862,20 @@ pub async fn operator_set_state(
     )
     .await?;
     let v = view(&txn, tenant_id, None).await?;
+    if let Some(b) = bridge {
+        bridge_command::record(
+            &txn,
+            b,
+            COMMAND,
+            Subject::Organization,
+            tenant_id,
+            tenant_id,
+        )
+        .await?;
+    }
     txn.commit().await?;
     if restore {
-        super::delegate_with(
+        let restored = super::delegate_with(
             state,
             &request.correlation_id,
             DelegationCall::SetTenantStatus {
@@ -803,7 +884,36 @@ pub async fn operator_set_state(
                 suspended: false,
             },
         )
-        .await?;
+        .await;
+        if let Err(e) = restored {
+            // The state change is committed: the bridge never gets a refusal for it.
+            if bridge.is_some() && e.0.status().is_client_error() {
+                return Err(ApiError(ErrorCode::ServiceUnavailable));
+            }
+            return Err(e);
+        }
+    }
+    if bridge.is_some() {
+        return Ok(bridge_command::answer(
+            to.as_str(),
+            v["version"].as_i64(),
+            bridge_resource(&state.db, tenant_id).await?,
+        ));
     }
     Ok(v)
+}
+
+/// The workspace as the admin bridge's command answer shows it (ids, state, timestamps).
+pub async fn bridge_resource<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+) -> Result<Value, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT jsonb_build_object('organizationId', tenant_id, 'state', state,                     'stateReason', state_reason, 'updatedAt', updated_at, 'closedAt', closed_at) AS v              FROM devplat_organizations WHERE tenant_id = $1",
+            vec![tenant_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    Ok(row.try_get("", "v")?)
 }

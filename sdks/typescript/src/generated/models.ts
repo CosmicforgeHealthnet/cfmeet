@@ -2780,6 +2780,22 @@ export namespace DeveloperPlatform {
     updatedAt: string | null;
     limits: QuotaRestrictionValues;
   };
+  /** ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret. */
+  export type CredentialDelivery = {
+    deliveryRef: Uuid;
+    deliveryChannel: "CONSOLE_REVEAL_ONCE";
+    state: "PENDING";
+    environmentId: Uuid;
+    credentialId: Uuid;
+    publicId: string;
+    serviceAccountId: Uuid;
+    createdAt: string;
+    expiresAt: string;
+  };
+  export type CredentialDeliveryList = {
+    items: Array<CredentialDelivery>;
+    nextCursor: null;
+  };
   export type CredentialEffectiveState = "ACTIVE" | "ROTATION_OVERLAP" | "NOT_YET_VALID" | "EXPIRED" | "SUPERSEDED" | "REVOKED" | "SUSPENDED";
   export type CredentialList = {
     items: Array<Credential>;
@@ -3733,6 +3749,11 @@ export namespace DeveloperPlatform {
       params: {};
       response: CommercialPlanList;
     };
+    /** GET /v1/environments/{environmentId}/credential-deliveries — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listCredentialDeliveries: {
+      params: { path: { environmentId: Uuid } };
+      response: CredentialDeliveryList;
+    };
     /** GET /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listCredentials: {
       params: { path: { environmentId: Uuid; serviceAccountId: Uuid }; query?: { limit?: number; cursor?: string } };
@@ -3938,6 +3959,11 @@ export namespace DeveloperPlatform {
     resumeServiceAccount: {
       params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
       response: ServiceAccount;
+    };
+    /** POST /v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal; auth DEVELOPER_SESSION; retry NO_RETRY */
+    revealCredentialDelivery: {
+      params: { path: { environmentId: Uuid; deliveryRef: Uuid } };
+      response: IssuedCredential;
     };
     /** POST /v1/environments/{environmentId}/credentials/{credentialId}/revoke — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     revokeCredential: {

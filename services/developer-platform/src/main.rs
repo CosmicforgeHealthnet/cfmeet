@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 "notificationsSealingKeyConfigured": config.notifications_sealing_key.is_some(),
                 "notificationServiceConfigured": settings.has_target(cf_service_auth::services::NOTIFICATIONS),
+                "adminBridgeEventsConfigured": settings.has_target(cf_service_auth::services::ADMIN_BRIDGE),
                 "webhookMigrationTransferKeyConfigured": config.webhooks.transfer_key.is_some(),
             })
         );
@@ -172,6 +173,25 @@ async fn main() -> anyhow::Result<()> {
                  CF_NOTIFICATIONS_BASE_URL: production-access decisions are not published"
             );
         }
+    }
+    // ADR 0068 A4: secrets produced by admin bridge commands are delivered by the
+    // Developer Platform itself (sealed to the Notification Service), never returned to HQ.
+    match (
+        notifications_configured,
+        config.notifications_sealing_key.clone(),
+    ) {
+        (true, Some(sealing_key)) => {
+            state = state.with_owner_delivery(
+                developer_platform::control::owner_delivery::OwnerDelivery { sealing_key },
+            );
+        }
+        _ => tracing::info!(
+            "owner-delivered secrets need CF_NOTIFICATIONS_BASE_URL and CF_NOTIFICATIONS_SEALING_KEY:              the admin bridge's first-party workspace registration is unavailable"
+        ),
+    }
+    if settings.has_target(cf_service_auth::services::ADMIN_BRIDGE) {
+        tracing::info!("owner events to the admin bridge are recorded (CF_ADMIN_BRIDGE_BASE_URL)");
+        state = state.with_bridge_events(developer_platform::bridge_events::BridgeEvents::ON);
     }
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;

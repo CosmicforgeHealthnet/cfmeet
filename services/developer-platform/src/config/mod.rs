@@ -36,7 +36,7 @@
 //! | `DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED` | no | feature flag (default `false`): the worker projects Platform Access `APP_GRANT` changes and event ingestion routes install-target events to installed apps; off, nothing changes |
 //! | `DEVELOPER_PLATFORM_APP_REVIEWERS` | no | comma-separated operator names allowed to review / approve / reject / publish apps (empty: no decision possible) |
 //! | `DEVELOPER_PLATFORM_OAUTH_ISSUER`, `DEVELOPER_PLATFORM_OAUTH_AUTHORIZATION_ENDPOINT` | no | https URLs advertised by `/v1/oauth/metadata` (defaults `https://api.cfmeet.com`, `https://cfmeet.com/oauth/authorize`) |
-//! | `CF_NOTIFICATIONS_SEALING_KEY` | no | the Notification Service's public HPKE key `<kid>:<base64url>` that push secrets are sealed to on receipt |
+//! | `CF_NOTIFICATIONS_SEALING_KEY` | no | the Notification Service's public HPKE key `<kid>:<base64url>` that push secrets are sealed to on receipt, and (ADR 0068 A4, with `CF_NOTIFICATIONS_BASE_URL`) the owner-delivered secrets of admin bridge commands (the first-party workspace owner invitation, sent only to the invited address) |
 //! | `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED` | no | feature flag (default `false`): enforce the workspace / project creation caps below (409 `LIMIT_EXCEEDED`) |
 //! | `DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER` | no | workspaces (not CLOSED) a CF Meet account may OWN (0 = unlimited, max 1000, default 3) |
 //! | `DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE` | no | projects (not ARCHIVED) per workspace (0 = unlimited, max 10000, default 10) |

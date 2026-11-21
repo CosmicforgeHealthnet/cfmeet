@@ -597,6 +597,13 @@ pub async fn accept(
             vec![tenant_id.into(), now.into()],
         ))
         .await?;
+        // ADR 0068 A7: the first-party workspace is now ACTIVE.
+        crate::bridge_events::record(
+            &txn,
+            state.bridge_events,
+            crate::bridge_events::Source::Workspace(tenant_id),
+        )
+        .await?;
     }
     activity::record(
         &txn,

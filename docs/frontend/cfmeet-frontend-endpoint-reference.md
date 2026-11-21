@@ -18,8 +18,8 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.9.0 | 76 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.33.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
-| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
-| **Total** | | | **745** |
+| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
+| **Total** | | | **747** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -1237,7 +1237,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 
 ## Developer Portal (Developer Platform)
 
-Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
+Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
 
 ### Activity
 
@@ -1283,6 +1283,8 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/credential-deliveries` | account session (developer bridge); platform credential (server-side only) | List API keys waiting for their one reveal | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listCredentialDeliveries` |
+| POST | `/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal` | account session (developer bridge) | Reveal an owner-delivered API key once | 200, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#revealCredentialDelivery` |
 | GET | `/v1/environments/{environmentId}/credentials/{credentialId}` | account session (developer bridge); platform credential (server-side only) | Read one credential's metadata | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getCredential` |
 | PUT | `/v1/environments/{environmentId}/credentials/{credentialId}/limits` | account session (developer bridge); platform credential (server-side only) | Restrict a credential's API quota (only ever stricter) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#putCredentialLimits` |
 | POST | `/v1/environments/{environmentId}/credentials/{credentialId}/resume` | account session (developer bridge); platform credential (server-side only) | Resume a suspended credential | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#resumeCredential` |

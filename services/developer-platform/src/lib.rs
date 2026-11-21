@@ -11,11 +11,14 @@
 //! * [`webhooks`]: Section 53 central customer webhooks (event ingestion, subscriptions,
 //!   signed SSRF-safe delivery through the shared `cf_webhooks` primitives).
 //! * [`worker`]: the Developer Platform's own background loop.
+//! * [`bridge_events`]: owner events to the HQ admin bridge (ADR 0068 A7, off unless
+//!   `CF_ADMIN_BRIDGE_BASE_URL` is set).
 //!
 //! It owns no communications data, no E2EE material and no product-specific endpoint, and
 //! never reads another service's database.
 
 pub mod apps;
+pub mod bridge_events;
 pub mod config;
 pub mod control;
 pub mod db;
@@ -25,6 +28,7 @@ pub mod http;
 pub mod ledger;
 pub mod notification_publications;
 pub mod platform_access;
+pub mod pricing;
 pub mod push_providers;
 pub mod reference_reconciliation;
 pub mod retention;

@@ -1033,9 +1033,15 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::DeveloperEntitlementRead,
         name: "developer-entitlement.read",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::API_GATEWAY],
+        // ADR 0068 A6: the Meeting Service and Messaging read a CF Meet user plan holder's
+        // effective plan limits where the usage happens (ids and limits only).
+        grantable_to: &[
+            services::API_GATEWAY,
+            services::MEETING_SERVICE,
+            services::MESSAGING,
+        ],
         sensitive: false,
-        description: "Read the effective platform entitlements (API request quotas) of an application environment",
+        description: "Read the effective platform entitlements (API request quotas) of an application environment, and the effective CF Meet plan limits of a user or organization (plan assignment and overrides)",
     },
     PermissionDefinition {
         permission: InternalPermission::DeveloperUsageRecord,
@@ -1991,6 +1997,8 @@ mod tests {
         "platform-principal.resolve",
         "platform-identity.read",
         "sms-bridge.submit",
+        // ADR 0068 A6: the effective CF Meet plan limits of a holder.
+        "developer-entitlement.read",
         "developer-event.publish",
         "security-scan.submit",
         "organization.read",

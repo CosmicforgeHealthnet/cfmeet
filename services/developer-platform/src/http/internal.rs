@@ -4,6 +4,7 @@
 //! |---|---|---|
 //! | `GET /internal/v1/gateway/context` | `developer-request.forward` (API Gateway only) | signed delegated context, re-validated by Platform Access |
 //! | `GET /internal/v1/entitlements/environments/{id}` | `developer-entitlement.read` | — |
+//! | `GET /internal/v1/plan-limits/{holderKind}/{holderId}` | `developer-entitlement.read` (API Gateway, Meeting Service, Messaging) | — |
 //! | `POST /internal/v1/usage/api-requests` | `developer-usage.record` | idempotent batch |
 //! | `GET /internal/v1/usage/api-requests/{environmentId}/{day}` | `developer-usage.record` | — |
 //! | `POST /internal/v1/platform/events` | `developer-event.publish` (producers; the envelope's producer is the caller) | Section 53, behind `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED` |
@@ -38,6 +39,11 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/entitlements/environments/:environment_id",
             get(environment_entitlements),
+        )
+        // ADR 0068 A6: a CF Meet plan holder's effective limits (Meeting Service, Messaging).
+        .route(
+            "/plan-limits/:holder_kind/:holder_id",
+            get(effective_plan_limits),
         )
         .route("/usage/api-requests", axum::routing::post(record_usage))
         .route("/usage/api-requests/:environment_id/:day", get(daily_usage))
@@ -153,6 +159,29 @@ struct EntitlementQuery {
     service_account_id: Option<Uuid>,
     #[serde(rename = "credentialId")]
     credential_id: Option<Uuid>,
+}
+
+/// `GET /internal/v1/plan-limits/{holderKind}/{holderId}` — ADR 0068 A6: the effective
+/// CF Meet plan limits of a user (`USER`) or business organization (`ORGANIZATION`) for
+/// the services that enforce them where the usage happens. Permission
+/// `developer-entitlement.read`; ids, codes and limits only; `cacheSeconds` bounds the
+/// caller's cache.
+async fn effective_plan_limits(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Path((kind, holder)): axum::extract::Path<(String, Uuid)>,
+) -> Result<axum::response::Response, ApiError> {
+    use axum::response::IntoResponse;
+    caller.require_permission(InternalPermission::DeveloperEntitlementRead)?;
+    let v = crate::pricing::effective_limits(&state.db, &kind, holder, Utc::now()).await?;
+    Ok((
+        [(
+            axum::http::header::CACHE_CONTROL,
+            format!("private, max-age={}", crate::pricing::LIMITS_CACHE_SECONDS),
+        )],
+        Json(v),
+    )
+        .into_response())
 }
 
 /// `GET /internal/v1/entitlements/environments/{id}` — effective platform entitlements

@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use cf_service_auth::InternalPermission;
-use sea_orm::TransactionTrait;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{
     control::{
+        bridge_command::{self, BridgeCommand, Expect, Subject},
         commercial, operator,
         operator::{RegisterFirstParty, SetState},
         organizations,
@@ -100,14 +101,93 @@ pub fn routes() -> Router<AppState> {
             get(cost_center_usage),
         )
         // Section 57: support / incident path.
+        // ADR 0068 A4: the admin bridge sends every command as POST.
         .route(
             "/operator/organizations/:organization_id/support-profile",
-            put(set_support_profile),
+            put(set_support_profile).post(set_support_profile),
         )
         .route(
             "/operator/organizations/:organization_id/incidents",
             post(record_incident),
         )
+        // ADR 0068 A4: admin bridge only.
+        .route(
+            "/operator/organizations/:organization_id/push-providers/:push_provider_id/disable",
+            post(disable_push_key),
+        )
+        .route(
+            "/operator/organizations/:organization_id/webhook-deliveries/:delivery_id/retry",
+            post(retry_webhook_delivery),
+        )
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DisableBody {
+    expected_version: Option<i64>,
+    #[serde(default)]
+    reason_code: Option<String>,
+}
+
+/// `POST …/organizations/{id}/push-providers/{pushProviderId}/disable` (admin bridge only,
+/// R3: HQ's approver required).
+async fn disable_push_key(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((id, push_key)): Path<(Uuid, Uuid)>,
+    Json(body): Json<DisableBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    let bridge = BridgeCommand::required(
+        &caller,
+        &headers,
+        body.expected_version,
+        true,
+        Expect::Version,
+    )?;
+    Ok(Json(
+        crate::control::push_credentials::operator_disable(
+            &s,
+            &op,
+            &ctx,
+            id,
+            push_key,
+            body.reason_code,
+            &bridge,
+        )
+        .await?,
+    ))
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyBody {}
+
+/// `POST …/organizations/{id}/webhook-deliveries/{deliveryId}/retry` (admin bridge only,
+/// R2; unversioned: no `expectedVersion`).
+async fn retry_webhook_delivery(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((id, delivery)): Path<(Uuid, Uuid)>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    // No body or `{}`; anything else (an expectedVersion included) is refused.
+    if !body.iter().all(u8::is_ascii_whitespace) {
+        serde_json::from_slice::<EmptyBody>(&body)
+            .map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    }
+    let bridge = BridgeCommand::required(&caller, &headers, None, false, Expect::Nothing)?;
+    let svc = s
+        .webhooks
+        .as_ref()
+        .filter(|w| w.settings().enabled)
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    Ok(Json(
+        svc.operator_retry(&op, &ctx, id, delivery, &bridge).await?,
+    ))
 }
 
 async fn set_override(
@@ -163,7 +243,8 @@ async fn list_production_requests(
 ) -> Result<Json<Value>, ApiError> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
     Ok(Json(
-        crate::control::production::operator_list(&s.db, q.state.as_deref()).await?,
+        crate::control::production::operator_list(&s.db, s.bridge_events, q.state.as_deref())
+            .await?,
     ))
 }
 
@@ -270,6 +351,24 @@ async fn rebuild_rollups(
     let (op, ctx) = operator_of(&caller, &headers)?;
     let from = crate::control::usage::parse_day(&b.from)?;
     let to = crate::control::usage::parse_day(&b.to)?;
+    // ADR 0068 A4 (`partners.usage.reprocess`, R2): from the admin bridge the key is
+    // required; the rollups are unversioned (no expectedVersion).
+    let bridge = BridgeCommand::of_with(&caller, &headers, None, false, Expect::Nothing)?;
+    const REPROCESS: &str = "partners.usage.reprocess";
+    let subject = b.environment_id.unwrap_or_else(Uuid::nil);
+    let resource = |out: Option<&Value>| {
+        json!({
+            "environmentId": b.environment_id, "from": b.from, "to": b.to,
+            "removed": out.map(|o| o["removed"].clone()), "rebuilt": out.map(|o| o["rebuilt"].clone()),
+        })
+    };
+    if let Some(cmd) = &bridge {
+        if let Some((st, v)) =
+            bridge_command::prior(&s.db, cmd, REPROCESS, Subject::UsageRollups, subject).await?
+        {
+            return Ok(Json(bridge_command::answer(&st, v, resource(None))));
+        }
+    }
     let txn = s.db.begin().await?;
     let out = crate::ledger::rebuild_rollups(&txn, from, to, b.environment_id).await?;
     operator::audit_command(
@@ -283,6 +382,38 @@ async fn rebuild_rollups(
         json!({ "from": b.from, "to": b.to, "environmentId": b.environment_id }),
     )
     .await?;
+    if let Some(cmd) = &bridge {
+        let tenant = match b.environment_id {
+            Some(e) => txn
+                .query_one(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT tenant_id FROM devplat_environment_profiles WHERE environment_id = $1",
+                    vec![e.into()],
+                ))
+                .await?
+                .map(|r| r.try_get::<Uuid>("", "tenant_id"))
+                .transpose()?
+                .unwrap_or_else(Uuid::nil),
+            None => Uuid::nil(),
+        };
+        bridge_command::record_result(
+            &txn,
+            cmd,
+            REPROCESS,
+            Subject::UsageRollups,
+            subject,
+            tenant,
+            "REPROCESSED",
+            None,
+        )
+        .await?;
+        txn.commit().await?;
+        return Ok(Json(bridge_command::answer(
+            "REPROCESSED",
+            None,
+            resource(Some(&out)),
+        )));
+    }
     txn.commit().await?;
     Ok(Json(out))
 }
@@ -385,8 +516,17 @@ async fn set_support_profile(
     Json(body): Json<crate::control::support::OperatorProfile>,
 ) -> Result<Json<Value>, ApiError> {
     let (op, ctx) = operator_of(&caller, &headers)?;
+    // ADR 0068 A4 (R2): from the admin bridge, the key and the profile version (0: none
+    // yet) are required.
+    let bridge = BridgeCommand::of_with(
+        &caller,
+        &headers,
+        body.expected_version,
+        false,
+        Expect::VersionOrAbsent,
+    )?;
     Ok(Json(
-        crate::control::support::operator_put(&s, &op, &ctx, id, body).await?,
+        crate::control::support::operator_put(&s, &op, &ctx, id, body, bridge.as_ref()).await?,
     ))
 }
 
@@ -398,8 +538,16 @@ async fn record_incident(
     Json(body): Json<crate::control::support::Incident>,
 ) -> Result<Json<Value>, ApiError> {
     let (op, ctx) = operator_of(&caller, &headers)?;
+    let bridge = BridgeCommand::of_with(
+        &caller,
+        &headers,
+        body.expected_version,
+        false,
+        Expect::VersionOrAbsent,
+    )?;
     Ok(Json(
-        crate::control::support::operator_incident(&s, &op, &ctx, id, body).await?,
+        crate::control::support::operator_incident(&s, &op, &ctx, id, body, bridge.as_ref())
+            .await?,
     ))
 }
 
@@ -517,6 +665,15 @@ async fn register_first_party(
     Json(body): Json<RegisterFirstParty>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (op, ctx) = operator_of(&caller, &headers)?;
+    // ADR 0068 A4 (`partners.workspace.register-first-party`, R4): from the admin bridge,
+    // the key and HQ's approver are required, no expectedVersion (the workspace does not
+    // exist yet), and the owner invitation is delivered to the owner only.
+    if let Some(cmd) = BridgeCommand::of_with(&caller, &headers, None, true, Expect::Nothing)? {
+        return Ok((
+            StatusCode::OK,
+            Json(operator::register_first_party_bridge(&s, &op, &ctx, body, &cmd).await?),
+        ));
+    }
     Ok((
         StatusCode::CREATED,
         Json(operator::register_first_party(&s, &op, &ctx, body).await?),
@@ -544,8 +701,12 @@ async fn set_state(
     if !operator::valid_reason(&body.reason) {
         return Err(ApiError(ErrorCode::ValidationError));
     }
+    // ADR 0068 A4 (R3): from the admin bridge, the key, the workspace version and HQ's
+    // approver are required.
+    let bridge = BridgeCommand::of(&caller, &headers, body.expected_version, true)?;
     Ok(Json(
-        organizations::operator_set_state(&s, &op, &ctx, id, to, &body.reason).await?,
+        organizations::operator_set_state(&s, &op, &ctx, id, to, &body.reason, bridge.as_ref())
+            .await?,
     ))
 }
 

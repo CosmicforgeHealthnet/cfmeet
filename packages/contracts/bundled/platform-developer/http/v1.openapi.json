@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform — Developer Console API",
-    "version": "1.9.0",
+    "version": "1.10.0",
     "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps. 1.8.0 (ADR 0064 / 0065, CF Meet Apps): app registration on projects (/v1/projects/{projectId}/app*: immutable manifest versions, client secret shown once, review submission, grants, draft test accounts; OWNER / ADMIN; flag DEVELOPER_PLATFORM_APPS_ENABLED), the anonymous OAuth endpoints /v1/oauth/token, /revoke, /userinfo, /metadata (RFC 6749 wire format, relayed to Platform Access; flag DEVELOPER_PLATFORM_OAUTH_ENABLED) and the anonymous app directory /v1/app-directory* (PUBLISHED, PUBLIC apps; flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED). 1.9.0 (DF1): POST /v1/environments/{environmentId}/webhooks/{webhookId}/test sends a test event (webhook.test, \"test\": true) signed and delivered exactly like a real one; at most 5 per webhook per minute."
   },
   "tags": [
@@ -7220,6 +7220,138 @@
           }
         }
       }
+    },
+    "/v1/environments/{environmentId}/credential-deliveries": {
+      "get": {
+        "operationId": "listCredentialDeliveries",
+        "summary": "List API keys waiting for their one reveal",
+        "description": "List API keys waiting for their one reveal. ADR 0068 A4: keys HQ staff issued or rotated for this environment through the admin bridge are held sealed by Platform Access for ONE reveal in the console (never a secret here). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `credentials.manage`.",
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.CredentialDeliveryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "credentials.manage"
+      }
+    },
+    "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal": {
+      "post": {
+        "operationId": "revealCredentialDelivery",
+        "summary": "Reveal an owner-delivered API key once",
+        "description": "Reveal an owner-delivered API key once. ADR 0068 A4: the ONE reveal of a key HQ staff issued or rotated through the admin bridge — the secret is in this response only (`Cache-Control: no-store`); Platform Access destroys its sealed copy, nothing is stored, replayed or resent (a lost response is recovered by rotating the key; an unknown, revealed or expired delivery is NOT_FOUND). A signed-in human member only: machine credentials are refused (PERMISSION_DENIED). Recorded as `credential.delivery_revealed` (never the secret). Roles: OWNER, ADMIN, DEVELOPER.",
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "deliveryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK (no-store).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.IssuedCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8767,6 +8899,79 @@
           }
         },
         "description": "Section 54: metadata of a Platform Access API credential. Never a secret or verifier."
+      },
+      "platform-developer.control.v1.CredentialDelivery": {
+        "description": "ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryRef",
+          "deliveryChannel",
+          "state",
+          "environmentId",
+          "credentialId",
+          "publicId",
+          "serviceAccountId",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "deliveryRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ]
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "credentialId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.CredentialDeliveryList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.CredentialDelivery"
+            }
+          },
+          "nextCursor": {
+            "type": "null"
+          }
+        }
       },
       "platform-developer.control.v1.CredentialEffectiveState": {
         "enum": [
