@@ -5,13 +5,17 @@
 //! deliveries carry ids, channels, states and times (never content or addresses);
 //! suppressions are found by address or digest but only the keyed digest is ever
 //! returned; provider status never includes a credential.
+//!
+//! The daily dataset pull (ADR 0068 A7): `GET /internal/v1/operator/datasets/{datasetId}/days/{date}`
+//! answers the counts this service owns for one UTC day (`cfmeet.operations_health`:
+//! `failed_deliveries`), null when a count cannot be computed (never a guessed 0).
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::Response,
 };
 use cf_service_auth::InternalPermission;
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use sea_orm::FromQueryResult;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -254,4 +258,111 @@ pub async fn providers(State(state): State<AppState>, caller: Caller) -> ApiResu
         }));
     }
     Ok(json_ok(json!({ "providers": out, "checkedAt": now })))
+}
+
+/// The dataset this service reports to the admin bridge (`datasets.v1.json`).
+pub const OPERATIONS_HEALTH: &str = "cfmeet.operations_health";
+/// Deliveries are deleted with their notification 30 days after it was created (W5
+/// retention, `workers::retention`).
+pub const DELIVERY_RETENTION_DAYS: i64 = 30;
+/// Margin for deliveries that end long after their notification was created (deferred and
+/// retried deliveries): a day is counted only while every notification that could have
+/// ended a delivery on it is still retained.
+pub const COMPLETION_MARGIN_DAYS: i64 = 7;
+
+/// A `yyyy-mm-dd` calendar date, exactly.
+pub fn parse_day(v: &str) -> Option<NaiveDate> {
+    let d = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok()?;
+    (d.format("%Y-%m-%d").to_string() == v).then_some(d)
+}
+
+/// The UTC bounds of `day` when its counts can be computed at `now`: the day has ended
+/// and it is still inside the retained window. `None` otherwise (the metric is null).
+pub fn countable_day(day: NaiveDate, now: DateTime<Utc>) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    let start = day.and_hms_opt(0, 0, 0)?.and_utc();
+    let end = start + Duration::days(1);
+    let oldest = now - Duration::days(DELIVERY_RETENTION_DAYS - COMPLETION_MARGIN_DAYS);
+    (end <= now && start >= oldest).then_some((start, end))
+}
+
+/// `GET /internal/v1/operator/datasets/{datasetId}/days/{date}` — the daily counts of one
+/// dataset for one UTC day, pulled by the admin bridge (`X-CF-Operator: hq:dataset-sync`).
+/// Only `cfmeet.operations_health` is served here, with its one metric this service owns:
+/// `failed_deliveries`, the deliveries (every channel) that ended FAILED during that day.
+/// The metric is null for a day that has not ended yet or whose deliveries are no longer
+/// all retained. Counts only: no id, address or content. Stateless (a single read of the
+/// shared database with the database's clock), so every replica answers the same.
+pub async fn dataset_day(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path((dataset_id, date)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    caller.require_operator(InternalPermission::NotificationsAdminister)?;
+    if dataset_id != OPERATIONS_HEALTH {
+        return Err(ApiError::not_found());
+    }
+    let day = parse_day(&date).ok_or_else(|| ApiError::validation("date must be yyyy-mm-dd"))?;
+    let now = db::now(&state.db).await?;
+    let failed_deliveries = match countable_day(day, now) {
+        Some((start, end)) => Some(
+            db::scalar_i64(
+                &state.db,
+                "SELECT count(*)::bigint AS n FROM notif_deliveries
+                  WHERE status = 'FAILED' AND completed_at >= $1 AND completed_at < $2",
+                vec![start.into(), end.into()],
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    Ok(json_ok(json!({
+        "datasetId": OPERATIONS_HEALTH,
+        "date": day.format("%Y-%m-%d").to_string(),
+        "metrics": { "failed_deliveries": failed_deliveries },
+    })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(v: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(v).unwrap().with_timezone(&Utc)
+    }
+
+    #[test]
+    fn days_are_exact_calendar_dates() {
+        assert_eq!(
+            parse_day("2026-11-20"),
+            NaiveDate::from_ymd_opt(2026, 11, 20)
+        );
+        for bad in [
+            "2026-11-31",
+            "2026-1-05",
+            "20261120",
+            "2026-11-20T00:00:00Z",
+            "",
+            "yesterday",
+        ] {
+            assert_eq!(parse_day(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_ended_and_retained_days_are_counted() {
+        let now = at("2026-11-21T09:00:00Z");
+        let day = |v: &str| parse_day(v).unwrap();
+        assert_eq!(
+            countable_day(day("2026-11-20"), now),
+            Some((at("2026-11-20T00:00:00Z"), at("2026-11-21T00:00:00Z")))
+        );
+        // Today and the future have not ended.
+        assert_eq!(countable_day(day("2026-11-21"), now), None);
+        assert_eq!(countable_day(day("2026-12-01"), now), None);
+        // 23 days back is still whole; older days may have lost deliveries to retention.
+        assert!(countable_day(day("2026-10-30"), now).is_some());
+        assert!(countable_day(day("2026-10-29"), now).is_none());
+        assert!(countable_day(day("2026-10-31"), at("2026-11-23T00:00:00Z")).is_some());
+        assert!(countable_day(day("2026-10-31"), at("2026-11-23T00:00:01Z")).is_none());
+    }
 }

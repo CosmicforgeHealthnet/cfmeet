@@ -15,6 +15,15 @@ const DELIVERIES: &str = "/internal/v1/operator/deliveries";
 const FAILED: &str = "/internal/v1/operator/failed-deliveries";
 const SUPPRESSIONS: &str = "/internal/v1/operator/email-suppressions";
 const PROVIDERS: &str = "/internal/v1/operator/providers";
+/// ADR 0068 A7: the daily dataset pull.
+const DATASET_DAY: &str = "/internal/v1/operator/datasets/{datasetId}/days/{date}";
+const SYNC: (&str, &str) = ("x-cf-operator", "hq:dataset-sync");
+
+fn dataset_day(dataset: &str, date: &str) -> String {
+    DATASET_DAY
+        .replace("{datasetId}", dataset)
+        .replace("{date}", date)
+}
 const OPERATOR: (&str, &str) = ("x-cf-operator", "hq:staff-0001");
 
 fn verification(h: &Harness, recipient: &str, code: &str) -> Value {
@@ -143,6 +152,7 @@ async fn operator_reads_need_the_permission_and_a_named_operator() {
         FAILED.to_string(),
         format!("{SUPPRESSIONS}?digest={digest}"),
         PROVIDERS.to_string(),
+        dataset_day("cfmeet.operations_health", "2026-11-20"),
     ] {
         // The operator console holds observability, not notifications.administer.
         let op = h.peers.operator.clone();
@@ -290,4 +300,139 @@ fn the_trust_bundle_admits_the_bridge_with_operator_reads() {
     // notifications.administer and notifications-observability.read grants.
     let (_verifier, peers) = verifier_and_peers();
     assert_eq!(peers.bridge.issuer().as_str(), "cfmeet.admin-bridge");
+}
+
+#[tokio::test]
+async fn the_bridge_pulls_daily_failed_deliveries_counts_only() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    with_deliveries(&h).await;
+    with_deliveries(&h).await;
+    with_deliveries(&h).await;
+    let total = h.count("SELECT count(*) FROM notif_deliveries").await;
+    assert!(total >= 3, "{total}");
+    // The database's UTC days: yesterday, the day before, and today.
+    let day = |offset: i32| {
+        let h = &h;
+        async move {
+            h.text(&format!(
+                "SELECT to_char((now() AT TIME ZONE 'UTC')::date - {offset}, 'YYYY-MM-DD')"
+            ))
+            .await
+            .unwrap()
+        }
+    };
+    let (today, yesterday, before) = (day(0).await, day(1).await, day(2).await);
+    let at = |date: &str, time: &str| format!("('{date} {time}'::timestamp AT TIME ZONE 'UTC')");
+    // Two deliveries failed yesterday (at its first and last second), one the day before;
+    // one other ended yesterday but was SENT; everything else is still in flight.
+    h.exec(&format!(
+        "UPDATE notif_deliveries SET status = 'FAILED', last_error_class = 'PROVIDER_REJECTED', completed_at = {}
+          WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 0)",
+        at(&yesterday, "00:00:00")
+    ))
+    .await
+    .unwrap();
+    h.exec(&format!(
+        "UPDATE notif_deliveries SET status = 'FAILED', last_error_class = 'PROVIDER_REJECTED', completed_at = {}
+          WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 1)",
+        at(&yesterday, "23:59:59.999999")
+    ))
+    .await
+    .unwrap();
+    h.exec(&format!(
+        "UPDATE notif_deliveries SET status = 'FAILED', last_error_class = 'PROVIDER_REJECTED', completed_at = {}
+          WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 2)",
+        at(&before, "23:59:59.999999")
+    ))
+    .await
+    .unwrap();
+    if total > 3 {
+        h.exec(&format!(
+            "UPDATE notif_deliveries SET status = 'SENT', completed_at = {}
+              WHERE id = (SELECT id FROM notif_deliveries ORDER BY id LIMIT 1 OFFSET 3)",
+            at(&yesterday, "12:00:00")
+        ))
+        .await
+        .unwrap();
+    }
+    let bridge = h.peers.bridge.clone();
+    let pull = |date: String| {
+        let (h, bridge) = (&h, bridge.clone());
+        async move {
+            h.signed(
+                &bridge,
+                Method::GET,
+                &dataset_day("cfmeet.operations_health", &date),
+                None,
+                &[SYNC],
+            )
+            .await
+        }
+    };
+    let r = pull(yesterday.clone()).await;
+    let body = r.expect(200).clone();
+    assert_eq!(
+        body,
+        json!({"datasetId": "cfmeet.operations_health", "date": yesterday.clone(),
+               "metrics": {"failed_deliveries": 2}})
+    );
+    let r = pull(before.clone()).await;
+    assert_eq!(r.expect(200)["metrics"]["failed_deliveries"], 1);
+    // A retained day without failures counts zero (it is known).
+    let r = pull(day(5).await).await;
+    assert_eq!(r.expect(200)["metrics"]["failed_deliveries"], 0);
+    // Today has not ended; the future and days past the retained window cannot be
+    // counted: null, never a guessed 0.
+    for date in [
+        today.clone(),
+        "2999-01-01".into(),
+        day(24).await,
+        "2020-01-01".into(),
+    ] {
+        let r = pull(date.clone()).await;
+        let body = r.expect(200);
+        assert_eq!(body["date"], json!(date));
+        assert_eq!(
+            body["metrics"],
+            json!({"failed_deliveries": null}),
+            "{date}"
+        );
+    }
+    // Only the listed dataset; exact dates only.
+    h.signed(
+        &bridge,
+        Method::GET,
+        &dataset_day("cfmeet.messaging_daily", &yesterday),
+        None,
+        &[SYNC],
+    )
+    .await
+    .expect_error(404, "NOT_FOUND");
+    for bad in ["2026-02-30", "2026-1-05", "yesterday", "20261120"] {
+        let r = h
+            .signed(
+                &bridge,
+                Method::GET,
+                &dataset_day("cfmeet.operations_health", bad),
+                None,
+                &[SYNC],
+            )
+            .await;
+        assert_eq!(r.status.as_u16(), 400, "{bad}");
+    }
+    // The operator console cannot pull, with or without attribution.
+    let op = h.peers.operator.clone();
+    for headers in [&[][..], &[SYNC][..]] {
+        h.signed(
+            &op,
+            Method::GET,
+            &dataset_day("cfmeet.operations_health", &yesterday),
+            None,
+            headers,
+        )
+        .await
+        .expect_error(403, "FORBIDDEN");
+    }
 }
