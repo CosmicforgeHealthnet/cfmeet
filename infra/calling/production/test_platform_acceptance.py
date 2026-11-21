@@ -137,7 +137,7 @@ class FakePlatform:
         if bearer in self.client_tokens:
             return 401, {'error': {'code': 'AUTHENTICATION_FAILED'}}  # client tokens never ride Bearer
         if bearer in self.signaling:
-            return self.device_signaling(self.signaling[bearer], method, bare)
+            return self.device_signaling(self.signaling[bearer], method, bare, body)
         if headers.get('X-Participant-Token') in self.participant_tokens:
             conf = self.participant_tokens[headers['X-Participant-Token']]
             if bare == '/api/v2/conferences/%s/messages' % conf:
@@ -245,14 +245,22 @@ class FakePlatform:
         m = re.fullmatch(r'/v1/conversations/(\w+)', bare)
         if m:
             c = self.conversations.get(m.group(1))
-            return (200, {}) if c and c['env'] == env else self.nf()
+            if not c or c['env'] != env:
+                return self.nf()
+            if m.group(2) and method == 'POST':
+                if not isinstance(body, dict) or body.get('expectedVersion') != c['version']:
+                    return 400, {'error': {'code': 'VALIDATION_ERROR'}}
+                c['state'] = 'CANCELLED'
+                c['version'] += 1
+                return 200, {}
+            return 200, dict(c)
         if bare == '/v1/calls' and method == 'POST':
             call = self.id('call')
-            self.calls_[call] = dict(env=env)
+            self.calls_[call] = dict(env=env, state='RINGING', version=1)
             target = body['targetPrincipalIds'][0]
             invitation = self.id('inv')
             self.invitations[invitation] = dict(call=call, user=target)
-            return 201, {'call': {'callId': call, 'state': 'RINGING'}, 'liveInvitationCount': 1}
+            return 201, {'call': {'callId': call, 'state': 'RINGING', 'version': 1}, 'liveInvitationCount': 1}
         m = re.fullmatch(r'/v1/calls/(\w+)(/cancel)?', bare)
         if m:
             c = self.calls_.get(m.group(1))
@@ -324,12 +332,14 @@ class FakePlatform:
             return 200, {'messages': [] if 'chat-receive' in self.broken else list(log)}
         return 404, {}
 
-    def device_signaling(self, sig, method, path):
+    def device_signaling(self, sig, method, path, body):
         if path == '/v1/calling/invitations':
-            return 200, {'endpointId': 'ep', 'data': [dict(invitationId=i, callId=v['call']) for i, v in self.invitations.items()
+            return 200, {'endpointId': 'ep', 'data': [dict(invitationId=i, callId=v['call'], callVersion=1) for i, v in self.invitations.items()
                                                       if v['user'] == sig['user']]}
         m = re.fullmatch(r'/v1/calling/invitations/(\w+)/accept', path)
         if m:
+            if not isinstance(body, dict) or body.get('expectedVersion') != 1:
+                return 400, {'error': {'code': 'VALIDATION_ERROR'}}
             v = self.invitations.get(m.group(1))
             return (200, {}) if v and v['user'] == sig['user'] else self.nf()
         return 404, {}
