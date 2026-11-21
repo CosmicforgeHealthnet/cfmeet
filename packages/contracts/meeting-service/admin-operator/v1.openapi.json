@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Meeting Service / Account — admin bridge operator reads and commands",
-    "version": "1.2.0",
-    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media. 1.1.0 (A4-A7): R3 / R4 COMMANDS (POST, Idempotency-Key required, expectedVersion where the subject is versioned, X-CF-Approver / X-CF-Approval-Ref / X-CF-Intent-Digest required) recorded in meeting_admin_operations in the same transaction and answered {status, version, resource}; the settlement read GET /internal/v1/operator/operations/{idempotencyKey}; further reads (duplicates, test accounts, conference health, recordings, transcripts, webinars and registrations, chat migration, email deliveries, CRITICAL lane). Account reads answer `version` (users.account_version). 1.2.0 (A7): accounts.user.export, owner-delivered (POST .../accounts/users/{userId}/export, R4; the data goes only to the owner's verified address as a single-use, sign-in-protected download link, sealed at rest for at most 7 days; HQ gets a reference) and its state (GET .../accounts/users/{userId}/exports, GET .../accounts/exports/{exportId})."
+    "version": "1.3.0",
+    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media. 1.1.0 (A4-A7): R3 / R4 COMMANDS (POST, Idempotency-Key required, expectedVersion where the subject is versioned, X-CF-Approver / X-CF-Approval-Ref / X-CF-Intent-Digest required) recorded in meeting_admin_operations in the same transaction and answered {status, version, resource}; the settlement read GET /internal/v1/operator/operations/{idempotencyKey}; further reads (duplicates, test accounts, conference health, recordings, transcripts, webinars and registrations, chat migration, email deliveries, CRITICAL lane). Account reads answer `version` (users.account_version). 1.2.0 (A7): accounts.user.export, owner-delivered (POST .../accounts/users/{userId}/export, R4; the data goes only to the owner's verified address as a single-use, sign-in-protected download link, sealed at rest for at most 7 days; HQ gets a reference) and its state (GET .../accounts/users/{userId}/exports, GET .../accounts/exports/{exportId}). 1.3.0 (A7): the daily dataset pull GET /internal/v1/operator/datasets/{datasetId}/days/{date} (cfmeet.engagement_daily: dau, mau, signups; cfmeet.meetings_daily: meetings, participant_minutes, peak_live_meetings)."
   },
   "tags": [
     {
@@ -17,6 +17,10 @@
     {
       "name": "Operations",
       "description": "The settlement record of applied bridge commands (account.administer or meeting.administer)."
+    },
+    {
+      "name": "Datasets",
+      "description": "The admin bridge's daily dataset pull (counts only)."
     }
   ],
   "paths": {
@@ -4161,6 +4165,95 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{date}": {
+      "get": {
+        "operationId": "operatorGetDatasetDay",
+        "summary": "One UTC day of a dataset (admin bridge dataset pull)",
+        "description": "bridge.datasets.read source (design §17.3): counts for one UTC day computed from the Meeting Service's own data; a metric that cannot be computed is null, never a guessed 0. cfmeet.engagement_daily needs account.administer, cfmeet.meetings_daily meeting.administer. The bridge sends X-CF-Operator: hq:dataset-sync. Today answers the counts so far.",
+        "tags": [
+          "Datasets"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer (cfmeet.engagement_daily) or meeting.administer (cfmeet.meetings_daily)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/DatasetId"
+          },
+          {
+            "$ref": "#/components/parameters/DatasetDate"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: the date is not a UTC day or is after today.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no permission for the dataset), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown dataset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE: no metric could be computed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4360,6 +4453,29 @@
         "schema": {
           "type": "string",
           "format": "uuid"
+        }
+      },
+      "DatasetId": {
+        "name": "datasetId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "cfmeet.engagement_daily",
+            "cfmeet.meetings_daily"
+          ]
+        }
+      },
+      "DatasetDate": {
+        "name": "date",
+        "in": "path",
+        "required": true,
+        "description": "A UTC day (yyyy-mm-dd), not after today.",
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
         }
       }
     },
@@ -6839,6 +6955,84 @@
               "null"
             ],
             "description": "<micros>.<exportId> of the last item (newest first)."
+          }
+        }
+      },
+      "OperatorDatasetDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "date",
+          "metrics"
+        ],
+        "description": "One UTC day of a dataset. Counts only; a metric that cannot be computed is null, never a guessed 0.",
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "enum": [
+              "cfmeet.engagement_daily",
+              "cfmeet.meetings_daily"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "cfmeet.engagement_daily: dau, mau, signups. cfmeet.meetings_daily: meetings, participant_minutes, peak_live_meetings.",
+            "properties": {
+              "dau": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Distinct registered (non-guest) accounts that signed in or were connected to a conference during the day."
+              },
+              "mau": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "The same over the 30 UTC days ending with the day."
+              },
+              "signups": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Non-guest accounts created during the day."
+              },
+              "meetings": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Conferences started during the day."
+              },
+              "participant_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Connected participant time within the day, whole minutes."
+              },
+              "peak_live_meetings": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "The most conferences live at the same instant during the day."
+              }
+            }
           }
         }
       }

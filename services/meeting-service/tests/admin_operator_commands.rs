@@ -1177,3 +1177,159 @@ async fn account_export_is_delivered_to_the_owner_only() {
         StatusCode::NOT_FOUND
     );
 }
+
+// ---------------------------------------------------------------------------
+// A7: the daily dataset pull
+// ---------------------------------------------------------------------------
+
+async fn dataset(h: &Harness, router: &Router, path: &str) -> (StatusCode, Value) {
+    let mut headers = signed(&h.bridge, &Method::GET, path);
+    headers.push(("x-cf-operator".into(), "hq:dataset-sync".into()));
+    send(router, Method::GET, path, headers, None).await
+}
+
+#[tokio::test]
+async fn datasets_answer_one_utc_day_of_counts() {
+    let Some(h) = Harness::start().await else {
+        return;
+    };
+    let today = chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    let owner = h.app.user("dataset-host").await;
+    let guest = h.app.user("dataset-guest").await;
+    let (_, conference_id) = h
+        .app
+        .live_conference(
+            &owner,
+            json!({ "title": "Counted", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let (status, v) = h
+        .app
+        .join(conference_id, Auth::Bearer(&guest.token), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    h.exec(&format!(
+        "UPDATE participant_sessions SET state = 'CONNECTED', connected_at = GREATEST(now() - interval '5 minutes', (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) \
+          WHERE conference_id = '{conference_id}'"
+    ))
+    .await;
+
+    let (status, e) = dataset(
+        &h,
+        &h.router,
+        &format!("{BASE}/datasets/cfmeet.engagement_daily/days/{today}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{e}");
+    assert_eq!(e["datasetId"], "cfmeet.engagement_daily");
+    assert_eq!(e["date"], json!(today));
+    let m = e["metrics"].as_object().unwrap();
+    assert_eq!(
+        m.keys().cloned().collect::<Vec<_>>(),
+        ["dau", "mau", "signups"]
+    );
+    assert!(m["signups"].as_i64().unwrap() >= 2, "{e}");
+    assert!(m["dau"].as_i64().unwrap() >= 1, "the connected guest: {e}");
+    assert!(m["mau"].as_i64().unwrap() >= m["dau"].as_i64().unwrap());
+
+    let (status, d) = dataset(
+        &h,
+        &h.router,
+        &format!("{BASE}/datasets/cfmeet.meetings_daily/days/{today}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{d}");
+    let m = d["metrics"].as_object().unwrap();
+    assert_eq!(
+        m.keys().cloned().collect::<Vec<_>>(),
+        ["meetings", "participant_minutes", "peak_live_meetings"]
+    );
+    assert!(m["meetings"].as_i64().unwrap() >= 1, "{d}");
+    let midnight = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
+    let since_midnight = (chrono::Utc::now() - midnight).num_minutes();
+    assert!(m["peak_live_meetings"].as_i64().unwrap() >= 1, "{d}");
+    assert!(
+        m["participant_minutes"].as_i64().unwrap() >= 4.min(since_midnight - 1).max(0),
+        "{d}"
+    );
+    assert!(
+        !d.to_string().contains(&conference_id.to_string()),
+        "counts only"
+    );
+
+    // a day before any data: computed zeros, not nulls
+    let (status, old) = dataset(
+        &h,
+        &h.router,
+        &format!("{BASE}/datasets/cfmeet.meetings_daily/days/2001-01-01"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(old["metrics"]["meetings"], 0);
+    assert_eq!(old["metrics"]["peak_live_meetings"], 0);
+
+    // refusals
+    for (path, expected) in [
+        (
+            format!("{BASE}/datasets/cfmeet.meetings_daily/days/2999-01-01"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("{BASE}/datasets/cfmeet.meetings_daily/days/2026-13-01"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("{BASE}/datasets/cfmeet.messaging_daily/days/{today}"),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        assert_eq!(dataset(&h, &h.router, &path).await.0, expected, "{path}");
+    }
+    assert_eq!(
+        dataset(
+            &h,
+            &h.meetings_only,
+            &format!("{BASE}/datasets/cfmeet.engagement_daily/days/{today}")
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        dataset(
+            &h,
+            &h.accounts_only,
+            &format!("{BASE}/datasets/cfmeet.meetings_daily/days/{today}")
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let path = format!("{BASE}/datasets/cfmeet.meetings_daily/days/{today}");
+    let mut headers = signed(&h.peer, &Method::GET, &path);
+    headers.push(("x-cf-operator".into(), "hq:dataset-sync".into()));
+    assert_eq!(
+        send(&h.router, Method::GET, &path, headers, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // no operator attribution
+    assert_eq!(
+        send(
+            &h.router,
+            Method::GET,
+            &path,
+            signed(&h.bridge, &Method::GET, &path),
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+}
