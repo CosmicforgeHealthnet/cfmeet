@@ -54,7 +54,7 @@ fn owner(
 /// Get my linked phone
 ///
 /// Returns the current account binding and provider availability. Phone verification is optional.
-#[utoipa::path(get,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_get_my_phone",responses((status=200,body=PhoneView)),security(("bearer_auth"=[])))]
+#[utoipa::path(get,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_get_my_phone",responses((status=200,body=PhoneView),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)),security(("bearer_auth"=[])))]
 pub async fn get_my_phone(
     State(state): State<AppState>,
     actor: ActorContext,
@@ -66,7 +66,7 @@ pub async fn get_my_phone(
 /// Request phone binding
 ///
 /// Consumes a session-bound email step-up token and sends an SMS verification challenge. No number is linked until provider approval.
-#[utoipa::path(post,path="/api/v2/me/phone/verification",tag="Account security (v2)",operation_id="v2_request_phone_binding",request_body=PhoneBindRequest,responses((status=200,body=PhoneChallenge)),security(("bearer_auth"=[])))]
+#[utoipa::path(post,path="/api/v2/me/phone/verification",tag="Account security (v2)",operation_id="v2_request_phone_binding",request_body=PhoneBindRequest,responses((status=200,body=PhoneChallenge),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)),security(("bearer_auth"=[])))]
 pub async fn request_binding(
     State(state): State<AppState>,
     actor: ActorContext,
@@ -89,7 +89,7 @@ pub async fn request_binding(
 /// Confirm phone binding
 ///
 /// Confirms a one-use SMS challenge belonging to this account and session. A successful provider check establishes the binding.
-#[utoipa::path(post,path="/api/v2/me/phone/confirm",tag="Account security (v2)",operation_id="v2_confirm_phone_binding",request_body=PhoneConfirm,responses((status=200,body=PhoneView)),security(("bearer_auth"=[])))]
+#[utoipa::path(post,path="/api/v2/me/phone/confirm",tag="Account security (v2)",operation_id="v2_confirm_phone_binding",request_body=PhoneConfirm,responses((status=200,body=PhoneView),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)),security(("bearer_auth"=[])))]
 pub async fn confirm_binding(
     State(state): State<AppState>,
     actor: ActorContext,
@@ -111,7 +111,7 @@ pub async fn confirm_binding(
 /// Update phone discovery
 ///
 /// Sets explicit opt-in discovery for the signed-in account. New or changed bindings start private.
-#[utoipa::path(patch,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_update_phone_privacy",request_body=PhoneSettings,responses((status=200,body=PhoneView)),security(("bearer_auth"=[])))]
+#[utoipa::path(patch,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_update_phone_privacy",request_body=PhoneSettings,responses((status=200,body=PhoneView),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)),security(("bearer_auth"=[])))]
 pub async fn update_privacy(
     State(state): State<AppState>,
     actor: ActorContext,
@@ -125,7 +125,7 @@ pub async fn update_privacy(
 /// Remove my phone
 ///
 /// Consumes an email step-up token, removes the account binding and revokes every existing sign-in session.
-#[utoipa::path(delete,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_remove_phone",request_body=PhoneRemove,responses((status=204)),security(("bearer_auth"=[])))]
+#[utoipa::path(delete,path="/api/v2/me/phone",tag="Account security (v2)",operation_id="v2_remove_phone",request_body=PhoneRemove,responses((status=204),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)),security(("bearer_auth"=[])))]
 pub async fn remove_phone(
     State(state): State<AppState>,
     actor: ActorContext,
@@ -149,7 +149,7 @@ pub async fn remove_phone(
 /// Request phone sign-in code
 ///
 /// Sends a code only for an active account with a verified binding. Always returns the same neutral response, including for unknown numbers.
-#[utoipa::path(post,path="/api/v1/auth/phone/request",tag="Authentication",operation_id="request_phone_otp",request_body=PhoneRequest,responses((status=200,body=PhoneChallenge)))]
+#[utoipa::path(post,path="/api/v1/auth/phone/request",tag="Authentication",operation_id="request_phone_otp",request_body=PhoneRequest,responses((status=200,body=PhoneChallenge),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)))]
 pub async fn request_signin(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -181,7 +181,7 @@ pub async fn request_signin(
 /// Verify phone sign-in code
 ///
 /// Consumes a provider-approved phone challenge. Accounts with an authenticator must complete the existing second-factor flow.
-#[utoipa::path(post,path="/api/v1/auth/phone/verify",tag="Authentication",operation_id="verify_phone_otp",request_body=PhoneConfirm,responses((status=200,body=OtpVerifyResponse)))]
+#[utoipa::path(post,path="/api/v1/auth/phone/verify",tag="Authentication",operation_id="verify_phone_otp",request_body=PhoneConfirm,responses((status=200,body=OtpVerifyResponse),(status=400,description="Invalid phone request or verification",body=ErrorEnvelope),(status=401,description="AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="Recent authentication required",body=ErrorEnvelope),(status=429,description="Too many attempts",body=ErrorEnvelope),(status=503,description="Phone provider unavailable",body=ErrorEnvelope)))]
 pub async fn verify_signin(
     State(state): State<AppState>,
     headers: HeaderMap,
