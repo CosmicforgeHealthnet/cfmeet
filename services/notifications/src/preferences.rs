@@ -903,12 +903,12 @@ mod tests {
             q.window_end(at("2026-11-16T22:30:00Z"), "Europe/Berlin"),
             Some(at("2026-11-17T06:00:00Z"))
         );
-        assert!(!QuietHours {
+        assert!(QuietHours {
             enabled: false,
             ..q
         }
         .window_end(at("2026-11-16T23:30:00Z"), "UTC")
-        .is_some());
+        .is_none());
     }
 
     #[test]

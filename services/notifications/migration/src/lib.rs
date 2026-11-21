@@ -15,6 +15,7 @@ mod m20261116_000001_notifications_foundation;
 mod m20261117_000001_preference_copy;
 mod m20261118_000001_account_notices;
 mod m20261119_000001_partner_push;
+mod m20261120_000001_admin_operations;
 
 /// Name of the table recording which Notifications migrations have been applied.
 pub const MIGRATION_TABLE: &str = "notifications_seaql_migrations";
@@ -32,6 +33,9 @@ impl MigratorTrait for Migrator {
             // ADR 0063 (phase B5): the partner push provider vault, partner registrations
             // and the platform-principal:<env>:<principal> recipient (additive).
             Box::new(m20261119_000001_partner_push::Migration),
+            // ADR 0068 (admin bridge A4): the bridge command ledger and the suppression
+            // row version (additive).
+            Box::new(m20261120_000001_admin_operations::Migration),
         ]
     }
 
