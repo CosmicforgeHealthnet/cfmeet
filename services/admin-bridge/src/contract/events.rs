@@ -86,12 +86,6 @@ pub const ADAPTERS: &[Adapter] = &[
         Privacy::OperationsMinimized,
     ),
     a(
-        Owner::Notifications,
-        "incident.changed.v1",
-        "incident",
-        Privacy::OperationsMinimized,
-    ),
-    a(
         Owner::MeetingService,
         "incident.changed.v1",
         "incident",

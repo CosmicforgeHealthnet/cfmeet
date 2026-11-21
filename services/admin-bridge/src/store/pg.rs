@@ -386,6 +386,83 @@ impl Store for PgStore {
             .collect()
     }
 
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        let sources = Value::from(sources.to_vec());
+        self.db
+            .execute(stmt(
+                "INSERT INTO admin_dataset_days (dataset_id, day, metrics, sources_reported, updated_at) \
+                 VALUES ($1, $2, $3::jsonb, ARRAY(SELECT DISTINCT s FROM jsonb_array_elements_text($4::jsonb) AS s ORDER BY s), $5) \
+                 ON CONFLICT (dataset_id, day) DO UPDATE SET \
+                   metrics = admin_dataset_days.metrics || EXCLUDED.metrics, \
+                   sources_reported = ARRAY(SELECT DISTINCT s FROM \
+                     unnest(admin_dataset_days.sources_reported || EXCLUDED.sources_reported) AS s ORDER BY s), \
+                   updated_at = GREATEST(admin_dataset_days.updated_at, EXCLUDED.updated_at)",
+                vec![
+                    dataset_id.into(),
+                    day.into(),
+                    json_text(&Value::Object(metrics.clone())).into(),
+                    json_text(&sources).into(),
+                    at.into(),
+                ],
+            ))
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>> {
+        let rows = self
+            .db
+            .query_all(stmt(
+                "SELECT producer, state, count(*) AS subjects FROM ( \
+                   SELECT DISTINCT ON (producer, subject_kind, subject_id) producer, state \
+                   FROM admin_hq_outbox WHERE event_type = $1 AND occurred_at < $2 \
+                   ORDER BY producer, subject_kind, subject_id, version DESC) latest \
+                 GROUP BY producer, state ORDER BY producer, state",
+                vec![event_type.into(), end.into()],
+            ))
+            .await
+            .map_err(unavailable)?;
+        rows.iter()
+            .map(|r| {
+                Ok(EventStateCount {
+                    producer: get(r, "producer")?,
+                    state: get(r, "state")?,
+                    subjects: get(r, "subjects")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64> {
+        let row = self
+            .db
+            .query_one(stmt(
+                "SELECT count(*) AS n FROM admin_event_inbox \
+                 WHERE disposition = 'QUARANTINED' AND received_at >= $1 AND received_at < $2",
+                vec![start.into(), end.into()],
+            ))
+            .await
+            .map_err(unavailable)?
+            .ok_or(StoreError::Invalid("count"))?;
+        get(&row, "n")
+    }
+
     async fn audit_window(
         &self,
         start: DateTime<Utc>,

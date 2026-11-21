@@ -9,6 +9,7 @@
 pub mod chain;
 pub mod config;
 pub mod contract;
+pub mod datasets;
 pub mod errors;
 pub mod events;
 pub mod metrics;

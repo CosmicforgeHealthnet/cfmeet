@@ -607,7 +607,15 @@ Served by `bridge.datasets.read` (`GET /datasets/{dataset_id}`, `SCOPED_WINDOW`,
 | `cfmeet.apps_daily` | `apps_draft`, `apps_in_review`, `apps_published`, `apps_suspended`, `installs` | Developer Platform (`app.review.changed.v1`, pull) |
 | `cfmeet.verification_queue` | `pending`, `in_review`, `approved`, `rejected` | Developer Platform (`verification.case.changed.v1`) |
 | `cfmeet.trust_safety_queue` | `open_messaging`, `open_calling`, `open_communications`, `open_meetings` | `abuse.report.changed.v1` from Messaging, Calling, Communications, Meeting Service |
-| `cfmeet.operations_health` | `failed_messages`, `failed_deliveries`, `open_incidents`, `projection_gaps`, `quarantined_events` | `incident.changed.v1` from Messaging, Calling, Notifications, Meeting Service, Developer Platform; pulls from Messaging, Notifications and the bridge itself |
+| `cfmeet.operations_health` | `failed_messages`, `failed_deliveries`, `open_incidents`, `projection_gaps`, `quarantined_events` | `incident.changed.v1` from Messaging, Calling, Meeting Service, Developer Platform (Notifications has no incident entity); pulls from Messaging, Notifications and the bridge itself |
+
+**Collection (A7).** The bridge's maintenance tick (`src/datasets.rs`) fills `admin_dataset_days` for yesterday and every day of the last 31 a source has not reported:
+
+- Pull sources: `GET /internal/v1/operator/datasets/{datasetId}/days/{yyyy-mm-dd}` on the owner with `X-CF-Operator: hq:dataset-sync` (counts for one UTC day; a metric the owner cannot compute is null). Served today: Notifications (`operations_health.failed_deliveries`). The other pulls join as their owners serve the route.
+- Event sources: each subject's latest state on the HQ feed as of the end of the day, per producer. Verification cases OPEN / CLAIMED / APPROVED + PUBLISHED / REJECTED; open abuse reports (OPEN, IN_REVIEW, CLAIMED) per producer; workspaces ACTIVE / RESTRICTED / SUSPENDED; apps DRAFT / SUBMITTED + IN_REVIEW / PUBLISHED / SUSPENDED; open incidents (OPEN, ACKNOWLEDGED, INVESTIGATING, MITIGATING) summed over producers. A producer counts only once its stream has started.
+- The bridge itself: quarantined owner events of the day, and the event inbox's open gaps as observed when yesterday is collected.
+
+A source joins `sources_reported` only when it computed every metric it owns, so coverage follows (a missing metric is null). Each merge is one idempotent upsert, so replicas collecting at once are harmless; owner calls are bounded per tick.
 
 HQ's own sync health (`cfmeet.sync_health`) stays HQ-local. Privacy requests and plan spread are capabilities and reports, not datasets.
 

@@ -173,6 +173,14 @@ pub struct DatasetDay {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Subjects of one owner event type per producer and latest state ([`Store::event_states`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventStateCount {
+    pub producer: String,
+    pub state: String,
+    pub subjects: i64,
+}
+
 /// Freshness of one projection (`admin_projections`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionRow {
@@ -491,6 +499,34 @@ pub trait Store: Send + Sync + 'static {
     ) -> StoreResult<Vec<DatasetDay>>;
 
     async fn projections(&self) -> StoreResult<Vec<ProjectionRow>>;
+
+    /// Merges reported metrics into one dataset day in ONE statement (idempotent, so
+    /// replicas collecting at once are harmless): `metrics` replace the stored values of
+    /// the same names, `sources` join the reported set (sorted, distinct).
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()>;
+
+    /// Subjects of `event_type` on the HQ feed per producer and latest state as of `end`
+    /// (each subject's highest version among the events that occurred before `end`). A
+    /// producer is listed only once it had sent such an event before `end`.
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>>;
+
+    /// Owner events quarantined with `start <= received_at < end`.
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64>;
 
     /// Records a new `PENDING` operation, or reports why it cannot be.
     async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome>;

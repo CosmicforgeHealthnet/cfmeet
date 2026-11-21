@@ -172,10 +172,6 @@
           "via": "incident.changed.v1"
         },
         {
-          "service": "notifications",
-          "via": "incident.changed.v1"
-        },
-        {
           "service": "meeting-service",
           "via": "incident.changed.v1"
         },

@@ -1155,3 +1155,81 @@ async fn activation_requests_record_their_dispatch_with_their_operation() {
     }
     db.drop().await;
 }
+
+#[tokio::test]
+async fn dataset_days_merge_idempotently_and_feed_states_count_latest_versions() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let s = &db.store;
+    let day = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
+    let at = Utc.timestamp_opt(1_795_000_100, 0).unwrap();
+    let mut m = serde_json::Map::new();
+    m.insert("failed_deliveries".into(), json!(7));
+    let id = "cfmeet.operations_health";
+    s.merge_dataset_day(id, day, &m, &["notifications:PULL".into()], at)
+        .await
+        .unwrap();
+    let mut q = serde_json::Map::new();
+    q.insert("quarantined_events".into(), json!(1));
+    s.merge_dataset_day(id, day, &q, &["admin-bridge:PULL".into()], at)
+        .await
+        .unwrap();
+    // The same report again changes nothing.
+    s.merge_dataset_day(id, day, &m, &["notifications:PULL".into()], at)
+        .await
+        .unwrap();
+    let rows = s.dataset_days(id, day, day, 1).await.unwrap();
+    assert_eq!(rows[0].metrics["failed_deliveries"], json!(7));
+    assert_eq!(rows[0].metrics["quarantined_events"], json!(1));
+    assert_eq!(
+        rows[0].sources_reported,
+        vec![
+            "admin-bridge:PULL".to_string(),
+            "notifications:PULL".to_string()
+        ]
+    );
+
+    const CASE: &str = "verification.case.changed.v1";
+    let mut a1 = owner_event("case-a", 1, CASE);
+    a1.state = "OPEN".into();
+    let mut a2 = owner_event("case-a", 2, CASE);
+    a2.state = "CLAIMED".into();
+    a2.occurred_at = a1.occurred_at + Duration::hours(2);
+    let b1 = owner_event("case-b", 1, CASE);
+    for e in [&a1, &a2, &b1] {
+        s.ingest_event(e, true, at).await.unwrap();
+    }
+    let mut bad = owner_event("case-c", 1, "unknown.type.v1");
+    bad.event_type = "unknown.type.v1".into();
+    s.ingest_event(&bad, false, at).await.unwrap();
+    let states = s
+        .event_states(CASE, a1.occurred_at + Duration::hours(1))
+        .await
+        .unwrap();
+    let n = |st: &str| {
+        states
+            .iter()
+            .find(|c| c.state == st)
+            .map_or(0, |c| c.subjects)
+    };
+    assert_eq!((n("OPEN"), n("CLAIMED")), (2, 0), "a2 had not happened yet");
+    let states = s
+        .event_states(CASE, a1.occurred_at + Duration::hours(3))
+        .await
+        .unwrap();
+    let n = |st: &str| {
+        states
+            .iter()
+            .find(|c| c.state == st)
+            .map_or(0, |c| c.subjects)
+    };
+    assert_eq!((n("OPEN"), n("CLAIMED")), (1, 1));
+    assert_eq!(
+        s.quarantined_between(at - Duration::minutes(1), at + Duration::minutes(1))
+            .await
+            .unwrap(),
+        1
+    );
+    db.drop().await;
+}
