@@ -1744,6 +1744,7 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     let pid = Uuid::new_v4();
     let mid = Uuid::new_v4();
     let rid = Uuid::new_v4();
+    let xid = Uuid::new_v4();
     // (method, path, the one peer allowed, a well-formed body)
     let table: Vec<(Method, String, &str, Value)> = vec![
         (
@@ -1819,6 +1820,20 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "meeting",
             json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
         ),
+        // ADR 0068: the recipient's side of owner-delivered exports (delegated mirror only,
+        // messaging-application.delegate).
+        (
+            Method::GET,
+            "/internal/v1/delegated/v1/messaging/export-deliveries".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/delegated/v1/messaging/exports/{xid}/claim"),
+            "meeting",
+            json!({}),
+        ),
     ];
     // ADR 0068: the admin bridge's operator reads and commands (messaging-firstparty.administer,
     // cfmeet.admin-bridge only, plus X-CF-Operator; no delegated scope). Their behaviour is
@@ -1850,6 +1865,16 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             Method::GET,
             "/internal/v1/operator/exports".into(),
             json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/exports/{xid}"),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/exports".into(),
+            json!({ "tenantId": tenant, "conversationId": cid, "recipientPrincipalId": pid, "reasonCode": "MATRIX" }),
         ),
         (
             Method::GET,
@@ -1982,6 +2007,7 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
                 .replace(&pid.to_string(), "{principalId}")
                 .replace(&mid.to_string(), "{messageId}")
                 .replace(&rid.to_string(), "{reportId}")
+                .replace(&xid.to_string(), "{exportId}")
                 .replace(&hold.to_string(), "{holdId}")
                 .replace(&incident.to_string(), "{incidentId}")
                 .replace(&event.to_string(), "{eventId}")

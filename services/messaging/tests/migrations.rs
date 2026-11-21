@@ -139,7 +139,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
             "m20261210_000038_mls_group_infos".to_string(),
             "m20261211_000039_member_notifications".to_string(),
             "m20261212_000040_inbox_and_chat_controls".to_string(),
-            "m20261213_000041_admin_operations".to_string()
+            "m20261213_000041_admin_operations".to_string(),
+            "m20261214_000042_owner_delivered_exports".to_string()
         ]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
@@ -152,7 +153,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         vec![
             "m20261211_000039_member_notifications".to_string(),
             "m20261212_000040_inbox_and_chat_controls".to_string(),
-            "m20261213_000041_admin_operations".to_string()
+            "m20261213_000041_admin_operations".to_string(),
+            "m20261214_000042_owner_delivered_exports".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -233,7 +235,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
         vec![
             "m20261211_000039_member_notifications".to_string(),
             "m20261212_000040_inbox_and_chat_controls".to_string(),
-            "m20261213_000041_admin_operations".to_string()
+            "m20261213_000041_admin_operations".to_string(),
+            "m20261214_000042_owner_delivered_exports".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -250,7 +253,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
             .unwrap(),
         vec![
             "m20261212_000040_inbox_and_chat_controls".to_string(),
-            "m20261213_000041_admin_operations".to_string()
+            "m20261213_000041_admin_operations".to_string(),
+            "m20261214_000042_owner_delivered_exports".to_string()
         ]
     );
     // What the previous image checks is untouched by this history.
@@ -384,7 +388,10 @@ async fn the_admin_operations_history_is_separate_and_rolls_back() {
         messaging_migration::pending_migrations(&db.conn)
             .await
             .unwrap(),
-        vec!["m20261213_000041_admin_operations".to_string()]
+        vec![
+            "m20261213_000041_admin_operations".to_string(),
+            "m20261214_000042_owner_delivered_exports".to_string()
+        ]
     );
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
         .await
