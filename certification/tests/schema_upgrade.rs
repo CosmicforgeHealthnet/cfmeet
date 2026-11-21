@@ -211,8 +211,9 @@ fn cases() -> Vec<Case> {
             // (credential last use, TENANT_RENAMED), then ADR 0058 Amendment A2 (automatic
             // organization service bindings), then the CF Meet Platform Build (partner end
             // users, user-token mint windows and allowed websites; OAuth apps; OAuth client
-            // presentation, ADR 0064): all newer than the deployed schema and upgraded /
-            // rolled back together.
+            // presentation, ADR 0064), then the ADR 0068 A4 admin bridge (operations ledger
+            // and suspension change counters; owner-delivered API keys): all newer than the
+            // deployed schema and upgraded / rolled back together.
             part_vi: &[
                 "m20261120_000004_credential_suspension_production_activation",
                 "m20261121_000005_first_party_organization_scopes",
@@ -221,6 +222,8 @@ fn cases() -> Vec<Case> {
                 "m20261124_000008_partner_users_tokens_origins",
                 "m20261125_000009_oauth_apps",
                 "m20261126_000010_oauth_client_presentation",
+                "m20261127_000011_admin_operations",
+                "m20261128_000012_credential_deliveries",
             ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
@@ -282,16 +285,28 @@ fn cases() -> Vec<Case> {
                        AND (SELECT count(*) FROM platform_oauth_grants) = 0",
                 ),
                 (
+                    "no admin bridge operation, suspension change or key delivery is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_access_admin_operations) = 0 \
+                       AND (SELECT count(*) FROM platform_credential_suspension_changes) = 0 \
+                       AND (SELECT count(*) FROM platform_credential_deliveries) = 0",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
                 ),
             ],
             // Data of the newest migration first refuses its own down (so nothing is rolled
-            // back), and the Part VI audit row would refuse 000004's. The OAuth client with
-            // its presentation set refuses 000010's (and 000009's) down.
+            // back), and the Part VI audit row would refuse 000004's. The bridge-issued key
+            // record (`KEY_ISSUE`) refuses 000012's (and 000011's) down; the OAuth client with
+            // its presentation set would refuse 000010's (and 000009's).
             part_vi_data: Some(
-                "INSERT INTO platform_oauth_clients (application_id, tenant_id, name, redirect_uris, distribution, \
+                "INSERT INTO platform_access_admin_operations (idempotency_key, command, subject_kind, subject_id, \
+                   tenant_id, resulting_id, operator_ref, resulting_state, recorded_at) VALUES \
+                   ('7e000000-0000-4000-8000-0000000000bb', 'identity.key.issue', 'KEY_ISSUE', \
+                    '7e000000-0000-4000-8000-000000000004', '7e000000-0000-4000-8000-000000000001', \
+                    '7e000000-0000-4000-8000-000000000005', 'hq:staff-upgrade', 'ACTIVE', now()); \
+                 INSERT INTO platform_oauth_clients (application_id, tenant_id, name, redirect_uris, distribution, \
                    status, created_at, updated_at, developer_name) VALUES \
                    ('7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000001', 'Acme App', \
                     ARRAY['https://acme.example/callback'], 'PRIVATE', 'DRAFT', now(), now(), 'Acme'); \

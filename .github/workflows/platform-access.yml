@@ -176,8 +176,10 @@ jobs:
           # activations, the Section 7 FIRST_PARTY organization scopes (ADR 0058), the Section 15 credential last-use table, the organization service bindings (ADR 0058 A2),
           # the Platform Build partner end users, user-token mint windows and environment
           # origins (+ origin change feed) (4), and the OAuth app clients, client secrets,
-          # grants, codes, tokens and refresh tokens (6) — and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "28"
+          # grants, codes, tokens and refresh tokens (6), the ADR 0068 A4 admin bridge
+          # operations ledger, credential suspension change counters and owner-delivered
+          # API key deliveries (3) — and nothing of any other service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "31"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations' AND tablename NOT LIKE 'platform\_%'")" = "0"
           # Verifier material lives only in the verifier-only secret tables: API credentials
           # and the OAuth client secrets, authorization codes and refresh tokens (never in
