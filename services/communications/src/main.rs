@@ -1,4 +1,5 @@
 use communications::{
+    admin_events::{self, AdminBridgeEvents},
     config::Config,
     notification_publications::{self, NotificationServiceEvents},
     store::Store,
@@ -43,6 +44,15 @@ async fn main() -> anyhow::Result<()> {
     if publications.is_none() {
         tracing::info!("CF_NOTIFICATIONS_BASE_URL is not set: no notification publications");
     }
+    // ADR 0068 A7: owner events (profile reports) to the admin bridge. Off unless
+    // CF_ADMIN_BRIDGE_BASE_URL is set (then nothing is stored either).
+    let bridge_events = config.admin_bridge_events.then(|| {
+        tracing::info!("profile report events are relayed to the admin bridge");
+        AdminBridgeEvents::new(config.client.clone())
+    });
+    if bridge_events.is_none() {
+        tracing::info!("CF_ADMIN_BRIDGE_BASE_URL is not set: no admin bridge events");
+    }
     let worker = tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -58,6 +68,10 @@ async fn main() -> anyhow::Result<()> {
                     // Every second: due notification publications (N7).
                     if let Some(sink) = &publications {
                         if count%2==0 && notification_publications::relay_due(&worker_state, sink, 500).await.is_err() {tracing::warn!("notification publication relay pass deferred");}
+                    }
+                    // Every second: due admin bridge events (A7).
+                    if let Some(sink) = &bridge_events {
+                        if count%2==1 && admin_events::relay_due(&worker_state, sink, admin_events::MAX_PASS).await.is_err() {tracing::warn!("admin bridge event relay pass deferred");}
                     }
                 }
             }

@@ -1,3 +1,4 @@
+pub mod admin_events;
 pub mod api;
 pub mod auth;
 pub mod calls;

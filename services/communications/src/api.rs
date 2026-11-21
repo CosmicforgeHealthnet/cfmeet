@@ -784,6 +784,8 @@ async fn report(s: &State, p: &Profile, cf_id: &str, body: Value, key: Uuid) -> 
     }
     let id = Uuid::new_v4();
     execute(&txn,"INSERT INTO communication_profile_reports(id,reporter_profile_id,target_profile_id,reason) VALUES($1,$2,$3,$4)",vec![id.into(),p.id.into(),target.id.into(),request.reason.clone().into()]).await?;
+    // ADR 0068 A7: the new report, OPEN at version 1, to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(s, &txn, id, None, 1).await?;
     s.store
         .audit(
             &txn,
