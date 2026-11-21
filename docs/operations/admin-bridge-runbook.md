@@ -15,10 +15,12 @@ CosmicForge central admin (HQ) into CF Meet. Design: `docs/admin/cfmeet-admin-br
   - `ADMIN_BRIDGE_ENABLED=false`, `ADMIN_BRIDGE_WRITES_ENABLED=false`, and every `ADMIN_BRIDGE_MODULE_*=false`;
   - no `CF_<OWNER>_BASE_URL`;
   - the ops listener on `127.0.0.1:8190`;
-  - the HQ mTLS listener is not started while disabled.
+  - the HQ mTLS listener is not started while disabled;
+  - no owner events listener (`ADMIN_BRIDGE_EVENTS_BIND_ADDRESS` unset).
+- Private TLS route `api.cfmeet.com:8457` (installed by `provision`, like every new service's route). It forwards **only** to the owner events listener (`cfmeet-admin-bridge:8191`), never to the ops or HQ listener, and answers 502 until §2.2 starts that listener.
 - Readiness: `GET http://127.0.0.1:8190/ready` (in the container's network namespace) returns `{"ready":true,"enabled":false,"database":"OK",…}`.
 - Live certification checks that the ops listener does **not** serve `/internal/cfmeet-admin/v1/*` (404).
-- Safe defaults refuse `ADMIN_BRIDGE_ENABLED=true`, `ADMIN_BRIDGE_WRITES_ENABLED=true`, and any module switch whose activation is not recorded. A hand-edited container therefore fails the next `release` / `verify`.
+- Safe defaults refuse `ADMIN_BRIDGE_ENABLED=true`, `ADMIN_BRIDGE_WRITES_ENABLED=true`, any module switch whose activation is not recorded, and an events listener or owner `CF_ADMIN_BRIDGE_BASE_URL` before §2.2. A hand-edited container therefore fails the next `release` / `verify`.
 
 ## 2. `activate-admin-bridge` (phase A2.0)
 
@@ -49,6 +51,43 @@ None of them touches `ADMIN_BRIDGE_ENABLED` or `ADMIN_BRIDGE_WRITES_ENABLED`. An
 | `activate-admin-bridge-calling` | `calling.administer` | `CF_CALLING_BASE_URL`; `CALLING` |
 
 Every permission except `notifications-observability.read`, `developer-platform.administer` and `platform-identity.administer` is bridge-only in the registry. Even those three require the bridge's `hq:<staff>` attribution, or the console's named operator, on the routes the bridge uses.
+
+**Daily datasets (A7).** The bridge pulls `GET /internal/v1/operator/datasets/{datasetId}/days/{day}` (attributed `hq:dataset-sync`) with the grants above; nothing more is granted:
+
+| Datasets | Owner | Permission (activation) |
+|---|---|---|
+| `cfmeet.engagement_daily`, `cfmeet.meetings_daily` | Meeting Service | `account.administer`, `meeting.administer` (`activate-admin-bridge-meetings`) |
+| `cfmeet.messaging_daily`, `cfmeet.operations_health` | Messaging | `messaging-firstparty.administer` (`activate-admin-bridge-messaging`) |
+| `cfmeet.operations_health` (failed deliveries) | Notifications | `notifications.administer` (`activate-admin-bridge-notifications`) |
+| `cfmeet.partners_daily`, `cfmeet.apps_daily` | Developer Platform | `developer-platform.administer` (`activate-admin-bridge-partners`) |
+
+A source whose owner activation is not recorded never reports; the read's coverage stays PARTIAL.
+
+### 2.2 Owner connections from the A4–A7 work
+
+Each operation below is off by default and refused by safe defaults until it is recorded. Each restores every container it touched on failure, and `rollback` undoes it like any activation. The trust bundles are merged: no issuer, key or grant is dropped.
+
+| Operation | Requires | Grants | Settings |
+|---|---|---|---|
+| `activate-admin-bridge-events` | `activate-admin-bridge-hq` | **bridge** bundle: `hq-bridge-events.publish` for the Developer Platform, Messaging, Calling, Communications | bridge: `ADMIN_BRIDGE_EVENTS_BIND_ADDRESS=0.0.0.0:8191`; Developer Platform API and worker, Messaging, Calling, Communications: `CF_ADMIN_BRIDGE_BASE_URL=https://api.cfmeet.com:8457` |
+| `activate-plan-enforcement` (`confirm=plan-limits-reviewed`) | `activate-developer-platform` | Developer Platform bundle: `developer-entitlement.read` for the Meeting Service and Messaging | Meeting Service: `MEETING_PLAN_ENFORCEMENT=on`, `MEETING_PLAN_CACHE_SECONDS=60`; Messaging: `MESSAGING_PLAN_ENFORCEMENT=on`, `MESSAGING_PLAN_CACHE_SECONDS=60`; both: `CF_DEVELOPER_PLATFORM_BASE_URL` only where it is not set yet |
+| `activate-developer-owner-invitations` | `activate-developer-publications` | none (I1 is granted by the publications activation) | Developer Platform API: `CF_NOTIFICATIONS_SEALING_KEY` |
+| `activate-organization-export-delivery` | `activate-organizations-publications` | none (I1 as above) | Organizations: `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED=true`, `CF_NOTIFICATIONS_SEALING_KEY`, `ORGANIZATIONS_EXPORT_KEYS_FILE=/run/secrets/organizations-export.keys` (mounted read-only) |
+
+**Owner events (`activate-admin-bridge-events`).** One operation, not one per owner: there is one listener, one receiver bundle (the bridge's) and one owner decision, and the publishers' outboxes simply wait (up to 7 days) for a listener. Each publisher's switch is "on when `CF_ADMIN_BRIDGE_BASE_URL` is set": no companion flag. The operation refuses, changing nothing, unless:
+- the bridge is enabled for HQ (the listener runs only while `ADMIN_BRIDGE_ENABLED=true`) and has its trust bundle;
+- the route 8457 is installed;
+- each publisher's outbox exists (`devplat_bridge_events`, `messaging_admin_bridge_events`, `calling_admin_bridge_events`, `communication_admin_bridge_events`), i.e. the released images carry the A7 publishers;
+- every publishing container has its production signing identity.
+
+It recreates the bridge first (new bundle and listener), then the publishers, then proves that an unsigned `POST /internal/v1/hq-bridge/events` through the route answers 401. The Meeting Service, Organizations, Platform Access and Notifications may be granted the permission by the registry but publish nothing yet. `rollback` always undoes the latest operation only: roll this one back before anything it depends on.
+
+**Plan enforcement (`activate-plan-enforcement`).** From this point on the active CF Meet plan limits refuse real joins (`participants`), recordings (`recording`), conference extensions (`meetingMinutes`) and attachment uploads (`attachmentBytes`). Review the active plan set and overrides first (HQ pricing, `pricing.administer`), then confirm. Both services fail open: a failed, slow or unexpected plan read keeps today's limits. The Meeting Service's earlier name for its switch, `MEETING_PLAN_ENFORCEMENT_ENABLED`, is refused as `true` too and never set.
+
+**Owner-delivered links.** A secret a bridge command produces goes to its rightful recipient, never to HQ:
+- The Developer Platform's first-party owner invitation and the Organizations export link are sealed to the Notification Service's HPKE key. It is the same pair `activate-meeting-publications` / `activate-partner-push` use: generated once, never replaced. Each operation also mounts the private key on any replica that lacks it. The producer gets only the public key. The notices are relayed through I1, so they need the producer's publications activation, and they are delivered only once the Notification Service routing row of their category is ACTIVE.
+- `activate-organization-export-delivery` generates `/opt/cfmeet-core/secrets/organizations-export.keys` once: one `exp-YYYY-MM:<base64url 32 bytes>` line, owned by uid 10001, mode 0400. It is never regenerated, because exports in flight must stay readable. To rotate, add a new first line and keep the old one for 7 days. Organizations refuses to start while its build lacks the Notification Service catalogue type `organizations.organization.export_ready`. Until then the activation fails its health check and restores the previous container.
+- The partner API keys from Platform Access, the Messaging exports and the Developer Console reveal (`CONSOLE_REVEAL_ONCE`) need no setting. Neither does the Meeting Service account export: it uses its own email, sealed under its existing secret, and is served once `activate-admin-bridge-meetings` set `ADMIN_OPERATOR_API_ENABLED`.
 
 ## 3. Enabling for HQ (HQ stage S3), operator steps
 
@@ -130,6 +169,7 @@ Rollback: run `rollback` on that operation. It restores writes off and the previ
 - Run `rollback` right after `activate-admin-bridge-hq`. It removes the relay first, so HQ's way in closes, then restores the dark bridge. HQ then gets no answer on 8460, and any request that still reaches the bridge gets `503 BRIDGE_DISABLED`.
 - Remove the firewall rule. The tunnel can stay up: with the relay gone, nothing listens on 8460.
 - Grants added by `activate-admin-bridge` are undone by rolling that operation back.
+- `rollback` right after a §2.2 operation restores every container it recreated. For `activate-admin-bridge-events` that means the bridge without its listener or the publishers' grants, and the publishers without `CF_ADMIN_BRIDGE_BASE_URL`. Events already in the publishers' outboxes stay there and expire after 7 days.
 
 ## 5. Keys: rotation and revocation
 
