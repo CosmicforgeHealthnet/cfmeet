@@ -507,8 +507,18 @@ async fn the_owner_downloads_the_document_once_after_sign_in() {
     );
     assert_eq!(doc["schemaVersion"], 1);
     assert_eq!(doc["organization"]["id"], json!(org));
-    assert_eq!(doc["invitations"][0]["email_normalized"], INVITEE);
-    assert!(doc["invitations"][0].get("token_hash").is_none());
+    // Invitations in creation order: the admin's accepted one (made by `add_member`),
+    // then the pending one to INVITEE.
+    let invitations = doc["invitations"].as_array().unwrap();
+    assert_eq!(invitations.len(), 2);
+    assert_eq!(
+        invitations[0]["email_normalized"],
+        format!("{}@example.com", admin.simple())
+    );
+    assert_eq!(invitations[0]["status"], "ACCEPTED");
+    assert_eq!(invitations[1]["email_normalized"], INVITEE);
+    assert_eq!(invitations[1]["status"], "PENDING");
+    assert!(invitations.iter().all(|i| i.get("token_hash").is_none()));
 
     // Single use.
     h.user(owner)
