@@ -154,17 +154,45 @@ def run(sha, run_id):
         raise RuntimeError("The exact current main release must complete before activation")
     cr.require_release(sha)
 
+    recovery = None
     if CAMPAIGN_FILE.exists():
         record = json.loads(CAMPAIGN_FILE.read_text())
         if record.get("status") == "complete":
             cr.emit("campaignComplete", {"campaign": CAMPAIGN, "alreadyComplete": True,
                                           "steps": record.get("completed", [])})
             return
-        raise RuntimeError("A prior campaign attempt is %s; requires investigation, not blind retry"
-                           % record.get("status", "unknown"))
-
-    record = {"campaign": CAMPAIGN, "status": "running", "baseSha": sha,
-              "runId": run_id, "completed": []}
+        # The first campaign failed precisely at Partner Calls because its
+        # acceptance probe sent {} instead of the required expectedVersion.
+        # Calling was rolled back successfully. The owner has approved a
+        # ONE-TIME repair retry, only after a newer production release.
+        original = "ae44f8a5e3f305c86a6d04249af6aa7a8d3810ab"
+        is_known_failure = (
+            record.get("status") == "failed"
+            and record.get("baseSha") == original
+            and record.get("failedOperation") == "activate-partner-calls"
+            and record.get("errorClass") == "RuntimeError"
+            and int(record.get("repairAttempts", 0)) == 0
+            and sha != original
+        )
+        if not is_known_failure:
+            raise RuntimeError("Prior campaign failed or is incomplete; recovery is not authorized")
+        entry = last_entry(cr.load_journal(), "activate-partner-calls")
+        passed, absent, missing = flag_attestation("activate-partner-calls")
+        if not entry or entry.get("status") != "failed" or passed or missing or not absent:
+            raise RuntimeError("Partner Calls rollback not independently verified; refusing retry")
+        # An exact, journaled failed state and the absence of live flags are
+        # required. Do not change any prior successfully activated component.
+        recovery = "activate-partner-calls"
+        record["status"] = "running"
+        record["repairAttempts"] = 1
+        record["repairFromSha"] = original
+        record["repairSha"] = sha
+        record["runId"] = run_id
+        cr.emit("campaignRepairAuthorized", {"operation": recovery, "oldRelease": original,
+                                             "newRelease": sha, "attempts": 1})
+    else:
+        record = {"campaign": CAMPAIGN, "status": "running", "baseSha": sha,
+                  "runId": run_id, "completed": [], "repairAttempts": 0}
     save(record)
     try:
         for index, (operation, confirm) in enumerate(STEPS):
@@ -184,6 +212,13 @@ def run(sha, run_id):
                 record["completed"].append({"step": index + 1, "operation": operation, "result": "already_active"})
                 save(record)
                 continue
+            if prior == "blocked_failed" and recovery == operation:
+                passed, absent, missing = flag_attestation(operation)
+                if passed or missing or not absent:
+                    raise RuntimeError("Failed activation is not safely rolled back")
+                # The API contract test was corrected in the new release;
+                # this one operation is explicitly authorized for one retry.
+                prior = "pending"
             if prior != "pending":
                 raise RuntimeError("%s is %s; investigate before activation" % (operation, prior))
             prerequisite_evidence(operation)
