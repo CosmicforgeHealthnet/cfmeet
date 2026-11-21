@@ -74,6 +74,8 @@ error_codes! {
     OauthInvalidClient = "invalid_client" => UNAUTHORIZED, "Client authentication failed.";
     OauthUnsupportedGrantType = "unsupported_grant_type" => BAD_REQUEST, "The grant type is not supported.";
     OauthInvalidRequest = "invalid_request" => BAD_REQUEST, "The request is missing a required parameter.";
+    // ADR 0068: an admin bridge command whose expectedVersion is not the current version.
+    VersionConflict = "VERSION_CONFLICT" => CONFLICT, "The resource is not at the expected version.";
 }
 
 impl ErrorCode {
@@ -135,6 +137,7 @@ impl AccessError {
                 AccessError::Operator(ErrorCode::PolicyViolation, m)
             }
             PlatformError::InvalidState(m) => AccessError::Operator(ErrorCode::InvalidState, m),
+            PlatformError::VersionConflict => AccessError::Refused(ErrorCode::VersionConflict),
             PlatformError::Database {
                 summary,
                 connectivity,

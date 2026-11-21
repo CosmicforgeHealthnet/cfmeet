@@ -27,7 +27,9 @@
 
 pub mod applications;
 pub mod authentication;
+pub mod bridge;
 pub mod changes;
+pub mod credential_delivery;
 pub mod credential_format;
 pub mod credentials;
 pub mod end_users;

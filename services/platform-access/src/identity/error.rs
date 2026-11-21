@@ -25,6 +25,10 @@ pub enum PlatformError {
     /// The resource is in a state that does not allow the operation.
     #[error("{0}")]
     InvalidState(String),
+    /// ADR 0068: the admin bridge's expected version is not the resource's current
+    /// version (nothing was changed).
+    #[error("the resource is not at the expected version")]
+    VersionConflict,
     /// Unexpected database failure. `Display` is deliberately generic.
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },

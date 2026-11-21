@@ -739,6 +739,8 @@ pub mod revoke_reason {
     pub const APP_SUSPENDED: &str = "APP_SUSPENDED";
     pub const CODE_REUSE: &str = "CODE_REUSE";
     pub const REFRESH_REUSE: &str = "REFRESH_REUSE";
+    /// ADR 0068: revoked by CF Meet staff through the admin bridge.
+    pub const OPERATOR_REVOKED: &str = "OPERATOR_REVOKED";
 }
 
 fn pkce_matches(verifier: &str, challenge: &str) -> bool {
@@ -1541,6 +1543,52 @@ impl PlatformService {
         self.oauth_grant(grant_id).await
     }
 
+    /// ADR 0068 (admin bridge `identity.app-grant.revoke`): staff revoke a grant
+    /// (`OPERATOR_REVOKED`; its tokens, refresh tokens and pending codes die with it and the
+    /// bot of an ORGANIZATION grant is DEACTIVATED). Audited `APP_GRANT_REVOKED`; a bridge
+    /// command in `op` changes it only at its expected version and is recorded in the same
+    /// transaction. An already revoked grant is answered unchanged. Unknown: NOT_FOUND.
+    pub async fn operator_revoke_oauth_grant(
+        &self,
+        op: &super::operator::OperatorContext,
+        grant_id: Uuid,
+    ) -> PlatformResult<()> {
+        use super::operator::{record, AuditEntry, AuditTargetKind, OperatorAction};
+        let now = self.clock.now();
+        let txn = self.db.begin().await?;
+        if let Some(command) = op.bridge() {
+            super::bridge::lock(&txn, command).await?;
+        }
+        let row = txn
+            .query_one(stmt(
+                "SELECT app_id, tenant_id, application_id, environment_id FROM platform_oauth_grants                  WHERE id = $1 FOR UPDATE",
+                vec![grant_id.into()],
+            ))
+            .await?
+            .ok_or(PlatformError::NotFound("grant"))?;
+        let app_id: Uuid = row.try_get("", "app_id")?;
+        let revoked = self
+            .revoke_grant_in(&txn, grant_id, revoke_reason::OPERATOR_REVOKED, now)
+            .await?;
+        let entry = AuditEntry::new(
+            OperatorAction::AppGrantRevoked,
+            AuditTargetKind::AppGrant,
+            grant_id,
+        )
+        .scope(
+            Some(row.try_get("", "tenant_id")?),
+            Some(row.try_get("", "application_id")?),
+            Some(row.try_get("", "environment_id")?),
+        )
+        .detail(json!({ "appId": app_id, "revoked": revoked }));
+        record(&txn, op, &entry, now).await?;
+        if let Some(command) = op.bridge() {
+            super::bridge::record(&txn, command, None, None, now).await?;
+        }
+        txn.commit().await?;
+        Ok(())
+    }
+
     /// Issues an access or bot token credential for `grant` inside `db`.
     async fn issue_token_credential<C: ConnectionTrait>(
         &self,
@@ -1968,6 +2016,7 @@ fn reason_label(reason: &str) -> &'static str {
         revoke_reason::APP_SUSPENDED => "app_suspended",
         revoke_reason::CODE_REUSE => "code_reuse",
         revoke_reason::REFRESH_REUSE => "refresh_reuse",
+        revoke_reason::OPERATOR_REVOKED => "operator_revoked",
         _ => "other",
     }
 }
