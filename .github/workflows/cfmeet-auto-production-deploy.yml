@@ -1,0 +1,24 @@
+name: CF Meet automatic production deploy
+
+# Once required backend CI on main is green, deploy that exact main commit
+# to the production VPS. Frontend/Vercel failures are intentionally not a
+# backend gate. The reusable coordinated release owns the production lock,
+# image validation, migrations, rollback and public smoke checks.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Deploy backend to VPS when backend CI is green
+    uses: ./.github/workflows/cfmeet-coordinated-release.yml
+    with:
+      operation: release
+      release_sha: ${{ github.sha }}
+    secrets: inherit
