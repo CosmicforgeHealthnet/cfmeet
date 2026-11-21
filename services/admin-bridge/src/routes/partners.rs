@@ -169,7 +169,7 @@ fn usage(u: &Value) -> T<Value> {
     ]))
 }
 
-fn incident(i: &Value) -> T<Value> {
+pub fn incident(i: &Value) -> T<Value> {
     Ok(obj(vec![
         ("incident_record_id", t::uuid(i, "incidentRecordId")?),
         ("workspace_id", t::uuid(i, "organizationId")?),

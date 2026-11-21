@@ -10,6 +10,8 @@ use serde_json::{json, Map, Value};
 
 use crate::releases::{RUN_CONCLUSIONS, RUN_STATUSES};
 
+const ROUTING_MODES_SCHEMA: [&str; 3] = ["OFF", "SHADOW", "ACTIVE"];
+
 pub fn insert(m: &mut Map<String, Value>) {
     let uuid = json!({"type": "string", "format": "uuid"});
     let ts = json!({"type": "string", "format": "date-time"});
@@ -190,6 +192,148 @@ pub fn insert(m: &mut Map<String, Value>) {
             "properties": {
                 "items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/OperationsRelease"}},
                 "next_cursor": {"type": ["string", "null"], "pattern": "^[0-9]{1,4}$"}
+            }
+        }),
+    );
+
+    // ---- Cross-service incidents and switches (A8) ------------------------------------
+    let code = json!({"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"});
+    let nullable_code = json!({"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"});
+    let ref_id = json!({"type": "string", "pattern": "^[a-z][a-z-]{0,31}:[A-Za-z0-9._:-]{1,160}$"});
+    let closed = |description: &str, props: Value| {
+        let required: Vec<String> = props.as_object().expect("object").keys().cloned().collect();
+        json!({"description": description, "type": "object", "additionalProperties": false, "required": required, "properties": props})
+    };
+    let base_props = |extra: Value| {
+        let mut p = json!({
+            "operation_id": {"type": "string", "format": "uuid", "description": "HQ's command id; equal to the Idempotency-Key header."},
+            "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+            "note": {"type": "string", "minLength": 1, "maxLength": 500}
+        });
+        for (k, v) in extra.as_object().expect("object") {
+            p[k] = v.clone();
+        }
+        p
+    };
+    m.insert(
+        "OperationsIncident".into(),
+        closed(
+            "One incident of an owning service: Messaging (platform), Calling (the request's tenant) or a Developer Platform partner incident record (immutable: RECORDED, never resolvable). incident_id names its owner (<owner>:<uuid>) and is what operations.incident.resolve takes.",
+            json!({
+                "incident_id": ref_id.clone(),
+                "owner": {"enum": ["messaging", "calling", "developer-platform"]},
+                "category": nullable_code, "severity": nullable_code, "status": code,
+                "occurrences": {"type": ["integer", "null"], "minimum": 0},
+                "opened_at": ts, "last_seen_at": nullable_ts, "resolved_at": nullable_ts,
+                "resolvable": {"type": "boolean"}
+            }),
+        ),
+    );
+    m.insert(
+        "OperationsIncidentPage".into(),
+        json!({
+            "description": "Incidents across the owners in the window, newest first. A page holds up to limit items per owner; next_cursor carries each owner's own position. freshness PARTIAL: an owner did not answer.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {"type": "array", "maxItems": 300, "items": {"$ref": "#/components/schemas/OperationsIncident"}},
+                "next_cursor": {"type": ["string", "null"], "pattern": "^[a-z]\\.[A-Za-z0-9._:@+=-]{1,160}(~[a-z]\\.[A-Za-z0-9._:@+=-]{1,160}){0,2}$"}
+            }
+        }),
+    );
+    m.insert(
+        "OperationsIncidentResolveRequest".into(),
+        json!({
+            "description": "Resolve one owner incident (the path's <owner>:<uuid>): messaging -> Messaging's incident resolve (the reason is sent), calling -> Calling's incident resolve for the request's tenant (the reason stays in the bridge's record). Unversioned. A partner incident record has nothing to resolve (RESOURCE_NOT_FOUND).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation_id", "reason_code"],
+            "properties": base_props(json!({}))
+        }),
+    );
+    m.insert(
+        "OperationsIncidentResolveResult".into(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation", "resource"],
+            "properties": {
+                "operation": {"$ref": "#/components/schemas/OperationReadback"},
+                "resource": closed(
+                    "The owner's incident after the resolve.",
+                    json!({
+                        "incident_id": ref_id.clone(),
+                        "owner": {"enum": ["messaging", "calling"]},
+                        "incident_status": code,
+                        "resolved_at": nullable_ts
+                    }),
+                )
+            }
+        }),
+    );
+    let switch_state = json!({"enum": ["ENGAGED", "RELEASED", "OFF", "SHADOW", "ACTIVE"]});
+    m.insert(
+        "OperationsSwitch".into(),
+        closed(
+            "One switch of an owning service: a Messaging kill switch at its scope (ENGAGED / RELEASED) or a Notifications routing mode per category and channel (OFF / SHADOW / ACTIVE). switch_id is what operations.switch.change takes; version is its expected_version.",
+            json!({
+                "switch_id": ref_id.clone(),
+                "owner": {"enum": ["messaging", "notifications"]},
+                "name": code,
+                "scope": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+                "state": switch_state.clone(),
+                "version": {"type": "integer", "minimum": 0},
+                "changed_at": nullable_ts
+            }),
+        ),
+    );
+    m.insert(
+        "OperationsSwitchPage".into(),
+        json!({
+            "description": "Every switch in one bounded page (next_cursor is always null). freshness PARTIAL: an owner did not answer.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {"type": "array", "maxItems": 300, "items": {"$ref": "#/components/schemas/OperationsSwitch"}},
+                "next_cursor": {"type": "null"}
+            }
+        }),
+    );
+    m.insert(
+        "OperationsSwitchChangeRequest".into(),
+        json!({
+            "description": "Change one switch (the path's switch_id): messaging:<NAME>[:<environment id>] takes engaged (messaging.switch.change semantics; expected_version 0 while the switch has no row); notifications:<CATEGORY>:<CHANNEL> takes mode (notifications.routing.change semantics; expected_version >= 1). The target is the owner's switch at its scope. TWO_PERSON.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation_id", "expected_version", "reason_code"],
+            "properties": base_props(json!({
+                "expected_version": {"type": "integer", "minimum": 0},
+                "engaged": {"type": "boolean"},
+                "mode": {"enum": ROUTING_MODES_SCHEMA}
+            })),
+            "oneOf": [{"required": ["engaged"]}, {"required": ["mode"]}]
+        }),
+    );
+    m.insert(
+        "OperationsSwitchChangeResult".into(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation", "resource"],
+            "properties": {
+                "operation": {"$ref": "#/components/schemas/OperationReadback"},
+                "resource": closed(
+                    "The switch after the change.",
+                    json!({
+                        "switch_id": ref_id,
+                        "owner": {"enum": ["messaging", "notifications"]},
+                        "state": switch_state,
+                        "version": {"type": ["integer", "null"], "minimum": 0},
+                        "changed_at": nullable_ts
+                    }),
+                )
             }
         }),
     );

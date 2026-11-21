@@ -683,7 +683,7 @@ No command is served by A3.0 itself; it is the core every A3+ family runs throug
   - With it, a member of the partner's workspace is refused (no self-review).
   - Two-person approval (requester ≠ approver) applies either way.
 
-### 17.7 Owner events, the HQ feed and feature switch-on requests (A7 / A8, contract 1.14.0)
+### 17.7 Owner events, the HQ feed and feature switch-on requests (A7 / A8, contract 1.17.0)
 
 Bridge-local; no new error code.
 
@@ -703,3 +703,10 @@ Bridge-local; no new error code.
 - **`operations.releases.list`** (SCOPED_WINDOW): the workflow's runs created in the window, newest first: run id, event, the operation when the bridge requested the run (GitHub does not list inputs), commit, status, conclusion and times. Never logs, inputs or artifacts. Without GitHub configured: an empty list with freshness UNAVAILABLE (a page that still validates, never read as "no releases"); GitHub not answering: `OWNER_UNAVAILABLE`.
 - **GitHub access**: no redirects, no proxy, 5 s connect and 10 s total timeouts; the token is read from its file on every call, sent in a sensitive header, never logged or stored. `ADMIN_BRIDGE_GITHUB_API_URL` (default `https://api.github.com`) exists for tests. The bridge never touches Docker, the servers or secrets; the workflow's own gates (main only, exact head, green CI, owner confirmations) still apply.
 - **Tables** (migration `m20261123_000001_admin_events_releases`): `admin_event_inbox` and `admin_hq_outbox` (append-only), `admin_hq_consumer_cursors` (never backwards, never deleted), `admin_activation_requests` (REQUESTED → DISPATCHED | FAILED, run linked once, never deleted). Runtime grants in `deploy/db-roles.sql`.
+
+### 17.8 Cross-service incidents and switches (A8)
+
+- **`operations.incidents.list`** (SCOPED_WINDOW): Messaging's platform incidents, Calling's incidents of the request's tenant (a tenant scope that is not a Platform Access tenant id has none) and the Developer Platform's partner incident records (immutable, `RECORDED`, never resolvable), in one closed shape (`OperationsIncident`), newest first. A page holds up to `limit` items per owner; `next_cursor` carries each owner's own cursor (`<tag>.<cursor>` joined by `~`). An owner that does not answer makes the page `PARTIAL`; none answering is `OWNER_UNAVAILABLE`. `incident_id` is `<owner>:<uuid>`.
+- **`operations.incident.resolve`** (R2): routed by that id through the command core to Messaging's or Calling's incident resolve. The ledger target is the owner's incident (`messaging:incident:<uuid>`, `calling:incident:<tenant>:<uuid>`). `reason_code` is required (Messaging receives it; Calling keeps it in the bridge's record). A partner incident record, or any other owner, is `RESOURCE_NOT_FOUND`.
+- **`operations.switches.list`** (one bounded page): Messaging's kill switches (`messaging:<NAME>` globally, `messaging:<NAME>:<scope>` per environment; ENGAGED / RELEASED) and Notifications' routing modes (`notifications:<CATEGORY>:<CHANNEL>`; OFF / SHADOW / ACTIVE), with their versions. `PARTIAL` when one owner does not answer.
+- **`operations.switch.change`** (R3, TWO_PERSON): routed by that id through the command core with `messaging.switch.change` semantics (`engaged`, `expected_version` ≥ 0) or `notifications.routing.change` semantics (`mode`, `expected_version` ≥ 1). The target is the owner's switch at its scope (`messaging:switch:<NAME>:<scope>`, `notifications:routing:<CATEGORY>:<CHANNEL>`).
