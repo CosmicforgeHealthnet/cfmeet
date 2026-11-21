@@ -1132,6 +1132,31 @@ const MSG_EXPORT: &[OutField] = &[
     o("application_id", "applicationId", Out::Uuid, false),
     o("environment_id", "environmentId", Out::Uuid, false),
 ];
+const MEET_EXPORT: &[OutField] = &[
+    o("export_id", "exportId", Out::Uuid, false),
+    o("user_id", "userId", Out::Uuid, false),
+    o("export_state", "state", Out::Code, false),
+    o("delivery", "delivery", Out::Code, false),
+    o("delivery_channel", "deliveryChannel", Out::Code, false),
+    o("delivery_ref", "deliveryRef", Out::Uuid, false),
+    o(
+        "recipient_masked",
+        "recipientMasked",
+        Out::EmailMasked,
+        false,
+    ),
+    o("expires_at", "expiresAt", Out::Time, false),
+    o("size_bytes", "sizeBytes", Out::Int, true),
+    o("sha256", "sha256", Out::Str, true),
+    // The delivery meetings.email-deliveries.read shows.
+    o("email_delivery_id", "emailDeliveryId", Out::Uuid, true),
+    o("failure_code", "failureCode", Out::Text, true),
+    o("requested_at", "requestedAt", Out::Time, false),
+    o("ready_at", "readyAt", Out::Time, true),
+    o("delivered_at", "deliveredAt", Out::Time, true),
+    o("purged_at", "purgedAt", Out::Time, true),
+    o("version", "version", Out::Int, false),
+];
 const KEY_SCOPES: In = In::StrList(64, 100);
 
 pub const COMMANDS: &[OwnerCommand] = &[
@@ -2459,6 +2484,18 @@ pub const COMMANDS: &[OwnerCommand] = &[
         MSG_EXPORT,
         "MessagingExportCreateRequest",
         "MessagingExportCreateResult",
+    ),
+    ms(
+        "accounts.user.export",
+        // The account's version; the document goes to the owner's verified address as a
+        // single-use download link (never to HQ).
+        "POST /internal/v1/operator/accounts/users/{user_id}/export",
+        Some(1),
+        &[],
+        &["REQUESTED"],
+        MEET_EXPORT,
+        "AccountUserExportRequest",
+        "AccountUserExportResult",
     ),
 ];
 

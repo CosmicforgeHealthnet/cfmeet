@@ -52,6 +52,9 @@ impl OwnerPort for FakeNotifications {
             }
             (Owner::Messaging, "cfmeet.operations_health") => json!({"failed_messages": n(2)}),
             (Owner::Messaging, "cfmeet.messaging_daily") => json!({"messages_sent": n(42)}),
+            (Owner::MeetingService, "cfmeet.engagement_daily") => {
+                json!({"dau": n(30), "mau": n(120), "signups": n(4)})
+            }
             (Owner::DeveloperPlatform, "cfmeet.partners_daily") => json!({
                 "workspaces_active": n(5), "workspaces_restricted": n(0), "workspaces_suspended": n(1),
                 "partners_live": n(2), "partner_mau": null}),
@@ -185,7 +188,7 @@ async fn the_collector_fills_dataset_days_from_pulls_events_and_the_bridge() {
     // Pulls: the sync operator on the owner's day route, bounded.
     let calls = fake.calls.lock().unwrap().clone();
     assert!(!calls.is_empty() && calls.len() <= admin_bridge::datasets::MAX_PULLS_PER_TICK);
-    let (owner, path, operator) = &calls[0];
+    let (owner, path, operator) = calls.iter().find(|c| c.0 == Owner::Notifications).unwrap();
     assert_eq!(*owner, Owner::Notifications);
     assert_eq!(operator, SYNC_OPERATOR);
     assert_eq!(

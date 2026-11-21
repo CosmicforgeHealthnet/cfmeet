@@ -29,7 +29,9 @@ pub const SYNC_OPERATOR: &str = "hq:dataset-sync";
 /// Days looked back (yesterday included).
 pub const LOOKBACK_DAYS: i64 = 31;
 /// Owner calls per tick, across every pull source.
-pub const MAX_PULLS_PER_TICK: usize = 48;
+pub const MAX_PULLS_PER_TICK: usize = 64;
+/// Missing days before yesterday one pull source fetches per tick (newest first).
+pub const MAX_BACKFILL_PER_PULL: usize = 6;
 /// Missing days recomputed per event source per tick (newest first).
 pub const MAX_EVENT_DAYS_PER_TICK: usize = 8;
 
@@ -46,6 +48,18 @@ pub struct Pull {
 }
 
 pub const PULLS: &[Pull] = &[
+    Pull {
+        dataset: "cfmeet.engagement_daily",
+        owner: Owner::MeetingService,
+        metrics: &["dau", "mau", "signups"],
+        unmetered: &[],
+    },
+    Pull {
+        dataset: "cfmeet.meetings_daily",
+        owner: Owner::MeetingService,
+        metrics: &["meetings", "participant_minutes", "peak_live_meetings"],
+        unmetered: &[],
+    },
     Pull {
         dataset: "cfmeet.operations_health",
         owner: Owner::Notifications,
@@ -362,15 +376,21 @@ async fn collect_pulls(
     now: DateTime<Utc>,
     stats: &mut CollectStats,
 ) {
+    // Every pull gets yesterday first, then at most MAX_BACKFILL_PER_PULL missing older
+    // days: one source with a long gap never starves the others.
     for pull in PULLS {
         let rows = rows_in(all, pull.dataset);
         let src = source(pull.owner, "PULL");
+        let mut backfilled = 0;
         for (i, day) in days.iter().copied().enumerate() {
             if stats.pulls >= MAX_PULLS_PER_TICK {
                 return;
             }
-            if i != 0 && !missing(&rows, day, &src) {
+            if i != 0 && (!missing(&rows, day, &src) || backfilled >= MAX_BACKFILL_PER_PULL) {
                 continue;
+            }
+            if i != 0 {
+                backfilled += 1;
             }
             stats.pulls += 1;
             let path = format!(
