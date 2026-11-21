@@ -5296,6 +5296,18 @@
       "path": "/api/v2/communications/discovery/phone/resolve",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/credential-deliveries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal",
+      "class": "PUBLIC_CUSTOMER"
     }
   ]
 }
