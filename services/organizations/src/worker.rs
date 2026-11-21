@@ -15,6 +15,9 @@
 //!    publications ([`crate::notification_publications::run_once`]: expire / purge,
 //!    discovery from the committed outbox record rows, relay to I1). Unset: this step
 //!    does not run and touches nothing.
+//! 7. owner-delivered exports ([`crate::exports::run_once`]): expiry, purge of the
+//!    encrypted copies and row retention on every tick; with `CF_NOTIFICATIONS_BASE_URL`
+//!    also the relay of the owners' link notices.
 
 use std::{sync::Arc, time::Duration};
 
@@ -23,7 +26,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    db,
+    db, exports,
     notification_publications::{self, NotificationEventSink},
     outbox::{self, EventDispatcher},
     provisioning::{self, PlatformScopes},
@@ -249,6 +252,14 @@ pub async fn run_with(
                         Ok(_) => {}
                         Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations provisioning pass failed"),
                     }
+                }
+                match exports::run_once(&db, notifications.as_deref()).await {
+                    Ok(r) if r != exports::ExportReport::default() => tracing::info!(
+                        sent = r.sent, retried = r.retried, failed = r.failed, expired = r.expired,
+                        purged = r.purged, deleted = r.deleted,
+                        "organizations export maintenance pass"),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations export maintenance pass failed"),
                 }
                 if let Some(sink) = &notifications {
                     match notification_publications::run_once(&db, sink.as_ref()).await {

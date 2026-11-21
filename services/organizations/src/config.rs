@@ -20,6 +20,9 @@
 //! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (I1, `notifications-event.publish`, roadmap N7): when set, the catalogue events `organizations.*` are published from the committed outbox record rows; unset (default): nothing is published and nothing is written |
 //! | `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED` | no | `true` / `false` (default `false`; gap audit G19): with `CF_NOTIFICATIONS_BASE_URL`, also notify the organization's ACTIVE members of `organization.archived` / `organization.reactivated` (`organizations.organization.{archived, reactivated}`). Leave off until the Notification Service catalogue carries both types: an event whose type the catalogue does not know is recorded `SKIPPED` (`NOT_IN_CATALOGUE`), never sent |
+//! | `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED` | no | `true` / `false` (default `false`; ADR 0068 A4): owner-delivered exports (the admin bridge's `organizations.organization.export`). Requires `CF_NOTIFICATIONS_BASE_URL`, `CF_NOTIFICATIONS_SEALING_KEY` and `ORGANIZATIONS_EXPORT_KEYS_FILE`, and the Notification Service catalogue type `organizations.organization.export_ready` (the service refuses to start without it). Off: the command answers 409 `EXPORT_DELIVERY_UNAVAILABLE` |
+//! | `CF_NOTIFICATIONS_SEALING_KEY` | with export delivery | the Notification Service's PUBLIC HPKE key `<kid>:<base64url>`: each link's token is sealed to it |
+//! | `ORGANIZATIONS_EXPORT_KEYS_FILE` | with export delivery | FILE of `<key id>:<base64url 32 bytes>` lines (XChaCha20-Poly1305 at-rest keys of exports; the first seals, all open; keep a retired key 7 days) |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
@@ -39,6 +42,7 @@ use cf_service_auth::{
 };
 
 use crate::{
+    exports::{ExportDelivery, ExportNotices, ExportVault, NotificationExportNotices},
     notification_publications::{NotificationEventSink, NotificationServiceEvents},
     outbox::{DisabledDispatcher, EventDispatcher, HttpEventDispatcher},
     provisioning::{HttpPlatformScopes, PlatformScopes},
@@ -94,6 +98,15 @@ pub struct SigningSettings {
     pub http_timeout: Duration,
 }
 
+/// Owner-delivered exports (`ORGANIZATIONS_EXPORT_DELIVERY_ENABLED=true`).
+#[derive(Debug, Clone)]
+pub struct ExportSettings {
+    /// `CF_NOTIFICATIONS_SEALING_KEY` (public, validated).
+    pub sealing_key: String,
+    /// `ORGANIZATIONS_EXPORT_KEYS_FILE` (read at startup).
+    pub keys_file: PathBuf,
+}
+
 /// Outbound service authentication for the provisioning saga.
 #[derive(Debug, Clone)]
 pub struct OutboundSettings {
@@ -127,6 +140,8 @@ pub struct OrganizationsConfig {
     pub lifecycle_notifications: bool,
     /// `Some` iff provisioning, event delivery or notification publication is enabled.
     pub signing: Option<SigningSettings>,
+    /// `Some` iff `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED=true` (ADR 0068 A4).
+    pub exports: Option<ExportSettings>,
 }
 
 impl fmt::Debug for OrganizationsConfig {
@@ -153,6 +168,7 @@ impl fmt::Debug for OrganizationsConfig {
                 &self.notifications_base_url.is_some(),
             )
             .field("lifecycle_notifications", &self.lifecycle_notifications)
+            .field("export_delivery", &self.exports.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -320,6 +336,34 @@ impl OrganizationsConfig {
                     ))
                 }
             };
+        let exports = match get("ORGANIZATIONS_EXPORT_DELIVERY_ENABLED").as_deref() {
+            None | Some("false") => None,
+            Some("true") => {
+                if notifications_base_url.is_none() {
+                    return Err(invalid(
+                        "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                        "requires CF_NOTIFICATIONS_BASE_URL",
+                    ));
+                }
+                let sealing_key = required("CF_NOTIFICATIONS_SEALING_KEY")?;
+                cf_notification_client::SealingKey::parse(&sealing_key).map_err(|_| {
+                    invalid(
+                        "CF_NOTIFICATIONS_SEALING_KEY",
+                        "must be <kid>:<base64url public key>",
+                    )
+                })?;
+                Some(ExportSettings {
+                    sealing_key,
+                    keys_file: PathBuf::from(required("ORGANIZATIONS_EXPORT_KEYS_FILE")?),
+                })
+            }
+            Some(_) => {
+                return Err(invalid(
+                    "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
         let signing = if enabled || !event_consumers.is_empty() || notifications_base_url.is_some()
         {
             let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
@@ -377,7 +421,36 @@ impl OrganizationsConfig {
             notifications_base_url,
             lifecycle_notifications,
             signing,
+            exports,
         })
+    }
+
+    /// Owner-delivered exports (`None` while `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED` is
+    /// off). Loads the key file and refuses (fail closed) while the Notification Service
+    /// catalogue lacks the notice type: a link that cannot be sent must never be issued.
+    pub fn export_delivery(&self) -> Result<Option<Arc<ExportDelivery>>, ConfigError> {
+        let Some(s) = &self.exports else {
+            return Ok(None);
+        };
+        let vault = ExportVault::from_file(&s.keys_file)
+            .map_err(|reason| invalid("ORGANIZATIONS_EXPORT_KEYS_FILE", reason))?;
+        let sealing = cf_notification_client::SealingKey::parse(&s.sealing_key).map_err(|_| {
+            invalid(
+                "CF_NOTIFICATIONS_SEALING_KEY",
+                "must be <kid>:<base64url public key>",
+            )
+        })?;
+        let notices = NotificationExportNotices::new(sealing);
+        notices.available().map_err(|_| {
+            invalid(
+                "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                "needs the Notification Service catalogue type organizations.organization.export_ready, which this build does not carry yet",
+            )
+        })?;
+        Ok(Some(Arc::new(ExportDelivery {
+            vault,
+            notices: Arc::new(notices),
+        })))
     }
 
     fn signer(

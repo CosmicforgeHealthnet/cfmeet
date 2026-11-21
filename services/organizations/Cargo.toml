@@ -45,6 +45,10 @@ base64 = "0.22"
 hex = "0.4"
 rand = "0.8"
 sha2 = "0.10"
+# Owner-delivered exports: the encrypted-at-rest copy (XChaCha20-Poly1305, as the Meeting
+# Service seals its fallback email; `aes-gcm` is reserved to the Contact Vault by the
+# service boundary guard).
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

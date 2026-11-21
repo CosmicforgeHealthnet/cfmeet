@@ -5,7 +5,7 @@ use std::sync::Arc;
 use cf_service_auth::ServiceTokenVerifier;
 use sea_orm::DatabaseConnection;
 
-use crate::provisioning::PlatformScopes;
+use crate::{exports::ExportDelivery, provisioning::PlatformScopes};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -23,6 +23,10 @@ pub struct AppState {
     /// ADR 0064 (`ORGANIZATIONS_APP_INSTALLS_ENABLED`): the policy section `apps` and the
     /// app-install check. Off (default): both are absent, exactly as before.
     pub app_installs_enabled: bool,
+    /// ADR 0068 A4 (`ORGANIZATIONS_EXPORT_DELIVERY_ENABLED`): owner-delivered exports (the
+    /// at-rest keys and the notice builder). `None` (default): the bridge's export command
+    /// is refused (409 `EXPORT_DELIVERY_UNAVAILABLE`).
+    pub exports: Option<Arc<ExportDelivery>>,
 }
 
 impl AppState {
@@ -34,6 +38,7 @@ impl AppState {
             platform: None,
             event_destinations: Vec::new(),
             app_installs_enabled: false,
+            exports: None,
         }
     }
 
@@ -49,6 +54,11 @@ impl AppState {
 
     pub fn with_app_installs(mut self, enabled: bool) -> Self {
         self.app_installs_enabled = enabled;
+        self
+    }
+
+    pub fn with_exports(mut self, exports: Option<Arc<ExportDelivery>>) -> Self {
+        self.exports = exports;
         self
     }
 
