@@ -71,11 +71,68 @@ class RecordingStorage(unittest.TestCase):
                 patch.object(mr, 'ensure_callback') as callback, \
                 patch.object(mr, 'recording_provider_overrides', return_value={mr.FLAG: 'true'}):
             mr.activate(cr, 'sha', '2', 'enable-30-days')
-            callback.assert_not_called()
+            callback.assert_called_once_with(cr, '2')
             self.assertEqual(apply.call_args.args[3], [('meeting-service', {mr.FLAG: 'true'})])
             with self.assertRaisesRegex(RuntimeError, 'capture failed'):
                 apply.call_args.kwargs['post']()
             callback.assert_called_once_with(cr, '2')
+
+    def test_enable_refuses_signer_changes_before_any_mutation(self):
+        cr = SimpleNamespace(require_release=Mock(), env_of=lambda _: {
+            'ARTIFACT_STORAGE_BUCKET': mr.BUCKET, 'MEETING_RECORDING_STORAGE_PREPARED': 'true'},
+            mem_available_mib=lambda: 4096, apply_activation=Mock())
+        with patch.object(mr, 'facts', return_value={'recordingStorageProtocol': 1}), \
+                patch.object(mr, 'recording_provider_overrides', return_value={mr.FLAG: 'true', 'LIVEKIT_API_KEY': 'new'}), \
+                patch.object(mr, 'ensure_callback') as callback:
+            with self.assertRaisesRegex(RuntimeError, 'Prepare.*callback signer'):
+                mr.activate(cr, 'sha', '2', 'enable-30-days')
+        cr.apply_activation.assert_not_called()
+        callback.assert_not_called()
+
+    def test_failed_capture_restores_prepared_signer_and_keeps_callback_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            site, snippet = root / 'site', root / 'snippet'
+            site.write_text(mr.ANCHOR)
+            env = {mr.FLAG: 'false', 'LIVEKIT_API_KEY': 'old', 'LIVEKIT_API_SECRET': 'old-secret'}
+            plans = []
+            def apply(operation, sha, run_id, changes, post):
+                before = dict(env)
+                plans.append(changes)
+                env.update(changes[0][1])
+                try:
+                    post()
+                except Exception:
+                    env.clear()
+                    env.update(before)
+                    raise
+            def provider(_):
+                return {mr.FLAG: 'true', **({} if env['LIVEKIT_API_KEY'] == 'callback' else
+                    {'LIVEKIT_API_KEY': 'callback', 'LIVEKIT_API_SECRET': 'callback-secret'})}
+            def callback(*_):
+                self.assertEqual(env['LIVEKIT_API_KEY'], 'callback')
+                self.assertEqual(env[mr.FLAG], 'false')
+            cr = SimpleNamespace(require_release=Mock(), env_of=lambda _: env, apply_activation=apply,
+                emit=Mock(), mem_available_mib=lambda: 4096)
+            with patch.object(mr, 'SITE', site), patch.object(mr, 'SNIPPET', snippet), \
+                    patch.object(mr.p, 'ROOT', root), patch.object(mr.shutil, 'disk_usage', return_value=SimpleNamespace(free=20*2**30)), \
+                    patch.object(mr.p, 'inspect', return_value={'State': {'Running': True}, 'HostConfig': {}}), \
+                    patch.object(mr, 'identity', return_value=([root/'access', root/'secret'], 'test-user', 'test-password')), \
+                    patch.object(mr.relay, 'wait_for_relay'), patch.object(mr.relay, 'anonymous_status', return_value=403), \
+                    patch.object(mr.relay, 'signed_round_trip'), patch.object(mr.p, 'reload_host_nginx'), \
+                    patch.object(mr, 'facts', side_effect=lambda _: dict(recordingStorageProtocol=1,
+                        recordingStorageConfigured=True, recordingEnabled=env[mr.FLAG]=='true')), \
+                    patch.object(mr, 'recording_provider_overrides', provider), patch.object(mr, 'ensure_callback', callback), \
+                    patch('meeting_recording_acceptance.run', side_effect=RuntimeError('capture failed')):
+                mr.activate(cr, 'sha', '1-1', 'prepare')
+                self.assertEqual(env['LIVEKIT_API_KEY'], 'callback')
+                with self.assertRaisesRegex(RuntimeError, 'capture failed'):
+                    mr.activate(cr, 'sha', '2-1', 'enable-30-days')
+            self.assertEqual(len(plans), 2)
+            self.assertEqual(plans[1], [('meeting-service', {mr.FLAG: 'true'})])
+            self.assertEqual(env['LIVEKIT_API_KEY'], 'callback')
+            self.assertEqual(env['LIVEKIT_API_SECRET'], 'callback-secret')
+            self.assertEqual(env[mr.FLAG], 'false')
 
     def test_confirmation_and_protocol_are_checked_before_storage_mutations(self):
         cr = SimpleNamespace(require_release=Mock())

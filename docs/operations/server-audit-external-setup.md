@@ -159,16 +159,19 @@ Report the actual cosignature state and who controls the configured witness sepa
 
 ## Recording callback activation
 
-`activate-meeting-recording` with `enable-30-days` checks both existing provider identities
+`activate-meeting-recording` with `prepare` checks both existing provider identities
 against the shared SFU's configured keys. Self-hosted LiveKit has a global webhook signer;
 Meeting currently verifies callbacks with its own provider credentials. The activation
-therefore aligns Meeting's client credentials with that existing signer inside the same
-rollback boundary as capture and acceptance. It never rotates or removes an SFU key,
+therefore aligns Meeting's client credentials with that existing signer while capture
+remains disabled. It never rotates or removes an SFU key,
 so existing participant tokens remain valid. Unknown keys or callback layouts are refused.
 It extends only the known Calling callback configuration. The media server restarts only
 when both participant and active-capture counts are zero. A failed restart or route
-verification restores the exact previous configuration. Capture remains governed by the
-real synthetic recording acceptance and its existing flag rollback.
+verification restores the exact previous configuration. Preparation completes as a
+separate workflow run before `enable-30-days`; re-run preparation for an older storage-only
+setup. Enable refuses a remaining signer mismatch and changes only the capture flag.
+A failed capture acceptance then restores the prepared container, retaining the signer
+that verifies the already configured callbacks.
 
 Use `diagnose` to read the allowlisted controlled recording receipt, its own artifact's
 state/failure code, the boolean signer comparison and known public RTC host/port. No media,

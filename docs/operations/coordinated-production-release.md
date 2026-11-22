@@ -404,6 +404,12 @@ existing artifact retention worker. No bucket lifecycle rule bypasses that autho
 Storage and its signed-read route survive an image rollback so old recording bytes
 remain accessible through authorized application access.
 
+Preparation also validates both existing SFU identities and configures the shared callback
+signer with capture disabled. It requires idle media before extending the known Calling
+callback configuration and preserves every SFU key. Re-run preparation for an earlier
+storage-only setup. The separate preparation run becomes the rollback baseline for
+capture, so a failed recording test does not restore a mismatched callback verifier.
+
 Then dispatch `activate-meeting-recording` with `confirm=enable-30-days`. This requires
 prepared storage and 2 GiB available RAM and runs the controlled real API/RTC acceptance
 inside the activation's rollback boundary. A disposable client publishes generated
