@@ -1,6 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Popover } from "radix-ui";
+import { toast } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +13,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { TimeZoneField } from "@/components/meetings/ScheduleFields";
 import { viewerTimeZone } from "@/lib/meeting-time";
-import { BadgeCheck, Check, Copy, Hash, Mail } from "lucide-react";
+import { BadgeCheck, Camera, Check, Copy, Hash, ImagePlus, KeyRound, Mail, Trash2 } from "lucide-react";
 import { useHubProfile } from "@/hooks/v2/useCommunications";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import EmailCodeConfirm from "./EmailCodeConfirm";
@@ -23,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useAccountProfile, useUpdateAccountProfile } from "@/hooks/useAccount";
+import { accountKeys, useAccountProfile, useUpdateAccountProfile } from "@/hooks/useAccount";
 import { accountService } from "@/services/account.service";
 import { AVATAR_ERROR_MESSAGES, prepareAvatarImage } from "@/lib/account/avatar-image";
 import { authService } from "@/services/auth.service";
@@ -120,27 +124,40 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
     </div>
   );
   const name = form.displayName.trim() || profile.effectiveDisplayName || form.username;
-  const avatar = form.avatarUrl.trim().startsWith("https://") && !problems.avatarUrl ? form.avatarUrl.trim() : null;
   const deviceZone = viewerTimeZone();
 
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-6">
-      {/* Identity card */}
-      <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-5 sm:p-6">
-        <AvatarUpload avatar={avatar} initials={name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}
-          onUploaded={(url) => setForm((f) => ({ ...f, avatarUrl: url }))} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-lg font-semibold">{name}</p>
-          <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground"><Mail className="size-3.5 shrink-0" />{profile.email}{profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : null}</p>
-          <MyCfMeetId />
-          <p className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
-            <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">Signs in with {profile.authType.toLowerCase() === "google" ? "Google" : "an email code"}</span>
-            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">{accountStatusLabel(normalizeAccountStatus(profile.status))}</span>
-            {!profile.emailVerified && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">Email not verified</span>}
-          </p>
+      {/* You: photo and name (WhatsApp profile header) */}
+      <section className="flex flex-col items-center gap-3 pt-2 text-center">
+        <AvatarUpload avatar={profile.avatarUrl ?? null} initials={name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")} />
+        <div className="min-w-0 max-w-full">
+          <p className="truncate text-xl font-semibold">{name}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{accountStatusLabel(normalizeAccountStatus(profile.status))} account</p>
         </div>
-        <ChangeEmail current={profile.email} />
       </section>
+
+      {/* Account: one row per fact, its action on the right */}
+      <ul className="overflow-hidden rounded-2xl border border-border bg-card">
+        <li className="flex items-center gap-3 px-4 py-3.5">
+          <Mail className="size-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted-foreground">Email</p>
+            <p className="flex items-center gap-1.5 text-[15px]"><span className="truncate">{profile.email}</span>
+              {profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">Not verified</span>}
+            </p>
+          </div>
+          <ChangeEmail current={profile.email} />
+        </li>
+        <MyCfMeetId />
+        <li className="flex items-center gap-3 border-t border-border px-4 py-3.5">
+          <KeyRound className="size-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted-foreground">Sign-in</p>
+            <p className="text-[15px]">{profile.authType.toLowerCase() === "google" ? "With Google" : "With a code sent to your email"}</p>
+          </div>
+        </li>
+      </ul>
 
       {error && (
         <div role="alert" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -221,47 +238,79 @@ function MyCfMeetId() {
   const [copied, setCopied] = useState(false);
   const id = profile.data?.cfMeetId;
   if (!id) return null;
+  const copy = () => void navigator.clipboard?.writeText(id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   return (
-    <button type="button" title="Copy your CF Meet ID" data-testid="profile-cfmeet-id"
-      onClick={() => void navigator.clipboard?.writeText(id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
-      className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground">
-      <Hash className="size-3.5 shrink-0" /><span className="truncate font-mono">{id}</span>
-      {copied ? <Check className="size-3.5 shrink-0 text-primary" /> : <Copy className="size-3.5 shrink-0" />}
-    </button>
+    <li className="flex items-center gap-3 border-t border-border px-4 py-3.5">
+      <Hash className="size-5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">CF Meet ID</p>
+        <p className="truncate font-mono text-[15px]" data-testid="profile-cfmeet-id">{id}</p>
+      </div>
+      <button type="button" onClick={copy} aria-label="Copy your CF Meet ID" className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-primary hover:bg-primary/10">
+        {copied ? <><Check className="size-4" />Copied</> : <><Copy className="size-4" />Copy</>}
+      </button>
+    </li>
   );
 }
 
-/** Tap the photo to upload a new one; large photos are shrunk to fit the 512 KB limit. */
-function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const pick = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy(true); setError(null);
-    try {
-      // Shrink phone photos in the browser so they fit the server's 512 KB limit.
-      const prepared = await prepareAvatarImage(file);
-      if (!prepared.ok) { setError(AVATAR_ERROR_MESSAGES[prepared.error]); return; }
-      const p = await accountService.uploadAvatar(prepared.file);
-      if (p.avatarUrl) onUploaded(p.avatarUrl);
-    }
-    catch (e) { setError(getErrorMessage(e, "The photo couldn't be uploaded. Try again.")); }
-    finally { setBusy(false); }
+/**
+ * Profile photo (WhatsApp): tap it for "Upload new photo" or "Remove photo". The change is
+ * saved straight away (no Save button) and confirmed with a toast. Large photos are shrunk
+ * in the browser to fit the 512 KB limit.
+ */
+function AvatarUpload({ avatar, initials }: { avatar: string | null; initials: string }) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<"upload" | "remove" | null>(null);
+  const [menu, setMenu] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+  const saved = (p: AccountProfile) => {
+    queryClient.setQueryData(accountKeys.profile(), p);
+    void queryClient.invalidateQueries({ queryKey: ["user-profile"] });
   };
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy("upload");
+    try {
+      const prepared = await prepareAvatarImage(f);
+      if (!prepared.ok) { toast(AVATAR_ERROR_MESSAGES[prepared.error], "error"); return; }
+      saved(await accountService.uploadAvatar(prepared.file));
+      toast("Profile photo updated");
+    } catch (e) { toast(getErrorMessage(e, "The photo couldn't be uploaded. Try again."), "error"); }
+    finally { setBusy(null); }
+  };
+  const remove = async () => {
+    setBusy("remove");
+    try { saved(await accountService.updateProfile({ avatarUrl: null })); toast("Profile photo removed"); }
+    catch (e) { toast(getErrorMessage(e, "The photo couldn't be removed. Try again."), "error"); }
+    finally { setBusy(null); }
+  };
+  const item = "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted";
   return (
-    <div className="flex flex-col items-center gap-1">
-      <label className="group relative size-16 shrink-0 cursor-pointer overflow-hidden rounded-full" title="Change photo">
-        {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatar} alt="" className="size-16 object-cover" />
-        ) : (
-          <span className="flex size-16 items-center justify-center bg-primary/10 text-xl font-semibold text-primary">{initials}</span>
-        )}
-        <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">{busy ? "Uploading…" : "Change"}</span>
-        <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
-      </label>
-      {error ? <p role="alert" className="max-w-[10rem] text-center text-[11px] text-destructive">{error}</p> : null}
-    </div>
+    <>
+      <input ref={file} type="file" accept="image/*" className="sr-only" tabIndex={-1} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
+      <Popover.Root open={menu} onOpenChange={setMenu}>
+        <Popover.Trigger asChild>
+          <button type="button" disabled={!!busy} aria-label="Change profile photo" className="group relative size-28 shrink-0 rounded-full outline-none focus-visible:ring-4 focus-visible:ring-primary/30">
+            {avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatar} alt="" className={cn("size-28 rounded-full object-cover transition-opacity", busy && "opacity-60")} />
+            ) : (
+              <span className="flex size-28 items-center justify-center rounded-full bg-primary/10 text-4xl font-semibold text-primary">{initials}</span>
+            )}
+            <span aria-hidden className="absolute inset-0 hidden items-center justify-center rounded-full bg-black/35 text-white group-hover:flex"><Camera className="size-7" /></span>
+            {busy ? <span aria-hidden className="absolute -inset-1 animate-spin rounded-full border-[3px] border-primary border-t-transparent" /> : null}
+            <span aria-hidden className="absolute bottom-1 right-1 flex size-9 items-center justify-center rounded-full border-[3px] border-background bg-primary text-primary-foreground shadow"><Camera className="size-4" /></span>
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content side="bottom" sideOffset={8} collisionPadding={12} className="z-50 w-56 rounded-2xl border border-border bg-popover p-1.5 shadow-xl">
+            <button type="button" className={item} onClick={() => { setMenu(false); file.current?.click(); }}><ImagePlus className="size-4 text-muted-foreground" />Upload new photo</button>
+            {avatar ? <button type="button" className={cn(item, "text-destructive")} onClick={() => { setMenu(false); void remove(); }}><Trash2 className="size-4" />Remove photo</button> : null}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+      {busy ? <p role="status" className="-mt-1 text-xs text-muted-foreground">{busy === "upload" ? "Uploading photo…" : "Removing photo…"}</p> : null}
+    </>
   );
 }
 
@@ -381,7 +430,7 @@ function ChangeEmail({ current }: { current: string }) {
   return (
     <Dialog open={open} onOpenChange={reset}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-9 shrink-0 rounded-xl px-3.5 text-sm">Change email</Button>
+        <button type="button" className="h-9 shrink-0 rounded-full px-3 text-sm font-semibold text-primary hover:bg-primary/10">Change</button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

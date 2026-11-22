@@ -9,6 +9,7 @@ import MobileSidebar from "./MobileSidebar";
 import TopBar from "./TopBar";
 import MobileTabs from "./MobileTabs";
 import CommandPalette from "./CommandPalette";
+import { Toaster } from "@/components/ui/toast";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { useSessionWatch } from "@/lib/auth/use-session-watch";
 
@@ -68,6 +69,7 @@ export default function DashboardLayout({
         <MobileTabs />
         <MobileSidebar />
         <CommandPalette />
+        <Toaster />
       </div>
     </WorkspaceProvider>
   );

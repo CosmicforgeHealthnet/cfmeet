@@ -2,7 +2,8 @@
 
 import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, BellRing, ChevronRight, KeyRound, Laptop, ShieldCheck, UserRound, Webhook } from "lucide-react";
+import { ArrowLeft, BellRing, ChevronRight, KeyRound, Laptop, Monitor, Moon, Palette, ShieldCheck, Sun, UserRound, Webhook } from "lucide-react";
+import { useTheme } from "next-themes";
 import ChatSettings from "@/components/account/ChatSettings";
 import AccountProfileSettings from "@/components/account/AccountProfileSettings";
 import AccountSecuritySettings from "@/components/account/AccountSecuritySettings";
@@ -13,7 +14,7 @@ import ApiKeysContent from "./ApiKeysContent";
 import WebhooksContent from "./WebhooksContent";
 import { cn } from "@/lib/utils";
 
-type Tab = "profile" | "security" | "devices" | "chats" | "api-keys" | "webhooks";
+type Tab = "profile" | "security" | "devices" | "chats" | "appearance" | "api-keys" | "webhooks";
 /** `desktopOnly`: on a phone the profile card at the top is the way in (no second "Profile" row). */
 type Item = { id: Tab; label: string; hint: string; icon: typeof UserRound; tint: string; desktopOnly?: boolean };
 
@@ -27,9 +28,10 @@ const GROUPS: { title: string; items: Item[] }[] = [
     ],
   },
   {
-    title: "Chats",
+    title: "App",
     items: [
       { id: "chats", label: "Chats & notifications", hint: "Alerts, storage, backup", icon: BellRing, tint: "bg-rose-500" },
+      { id: "appearance", label: "Appearance", hint: "Light, dark or match this device", icon: Palette, tint: "bg-amber-500" },
     ],
   },
   {
@@ -106,6 +108,7 @@ function Settings() {
           {current.id === "security" && <AccountSecuritySettings />}
           {current.id === "devices" && <LinkedDevices />}
           {current.id === "chats" && <ChatSettings />}
+          {current.id === "appearance" && <Appearance />}
           {current.id === "api-keys" && <ApiKeysContent />}
           {current.id === "webhooks" && <WebhooksContent />}
         </div>
@@ -136,5 +139,39 @@ function ProfileCard({ onOpen }: { onOpen: () => void }) {
       </span>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
     </button>
+  );
+}
+
+const THEMES = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "Same as device", icon: Monitor },
+] as const;
+
+/** Theme: three cards with a small preview of each. */
+function Appearance() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+      <h3 className="text-base font-semibold">Theme</h3>
+      <p className="mt-0.5 text-sm text-muted-foreground">Choose how CF Meet looks on this device.</p>
+      <div role="radiogroup" aria-label="Theme" className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+        {THEMES.map(({ value, label, icon: Icon }) => {
+          const on = (theme ?? "system") === value;
+          return (
+            <button key={value} type="button" role="radio" aria-checked={on} onClick={() => setTheme(value)}
+              className={cn("flex flex-col items-center gap-2 rounded-2xl border-2 p-2 pb-3 text-sm font-medium transition-colors", on ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/60")}>
+              <span aria-hidden className={cn("flex h-16 w-full flex-col gap-1.5 overflow-hidden rounded-xl p-2",
+                value === "light" ? "bg-[#F4F6FA]" : value === "dark" ? "bg-[#16181D]" : "bg-gradient-to-r from-[#F4F6FA] from-50% to-[#16181D] to-50%")}>
+                <span className="h-2 w-3/5 rounded-full bg-[#006BFF]/70" />
+                <span className={cn("h-2 w-4/5 rounded-full", value === "dark" ? "bg-white/20" : "bg-black/10")} />
+                <span className={cn("h-2 w-2/5 rounded-full", value === "dark" ? "bg-white/20" : "bg-black/10")} />
+              </span>
+              <span className="flex items-center gap-1.5"><Icon className="size-4" />{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
