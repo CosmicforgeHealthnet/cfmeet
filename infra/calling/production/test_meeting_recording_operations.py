@@ -82,3 +82,23 @@ class RecordingStorage(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Release'):
                     mr.activate(cr, 'sha', '1', 'prepare')
             identity.assert_not_called()
+
+
+class RecordingProviderIdentity(unittest.TestCase):
+    def test_signer_comparison_emits_only_booleans(self):
+        for secret, expected in [('provider-secret', True), ('different-provider-secret', False)]:
+            cr = SimpleNamespace(env_of=Mock(return_value={'LIVEKIT_API_KEY': 'provider-id',
+                                                          'LIVEKIT_API_SECRET': secret}), emit=Mock())
+            with patch.object(mr.p, 'secret', side_effect=['provider-id', 'provider-secret']):
+                mr.provider_identity(cr)
+            kind, result = cr.emit.call_args.args
+            self.assertEqual(kind, 'meetingRecordingProviderIdentity')
+            self.assertEqual(result, dict(meetingSignerConfigured=True, sharesCallingSigner=expected))
+            self.assertNotIn('provider-', json.dumps(result))
+
+    def test_missing_provider_identity_is_unknown_and_does_not_read_secrets(self):
+        cr = SimpleNamespace(env_of=Mock(return_value={}), emit=Mock())
+        with patch.object(mr.p, 'secret') as secret:
+            mr.provider_identity(cr)
+        secret.assert_not_called()
+        self.assertIsNone(cr.emit.call_args.args[1]['sharesCallingSigner'])

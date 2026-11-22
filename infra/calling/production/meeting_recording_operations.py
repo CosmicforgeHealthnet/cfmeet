@@ -155,3 +155,18 @@ def activate(cr, sha, run_id, confirm):
     # additions: restoring an old application never strands existing recording bytes.
     cr.emit('meetingRecordingStorage', dict(encrypted=True, anonymousRead='denied',
             quotaGiB=10, defaultRetentionDays=30, captureEnabled=False))
+
+
+def provider_identity(cr):
+    """Compare provider identities on the host; never emit either key or secret."""
+    env = cr.env_of('meeting-service')
+    configured = bool(env.get('LIVEKIT_API_KEY') and env.get('LIVEKIT_API_SECRET'))
+    matches = None
+    if configured:
+        try:
+            matches = (env['LIVEKIT_API_KEY'] == p.secret('calling-livekit-api-key')
+                       and env['LIVEKIT_API_SECRET'] == p.secret('calling-livekit-api-secret'))
+        except OSError:
+            pass
+    cr.emit('meetingRecordingProviderIdentity', dict(meetingSignerConfigured=configured,
+                                                    sharesCallingSigner=matches))
