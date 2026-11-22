@@ -152,7 +152,8 @@ ReadWritePaths={root}/logs/services
 RestrictAddressFamilies=AF_UNIX
 CapabilityBoundingSet=
 MemoryMax=512M
-TasksMax=256
+# Up to 80 Docker log clients, their runtime threads, and Python collectors.
+TasksMax=2048
 [Install]
 WantedBy=multi-user.target
 '''.format(root=root)
