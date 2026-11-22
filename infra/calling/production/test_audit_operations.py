@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,3 +86,56 @@ class Capacity(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RecordingReceipts(unittest.TestCase):
+    def test_only_known_receipt_fields_are_emitted_and_private_files_are_not_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'meeting-recording' / 'acceptance' / '12345-1'
+            folder.mkdir(parents=True)
+            (folder / 'credentials.private.json').write_text('private-token')
+            (folder / 'report.json').write_text(json.dumps(dict(result='FAIL', phase='capture',
+                errorClass='AssertionError', url='https://private-token', secret='private-token',
+                checks={'real_rtc_synthetic_media': 'PASS', 'private-token': 'PASS'})))
+            fake = SimpleNamespace(emit=Mock())
+            with patch.object(ao.p, 'ROOT', root):
+                ao.recording_receipts(fake)
+            key, receipts = fake.emit.call_args.args
+            self.assertEqual(key, 'meetingRecordingReceipts')
+            self.assertEqual(receipts[0]['phase'], 'capture')
+            self.assertEqual(receipts[0]['checks'], {'real_rtc_synthetic_media': 'PASS'})
+            self.assertNotIn('private-token', json.dumps(receipts))
+
+    def test_malformed_receipt_fields_cannot_escape_the_allowlist(self):
+        value = ao.recording_receipt(dict(result='private-token', phase={'private-token': True},
+                                       errorClass='private-token', checks=[]), '12345-1')
+        self.assertNotIn('private-token', json.dumps(value))
+        self.assertEqual(value['result'], 'INVALID')
+
+
+class ControlledRecordingState(unittest.TestCase):
+    def test_query_is_scoped_to_all_three_fixture_ids_and_drops_private_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            ids = dict(recording='00000000-0000-4000-8000-000000000001',
+                       conference='00000000-0000-4000-8000-000000000002',
+                       space='00000000-0000-4000-8000-000000000003')
+            (folder / 'cleanup.json').write_text(json.dumps(ids))
+            cr = SimpleNamespace(meeting_psql=Mock(return_value=json.dumps(dict(
+                status='FAILED', failureCode='RECORDING_START_TIMEOUT', providerAssigned=True,
+                storageUri='private-token', failureDetail='private-token'))))
+            result = ao.owned_recording_state(cr, folder)
+            self.assertEqual(result, dict(status='FAILED', failureCode='RECORDING_START_TIMEOUT', providerAssigned=True))
+            query = cr.meeting_psql.call_args.args[0]
+            for value in ids.values():
+                self.assertIn(value, query)
+            self.assertNotIn('private-token', json.dumps(result))
+
+    def test_invalid_fixture_ids_never_reach_the_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / 'cleanup.json').write_text(json.dumps(dict(recording="injection", conference='x', space='y')))
+            cr = SimpleNamespace(meeting_psql=Mock())
+            self.assertIsNone(ao.owned_recording_state(cr, folder))
+            cr.meeting_psql.assert_not_called()

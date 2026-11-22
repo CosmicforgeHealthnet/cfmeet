@@ -2,6 +2,8 @@
 import time
 import datetime
 import json
+import re
+import uuid
 from pathlib import Path
 import shutil
 
@@ -16,9 +18,10 @@ MAX_CONNECTIONS = 256
 BACKEND_MEMORY_MIB = 16
 MEMORY_RESERVE_MIB = 2048
 LOG_DEPENDENCIES = frozenset((
-    'cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio',
+    'cfmeet-core-db', 'cfmeet-core-tls', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio',
     'cfmeet-postgres', 'cfmeet-redis', 'cfmeet-calling-redis', 'cfmeet-calling-artifacts',
-    'cfmeet-calling-egress', 'cfmeet-storage-ingress', 'cfmeet-messaging-ingress',
+    'cfmeet-calling-egress', 'cfmeet-calling-loopback', 'cfmeet-livekit', 'cfmeet-nginx',
+    'cfmeet-storage-ingress', 'cfmeet-messaging-ingress',
     'cfmeet-gateway-ingress', 'cfmeet-prometheus', 'cfmeet-alertmanager',
     'cfmeet-blackbox', 'cfmeet-heartbeat-exporter', 'cfmeet-messaging-kt-witness',
 ))
@@ -150,7 +153,8 @@ ReadWritePaths={root}/logs/services
 RestrictAddressFamilies=AF_UNIX
 CapabilityBoundingSet=
 MemoryMax=512M
-TasksMax=256
+# Up to 80 Docker log clients, their runtime threads, and Python collectors.
+TasksMax=2048
 [Install]
 WantedBy=multi-user.target
 '''.format(root=root)
@@ -236,3 +240,73 @@ def activate_service_logs(cr, sha, run_id, confirm):
     cr.commit(entry)
     cr.emit('serviceLogs', {'containers': names, 'minimumRetentionDays': 14,
                            'archiveStartedNow': True, 'historicalRecovery': 'AVAILABLE_DOCKER_LOGS_ONLY'})
+
+
+RECORDING_CHECKS = frozenset((
+    'real_rtc_synthetic_media', 'default_retention_30_days',
+    'host_start_stop_and_object_finalization', 'signed_download_checksum_and_playable_audio_video',
+    'unrelated_account_denied', 'anonymous_storage_denied', 'authenticated_recording_deletion',
+))
+RECORDING_PHASES = frozenset(('setup', 'synthetic_media', 'capture', 'authorized_download', 'deletion'))
+
+
+def recording_receipt(value, run_id):
+    """An allowlisted projection. Credentials, URLs, media and exception text never leave the VPS."""
+    if not isinstance(value, dict):
+        value = {}
+    checks = value.get('checks') if isinstance(value.get('checks'), dict) else {}
+    error = value.get('errorClass')
+    phase = value.get('phase')
+    return dict(runId=run_id, result=value.get('result') if value.get('result') in ('PASS', 'FAIL') else 'INVALID',
+                phase=phase if isinstance(phase, str) and phase in RECORDING_PHASES else 'unknown',
+                errorClass=error if error in ('AssertionError', 'RuntimeError', 'TimeoutError', 'HTTPError',
+                            'URLError', 'KeyError', 'ValueError', 'OSError', 'FileNotFoundError', 'TypeError') else None,
+                checks={key: checks[key] for key in RECORDING_CHECKS if checks.get(key) in ('PASS', 'FAIL')})
+
+
+def recording_receipts(cr):
+    """Read-only evidence of the last five controlled recording journeys, including rolled-back attempts."""
+    root = p.ROOT / 'meeting-recording' / 'acceptance'
+    receipts = []
+    if root.is_dir() and not root.is_symlink():
+        for folder in sorted(root.iterdir(), key=lambda path: path.name, reverse=True):
+            if not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,5}', folder.name) or folder.is_symlink() or not folder.is_dir():
+                continue
+            file = folder / 'report.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+                continue
+            try:
+                value = json.loads(file.read_text())
+            except (OSError, ValueError):
+                value = {}
+            receipt = recording_receipt(value, folder.name)
+            state = owned_recording_state(cr, folder)
+            if state is not None:
+                receipt['artifact'] = state
+            receipts.append(receipt)
+            if len(receipts) == 5:
+                break
+    cr.emit('meetingRecordingReceipts', receipts)
+
+
+def owned_recording_state(cr, folder):
+    """Only the artifact recorded by this disposable client's UUID-only cleanup receipt."""
+    file = folder / 'cleanup.json'
+    if file.is_symlink() or not file.is_file() or file.stat().st_size > 4096:
+        return None
+    try:
+        ids = json.loads(file.read_text())
+        recording, conference, space = (str(uuid.UUID(ids[name])) for name in ('recording', 'conference', 'space'))
+        row = json.loads(cr.meeting_psql(
+            "SELECT json_build_object('status',status,'failureCode',failure_code,"
+            "'providerAssigned',provider_ref IS NOT NULL) FROM meeting_artifacts "
+            "WHERE id='%s' AND conference_id='%s' AND meeting_space_id='%s';" % (recording, conference, space)) or 'null')
+        if not isinstance(row, dict):
+            return None
+        status, failure = row.get('status'), row.get('failureCode')
+        return dict(status=status if status in ('REQUESTED', 'RECORDING', 'STOPPING', 'PROCESSING',
+                    'READY', 'DELETING', 'DELETED', 'FAILED', 'ABORTED') else 'unknown',
+                    failureCode=failure if isinstance(failure, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,79}', failure) else None,
+                    providerAssigned=row.get('providerAssigned') is True)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        return None

@@ -39,6 +39,15 @@ class PublicSurface(unittest.TestCase):
         self.assertEqual(pc.judge_internal(200)[0], 'FAIL')
         self.assertEqual(pc.judge_internal(404)[0], 'PASS')
 
+    def test_anonymous_contract_routes_can_be_public_without_allowing_mixed_or_unknown_auth(self):
+        for auth, expected in [(['ANONYMOUS'], 'PASS'), (['ANONYMOUS', 'PLATFORM_CREDENTIAL'], 'FAIL'),
+                               (['UNKNOWN'], 'FAIL'), (['DEVELOPER_SESSION'], 'FAIL')]:
+            self.assertEqual(pc.judge_public({'pattern': '/v1/oauth/metadata', 'auth': auth}, 200)[0], expected)
+        routes = {r['pattern']: r for r in pc.public_routes(REPO)}
+        for path in ('/v1/app-directory', '/v1/oauth/metadata'):
+            self.assertEqual(routes[path]['auth'], ['ANONYMOUS'])
+            self.assertEqual(pc.judge_public(routes[path], 200)[0], 'PASS')
+
     def test_route_inventories_come_from_the_repository(self):
         public = pc.public_routes(REPO)
         internal = pc.internal_routes(REPO)

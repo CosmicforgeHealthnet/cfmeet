@@ -13,10 +13,10 @@ class ServiceLogs(unittest.TestCase):
     def test_catalogue_and_owned_dependencies_are_collected_without_foreign_or_staging_containers(self):
         names = operations.log_containers({'calling': {'container': 'cfmeet-calling'}}, {
             'cfmeet-calling', 'cfmeet-calling-artifacts', 'cfmeet-calling-redis',
-            'cfmeet-messaging-kt-witness', 'cfmeet-staging-calling', 'cosmicforge-other', 'lk-server',
+            'cfmeet-messaging-kt-witness', 'cfmeet-core-tls', 'cfmeet-staging-calling', 'cosmicforge-other', 'lk-server',
         })
         self.assertEqual(names, ['cfmeet-calling', 'cfmeet-calling-artifacts',
-                                 'cfmeet-calling-redis', 'cfmeet-messaging-kt-witness'])
+                                 'cfmeet-calling-redis', 'cfmeet-core-tls', 'cfmeet-messaging-kt-witness'])
 
     def test_archives_exact_bytes_and_restores_the_last_durable_cursor(self):
         with tempfile.TemporaryDirectory() as folder:

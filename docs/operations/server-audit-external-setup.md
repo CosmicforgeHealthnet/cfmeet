@@ -155,3 +155,20 @@ Report the actual cosignature state and who controls the configured witness sepa
   Existing Calling storage is not substituted for Meeting's separate artifact bucket.
 - **M8 owner decision, 21 November 2026:** leave transcripts and AI notes disabled. No
   OpenAI key was created and no AI-provider integration was activated in this pass.
+
+
+## Recording callback activation
+
+`activate-meeting-recording` with `enable-30-days` now checks the internal Meeting
+provider callback before enabling capture. It extends only the known Calling callback
+configuration, preserves all provider keys and other settings, and refuses a signer
+mismatch or an unknown existing callback configuration. The media server restarts only
+when both participant and active-capture counts are zero. A failed restart or route
+verification restores the exact previous configuration. Capture remains governed by the
+real synthetic recording acceptance and its existing flag rollback.
+
+Use `diagnose` to read the allowlisted controlled recording receipt, its own artifact's
+state/failure code, and the boolean signer comparison. No media, storage URL, credential,
+provider reference, or failure detail is exported by these diagnostics. The web recording
+flag (`NEXT_PUBLIC_MEETING_RECORDING=on`) must be enabled in Production and rebuilt only
+after backend recording acceptance passes. Transcripts and AI notes remain disabled.

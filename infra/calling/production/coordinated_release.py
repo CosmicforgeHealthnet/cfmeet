@@ -3088,6 +3088,8 @@ def run(operation, sha, run_id, confirm=''):
         if confirm:
             raise RuntimeError('diagnose takes no confirmation')
         mail_ops.diagnose(sys.modules[__name__], sha, run_id)
+        audit_operations.recording_receipts(sys.modules[__name__])
+        meeting_recording_operations.provider_identity(sys.modules[__name__])
         notif_ops.notification_diagnostics(sys.modules[__name__])
         provider_operations.resend_domain_facts(sys.modules[__name__])
     elif operation == 'developer-access-review':
