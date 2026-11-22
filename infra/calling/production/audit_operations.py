@@ -17,9 +17,10 @@ MAX_CONNECTIONS = 256
 BACKEND_MEMORY_MIB = 16
 MEMORY_RESERVE_MIB = 2048
 LOG_DEPENDENCIES = frozenset((
-    'cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio',
+    'cfmeet-core-db', 'cfmeet-core-tls', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio',
     'cfmeet-postgres', 'cfmeet-redis', 'cfmeet-calling-redis', 'cfmeet-calling-artifacts',
-    'cfmeet-calling-egress', 'cfmeet-storage-ingress', 'cfmeet-messaging-ingress',
+    'cfmeet-calling-egress', 'cfmeet-calling-loopback', 'cfmeet-livekit', 'cfmeet-nginx',
+    'cfmeet-storage-ingress', 'cfmeet-messaging-ingress',
     'cfmeet-gateway-ingress', 'cfmeet-prometheus', 'cfmeet-alertmanager',
     'cfmeet-blackbox', 'cfmeet-heartbeat-exporter', 'cfmeet-messaging-kt-witness',
 ))
