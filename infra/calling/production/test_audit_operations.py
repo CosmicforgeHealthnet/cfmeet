@@ -112,3 +112,30 @@ class RecordingReceipts(unittest.TestCase):
                                        errorClass='private-token', checks=[]), '12345-1')
         self.assertNotIn('private-token', json.dumps(value))
         self.assertEqual(value['result'], 'INVALID')
+
+
+class ControlledRecordingState(unittest.TestCase):
+    def test_query_is_scoped_to_all_three_fixture_ids_and_drops_private_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            ids = dict(recording='00000000-0000-4000-8000-000000000001',
+                       conference='00000000-0000-4000-8000-000000000002',
+                       space='00000000-0000-4000-8000-000000000003')
+            (folder / 'cleanup.json').write_text(json.dumps(ids))
+            cr = SimpleNamespace(meeting_psql=Mock(return_value=json.dumps(dict(
+                status='FAILED', failureCode='RECORDING_START_TIMEOUT', providerAssigned=True,
+                storageUri='private-token', failureDetail='private-token'))))
+            result = ao.owned_recording_state(cr, folder)
+            self.assertEqual(result, dict(status='FAILED', failureCode='RECORDING_START_TIMEOUT', providerAssigned=True))
+            query = cr.meeting_psql.call_args.args[0]
+            for value in ids.values():
+                self.assertIn(value, query)
+            self.assertNotIn('private-token', json.dumps(result))
+
+    def test_invalid_fixture_ids_never_reach_the_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / 'cleanup.json').write_text(json.dumps(dict(recording="injection", conference='x', space='y')))
+            cr = SimpleNamespace(meeting_psql=Mock())
+            self.assertIsNone(ao.owned_recording_state(cr, folder))
+            cr.meeting_psql.assert_not_called()

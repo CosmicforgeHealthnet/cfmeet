@@ -3,6 +3,7 @@ import time
 import datetime
 import json
 import re
+import uuid
 from pathlib import Path
 import shutil
 
@@ -278,7 +279,34 @@ def recording_receipts(cr):
                 value = json.loads(file.read_text())
             except (OSError, ValueError):
                 value = {}
-            receipts.append(recording_receipt(value, folder.name))
+            receipt = recording_receipt(value, folder.name)
+            state = owned_recording_state(cr, folder)
+            if state is not None:
+                receipt['artifact'] = state
+            receipts.append(receipt)
             if len(receipts) == 5:
                 break
     cr.emit('meetingRecordingReceipts', receipts)
+
+
+def owned_recording_state(cr, folder):
+    """Only the artifact recorded by this disposable client's UUID-only cleanup receipt."""
+    file = folder / 'cleanup.json'
+    if file.is_symlink() or not file.is_file() or file.stat().st_size > 4096:
+        return None
+    try:
+        ids = json.loads(file.read_text())
+        recording, conference, space = (str(uuid.UUID(ids[name])) for name in ('recording', 'conference', 'space'))
+        row = json.loads(cr.meeting_psql(
+            "SELECT json_build_object('status',status,'failureCode',failure_code,"
+            "'providerAssigned',provider_ref IS NOT NULL) FROM meeting_artifacts "
+            "WHERE id='%s' AND conference_id='%s' AND meeting_space_id='%s';" % (recording, conference, space)) or 'null')
+        if not isinstance(row, dict):
+            return None
+        status, failure = row.get('status'), row.get('failureCode')
+        return dict(status=status if status in ('REQUESTED', 'RECORDING', 'STOPPING', 'PROCESSING',
+                    'READY', 'DELETING', 'DELETED', 'FAILED', 'ABORTED') else 'unknown',
+                    failureCode=failure if isinstance(failure, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,79}', failure) else None,
+                    providerAssigned=row.get('providerAssigned') is True)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        return None
