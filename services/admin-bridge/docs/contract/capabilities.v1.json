@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.2.0",
+  "contract_version": "1.4.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "7c50f191093e09bedaa82d5d0d230d424e74836e7453d150793e7f616e0207c3",
-    "capability_matrix_sha256": "3e7734e0e459a9eb2a17cdaec4e755b24e7df7ea60954db21c93c3f799e4ee63"
+    "openapi_sha256": "8ead0abc2955ddf86eaa377311ebf159519b15377b2e64eb3da21d8e999e4796",
+    "capability_matrix_sha256": "cf714b7ba3b76b24dc5e532a5afe9ca92dd1f489a81646447ffcb866e358f1ed"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 12,
+      "READ_ONLY": 17,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 120
+      "BLOCKED_DEPENDENCY": 115
     }
   },
   "capabilities": [
@@ -112,7 +112,8 @@
       "blocker": null,
       "source_tests": [
         "discovery_reports_runtime_states_and_the_openapi_hash"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "bridge.health.read",
@@ -162,7 +163,8 @@
       "blocker": null,
       "source_tests": [
         "health_reports_unconfigured_owners_honestly"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "bridge.datasets.read",
@@ -228,7 +230,8 @@
       "source_tests": [
         "datasets_are_null_not_zero_until_sources_report",
         "worker_identity_reads_datasets_with_the_workload_acr"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "hq.events.feed",
@@ -274,7 +277,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
       "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "hq.events.ack",
@@ -320,7 +324,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
       "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "hq.projections.status",
@@ -368,7 +373,8 @@
       "blocker": null,
       "source_tests": [
         "projection_status_is_unavailable_until_owner_events"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "accounts.users.search",
@@ -417,7 +423,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": true
     },
     {
       "id": "accounts.users.read",
@@ -470,7 +477,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.user.status.change",
@@ -525,7 +533,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.user.role.change",
@@ -578,7 +587,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.user.email.change",
@@ -631,7 +641,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.sessions.list",
@@ -684,7 +695,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.sessions.revoke-all",
@@ -739,7 +751,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.devices.list",
@@ -792,7 +805,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.device.revoke",
@@ -851,7 +865,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.mfa.read",
@@ -904,7 +919,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.mfa.reset",
@@ -957,7 +973,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.security-history.list",
@@ -1012,7 +1029,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.duplicates.list",
@@ -1060,7 +1078,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.duplicates.enforce",
@@ -1115,7 +1134,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.user.export",
@@ -1166,7 +1186,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.user.delete",
@@ -1217,7 +1238,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "accounts.test-accounts.list",
@@ -1265,7 +1287,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.spaces.search",
@@ -1315,7 +1338,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.meetings.search",
@@ -1365,7 +1389,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.meetings.read",
@@ -1420,7 +1445,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.live.list",
@@ -1469,7 +1495,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.live-health.read",
@@ -1524,7 +1551,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.participants.list",
@@ -1579,7 +1607,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.meeting.end",
@@ -1635,7 +1664,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.space.archive",
@@ -1691,7 +1721,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.space.transfer",
@@ -1747,7 +1778,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.recordings.list",
@@ -1798,7 +1830,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.recording.delete",
@@ -1854,7 +1887,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.transcripts.list",
@@ -1905,7 +1939,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.transcript.delete",
@@ -1961,7 +1996,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.webinars.list",
@@ -2012,7 +2048,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.webinar-registrations.list",
@@ -2067,7 +2104,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.audit.list",
@@ -2118,7 +2156,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: meeting-service keeps this in its database only; operator read API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.reports.list",
@@ -2167,7 +2206,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A4: new meeting-service operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.report.review",
@@ -2222,7 +2262,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new meeting-service operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.chat-migration.read",
@@ -2271,7 +2312,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.chat-migration.change",
@@ -2320,7 +2362,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.email-delivery.read",
@@ -2371,7 +2414,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.critical-lane.read",
@@ -2420,7 +2464,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
       "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "meetings.critical-lane.change",
@@ -2469,7 +2514,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: meeting-service endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.reports.list",
@@ -2516,7 +2562,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.reports.read",
@@ -2569,7 +2616,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.message.remove",
@@ -2623,7 +2671,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.member.mute",
@@ -2682,7 +2731,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.member.remove",
@@ -2741,7 +2791,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.conversation.restrict",
@@ -2795,7 +2846,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.report.dismiss",
@@ -2849,7 +2901,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.policy.read",
@@ -2896,7 +2949,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.policy.change",
@@ -2944,7 +2998,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.holds.list",
@@ -2991,7 +3046,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.hold.place",
@@ -3039,7 +3095,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.hold.release",
@@ -3093,7 +3150,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.exports.list",
@@ -3140,7 +3198,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.export.request",
@@ -3188,7 +3247,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.deletion-requests.list",
@@ -3235,7 +3295,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.deletion-request.create",
@@ -3281,7 +3342,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: new messaging operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.audit.list",
@@ -3330,7 +3392,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.switches.list",
@@ -3377,7 +3440,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.switch.change",
@@ -3429,7 +3493,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.incidents.list",
@@ -3478,7 +3543,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.incident.record",
@@ -3524,7 +3590,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.failed-messages.list",
@@ -3573,7 +3640,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.failed-message.retry",
@@ -3625,7 +3693,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.key-transparency.read",
@@ -3672,7 +3741,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
       "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "messaging.key-transparency.checkpoint",
@@ -3718,7 +3788,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: messaging has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.calls.list",
@@ -3767,7 +3838,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.calls.read",
@@ -3820,7 +3892,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.live.list",
@@ -3867,7 +3940,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.abuse-reports.list",
@@ -3914,7 +3988,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.abuse-report.resolve",
@@ -3968,7 +4043,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: calling endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.blocks.list",
@@ -4015,7 +4091,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.block.release",
@@ -4069,7 +4146,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.limits.read",
@@ -4116,7 +4194,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.limits.change",
@@ -4164,7 +4243,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.routing.read",
@@ -4211,7 +4291,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.routing.change",
@@ -4259,7 +4340,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.enterprise-features.read",
@@ -4306,7 +4388,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.enterprise-features.change",
@@ -4354,7 +4437,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.spend-limits.read",
@@ -4401,7 +4485,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.spend-limits.change",
@@ -4448,7 +4533,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.recordings.list",
@@ -4497,7 +4583,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.voicemail.list",
@@ -4546,7 +4633,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.recording.delete",
@@ -4600,7 +4688,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: new calling operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.retention-holds.list",
@@ -4647,7 +4736,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.retention-hold.place",
@@ -4695,7 +4785,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.retention-hold.release",
@@ -4749,7 +4840,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.incidents.list",
@@ -4798,7 +4890,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.incident.record",
@@ -4844,7 +4937,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.webhook-keys.list",
@@ -4891,7 +4985,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.webhook-key.reseal",
@@ -4945,7 +5040,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: calling has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "calling.audit.list",
@@ -4994,7 +5090,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
       "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.profiles.read",
@@ -5047,7 +5144,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
       "blocker": "Phase A2: new communications operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.profile.suspend",
@@ -5101,7 +5199,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.profile.restore",
@@ -5155,7 +5254,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.reports.list",
@@ -5202,7 +5302,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
       "blocker": "Phase A2: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.report.review",
@@ -5256,7 +5357,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.holds.list",
@@ -5303,7 +5405,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
       "blocker": "Phase A2: new communications operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.audit.list",
@@ -5352,7 +5455,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
       "blocker": "Phase A2: communications keeps this in its database only; operator read API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.metrics.read",
@@ -5399,7 +5503,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
       "blocker": "Phase A2: communications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.backfill.run",
@@ -5445,7 +5550,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: communications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "communications.events.replay",
@@ -5491,7 +5597,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: communications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.organizations.search",
@@ -5541,7 +5648,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_search_translates_and_minimizes"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.organizations.read",
@@ -5595,7 +5703,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_detail_never_relays_contact_details"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.organization.create",
@@ -5643,7 +5752,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.organization.suspend",
@@ -5696,7 +5806,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.organization.archive",
@@ -5749,7 +5860,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.organization.reactivate",
@@ -5802,7 +5914,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.ownership.recover",
@@ -5855,7 +5968,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.bindings.list",
@@ -5909,7 +6023,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_bindings_treat_absent_as_unbound"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.binding.change",
@@ -5967,7 +6082,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.organization.export",
@@ -6019,7 +6135,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: organizations endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.audit.list",
@@ -6075,7 +6192,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_audit_maps_the_window_and_cursor"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.global-audit.list",
@@ -6126,7 +6244,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_global_audit_is_served"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.provisioning.retry",
@@ -6179,7 +6298,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.events.replay",
@@ -6226,7 +6346,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.members.list",
@@ -6280,7 +6401,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_members_are_opaque_user_ids"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.teams.list",
@@ -6334,7 +6456,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_teams_drop_free_text"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.policies.read",
@@ -6388,7 +6511,8 @@
       "blocker": null,
       "source_tests": [
         "organizations_policies_are_relayed_field_by_field"
-      ]
+      ],
+      "contact_search": false
     },
     {
       "id": "organizations.member.change",
@@ -6446,7 +6570,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new organizations operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.team.change",
@@ -6504,7 +6629,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new organizations operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "organizations.policies.change",
@@ -6557,7 +6683,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new organizations operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.workspaces.search",
@@ -6605,7 +6732,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.workspaces.read",
@@ -6658,7 +6786,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.workspace-activity.list",
@@ -6713,7 +6842,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.workspace.state.change",
@@ -6767,7 +6897,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.workspace.register-first-party",
@@ -6815,7 +6946,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.projects.list",
@@ -6868,7 +7000,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.environments.list",
@@ -6921,7 +7054,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.members.list",
@@ -6974,7 +7108,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.invitations.list",
@@ -7027,7 +7162,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.keys.list",
@@ -7080,7 +7216,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.key.revoke",
@@ -7139,7 +7276,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.service-accounts.list",
@@ -7192,7 +7330,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.service-account.suspend",
@@ -7251,7 +7390,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.websites.list",
@@ -7304,7 +7444,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.website.remove",
@@ -7363,7 +7504,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.push-keys.list",
@@ -7416,7 +7558,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.push-key.disable",
@@ -7475,7 +7618,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.users.list",
@@ -7529,7 +7673,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": true
     },
     {
       "id": "partners.user.sign-out",
@@ -7588,7 +7733,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.webhooks.list",
@@ -7641,7 +7787,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.webhook-deliveries.list",
@@ -7696,7 +7843,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.webhook-delivery.retry",
@@ -7755,7 +7903,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.usage.read",
@@ -7810,7 +7959,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.usage.reprocess",
@@ -7857,7 +8007,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.support-tier.change",
@@ -7911,7 +8062,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.incidents.list",
@@ -7960,7 +8112,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
       "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "partners.incident.record",
@@ -8006,7 +8159,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.tenants.list",
@@ -8054,7 +8208,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.applications.list",
@@ -8107,7 +8262,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.environments.list",
@@ -8160,7 +8316,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.service-accounts.list",
@@ -8213,7 +8370,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.status.change",
@@ -8272,7 +8430,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.scope-grants.list",
@@ -8325,7 +8484,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.scope-grant.change",
@@ -8379,7 +8539,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.privileged-scope-grant.change",
@@ -8433,7 +8594,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.keys.list",
@@ -8486,7 +8648,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.key.issue",
@@ -8540,7 +8703,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.key.rotate",
@@ -8599,7 +8763,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.key.revoke",
@@ -8658,7 +8823,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.key.suspend",
@@ -8717,7 +8883,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.key.resume",
@@ -8776,7 +8943,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.records.list",
@@ -8824,7 +8992,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access has a server command-line tool only; operator API required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.record.register",
@@ -8872,7 +9041,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.record.status.change",
@@ -8926,7 +9096,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.record.remove",
@@ -8980,7 +9151,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.oauth-apps.list",
@@ -9028,7 +9200,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.app-grants.list",
@@ -9081,7 +9254,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.app-grant.revoke",
@@ -9140,7 +9314,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new platform-access operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "identity.partner-users.list",
@@ -9194,7 +9369,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: new platform-access operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": true
     },
     {
       "id": "identity.audit.list",
@@ -9243,7 +9419,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY",
       "blocker": "Phase A2: platform-access endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.apps.search",
@@ -9291,7 +9468,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.apps.read",
@@ -9344,7 +9522,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.versions.list",
@@ -9397,7 +9576,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.installs.list",
@@ -9450,7 +9630,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS",
       "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.app.suspend",
@@ -9504,7 +9685,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "apps.app.lift-suspension",
@@ -9558,7 +9740,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.cases.list",
@@ -9602,7 +9785,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
       "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.cases.read",
@@ -9652,7 +9836,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
       "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.case-history.list",
@@ -9702,7 +9887,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
       "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.case.claim",
@@ -9754,7 +9940,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.partner-go-live.approve",
@@ -9806,7 +9993,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.partner-go-live.reject",
@@ -9858,7 +10046,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.partner-go-live.suspend",
@@ -9910,7 +10099,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.app-review.approve",
@@ -9962,7 +10152,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.app-review.reject",
@@ -10014,7 +10205,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.app-review.publish",
@@ -10066,7 +10258,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.organization.decide",
@@ -10118,7 +10311,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase FUTURE: future capability; no owner decision yet; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.number-kyc.list",
@@ -10162,7 +10356,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
       "blocker": "Phase FUTURE: telecom is switched off",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "verification.number-kyc.decide",
@@ -10214,7 +10409,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase FUTURE: telecom is switched off; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.price-books.list",
@@ -10261,7 +10457,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.versions.list",
@@ -10314,7 +10511,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.versions.read",
@@ -10367,7 +10565,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.draft",
@@ -10420,7 +10619,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.edit",
@@ -10473,7 +10673,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.submit",
@@ -10526,7 +10727,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.approve",
@@ -10579,7 +10781,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.reject",
@@ -10632,7 +10835,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.activations.list",
@@ -10685,7 +10889,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.schedule",
@@ -10738,7 +10943,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.version.activate",
@@ -10791,7 +10997,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.price-book.rollback",
@@ -10844,7 +11051,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.freezes.list",
@@ -10891,7 +11099,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.market.freeze",
@@ -10944,7 +11153,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.market.unfreeze",
@@ -10997,7 +11207,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.plans.list",
@@ -11044,7 +11255,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.plan-assignments.list",
@@ -11092,7 +11304,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.plan.assign",
@@ -11139,7 +11352,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.overrides.list",
@@ -11186,7 +11400,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.override.change",
@@ -11233,7 +11448,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "pricing.charges.simulate",
@@ -11282,7 +11498,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "finance.usage.report",
@@ -11328,7 +11545,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "finance.estimated-charges.report",
@@ -11374,7 +11592,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "finance.plan-spread.report",
@@ -11420,7 +11639,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
       "blocker": "Phase A6: new developer-platform operator endpoint required",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "notifications.deliveries.list",
@@ -11456,9 +11676,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationDeliveryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.deliveries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11467,8 +11687,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_deliveries_map_the_window_and_carry_no_content"
+      ],
+      "contact_search": false
     },
     {
       "id": "notifications.failed-deliveries.list",
@@ -11504,9 +11727,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationDeliveryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.failed-deliveries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11515,8 +11738,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_failed_deliveries_use_the_failure_route"
+      ],
+      "contact_search": false
     },
     {
       "id": "notifications.delivery.retry",
@@ -11569,7 +11795,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "notifications.suppressions.list",
@@ -11604,9 +11831,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationSuppressionPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.suppressions.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -11615,8 +11842,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_suppressions_relay_only_the_digest"
+      ],
+      "contact_search": true
     },
     {
       "id": "notifications.suppression.remove",
@@ -11669,7 +11899,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: notifications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "notifications.routing.read",
@@ -11703,9 +11934,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationRouting"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.routing.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -11714,8 +11945,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications keeps this in its database only; operator read API required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_routing_drops_the_audit_digest"
+      ],
+      "contact_search": false
     },
     {
       "id": "notifications.routing.change",
@@ -11762,7 +11996,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: notifications keeps this in its database only; operator read API required; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "notifications.reroute.cancel",
@@ -11815,7 +12050,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A5: notifications endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "notifications.providers.read",
@@ -11849,9 +12085,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationProviders"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.providers.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11860,8 +12096,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: new notifications operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_providers_report_status_only"
+      ],
+      "contact_search": false
     },
     {
       "id": "privacy.requests.list",
@@ -11905,7 +12144,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
       "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "privacy.requests.read",
@@ -11954,7 +12194,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
       "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "privacy.request.register",
@@ -12000,7 +12241,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "privacy.request.complete-service",
@@ -12056,7 +12298,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.health.read",
@@ -12102,7 +12345,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
       "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.incidents.list",
@@ -12150,7 +12394,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
       "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.incident.resolve",
@@ -12202,7 +12447,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A8: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.switches.list",
@@ -12248,7 +12494,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
       "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.switch.change",
@@ -12300,7 +12547,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A8: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.activations.list",
@@ -12346,7 +12594,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
       "blocker": "Phase A8: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.activation.request",
@@ -12392,7 +12641,8 @@
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
       "blocker": "Phase A8: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "operations.releases.list",
@@ -12440,7 +12690,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
       "blocker": "Phase A8: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "audit.entries.list",
@@ -12489,7 +12740,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_AUDIT",
       "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "telecom.numbers.summary",
@@ -12533,7 +12785,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_TELECOM",
       "blocker": "Phase FUTURE: telecom is switched off",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "telecom.calls.summary",
@@ -12577,7 +12830,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_TELECOM",
       "blocker": "Phase FUTURE: telecom is switched off",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "telecom.sms.summary",
@@ -12621,7 +12875,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_TELECOM",
       "blocker": "Phase FUTURE: telecom is switched off",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     },
     {
       "id": "telecom.privacy-relay.summary",
@@ -12665,7 +12920,8 @@
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_TELECOM",
       "blocker": "Phase FUTURE: telecom is switched off",
-      "source_tests": []
+      "source_tests": [],
+      "contact_search": false
     }
   ]
 }

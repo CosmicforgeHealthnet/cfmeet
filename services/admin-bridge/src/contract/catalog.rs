@@ -174,6 +174,7 @@ impl B {
             result: None,
             phase: P::A2,
             served: false,
+            contact_search: false,
             tests: Vec::new(),
         })
     }
@@ -2910,8 +2911,30 @@ pub fn catalog() -> Vec<Capability> {
         cap.served = true;
         cap.tests = tests.to_vec();
     }
+    for id in CONTACT_SEARCH {
+        let cap = caps
+            .iter_mut()
+            .find(|c| c.id == *id)
+            .unwrap_or_else(|| panic!("{id}: not in the catalog"));
+        assert_eq!(
+            cap.shape,
+            QueryShape::ScopedSearch,
+            "{id}: only searches take q"
+        );
+        cap.contact_search = true;
+    }
     caps
 }
+
+/// Searches whose `q` may carry an email address or phone number (agreed with HQ Track B:
+/// published as `x-contact-search`; HQ routes them through its POST search so a contact
+/// identifier never lands in a logged URL). Add a capability here when its slice lands.
+const CONTACT_SEARCH: &[&str] = &[
+    "accounts.users.search",
+    "partners.users.list",
+    "identity.partner-users.list",
+    "notifications.suppressions.list",
+];
 
 /// Owner reads the bridge serves, by phase: (capability, result schema, covering tests).
 /// The owner endpoint must also be granted and reachable; until then the bridge answers
@@ -2958,5 +2981,31 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "organizations.bindings.list",
         "OrganizationBindingPage",
         &["organizations_bindings_treat_absent_as_unbound"],
+    ),
+    // A2.2 Notifications.
+    (
+        "notifications.deliveries.list",
+        "NotificationDeliveryPage",
+        &["notifications_deliveries_map_the_window_and_carry_no_content"],
+    ),
+    (
+        "notifications.failed-deliveries.list",
+        "NotificationDeliveryPage",
+        &["notifications_failed_deliveries_use_the_failure_route"],
+    ),
+    (
+        "notifications.suppressions.list",
+        "NotificationSuppressionPage",
+        &["notifications_suppressions_relay_only_the_digest"],
+    ),
+    (
+        "notifications.routing.read",
+        "NotificationRouting",
+        &["notifications_routing_drops_the_audit_digest"],
+    ),
+    (
+        "notifications.providers.read",
+        "NotificationProviders",
+        &["notifications_providers_report_status_only"],
     ),
 ];

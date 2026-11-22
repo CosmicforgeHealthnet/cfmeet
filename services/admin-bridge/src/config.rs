@@ -22,7 +22,7 @@
 //! | `ADMIN_BRIDGE_STRONG_ACR` | no | comma list (default `urn:cosmicforge:acr:mfa`); never the workload acr |
 //! | `ADMIN_BRIDGE_WORKLOAD_ACR` | no | default `urn:cosmicforge:acr:workload` (only for `cfmeet.source_sync`) |
 //! | `ADMIN_BRIDGE_ENROLLED_MARKETS` | when enabled | comma list of markets HQ may act in (e.g. `GLOBAL`) |
-//! | `ADMIN_BRIDGE_ENROLLED_TENANTS` | when enabled | comma list of tenants HQ may act in |
+//! | `ADMIN_BRIDGE_ENROLLED_TENANTS` | when enabled | comma list of tenants HQ may act in: Platform Access tenant UUIDs, canonical lowercase (enforced in staging and production) |
 //! | `ADMIN_BRIDGE_RATE_LIMIT_PER_MINUTE` | no | per staff member, permission and scope (1–10000, default 120) |
 //! | `ADMIN_BRIDGE_HEALTH_<SERVICE>_URL` | no | owner health URL probed by `bridge.health.read` (`MEETING_SERVICE`, `MESSAGING`, …); unset: NOT_CONFIGURED |
 //! | `CF_<OWNER>_BASE_URL` | no | internal base URL of an owning service the bridge reads from (`CF_ORGANIZATIONS_BASE_URL`, `CF_MEETING_SERVICE_BASE_URL`, …); unset: its capabilities answer `OWNER_UNAVAILABLE` |
@@ -196,6 +196,15 @@ fn scope_value_ok(v: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'@' | b'-'))
 }
 
+/// Canonical lowercase 8-4-4-4-12 UUID.
+fn lowercase_uuid(v: &str) -> bool {
+    v.len() == 36
+        && v.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
+        })
+}
+
 impl Config {
     pub fn from_env(env: &dyn Env) -> Result<Config, ConfigError> {
         let runtime_environment =
@@ -358,6 +367,19 @@ impl Config {
             return Err(invalid(
                 "ADMIN_BRIDGE_ENROLLED_TENANTS",
                 "expected a comma list of scope values",
+            ));
+        }
+        // Agreed with HQ: a tenant scope is the Platform Access tenant UUID in canonical
+        // lowercase (scopes compare as exact strings on both sides). Enforced where HQ
+        // enforces it; local and test runs may use readable fixtures.
+        if matches!(
+            runtime_environment,
+            RuntimeEnvironment::Staging | RuntimeEnvironment::Production
+        ) && !enrolled_tenants.iter().all(|t| lowercase_uuid(t))
+        {
+            return Err(invalid(
+                "ADMIN_BRIDGE_ENROLLED_TENANTS",
+                "must be lowercase Platform Access tenant UUIDs in staging and production",
             ));
         }
         let security = SecurityConfig {
@@ -524,6 +546,41 @@ mod tests {
             .unwrap()
             .outbound
             .is_none());
+    }
+
+    #[test]
+    fn staging_and_production_tenants_are_lowercase_platform_access_uuids() {
+        let uuid = "0b7e7f0e-2b9c-4c8e-9d7a-1f2e3d4c5b6a";
+        for env in ["staging", "production"] {
+            assert!(Config::from_env(&V(enabled(&[
+                ("CF_RUNTIME_ENVIRONMENT", env),
+                ("ADMIN_BRIDGE_ENROLLED_TENANTS", uuid)
+            ])))
+            .is_ok());
+            for bad in [
+                "cfmeet-first-party",
+                "0B7E7F0E-2B9C-4C8E-9D7A-1F2E3D4C5B6A",
+                "0b7e7f0e2b9c4c8e9d7a1f2e3d4c5b6a",
+            ] {
+                let e = Config::from_env(&V(enabled(&[
+                    ("CF_RUNTIME_ENVIRONMENT", env),
+                    ("ADMIN_BRIDGE_ENROLLED_TENANTS", bad),
+                ])))
+                .unwrap_err();
+                assert!(
+                    matches!(
+                        e,
+                        ConfigError::Invalid {
+                            var: "ADMIN_BRIDGE_ENROLLED_TENANTS",
+                            ..
+                        }
+                    ),
+                    "{env} {bad}"
+                );
+            }
+        }
+        // local and test fixtures may stay readable
+        assert!(Config::from_env(&V(enabled(&[]))).is_ok());
     }
 
     #[test]

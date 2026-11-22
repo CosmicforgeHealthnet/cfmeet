@@ -565,7 +565,8 @@ Agreed with the `centralize-admin` session building `services/cfmeet-admin` (202
 |---|---|---|
 | 1.0.0 (A0) | `7325f30447891ed91ac0b421c8eb363a9c356609` (merge of #121, 2026-11-20) | Contract only. Every capability is DISABLED or BLOCKED_DEPENDENCY; nothing is served |
 | 1.1.0 (A1) | `df610aca769970bafb8b3a48ef928235d9a168e9` (merge of #122, 2026-11-20) | Runtime. `bridge.capabilities.read`, `bridge.health.read`, `bridge.datasets.read` and `hq.projections.status` are READ_ONLY; new error code `BRIDGE_UNAVAILABLE`. Additive over 1.0.0 |
-| 1.2.0 (A2.0) | *recorded when A2.0 merges* | Organizations reads served: search, detail, audit (one and across all), members, teams, policies, service bindings; Health in HQ's shape; new error code `RESOURCE_NOT_FOUND`. Additive over 1.1.0 |
+| 1.2.0 (A2.0) | `568328cca32749e207a1fe0be7f664da6380202c` (merge of #132, 2026-11-20) | Organizations reads served: search, detail, audit (one and across all), members, teams, policies, service bindings; Health in HQ's shape; new error code `RESOURCE_NOT_FOUND`. Additive over 1.1.0 |
+| 1.4.0 (A2.2) | *recorded when A2.2 merges* | Notifications reads served: deliveries and failed deliveries (time window), suppression lookup by address or digest (keyed digest only), routing, provider status. Additive (1.3.0 is the Developer Platform slice) |
 
 HQ pins a merged commit on `main` (the branch CF Meet production deploys from) and recomputes `SHA256SUMS`. The running bridge reports the sha256 of its own `openapi.json` in `bridge.capabilities.read`; HQ trusts runtime states only when it equals the pinned hash.
 

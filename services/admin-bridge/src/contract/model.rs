@@ -11,7 +11,7 @@ pub const BRIDGE_BASE: &str = "/internal/cfmeet-admin/v1";
 pub const ENVELOPE_VERSION: &str = "1.0";
 /// Contract artifact version (`openapi.info.version`). Minor: additive (new capability,
 /// state change, a schema defined for the first time). Major: anything breaking.
-pub const CONTRACT_VERSION: &str = "1.2.0";
+pub const CONTRACT_VERSION: &str = "1.4.0";
 pub const CONTRACT_NAME: &str = "cfmeet-admin-bridge";
 pub const PRODUCT: &str = "cfmeet";
 /// The only HQ principal the bridge accepts (HMAC `X-Service-Name`, client certificate).
@@ -281,6 +281,9 @@ pub struct Capability {
     pub phase: Phase,
     /// True once the bridge serves this route in this commit.
     pub served: bool,
+    /// True when `q` may carry an email address or phone number (published as
+    /// `x-contact-search`; HQ sends those searches through its POST search path).
+    pub contact_search: bool,
     pub tests: Vec<&'static str>,
 }
 

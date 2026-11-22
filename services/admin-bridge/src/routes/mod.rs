@@ -1,6 +1,7 @@
 //! Routes: discovery, aggregate health, datasets and projection status (A1), and the
 //! owner reads by module (`organizations`, A2). Every other capability is refused before it gets here (`served == false`).
 
+pub mod notifications;
 pub mod organizations;
 pub mod translate;
 
@@ -16,6 +17,9 @@ use crate::errors::ErrorCode;
 
 pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, ErrorCode> {
     if let Some(answer) = organizations::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = notifications::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {

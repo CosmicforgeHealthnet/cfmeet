@@ -82,3 +82,56 @@ pub fn request_digest(method: &str, uri: &str, body: &[u8]) -> String {
         .as_bytes(),
     )
 }
+
+/// An HMAC key file (shared with HQ, which reads the same file): base64url text of at
+/// least 32 key bytes, padding optional, surrounding whitespace ignored. Returns the key
+/// bytes, or `None` for anything else (raw binary files are refused, so both sides always
+/// read the same key).
+pub fn decode_hmac_key_file(contents: &[u8]) -> Option<Vec<u8>> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let text = std::str::from_utf8(contents).ok()?.trim();
+    let text = text.trim_end_matches('=');
+    if text.is_empty()
+        || !text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
+    let key = URL_SAFE_NO_PAD.decode(text).ok()?;
+    (key.len() >= 32).then_some(key)
+}
+
+#[cfg(test)]
+mod key_file_tests {
+    use super::decode_hmac_key_file;
+
+    #[test]
+    fn hmac_key_files_are_base64url_text_of_at_least_32_bytes() {
+        let key = [7u8; 32];
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let text = URL_SAFE_NO_PAD.encode(key);
+        assert_eq!(decode_hmac_key_file(text.as_bytes()).unwrap(), key);
+        assert_eq!(
+            decode_hmac_key_file(
+                format!(
+                    "{text}
+"
+                )
+                .as_bytes()
+            )
+            .unwrap(),
+            key
+        );
+        assert_eq!(
+            decode_hmac_key_file(format!("{text}=").as_bytes()).unwrap(),
+            key
+        );
+        assert!(
+            decode_hmac_key_file(URL_SAFE_NO_PAD.encode([7u8; 31]).as_bytes()).is_none(),
+            "too short"
+        );
+        assert!(decode_hmac_key_file(&key).is_none(), "raw bytes refused");
+        assert!(decode_hmac_key_file(b"not base64url!").is_none());
+    }
+}
