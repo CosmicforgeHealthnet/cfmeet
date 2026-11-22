@@ -110,7 +110,7 @@ def activate(cr, sha, run_id, confirm):
     logs.write_text(json.dumps([dict(logId=log_id, publicKey=log_key)]))
     logs.chmod(0o444)
     config = root / 'witnesses.json'
-    config.write_text(json.dumps([dict(witnessId=WITNESS, url='https://api.cfmeet.com' + PATH,
+    config.write_text(json.dumps([dict(witnessId=WITNESS, url='https://api.cfmeet.com',
                                        publicKey=public_key(key))]))
     config.chmod(0o444)
     existing = NAME in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
