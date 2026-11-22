@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,7 +67,8 @@ class RecordingStorage(unittest.TestCase):
         apply.assert_not_called()
         cr.env_of = lambda _: {'ARTIFACT_STORAGE_BUCKET': mr.BUCKET, 'MEETING_RECORDING_STORAGE_PREPARED': 'true'}
         with patch.object(mr, 'facts', return_value={'recordingStorageProtocol': 1}), \
-                patch('meeting_recording_acceptance.run', side_effect=RuntimeError('capture failed')):
+                patch('meeting_recording_acceptance.run', side_effect=RuntimeError('capture failed')), \
+                patch.object(mr, 'ensure_callback'):
             mr.activate(cr, 'sha', '2', 'enable-30-days')
             self.assertEqual(apply.call_args.args[3], [('meeting-service', {mr.FLAG: 'true'})])
             with self.assertRaisesRegex(RuntimeError, 'capture failed'):
@@ -102,3 +104,60 @@ class RecordingProviderIdentity(unittest.TestCase):
             mr.provider_identity(cr)
         secret.assert_not_called()
         self.assertIsNone(cr.emit.call_args.args[1]['sharesCallingSigner'])
+
+
+class MeetingCallbacks(unittest.TestCase):
+    def test_plan_adds_only_meeting_target_and_is_idempotent(self):
+        before = dict(keys={'key': 'secret', 'other': 'preserved'}, rtc={'udp_port': 7882},
+                      webhook=dict(api_key='key', urls=['calling']))
+        after, changed = mr.callback_plan(before, 'calling', 'meeting', 'key', 'secret')
+        self.assertTrue(changed)
+        self.assertEqual(after['keys'], before['keys'])
+        self.assertEqual(after['rtc'], before['rtc'])
+        self.assertEqual(before['webhook']['urls'], ['calling'])
+        self.assertEqual(after['webhook']['urls'], ['calling', 'meeting'])
+        self.assertFalse(mr.callback_plan(after, 'calling', 'meeting', 'key', 'secret')[1])
+        for config in (dict(keys={'key': 'different'}, webhook=before['webhook']),
+                       dict(keys=before['keys'], webhook=dict(api_key='key', urls=['unknown']))):
+            with self.assertRaises(RuntimeError):
+                mr.callback_plan(config, 'calling', 'meeting', 'key', 'secret')
+
+    def test_different_signers_are_refused_before_provider_access(self):
+        cr = SimpleNamespace(env_of=Mock(return_value={'LIVEKIT_API_KEY': 'different'}))
+        yaml = SimpleNamespace(safe_load=json.loads, safe_dump=lambda value, **_: json.dumps(value))
+        with patch.dict(sys.modules, yaml=yaml), patch.object(mr.media_webhook, 'calling_key', return_value=('key', 'secret')), \
+                patch.object(mr.p, 'inspect') as inspect:
+            with self.assertRaisesRegex(RuntimeError, 'signers differ'):
+                mr.ensure_callback(cr, '12345-1')
+            inspect.assert_not_called()
+
+    def test_callback_restart_is_idle_only_and_restores_configuration_on_failure(self):
+        for busy, fails in ((True, False), (False, True), (False, False)):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = root / 'livekit.yaml'
+                before = json.dumps(dict(keys={'key': 'secret'}, rtc={'udp_port': 7882},
+                    webhook=dict(api_key='key', urls=[mr.media_webhook.BRIDGE_URL])))
+                config.write_text(before)
+                cr = SimpleNamespace(env_of=Mock(return_value={'LIVEKIT_API_KEY': 'key', 'LIVEKIT_API_SECRET': 'secret'}),
+                    SERVICES={'meeting-service': {'container': 'cfmeet-production-backend', 'port': 8081}}, emit=Mock())
+                yaml = SimpleNamespace(safe_load=json.loads, safe_dump=lambda value, **_: json.dumps(value))
+                container = {'HostConfig': {'NetworkMode': 'bridge'}, 'NetworkSettings': {'Networks': {mr.p.NET: {}}}}
+                with patch.dict(sys.modules, yaml=yaml), patch.object(mr.media_webhook, 'CONFIG', config), \
+                        patch.object(mr.p, 'ROOT', root), patch.object(mr.p, 'inspect', return_value=container), \
+                        patch.object(mr.media_webhook, 'calling_key', return_value=('key', 'secret')), \
+                        patch.object(mr.media_webhook, 'route_status', return_value=401), \
+                        patch.object(mr.media_webhook, 'participants', return_value=1 if busy else 0), \
+                        patch.object(mr.p, 'lk_request', return_value={'items': []}), patch.object(mr.p, 'regression'), \
+                        patch.object(mr.media_webhook, 'restart_and_wait', side_effect=[RuntimeError('restart'), None] if fails else None) as restart:
+                    if busy or fails:
+                        with self.assertRaises(RuntimeError):
+                            mr.ensure_callback(cr, '12345-1')
+                        self.assertEqual(config.read_text(), before)
+                        self.assertEqual(restart.call_count, 2 if fails else 0)
+                    else:
+                        mr.ensure_callback(cr, '12345-1')
+                        self.assertEqual(json.loads(config.read_text())['rtc'], {'udp_port': 7882})
+                        self.assertEqual(len(json.loads(config.read_text())['webhook']['urls']), 2)
+                        self.assertTrue(cr.emit.call_args.args[1]['keysPreserved'])
+                        restart.assert_called_once()

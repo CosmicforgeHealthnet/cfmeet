@@ -1,5 +1,6 @@
 """M7: private encrypted recording storage, then a real API/media acceptance gate."""
 import json
+import copy
 import os
 from pathlib import Path
 import secrets
@@ -10,6 +11,7 @@ import production as p
 import provider_operations as providers
 import storage_encryption as storage
 import storage_relay as relay
+import livekit_webhook as media_webhook
 
 OPERATION = 'activate-meeting-recording'
 BUCKET = 'cfmeet-meeting-artifacts'
@@ -105,6 +107,7 @@ def activate(cr, sha, run_id, confirm):
             raise RuntimeError('Prepare the private Meeting recording store first')
         if cr.mem_available_mib() < 2048:
             raise RuntimeError('Recording acceptance needs 2 GiB available memory for media and the disposable client')
+        ensure_callback(cr, run_id)
         import meeting_recording_acceptance
         def post():
             report = meeting_recording_acceptance.run(cr, run_id)
@@ -170,3 +173,65 @@ def provider_identity(cr):
             pass
     cr.emit('meetingRecordingProviderIdentity', dict(meetingSignerConfigured=configured,
                                                     sharesCallingSigner=matches))
+
+
+def callback_plan(config, calling_url, meeting_url, key, secret):
+    """Extend exactly the known Calling webhook; preserve every provider key and other setting."""
+    current = config.get('webhook')
+    if (config.get('keys') or {}).get(key) != secret:
+        raise RuntimeError('Meeting callback signer does not match a configured provider key')
+    expected = dict(api_key=key, urls=[calling_url])
+    combined = dict(api_key=key, urls=[calling_url, meeting_url])
+    if current == combined:
+        return config, False
+    if current != expected:
+        raise RuntimeError('Unknown existing provider callback configuration; preserved')
+    after = copy.deepcopy(config)
+    after['webhook'] = combined
+    return after, True
+
+
+def ensure_callback(cr, run_id):
+    """Prepare signed internal callbacks while capture is still disabled; never interrupt live media."""
+    import yaml
+    env = cr.env_of('meeting-service')
+    key, secret = media_webhook.calling_key()
+    if env.get('LIVEKIT_API_KEY') != key or env.get('LIVEKIT_API_SECRET') != secret:
+        raise RuntimeError('Meeting and provider webhook signers differ; preserve keys and configure callback verification first')
+    container = p.inspect('lk-server')
+    calling_url = media_webhook.target_url(container)
+    if p.NET not in (container.get('NetworkSettings', {}).get('Networks') or {}) or not calling_url:
+        raise RuntimeError('Meeting callback requires the existing private media network')
+    spec = cr.SERVICES['meeting-service']
+    meeting_url = 'http://%s:%d/internal/rtc/livekit/webhook' % (spec['container'], spec['port'])
+    if media_webhook.route_status(meeting_url) != 401:
+        raise RuntimeError('Meeting callback must reject an unsigned request before activation')
+    if media_webhook.CONFIG.is_symlink():
+        raise RuntimeError('Unknown provider configuration path; preserved')
+    before = media_webhook.CONFIG.read_text()
+    after, change = callback_plan(yaml.safe_load(before) or {}, calling_url, meeting_url, key, secret)
+    if not change:
+        cr.emit('meetingRecordingCallback', dict(configured=True, callingPreserved=True, keysPreserved=True))
+        return
+    if media_webhook.participants():
+        raise RuntimeError('Active media participants prevent the callback configuration restart')
+    active = p.lk_request('Egress/ListEgress', {'active': True}, key, secret, {'roomRecord': True})
+    if active.get('items'):
+        raise RuntimeError('Active captures prevent the callback configuration restart')
+    changed = yaml.safe_dump(after, sort_keys=False)
+    if yaml.safe_load(changed) != after:
+        raise RuntimeError('Provider configuration did not round-trip; preserved')
+    p.write_private(p.ROOT / 'meeting-recording' / ('livekit-webhook.before.' + run_id + '.yaml'), before)
+    try:
+        # Keep the inode used by the media server's existing file bind mount.
+        media_webhook.CONFIG.write_text(changed)
+        media_webhook.restart_and_wait()
+        if media_webhook.route_status(meeting_url) != 401 or media_webhook.route_status(calling_url) != 401:
+            raise RuntimeError('Provider callback route verification failed')
+        p.regression()
+    except Exception:
+        media_webhook.CONFIG.write_text(before)
+        media_webhook.restart_and_wait()
+        raise
+    cr.emit('meetingRecordingCallback', dict(configured=True, callingPreserved=True, keysPreserved=True,
+                                           idleMediaRestart=True))
