@@ -515,6 +515,7 @@ pub fn components() -> Map<String, Value> {
             }
         }),
     );
+    super::schemas_partners::insert(&mut m);
 
     m.insert(
         "Purpose".into(),

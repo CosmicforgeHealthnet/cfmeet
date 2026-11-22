@@ -1,0 +1,70 @@
+{
+  "description": "One CF Meet App (the current manifest's name and distribution).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "app_id",
+    "workspace_id",
+    "name",
+    "distribution",
+    "status",
+    "current_version",
+    "published_version",
+    "published_at",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "distribution": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "current_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "published_version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

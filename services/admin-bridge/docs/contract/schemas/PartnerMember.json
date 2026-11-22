@@ -1,0 +1,57 @@
+{
+  "description": "One workspace membership. The member is an opaque CF Meet user id; no name or address.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "membership_id",
+    "user_id",
+    "role",
+    "status",
+    "joined_via",
+    "created_at",
+    "updated_at",
+    "removed_at",
+    "version"
+  ],
+  "properties": {
+    "membership_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "joined_via": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "removed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

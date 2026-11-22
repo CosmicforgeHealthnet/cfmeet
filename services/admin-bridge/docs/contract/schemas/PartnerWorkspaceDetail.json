@@ -1,0 +1,66 @@
+{
+  "description": "One partner workspace with member and project counts. No support address.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_id",
+    "display_name",
+    "state",
+    "state_reason",
+    "created_at",
+    "updated_at",
+    "closed_at",
+    "version",
+    "active_members",
+    "projects"
+  ],
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "state_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "closed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "active_members": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "projects": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
