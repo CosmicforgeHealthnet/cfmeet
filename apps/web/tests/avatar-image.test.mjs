@@ -195,7 +195,7 @@ test("the browser codec falls back when imageOrientation is not supported", asyn
 
 test("the settings screen uses the shrinking step and no longer refuses large files up front", () => {
   const src = readFileSync(new URL("../src/components/account/AccountProfileSettings.tsx", import.meta.url), "utf8");
-  assert.match(src, /prepareAvatarImage\(file\)/);
+  assert.match(src, /const prepared\s*=\s*await prepareAvatarImage\([A-Za-z_$][\w$]*\)/);
   assert.doesNotMatch(src, /file\.size > 512 \* 1024/);
   assert.match(src, /uploadAvatar\(prepared\.file\)/);
 });
