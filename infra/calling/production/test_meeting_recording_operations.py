@@ -68,11 +68,14 @@ class RecordingStorage(unittest.TestCase):
         cr.env_of = lambda _: {'ARTIFACT_STORAGE_BUCKET': mr.BUCKET, 'MEETING_RECORDING_STORAGE_PREPARED': 'true'}
         with patch.object(mr, 'facts', return_value={'recordingStorageProtocol': 1}), \
                 patch('meeting_recording_acceptance.run', side_effect=RuntimeError('capture failed')), \
-                patch.object(mr, 'ensure_callback'):
+                patch.object(mr, 'ensure_callback') as callback, \
+                patch.object(mr, 'recording_provider_overrides', return_value={mr.FLAG: 'true'}):
             mr.activate(cr, 'sha', '2', 'enable-30-days')
+            callback.assert_not_called()
             self.assertEqual(apply.call_args.args[3], [('meeting-service', {mr.FLAG: 'true'})])
             with self.assertRaisesRegex(RuntimeError, 'capture failed'):
                 apply.call_args.kwargs['post']()
+            callback.assert_called_once_with(cr, '2')
 
     def test_confirmation_and_protocol_are_checked_before_storage_mutations(self):
         cr = SimpleNamespace(require_release=Mock())
@@ -95,7 +98,7 @@ class RecordingProviderIdentity(unittest.TestCase):
                 mr.provider_identity(cr)
             kind, result = cr.emit.call_args.args
             self.assertEqual(kind, 'meetingRecordingProviderIdentity')
-            self.assertEqual(result, dict(meetingSignerConfigured=True, sharesCallingSigner=expected))
+            self.assertEqual(result, dict(meetingSignerConfigured=True, sharesCallingSigner=expected, rtcEndpoint=None))
             self.assertNotIn('provider-', json.dumps(result))
 
     def test_missing_provider_identity_is_unknown_and_does_not_read_secrets(self):
@@ -104,6 +107,49 @@ class RecordingProviderIdentity(unittest.TestCase):
             mr.provider_identity(cr)
         secret.assert_not_called()
         self.assertIsNone(cr.emit.call_args.args[1]['sharesCallingSigner'])
+
+    def test_endpoint_projection_excludes_credentials_path_query_and_unknown_hosts(self):
+        for url, expected in (
+            ('wss://user:private-token@livekit.cfmeet.com:8446/private?token=private-token',
+             dict(scheme='wss', hostname='livekit.cfmeet.com', port=8446)),
+            ('wss://api.cfmeet.com', dict(scheme='wss', hostname='api.cfmeet.com', port=443)),
+            ('wss://private-token.invalid', None), ('wss://livekit.cfmeet.com:invalid', None)):
+            cr = SimpleNamespace(env_of=lambda _: {'LIVEKIT_URL': url}, emit=Mock())
+            mr.provider_identity(cr)
+            value = cr.emit.call_args.args[1]
+            self.assertEqual(value['rtcEndpoint'], expected)
+            self.assertNotIn('private-token', json.dumps(value))
+
+
+class RecordingProviderActivation(unittest.TestCase):
+    def test_only_existing_same_server_keys_can_be_aligned_and_busy_media_is_preserved(self):
+        for current, callback, busy, active, valid in (
+            ('meeting-secret', 'callback-secret', False, False, True),
+            ('wrong', 'callback-secret', False, False, False),
+            ('meeting-secret', 'wrong', False, False, False),
+            ('meeting-secret', 'callback-secret', True, False, False),
+            ('meeting-secret', 'callback-secret', False, True, False)):
+            with tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / 'livekit.yaml'
+                original = json.dumps(dict(keys={'meeting': 'meeting-secret', 'callback': 'callback-secret'},
+                    webhook=dict(api_key='callback', urls=[mr.media_webhook.BRIDGE_URL])))
+                config.write_text(original)
+                cr = SimpleNamespace(env_of=lambda _: dict(LIVEKIT_API_KEY='meeting', LIVEKIT_API_SECRET=current),
+                    SERVICES={'meeting-service': dict(container='meeting', port=8081)})
+                yaml = SimpleNamespace(safe_load=json.loads)
+                container = {'NetworkSettings': {'Networks': {mr.p.NET: {}}}}
+                with patch.dict(sys.modules, yaml=yaml), patch.object(mr.media_webhook, 'CONFIG', config), \
+                        patch.object(mr.media_webhook, 'calling_key', return_value=('callback', callback)), \
+                        patch.object(mr.p, 'inspect', return_value=container), \
+                        patch.object(mr.media_webhook, 'participants', return_value=int(busy)), \
+                        patch.object(mr.p, 'lk_request', return_value={'items': [1] if active else []}):
+                    if valid:
+                        self.assertEqual(mr.recording_provider_overrides(cr),
+                            {mr.FLAG: 'true', 'LIVEKIT_API_KEY': 'callback', 'LIVEKIT_API_SECRET': callback})
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            mr.recording_provider_overrides(cr)
+                    self.assertEqual(config.read_text(), original)
 
 
 class MeetingCallbacks(unittest.TestCase):

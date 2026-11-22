@@ -38,7 +38,9 @@ def run(cr, run_id):
         p.write_private(credentials, json.dumps(dict(owner=tokens[0], outsider=tokens[1])))
         p.run('chmod', '0400', str(credentials))
         p.run('chown', '10001:10001', str(credentials))
-        result = subprocess.run(['docker', 'run', '--rm', '--name', name, '--network', p.NET,
+        # Match the existing real RTC acceptance: avoid Docker NAT/hairpin for
+        # the public WSS/ICE path. Only this non-root, scoped fixture client uses it.
+        result = subprocess.run(['docker', 'run', '--rm', '--name', name, '--network', 'host',
             '--user', '10001:10001', '--read-only', '--log-driver', 'none', '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges', '--memory', '768m', '--cpus', '1', '--pids-limit', '96',
             '--tmpfs', '/tmp:rw,nosuid,size=64m,uid=10001,gid=10001',

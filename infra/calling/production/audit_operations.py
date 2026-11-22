@@ -260,7 +260,8 @@ def recording_receipt(value, run_id):
     return dict(runId=run_id, result=value.get('result') if value.get('result') in ('PASS', 'FAIL') else 'INVALID',
                 phase=phase if isinstance(phase, str) and phase in RECORDING_PHASES else 'unknown',
                 errorClass=error if error in ('AssertionError', 'RuntimeError', 'TimeoutError', 'HTTPError',
-                            'URLError', 'KeyError', 'ValueError', 'OSError', 'FileNotFoundError', 'TypeError') else None,
+                            'URLError', 'KeyError', 'ValueError', 'OSError', 'FileNotFoundError', 'TypeError',
+                            'ConnectError', 'PublishTrackError') else None,
                 checks={key: checks[key] for key in RECORDING_CHECKS if checks.get(key) in ('PASS', 'FAIL')})
 
 
