@@ -159,16 +159,25 @@ Report the actual cosignature state and who controls the configured witness sepa
 
 ## Recording callback activation
 
-`activate-meeting-recording` with `enable-30-days` now checks the internal Meeting
-provider callback before enabling capture. It extends only the known Calling callback
-configuration, preserves all provider keys and other settings, and refuses a signer
-mismatch or an unknown existing callback configuration. The media server restarts only
+`activate-meeting-recording` with `enable-30-days` checks both existing provider identities
+against the shared SFU's configured keys. Self-hosted LiveKit has a global webhook signer;
+Meeting currently verifies callbacks with its own provider credentials. The activation
+therefore aligns Meeting's client credentials with that existing signer inside the same
+rollback boundary as capture and acceptance. It never rotates or removes an SFU key,
+so existing participant tokens remain valid. Unknown keys or callback layouts are refused.
+It extends only the known Calling callback configuration. The media server restarts only
 when both participant and active-capture counts are zero. A failed restart or route
 verification restores the exact previous configuration. Capture remains governed by the
 real synthetic recording acceptance and its existing flag rollback.
 
 Use `diagnose` to read the allowlisted controlled recording receipt, its own artifact's
-state/failure code, and the boolean signer comparison. No media, storage URL, credential,
+state/failure code, the boolean signer comparison and known public RTC host/port. No media,
+storage URL, credential,
 provider reference, or failure detail is exported by these diagnostics. The web recording
 flag (`NEXT_PUBLIC_MEETING_RECORDING=on`) must be enabled in Production and rebuilt only
 after backend recording acceptance passes. Transcripts and AI notes remain disabled.
+
+The disposable media client uses the host network, matching the existing Calling RTC
+acceptance and avoiding Docker NAT/hairpin on public WSS and ICE. It remains non-root,
+read-only, resource limited, without capabilities or provider/storage administrator keys.
+References: [LiveKit's server key and webhook configuration](https://github.com/livekit/livekit/blob/master/config-sample.yaml).

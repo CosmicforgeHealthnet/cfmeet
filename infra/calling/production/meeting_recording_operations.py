@@ -6,6 +6,7 @@ from pathlib import Path
 import secrets
 import shutil
 import subprocess
+from urllib.parse import urlsplit
 
 import production as p
 import provider_operations as providers
@@ -107,12 +108,13 @@ def activate(cr, sha, run_id, confirm):
             raise RuntimeError('Prepare the private Meeting recording store first')
         if cr.mem_available_mib() < 2048:
             raise RuntimeError('Recording acceptance needs 2 GiB available memory for media and the disposable client')
-        ensure_callback(cr, run_id)
+        overrides = recording_provider_overrides(cr)
         import meeting_recording_acceptance
         def post():
+            ensure_callback(cr, run_id)
             report = meeting_recording_acceptance.run(cr, run_id)
             cr.emit('meetingRecordingAcceptance', report)
-        cr.apply_activation(OPERATION, sha, run_id, [('meeting-service', {FLAG: 'true'})], post=post)
+        cr.apply_activation(OPERATION, sha, run_id, [('meeting-service', overrides)], post=post)
         return
     if shutil.disk_usage(p.ROOT).free < 12 * 2**30:
         raise RuntimeError('Meeting recording needs 12 GiB free for its 10 GiB bucket quota and reserve')
@@ -171,8 +173,50 @@ def provider_identity(cr):
                        and env['LIVEKIT_API_SECRET'] == p.secret('calling-livekit-api-secret'))
         except OSError:
             pass
+    endpoint = None
+    try:
+        parsed = urlsplit(env.get('LIVEKIT_URL', ''))
+        if parsed.scheme in ('ws', 'wss') and parsed.hostname in ('api.cfmeet.com', 'livekit.cfmeet.com'):
+            endpoint = dict(scheme=parsed.scheme, hostname=parsed.hostname,
+                            port=parsed.port or (443 if parsed.scheme == 'wss' else 80))
+    except ValueError:
+        pass
     cr.emit('meetingRecordingProviderIdentity', dict(meetingSignerConfigured=configured,
-                                                    sharesCallingSigner=matches))
+                                                    sharesCallingSigner=matches, rtcEndpoint=endpoint))
+
+
+def recording_provider_overrides(cr):
+    """Use the existing shared SFU's callback signer, without rotating any provider key.
+
+    Self-hosted LiveKit has one global webhook signing key. Meeting's current adapter
+    verifies callbacks with its provider credentials. Both identities must already be
+    valid keys of this same SFU; unknown or incomplete configurations are preserved.
+    This change enters the same rollback boundary as recording and real acceptance.
+    """
+    import yaml
+    if media_webhook.CONFIG.is_symlink():
+        raise RuntimeError('Unknown provider configuration path; preserved')
+    env = cr.env_of('meeting-service')
+    config = yaml.safe_load(media_webhook.CONFIG.read_text()) or {}
+    keys = config.get('keys') or {}
+    current_key, current_secret = env.get('LIVEKIT_API_KEY'), env.get('LIVEKIT_API_SECRET')
+    key, secret = media_webhook.calling_key()
+    if not current_key or not current_secret or keys.get(current_key) != current_secret or keys.get(key) != secret:
+        raise RuntimeError('Both Meeting and callback identities must already belong to the configured media server')
+    container = p.inspect('lk-server')
+    calling_url = media_webhook.target_url(container)
+    spec = cr.SERVICES['meeting-service']
+    meeting_url = 'http://%s:%d/internal/rtc/livekit/webhook' % (spec['container'], spec['port'])
+    if not calling_url or p.NET not in (container.get('NetworkSettings', {}).get('Networks') or {}):
+        raise RuntimeError('Meeting callback requires the existing private media network')
+    callback_plan(config, calling_url, meeting_url, key, secret)
+    if media_webhook.participants() or p.lk_request('Egress/ListEgress', {'active': True}, key, secret,
+                                                  {'roomRecord': True}).get('items'):
+        raise RuntimeError('Active media prevents recording provider configuration changes')
+    overrides = {FLAG: 'true'}
+    if current_key != key or current_secret != secret:
+        overrides.update(LIVEKIT_API_KEY=key, LIVEKIT_API_SECRET=secret)
+    return overrides
 
 
 def callback_plan(config, calling_url, meeting_url, key, secret):

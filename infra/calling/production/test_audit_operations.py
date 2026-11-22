@@ -89,6 +89,13 @@ if __name__ == '__main__':
 
 
 class RecordingReceipts(unittest.TestCase):
+    def test_sdk_error_classes_survive_without_exception_messages(self):
+        for error in ('ConnectError', 'PublishTrackError'):
+            result = ao.recording_receipt(dict(result='FAIL', phase='synthetic_media',
+                errorClass=error, message='private-token'), '12345-1')
+            self.assertEqual(result['errorClass'], error)
+            self.assertNotIn('private-token', json.dumps(result))
+
     def test_only_known_receipt_fields_are_emitted_and_private_files_are_not_read(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
