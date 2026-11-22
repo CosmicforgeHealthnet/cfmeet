@@ -437,3 +437,21 @@ The owner explicitly chose to leave M8 transcripts and AI notes disabled. No AI 
 created and no provider was enabled. Independent witnessing and native phone push still
 need the external operator/keys and actual acceptance listed in
 [server-audit-external-setup.md](server-audit-external-setup.md).
+
+
+### Operator-managed KT cosigner (owner decision, 22 November 2026)
+
+The owner requested a CF Meet-operated cosigner instead of an external operator.
+After the approved image release, dispatch `activate-managed-kt-witness` with
+`confirm=operator-managed`. This preserves the log identity and starts the shipped
+`messaging-kt-witness` executable with its own protected Ed25519 key and durable state.
+Only a POST endpoint accepting cryptographically valid pinned-log checkpoints is exposed
+through the existing TLS site. No database credentials enter the cosigner container.
+The activation waits for Messaging to store a verified cosignature of the current head;
+on failure its Messaging change and added route roll back. Existing state is preserved.
+The operation reports `independentOperator=false`; this mode must not be described as
+independent confirmation. Keep its signing key and state together and never restore old
+state over a newer checkpoint. Existing keys or an unexpected container/route are preserved.
+
+Activate this before `activate-local-send-policy`. Re-run the service-log collector
+activation after the witness starts to include it in the 14-day archive.
