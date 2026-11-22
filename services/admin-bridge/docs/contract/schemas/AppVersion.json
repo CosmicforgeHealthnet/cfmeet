@@ -1,0 +1,35 @@
+{
+  "description": "One manifest version of an app (name and distribution only).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "name",
+    "distribution",
+    "created_at"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "distribution": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

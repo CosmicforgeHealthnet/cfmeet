@@ -1,0 +1,55 @@
+{
+  "description": "One environment of a workspace's project.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment_id",
+    "project_id",
+    "kind",
+    "display_name",
+    "status",
+    "production_access_state",
+    "created_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "production_access_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
