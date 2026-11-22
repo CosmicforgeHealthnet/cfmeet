@@ -104,6 +104,10 @@ is required for this deployment. `activate-managed-kt-witness`, with
 `confirm=operator-managed`, starts the existing Rust witness program in an isolated
 container, preserves the current log signing identity, pins its public key, and retains
 monotonic state across restarts. The separate signing key has protected recovery material.
+The container uses an owned, non-internal bridge with only a loopback-published listener:
+Docker does not publish host ports from the internal core network. Its public-key
+response must match the pinned identity before Messaging is changed. Host nginx exposes
+only the signed-checkpoint POST route over HTTPS; the witness has no core-network access.
 Messaging is configured with quorum 1 only inside a rollback-protected activation which
 must observe a verified cosignature of the current head. Its witness ID is
 `cfmeet.operated`. This is an **operator-managed cosignature**, not independent oversight:
@@ -132,7 +136,8 @@ repository supplies `messaging-kt-witness`, built from
 
 They return their HTTPS `POST /witness/v1/add-checkpoint` endpoint and base64url Ed25519
 public key. Configure Messaging's read-only `MESSAGING_KT_WITNESSES_FILE` as
-`[{"witnessId":"<operator-id>","url":"https://<operator>/witness/v1/add-checkpoint","publicKey":"<key>"}]`
+`[{"witnessId":"<operator-id>","url":"https://<operator>","publicKey":"<key>"}]`
+The worker appends `/witness/v1/add-checkpoint` to this base URL.
 and set `MESSAGING_KT_WITNESS_QUORUM` to the agreed number of distinct operators. Preserve
 the pinned log identity and the web `NEXT_PUBLIC_MESSAGING_KT_LOG_ID` / `_LOG_KEY`.
 

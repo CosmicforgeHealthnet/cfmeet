@@ -363,10 +363,32 @@ work and returns unavailable; an idempotent retry must deliver before confirming
 Per-rule versions preserve unblock tombstones; contradictory equal versions are refused.
 Rollout UUIDs keep delayed events from an older activation from restoring stale blocks.
 
-Before releasing or rolling back a source image, dispatch this operation with
-`confirm=disable`. Source-image release/rollback refuses while the local fast path is
-on. Disabling restores fresh direct eligibility checks while preserving synchronous
-source ACKs. The normal background relay remains available for retry.
+When a coordinated release replaces a Messaging, Communications or Calling image,
+it first pauses the fast path on the verified existing images and requires Messaging
+to acknowledge authoritative checks. After a successful image rollout, it prepares a
+fresh generation and requires all three ACKs before enabling again. A failed pause
+prevents source swaps; a failed rollout leaves authoritative checks enabled. Releases
+which keep all three source images do not pause or restart them. For a manual source
+rollback, dispatch `confirm=disable` first; rollback still refuses while fast mode is on.
+The normal background relay remains available for retry.
+
+### Audit activation during continuing main merges
+
+Set repository variable `CFMEET_AUDIT_ACTIVATIONS=enabled` to opt the next verified
+release into the owner-authorized audit campaign: managed witness, 14-day log coverage,
+recording preparation and full capture/download/playback/deletion acceptance, then local
+send-policy preparation and activation. Unset or `disabled` leaves the campaign off.
+It runs inside the existing production lock against the just-deployed SHA, after all
+normal main, exact-SHA, image and CI gates. Main may advance after rollout starts.
+
+The root-only `audit-activation-campaign.json` records each stage before it starts and
+after completion. Failure or interruption blocks automatic retries across unrelated
+merges; diagnose and review a concrete fix, then increment only that stage's version
+in `audit_release.py` to permit a retry. A later application release can succeed while
+reporting the audit campaign `BLOCKED`; that is not audit completion. Child operation
+IDs carry a fixed `-audit-...` suffix; recording acceptance receipts require all seven
+checks to pass. Turn the repository variable off after the final evidence is reviewed.
+The source-upgrade pause and fresh-generation handshake remain in effect independently.
 
 ### Meeting notification email cutover (M4)
 

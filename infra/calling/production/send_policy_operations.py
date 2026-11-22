@@ -8,6 +8,28 @@ FAST = 'MESSAGING_LOCAL_SEND_POLICY_ENABLED'
 PREPARED = 'MESSAGING_LOCAL_SEND_POLICY_PREPARED'
 SOURCE_FLAGS = {'communications': 'COMMUNICATIONS_SYNCHRONOUS_POLICY_EVENTS_ENABLED',
                 'calling': 'CALLING_SYNCHRONOUS_BLOCK_PROJECTION_ENABLED'}
+OWNERS = ('messaging', 'communications', 'calling')
+
+
+def pause_for_release(cr, sha, run_id):
+    """Fail closed on the verified deployed images, before a release swaps any source.
+
+    The release already holds its main/CI/production gates. Its new image inputs may
+    differ, so verify the actual old source images against their completed release;
+    this operation changes only Messaging's existing runtime flags, never an image.
+    """
+    base = cr.last_release()
+    if not base:
+        raise RuntimeError('Cannot pause policy without a completed source release')
+    manifest = cr.registry(base['sha'])
+    for name in OWNERS:
+        cr.verify_running(cr.SERVICES[name]['container'], *cr.expected_image(name, base['sha'], manifest))
+    def post():
+        if facts(cr, 'messaging').get('sendPolicyLocalEnabled') is not False:
+            raise RuntimeError('Messaging must confirm authoritative send checks before source upgrades')
+    cr.apply_activation(OPERATION, sha, run_id,
+        [('messaging', {FAST: 'false', PREPARED: 'false'})], post=post)
+    cr.emit('sendPolicyReleasePause', dict(deployedRelease=base['sha'], localEnabled=False))
 
 
 def facts(cr, name):

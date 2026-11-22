@@ -1409,8 +1409,7 @@ def running_envs():
     return {n: p.env_of(p.inspect(SERVICES[n]['container'])) for n in ORDER if SERVICES[n]['container'] in names}
 
 
-def release_all(sha, run_id):
-    send_policy_operations.require_remote_path(sys.modules[__name__])
+def release_all(sha, run_id, before_source_swap=None):
     p.identity()
     # Unchanged services retain their verified previous image and OCI revision.
     # The manifest intentionally contains only the newly required images.
@@ -1437,6 +1436,10 @@ def release_all(sha, run_id):
         commit(entry)
         verify(sha, run_id)
         return
+    if any(name not in kept for name in send_policy_operations.OWNERS):
+        if before_source_swap:
+            before_source_swap()
+        send_policy_operations.require_remote_path(sys.modules[__name__])
     backup(sha, run_id)
     provision(sha, run_id)
     entry = begin('release', sha, run_id)
@@ -3105,10 +3108,11 @@ def run(operation, sha, run_id, confirm=''):
     elif operation == 'provision':
         provision(sha, run_id)
     elif operation == 'release':
-        release_all(sha, run_id)
+        import audit_release
         # Monitoring follows every successful release and never fails it (monitoring_stack.py).
         import monitoring_stack
-        monitoring_stack.deploy_after_release(sys.modules[__name__], emit)
+        audit_release.release(sys.modules[__name__], sha, run_id,
+            after_release=lambda: monitoring_stack.deploy_after_release(sys.modules[__name__], emit))
     elif operation == 'deploy-monitoring':
         # Prometheus, Alertmanager and the probe / heartbeat exporters only; no service changes.
         if confirm:

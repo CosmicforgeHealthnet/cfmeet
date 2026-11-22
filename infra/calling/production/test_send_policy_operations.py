@@ -89,3 +89,38 @@ class SendPolicyActivation(unittest.TestCase):
             sp.activate(cr, 'sha', '1', 'yes')
         cr.require_release.assert_not_called()
         self.assertEqual(plans, [])
+
+
+class ReleasePause(unittest.TestCase):
+    def fake(self):
+        return SimpleNamespace(last_release=Mock(return_value={'sha': 'old-release'}),
+            registry=Mock(return_value={'manifest': True}), expected_image=Mock(return_value=('image-id', 'revision')),
+            verify_running=Mock(), SERVICES={name: {'container': 'cfmeet-'+name} for name in sp.OWNERS},
+            apply_activation=Mock(), emit=Mock())
+
+    def test_all_old_source_images_are_verified_and_receiver_must_ack_disabled(self):
+        cr = self.fake()
+        sp.pause_for_release(cr, 'new-head', '123-1-audit-send-pause')
+        self.assertEqual(cr.verify_running.call_count, 3)
+        self.assertEqual(cr.registry.call_args.args, ('old-release',))
+        self.assertEqual(cr.apply_activation.call_args.args[3],
+            [('messaging', {sp.FAST: 'false', sp.PREPARED: 'false'})])
+        post = cr.apply_activation.call_args.kwargs['post']
+        for observed in (True, None, False):
+            with patch.object(sp, 'facts', return_value={'sendPolicyLocalEnabled': observed}):
+                if observed is False:
+                    post()
+                else:
+                    with self.assertRaises(RuntimeError):
+                        post()
+
+    def test_unknown_or_mismatched_deployed_source_images_refuse_before_mutation(self):
+        for missing in (True, False):
+            cr = self.fake()
+            if missing:
+                cr.last_release.return_value = None
+            else:
+                cr.verify_running.side_effect = RuntimeError('image mismatch')
+            with self.assertRaises(RuntimeError):
+                sp.pause_for_release(cr, 'new-head', '123-1-audit-send-pause')
+            cr.apply_activation.assert_not_called()

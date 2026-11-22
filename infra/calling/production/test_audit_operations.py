@@ -89,6 +89,23 @@ if __name__ == '__main__':
 
 
 class RecordingReceipts(unittest.TestCase):
+    def test_campaign_receipt_requires_all_real_acceptance_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root/'meeting-recording/acceptance/12345-1-audit-recording-enable'
+            folder.mkdir(parents=True)
+            report = dict(result='PASS', phase='deletion', checks={key: 'PASS' for key in ao.RECORDING_CHECKS})
+            file = folder/'report.json'
+            file.write_text(json.dumps(report))
+            with patch.object(ao.p, 'ROOT', root):
+                self.assertTrue(ao.recording_acceptance_proven())
+                cr = SimpleNamespace(emit=Mock())
+                ao.recording_receipts(cr)
+                self.assertEqual(len(cr.emit.call_args.args[1]), 1)
+                report['checks'].pop('authenticated_recording_deletion')
+                file.write_text(json.dumps(report))
+                self.assertFalse(ao.recording_acceptance_proven())
+
     def test_sdk_error_classes_survive_without_exception_messages(self):
         for error in ('ConnectError', 'PublishTrackError'):
             result = ao.recording_receipt(dict(result='FAIL', phase='synthetic_media',

@@ -226,7 +226,8 @@ def activate_service_logs(cr, sha, run_id, confirm):
                 health = json.loads(health_file.read_text())
                 age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(health['at'])
                 observed = datetime.datetime.fromisoformat(health['at'])
-                if observed >= started and 0 <= age.total_seconds() < 30 and health['threadsAlive'] == len(names):
+                if observed >= started and 0 <= age.total_seconds() < 30 and health['threadsAlive'] == len(names) \
+                        and not health.get('failures'):
                     break
             time.sleep(1)
         else:
@@ -250,6 +251,27 @@ RECORDING_CHECKS = frozenset((
 RECORDING_PHASES = frozenset(('setup', 'synthetic_media', 'capture', 'authorized_download', 'deletion'))
 
 
+def recording_acceptance_proven():
+    root = p.ROOT / 'meeting-recording' / 'acceptance'
+    if root.is_symlink() or not root.is_dir():
+        return False
+    for folder in sorted(root.iterdir(), key=lambda item: item.name, reverse=True):
+        if folder.is_symlink() or not folder.is_dir() \
+                or not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,5}(?:-audit-recording-enable)?', folder.name):
+            continue
+        file = folder/'report.json'
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            continue
+        try:
+            value = json.loads(file.read_text())
+            if value.get('result') == 'PASS' and isinstance(value.get('checks'), dict) \
+                    and all(value['checks'].get(key) == 'PASS' for key in RECORDING_CHECKS):
+                return True
+        except (OSError, ValueError, AttributeError):
+            continue
+    return False
+
+
 def recording_receipt(value, run_id):
     """An allowlisted projection. Credentials, URLs, media and exception text never leave the VPS."""
     if not isinstance(value, dict):
@@ -271,7 +293,8 @@ def recording_receipts(cr):
     receipts = []
     if root.is_dir() and not root.is_symlink():
         for folder in sorted(root.iterdir(), key=lambda path: path.name, reverse=True):
-            if not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,5}', folder.name) or folder.is_symlink() or not folder.is_dir():
+            if not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,5}(?:-audit-recording-enable)?', folder.name) \
+                    or folder.is_symlink() or not folder.is_dir():
                 continue
             file = folder / 'report.json'
             if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
