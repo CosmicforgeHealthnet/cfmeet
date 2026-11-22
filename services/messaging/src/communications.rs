@@ -1,4 +1,5 @@
 //! Personal relationship policy. Messaging remains the conversation and security owner.
+mod block_projection;
 mod owner;
 mod send_cache;
 use crate::{
@@ -80,6 +81,11 @@ pub async fn resolve_address(
     Ok(())
 }
 impl AppState {
+    pub fn with_local_send_policy(mut self, enabled: bool, generation: Option<Uuid>) -> Self {
+        self.local_send_policy = enabled;
+        self.local_send_generation = generation;
+        self
+    }
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
         self.communications = client;
         self
@@ -150,9 +156,27 @@ pub async fn require_send<C: ConnectionTrait>(
     if targets.len() != 1 {
         return Err(Error::code(ErrorCode::DeliveryRefused));
     }
-    // Never served from the B2 cache: a block must refuse the very next one-to-one
-    // message, and the Communications event that would invalidate a cached allow is
-    // delivered asynchronously (outbox relay), so a cached decision could outlive it.
+    if state.local_send_policy {
+        block_projection::require_unblocked(
+            db,
+            ctx.scope,
+            state
+                .local_send_generation
+                .ok_or_else(|| Error::code(ErrorCode::ServiceUnavailable))?,
+            actor,
+            targets[0].principal_id,
+        )
+        .await?;
+        return send_cache::require_cached(
+            db,
+            state,
+            ctx,
+            Action::MessageSend,
+            actor,
+            targets[0].principal_id,
+        )
+        .await;
+    }
     require(
         state,
         ctx,
@@ -410,8 +434,15 @@ async fn event(
             return Err(Error::validation("Event identity conflict"));
         }
     }
+    // A duplicate received during a receiver configuration transition is safe to
+    // reapply: generation and source versions fence it, independently of inbox dedupe.
+    if let Some(generation) = s.local_send_generation {
+        block_projection::apply(&txn, d, generation, &e.kind, e.version, &e.data).await?;
+    }
     let mut announced = None;
     if n == 1 && e.kind != TIMELINE_CHANGED {
+        let principals = send_cache::event_principals(&e.data);
+        block_projection::lock(&txn, d, &principals, false).await?;
         // B2: cached send decisions about these principals stop being used.
         send_cache::invalidate(&txn, d, &send_cache::event_principals(&e.data)).await?;
     }
@@ -433,7 +464,14 @@ async fn event(
     if announced == Some(true) {
         s.realtime.outbox_wakeup.notify_one();
     }
-    Ok(Json(json!({"applied":n==1,"duplicate":n==0})))
+    let mut acknowledgment = json!({"applied":n==1,"duplicate":n==0});
+    // Unprepared receivers retain the legacy wire response. A synchronous producer
+    // requires its matching generation, so this cannot acknowledge an unprepared rollout.
+    if let Some(generation) = s.local_send_generation {
+        acknowledgment["sendPolicyProjection"] = json!(1);
+        acknowledgment["sendPolicyGeneration"] = json!(generation);
+    }
+    Ok(Json(acknowledgment))
 }
 
 /// MSG-009: the Hub's realtime nudge for a conversation's call / meeting timeline.

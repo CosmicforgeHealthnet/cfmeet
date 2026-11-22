@@ -81,4 +81,5 @@ pub use rate_limiter::RateLimiterService;
 pub use redis::RedisService;
 pub use token_blacklist::TokenBlacklistService;
 
+pub mod account_phone;
 pub mod communications;

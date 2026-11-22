@@ -6,7 +6,7 @@
  * fetched, by this browser or by the server.
  */
 
-export type LinkPreview = { url: string; title: string | null; description: string | null; siteName: string | null };
+export type LinkPreview = { url: string; title: string | null; description: string | null; siteName: string | null; imageDataUrl?: string | null };
 export type PollTally = { counts: number[]; voters: number; myChoices: number[] };
 
 export type RichContent =
@@ -17,6 +17,7 @@ export type RichContent =
 
 /** Payloads the page asks the worker to encrypt (besides text and files). */
 export type RichPayload =
+  | { t: "text"; text: string; preview?: LinkPreview }
   | { t: "contact"; cfMeetId: string; name: string }
   | { t: "location"; lat: number; lng: number; label: string | null }
   | { t: "poll"; question: string; options: string[]; multiple: boolean }

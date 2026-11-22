@@ -517,3 +517,41 @@ pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionT
         .collect::<Result<_, _>>()?;
     Ok(known == actual)
 }
+
+mod send_policy_projection;
+pub struct SendPolicyProjectionMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for SendPolicyProjectionMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(send_policy_projection::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("messaging_send_policy_projection_migrations").into_iden()
+    }
+}
+
+/// Read-only readiness for the independently versioned additive integration.
+pub async fn send_policy_projection_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db.query_one(Statement::from_string(DbBackend::Postgres, "SELECT to_regclass('public.messaging_send_policy_projection_migrations') IS NOT NULL AS present".to_owned())).await?.ok_or_else(||sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?.try_get::<bool>("","present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM messaging_send_policy_projection_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = SendPolicyProjectionMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}

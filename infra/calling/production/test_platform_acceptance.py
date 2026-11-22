@@ -25,7 +25,11 @@ class FakePlatform:
         # CF Meet Apps features served (only while the apps stage is on).
         self.apps_on = set(apps) if 'apps' in self.stages else set()
         # Behaviours to break: 'isolation-users', 'chat-receive', 'cors-credential-route',
-        # 'refresh-reuse', 'cross-client-code', 'apps-isolation'.
+        # 'refresh-reuse', 'cross-client-code', 'apps-isolation', and partner meeting chat:
+        # 'meeting-chat-sync' (joined users never become members), 'meeting-chat-leak' (a user
+        # who has not joined reads it), 'meeting-chat-isolation' (another tenant's device reads
+        # it), 'meeting-chat-receive' (messages are not delivered), 'first-party-chat-open'
+        # (the first-party participant-token chat route answers 200: recorded only).
         self.broken = set(broken)
         self.n = 0
         self.calls = []
@@ -38,6 +42,36 @@ class FakePlatform:
         self.scopes = {}
         self.apps, self.codes, self.grants, self.oauth_tokens, self.app_spaces = {}, {}, {}, {}, {}
         self.issued_codes = []
+        self.secrets = {}
+        # Sign-in: OTP requests per client address in the current window, sessions.
+        self.otp_limit, self.otp_window, self.otp_requests = 20, 0, 0
+        self.sign_ins, self.refreshes, self.refresh_tokens, self.expired = {}, {}, {}, set()
+        self.orgs_created = {}
+        self.slept = []
+
+    def new_refresh(self, owner):
+        token = '%s-refresh-%s' % (owner, self.id('r'))
+        self.refresh_tokens[token] = owner
+        return token
+
+    def sleep(self, seconds):
+        """The patched time.sleep: waiting out the reported time ends the OTP window."""
+        self.slept.append(seconds)
+        if seconds >= 7:
+            self.otp_window = 0
+
+    def create_accounts(self, namespace):
+        """app_acceptance.accounts(namespace, count=2, keep_sessions=True): two new accounts,
+        each created by one OTP sign-in whose refresh token it keeps (in memory)."""
+        made = []
+        for _ in range(2):
+            owner = 'p' + 'abcdefghijklmnopqrstuvwxyz'[len(self.sign_ins) % 26]
+            self.otp_requests += 1
+            self.otp_window += 1
+            self.sign_ins[owner] = self.sign_ins.get(owner, 0) + 1
+            made.append({'email': owner + '@example.invalid', 'userId': 'acct-' + owner,
+                         'refreshToken': self.new_refresh(owner)})
+        return made
 
     def id(self, prefix='id'):
         self.n += 1
@@ -50,6 +84,8 @@ class FakePlatform:
         self.calls.append((method, path.split('?')[0], client.base, bearer))
         client.last_headers = {'cache-control': 'no-store'}
         status, value = self.route(client, method, path, body, bearer, headers)
+        if status == 401 and 401 not in expected and client.account and not token:
+            raise da.Expired()  # as the real _call: a session client renews its session
         if status not in expected:
             raise da.Failed('%s %s answered %d' % (method, path.split('?')[0], status))
         return status, value
@@ -60,7 +96,7 @@ class FakePlatform:
         return stage in self.stages
 
     def machine_env(self, bearer):
-        m = re.fullmatch(r'cfmk_sbx_(\w+)_s', bearer or '')
+        m = re.fullmatch(r'cfmk_sbx_([a-z]+env)(?:_\d+)?_s', bearer or '')
         return m.group(1) if m and bearer not in self.revoked else None
 
     def session(self, bearer):
@@ -111,9 +147,27 @@ class FakePlatform:
         if client.base == pa.RELAY:
             return self.relay(method, bare, body, bearer, headers)
         if path == '/api/v1/auth/otp/request':
+            self.otp_requests += 1
+            self.otp_window += 1
+            if self.otp_window > self.otp_limit:  # Meeting Service limit_by_client (fixed window)
+                return 429, {'error': {'code': 'TOO_MANY_REQUESTS',
+                                       'message': 'Too many requests. Please try again in 7 seconds.'}}
             return 200, {}
         if path == '/api/v1/auth/otp/verify':
-            return 200, {'access_token': body['email'].split('@')[0] + '-tok'}
+            owner = body['email'].split('@')[0]
+            self.sign_ins[owner] = self.sign_ins.get(owner, 0) + 1
+            return 200, {'access_token': owner + '-tok', 'refresh_token': self.new_refresh(owner)}
+        if path == '/api/v1/auth/refresh':
+            owner = self.refresh_tokens.get(body.get('refresh_token'))
+            if not owner or 'refresh-refused' in self.broken:
+                return 401, {'error': {'code': 'UNAUTHORIZED'}}
+            del self.refresh_tokens[body['refresh_token']]  # single use (rotated)
+            self.refreshes[owner] = self.refreshes.get(owner, 0) + 1
+            self.expired.discard(owner)
+            return 200, {'access_token': owner + '-tok', 'refresh_token': self.new_refresh(owner)}
+        owner = self.session(bearer)
+        if owner in self.expired:
+            return 401, {'error': {'code': 'UNAUTHORIZED'}}
         if method == 'OPTIONS':
             return self.preflight(client, bare, headers)
         if bare.startswith(('/v1/oauth/', '/v1/app-directory')) or bare == '/api/v2/app-context-keys':
@@ -137,11 +191,14 @@ class FakePlatform:
         if bearer in self.client_tokens:
             return 401, {'error': {'code': 'AUTHENTICATION_FAILED'}}  # client tokens never ride Bearer
         if bearer in self.signaling:
-            return self.device_signaling(self.signaling[bearer], method, bare)
+            return self.device_signaling(self.signaling[bearer], method, bare, body)
         if headers.get('X-Participant-Token') in self.participant_tokens:
             conf = self.participant_tokens[headers['X-Participant-Token']]
             if bare == '/api/v2/conferences/%s/messages' % conf:
-                return 200, {'success': True, 'data': {'items': []}}
+                if 'first-party-chat-open' in self.broken:
+                    return 200, {'success': True, 'data': {'items': []}}
+                # Environment-owned meetings have no first-party conversation (fail closed).
+                return 503, {'error': {'code': 'CHAT_UNAVAILABLE'}}
         return 401, {}
 
     def preflight(self, client, path, headers):
@@ -156,6 +213,9 @@ class FakePlatform:
     def console(self, owner, method, path, body):
         env = owner + 'env'
         if method == 'POST' and path == '/v1/organizations':
+            self.orgs_created[owner] = self.orgs_created.get(owner, 0) + 1
+            if self.orgs_created[owner] > 5:  # Organizations CREATION_LIMIT_PER_DAY
+                return 429, {'error': {'code': 'RATE_LIMITED'}}
             return 201, {'id': owner + 'org', 'myRole': 'OWNER', 'state': 'ACTIVE'}
         if re.fullmatch(r'/v1/organizations/\w+/projects', path):
             return 201, {'id': owner + 'proj'}
@@ -169,10 +229,13 @@ class FakePlatform:
         if path.endswith('/service-accounts'):
             return 201, {'id': self.id('sa')}
         if path.endswith('/credentials') and method == 'POST':
-            return 201, {'secret': 'cfmk_sbx_%s_s' % env, 'credential': {'id': self.id('cr'), 'scopes': body['scopes']}}
+            secret = 'cfmk_sbx_%s_s' % env if not self.secrets.get(env) else 'cfmk_sbx_%s_%d_s' % (env, self.n)
+            self.n += 1
+            self.secrets.setdefault(env, []).append(secret)
+            return 201, {'secret': secret, 'credential': {'id': self.id('cr'), 'scopes': body['scopes']}}
         m = re.fullmatch(r'/v1/environments/(\w+)/credentials/\w+/revoke', path)
         if m:
-            self.revoked.add('cfmk_sbx_%s_s' % m.group(1))
+            self.revoked.update(self.secrets.get(m.group(1), []))
             return 200, {}
         if re.fullmatch(r'/v1/(projects/\w+/archive|organizations/\w+/close)', path):
             return 200, {}
@@ -248,15 +311,23 @@ class FakePlatform:
             return (200, {}) if c and c['env'] == env else self.nf()
         if bare == '/v1/calls' and method == 'POST':
             call = self.id('call')
-            self.calls_[call] = dict(env=env)
+            self.calls_[call] = dict(env=env, state='RINGING', version=1)
             target = body['targetPrincipalIds'][0]
             invitation = self.id('inv')
             self.invitations[invitation] = dict(call=call, user=target)
-            return 201, {'call': {'callId': call, 'state': 'RINGING'}, 'liveInvitationCount': 1}
+            return 201, {'call': {'callId': call, 'state': 'RINGING', 'version': 1}, 'liveInvitationCount': 1}
         m = re.fullmatch(r'/v1/calls/(\w+)(/cancel)?', bare)
         if m:
             c = self.calls_.get(m.group(1))
-            return (200, {}) if c and c['env'] == env else self.nf()
+            if not c or c['env'] != env:
+                return self.nf()
+            if m.group(2) and method == 'POST':
+                if not isinstance(body, dict) or body.get('expectedVersion') != c['version']:
+                    return 400, {'error': {'code': 'VALIDATION_ERROR'}}
+                c['state'] = 'CANCELLED'
+                c['version'] += 1
+                return 200, {}
+            return 200, dict(c)
         return 404, {}
 
     def device_user_token(self, method, path, body, bearer):
@@ -296,8 +367,11 @@ class FakePlatform:
                 return self.nf()
             if not any(g['c'] == m.group(1) for g in t['grants'].get('mtg', [])):
                 return 403, {'error': {'code': 'FORBIDDEN'}}
+            if conf['status'] != 'LIVE':  # admission requires a LIVE conference
+                return 409, {'error': {'code': 'CONFERENCE_NOT_LIVE'}}
             key = (m.group(1), t['user'])
             pid = self.participants.setdefault(key, self.id('p'))
+            self.partner_chat_join(m.group(1), conf['env'], t['user'])
             pt = 'pt_' + self.id()
             self.participant_tokens[pt] = m.group(1)
             return 200, {'participant': {'id': pid, 'role': t['grants']['mtg'][0]['r'],
@@ -310,10 +384,19 @@ class FakePlatform:
             return 201, {'ticket': 'rt_x'}
         if re.fullmatch(r'/v1/messaging/user-push-registrations/([\w.-]+)', path):
             return 401, {}  # these take the user token, never a client token
+        if path == '/v1/conversations' and method == 'GET':
+            # Partner session devices list the MANAGED conversations they are an ACTIVE member of.
+            return 200, {'conversations': [
+                dict(conversationId=cid, securityProfile='MANAGED', contextClass='MEETING' if c.get('meeting') else 'DIRECT',
+                     context={'namespace': 'meeting', 'reference': 'conference:%s' % c['meeting']} if c.get('meeting')
+                     else None)
+                for cid, c in self.conversations.items() if c['env'] == ct['env'] and ct['user'] in c['members']]}
         m = re.fullmatch(r'/v1/conversations/(\w+)/(messages|mls/state)', path)
         if m:
             c = self.conversations.get(m.group(1))
-            if not c or c['env'] != ct['env'] or ct['user'] not in c['members']:
+            leak = c and c.get('meeting') and 'meeting-chat-leak' in self.broken
+            foreign = c and c.get('meeting') and 'meeting-chat-isolation' in self.broken
+            if not c or (c['env'] != ct['env'] and not foreign) or (ct['user'] not in c['members'] and not leak and not foreign):
                 return self.nf()
             if m.group(2) == 'mls/state':
                 return 401, {'error': {'code': 'CLIENT_TOKENS_NOT_ENABLED'}}  # not a partner device route
@@ -321,15 +404,27 @@ class FakePlatform:
             if method == 'POST':
                 log.append(dict(body))
                 return 201, {}
-            return 200, {'messages': [] if 'chat-receive' in self.broken else list(log)}
+            dropped = 'meeting-chat-receive' if c.get('meeting') else 'chat-receive'
+            return 200, {'messages': [] if dropped in self.broken else list(log)}
         return 404, {}
 
-    def device_signaling(self, sig, method, path):
+    def partner_chat_join(self, conf, env, user):
+        """Meeting Service partner chat: one MANAGED conversation per partner meeting, in the
+        partner's own environment, owned by its system principal; joined users become members."""
+        if 'meetings' not in self.stages or 'chat' not in self.stages:
+            return
+        c = self.conversations.setdefault('mc' + conf, dict(env=env, members=set(), meeting=conf))
+        if 'meeting-chat-sync' not in self.broken:
+            c['members'].add(user)
+
+    def device_signaling(self, sig, method, path, body):
         if path == '/v1/calling/invitations':
-            return 200, {'endpointId': 'ep', 'data': [dict(invitationId=i, callId=v['call']) for i, v in self.invitations.items()
+            return 200, {'endpointId': 'ep', 'data': [dict(invitationId=i, callId=v['call'], callVersion=1) for i, v in self.invitations.items()
                                                       if v['user'] == sig['user']]}
         m = re.fullmatch(r'/v1/calling/invitations/(\w+)/accept', path)
         if m:
+            if not isinstance(body, dict) or body.get('expectedVersion') != 1:
+                return 400, {'error': {'code': 'VALIDATION_ERROR'}}
             v = self.invitations.get(m.group(1))
             return (200, {}) if v and v['user'] == sig['user'] else self.nf()
         return 404, {}
@@ -521,17 +616,30 @@ class FakePlatform:
             if m.group(2) == 'archive':
                 return 200, {}
             conf = self.id('conf')
-            self.conferences[conf] = dict(env=env, space=m.group(1))
-            return 201, {'id': conf, 'meetingSpaceId': m.group(1)}
-        m = re.fullmatch(r'/api/v2/conferences/(\w+)(/end)?', path)
+            self.conferences[conf] = dict(env=env, space=m.group(1), status='CREATED')
+            return 201, {'id': conf, 'meetingSpaceId': m.group(1), 'status': 'CREATED'}
+        m = re.fullmatch(r'/api/v2/conferences/(\w+)(/start|/end|/cancel)?', path)
         if m:
             c = self.conferences.get(m.group(1))
-            return (200, {}) if c and c['env'] == env else self.nf()
+            if not c or c['env'] != env:
+                return self.nf()
+            action = m.group(2)
+            if action == '/start' and c['status'] in ('CREATED', 'PREPARING', 'WAITING', 'LIVE'):
+                c['status'] = 'LIVE'
+            elif action == '/end' and c['status'] in ('LIVE', 'ENDING', 'ENDED'):
+                c['status'] = 'ENDED'
+            elif action == '/cancel' and c['status'] in ('CREATED', 'PREPARING', 'WAITING', 'CANCELLED'):
+                c['status'] = 'CANCELLED'
+            elif action == '/end':
+                return 409, {'error': {'code': 'CONFERENCE_NOT_LIVE'}}
+            elif action:
+                return 409, {'error': {'code': 'CONFERENCE_STATE_CONFLICT'}}
+            return 200, {'conference': {'id': m.group(1), 'status': c['status']}, 'changed': True}
         return 404, {}
 
 
-def run_flow(api, stages=ALL, apps=None):
-    accounts = [{'email': 'pa@example.invalid', 'userId': 'acct-pa'}, {'email': 'pb@example.invalid', 'userId': 'acct-pb'}]
+def run_flow(api, stages=ALL, apps=None, pool=None, run_id='77-1'):
+    pool = pool or pa.AccountPool(create=api.create_accounts)
     out = io.StringIO()
     emitted = []
 
@@ -539,12 +647,13 @@ def run_flow(api, stages=ALL, apps=None):
         emitted.append((kind, value))
         print(json.dumps({kind: value}, default=str))
 
-    with patch.object(pa.app_acceptance, 'accounts', lambda ns, count: accounts), \
+    with patch.object(pa, 'POOL', pool), \
+            patch.object(pa.app_acceptance, 'accounts', side_effect=AssertionError('accounts come from the pool')), \
             patch.object(pa.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
             patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
-            patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out), \
+            patch.object(pa.time, 'sleep', api.sleep), contextlib.redirect_stdout(out), \
             patch.object(pa.urllib.request, 'urlopen', side_effect=AssertionError('no network in tests')):
-        checks = pa.run('77-1', stages, emit, apps=apps)
+        checks = pa.run(run_id, stages, emit, apps=apps)
     return checks, out.getvalue(), emitted
 
 
@@ -570,6 +679,10 @@ class Journey(unittest.TestCase):
             self.assertLess(order.index(('POST', '/v1/projects/%sproj/archive' % env)), close)
         self.assertEqual(len(api.conferences), 2)
         for conf, value in api.conferences.items():
+            # Started before any join, ended (not left LIVE) at cleanup.
+            self.assertEqual(value['status'], 'ENDED')
+            self.assertLess(order.index(('POST', '/api/v2/conferences/%s/start' % conf)),
+                            order.index(('POST', '/api/v2/conferences/%s/join' % conf)))
             self.assertLess(order.index(('POST', '/api/v2/conferences/%s/end' % conf)),
                             order.index(('POST', '/api/v2/meeting-spaces/%s/archive' % value['space'])))
         self.assertTrue(any(p.endswith('/cancel') for _, p in order))
@@ -635,6 +748,95 @@ class Journey(unittest.TestCase):
         self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'),
                          ["chat A: rider's device sends, customer's device receives",
                           "chat B: rider's device sends, customer's device receives"])
+
+    def test_partner_meeting_chat_uses_messaging_partner_devices_in_each_tenants_own_scope(self):
+        api = FakePlatform()
+        checks, _, _ = run_flow(api)
+        self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
+        for label in ('A', 'B'):
+            for name in ("partner meeting chat linked; the joined rider's device sees the MANAGED meeting conversation",
+                         "a user who has not joined cannot read the meeting chat -> 404/403",
+                         "a user who has not joined cannot send into the meeting chat -> 404/403",
+                         "the customer who joined becomes a member of the meeting chat",
+                         "rider's device sends, customer's device receives in the meeting chat"):
+                self.assertEqual(checks['meetings %s: %s' % (label, name)], 'PASS')
+        for name in ("B's device reads A's meeting chat -> 404/403", "B's device sends into A's meeting chat -> 404/403",
+                     "B's server reads A's meeting chat -> 404"):
+            self.assertEqual(checks['isolation meetings: ' + name], 'PASS')
+        self.assertFalse(any('partner meeting chat available' in k for k in checks))
+        # One meeting conversation per tenant, in its own environment, with exactly the two
+        # users who joined; the message reached it through the partner session device.
+        meeting = {c['env']: c for c in api.conversations.values() if c.get('meeting')}
+        self.assertEqual(set(meeting), {'paenv', 'pbenv'})
+        for env, c in meeting.items():
+            self.assertEqual(len(c['members']), 2)
+            self.assertTrue(all(api.users.get(u) is None for u in c['members']))  # users deleted at cleanup
+            self.assertEqual(api.conferences[c['meeting']]['env'], env)
+        sent = [m for cid, log in api.messages.items() if cid.startswith('mc') for m in log]
+        self.assertEqual(len(sent), 2)
+
+    def test_meeting_chat_that_never_admits_joined_users_fails_and_still_cleans_up(self):
+        api = FakePlatform(broken=('meeting-chat-sync',))
+        checks, _, _ = run_flow(api)
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        linked = "partner meeting chat linked; the joined rider's device sees the MANAGED meeting conversation"
+        # A fatal check is also recorded under its step's name.
+        self.assertTrue(failed and all(k.endswith(linked) for k in failed), failed)
+        self.assertEqual({k[:10] for k in failed}, {'meetings A', 'meetings B'})
+        self.assertFalse(any('meeting chat' in k for k, v in checks.items() if k.startswith('isolation')))
+        self.assertEqual({c['status'] for c in api.conferences.values()}, {'ENDED'})
+        self.assertEqual(api.users, {})
+
+    def test_a_user_who_has_not_joined_reading_meeting_chat_fails(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-leak',)))
+        self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'), sorted(
+            'meetings %s: a user who has not joined cannot %s' % (label, what)
+            for label in ('A', 'B') for what in ('read the meeting chat -> 404/403',
+                                                  'send into the meeting chat -> 404/403')))
+
+    def test_another_tenant_reading_meeting_chat_fails_isolation(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-isolation',)))
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        self.assertIn("isolation meetings: B's device reads A's meeting chat -> 404/403", failed)
+        self.assertIn("isolation meetings: B's device sends into A's meeting chat -> 404/403", failed)
+
+    def test_undelivered_meeting_chat_fails_only_meeting_receive(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('meeting-chat-receive',)))
+        self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'), [
+            "meetings A: rider's device sends, customer's device receives in the meeting chat",
+            "meetings B: rider's device sends, customer's device receives in the meeting chat"])
+
+    def test_the_first_party_chat_route_is_recorded_not_used_as_partner_chat(self):
+        for broken, expected in (((), {'status': 503, 'code': 'CHAT_UNAVAILABLE'}),
+                                 (('first-party-chat-open',), {'status': 200, 'code': None})):
+            checks, _, emitted = run_flow(FakePlatform(broken=broken))
+            self.assertEqual([k for k, v in checks.items() if v != 'PASS'], [])
+            notes = [v for kind, v in emitted if kind == 'platformAcceptanceNote']
+            for label in ('A', 'B'):
+                self.assertIn({'meetings %s first-party chat route' % label: expected}, notes)
+            self.assertFalse(any('first-party' in k for k in checks))
+
+    def test_meeting_chat_is_not_claimed_without_the_chat_stage(self):
+        stages = ('users', 'tokens', 'calls', 'push', 'meetings')
+        checks, _, emitted = run_flow(FakePlatform(stages=stages), stages)
+        self.assertEqual([k for k, v in checks.items() if v != 'PASS'], [])
+        self.assertFalse(any('meeting chat' in k for k in checks))
+        self.assertTrue(any(kind == 'platformAcceptanceNote' and 'meetings chat' in value for kind, value in emitted))
+
+    def test_a_conference_that_cannot_start_fails_meetings_and_is_cancelled_at_cleanup(self):
+        api = FakePlatform()
+        original = api.relay
+
+        def relay(method, path, body, bearer, headers):
+            if path.endswith('/start'):
+                return 409, {'error': {'code': 'CONFERENCE_STATE_CONFLICT'}}
+            return original(method, path, body, bearer, headers)
+        api.relay = relay
+        checks, _, _ = run_flow(api)
+        failed = [k for k, v in checks.items() if v != 'PASS']
+        self.assertTrue(failed and all(k.startswith(('meetings', 'isolation meetings')) for k in failed), failed)
+        self.assertFalse(any(p.endswith('/join') and '/conferences/conf' in p for _, p, _, _ in api.calls))
+        self.assertEqual({c['status'] for c in api.conferences.values()}, {'CANCELLED'})
 
     def test_a_failed_setup_stops_early_and_still_cleans_up(self):
         api = FakePlatform()
@@ -747,7 +949,8 @@ class Apps(unittest.TestCase):
     def test_an_account_without_a_recorded_user_id_fails_registration_only(self):
         api = FakePlatform(stages=BUILD[:2] + ('apps',), apps=('register',))
         out = io.StringIO()
-        with patch.object(pa.app_acceptance, 'accounts', lambda ns, count: [{'email': 'pa@x'}, {'email': 'pb@x'}]), \
+        pool = pa.AccountPool(create=lambda ns: [{'email': 'pa@x'}, {'email': 'pb@x'}])  # no refresh token: signs in
+        with patch.object(pa, 'POOL', pool), \
                 patch.object(pa.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
                 patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
                 patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out):
@@ -769,3 +972,125 @@ class Apps(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CampaignSignIn(unittest.TestCase):
+    """One campaign runs many acceptances in one process: accounts are created once and their
+    sessions reused, within the per-address code limit, the per-client-address OTP limit
+    (20 / 15 min) and the per-account organization limit (5 / 24 h)."""
+
+    STAGES = BUILD  # every Build stage; apps state is per project and covered by Apps
+
+    def campaign(self, api, runs, pool=None):
+        pool = pool or pa.AccountPool(create=api.create_accounts)
+        results = []
+        for n in range(runs):
+            checks, _, _ = run_flow(api, self.STAGES, pool=pool, run_id='77-%d' % (n + 1))
+            results.append({k: v for k, v in checks.items() if v != 'PASS'})
+        return pool, results
+
+    def test_a_campaign_creates_each_account_once_and_reuses_its_session(self):
+        api = FakePlatform(stages=self.STAGES)
+        pool, results = self.campaign(api, 9)  # steps 6-13 and the final acceptance
+        self.assertEqual(results, [{}] * 9)
+        # Four acceptances per account pair (organization budget), so 3 pairs for 9 runs.
+        self.assertEqual(len(pool.accounts), 6)
+        self.assertTrue(all(a['orgs'] <= pa.ORG_BUDGET for a in pool.accounts))
+        self.assertTrue(all(n <= pa.ORG_BUDGET for n in api.orgs_created.values()), api.orgs_created)
+        # The only codes are the six creations: no account signs in again.
+        self.assertEqual(api.otp_requests, 6)
+        self.assertEqual(set(api.sign_ins.values()), {1})
+        self.assertEqual(api.slept, [])
+        # The old flow (fresh accounts, then a console sign-in) needed 4 codes per run.
+        self.assertGreater(9 * 4, api.otp_limit)
+
+    def test_an_expired_session_is_renewed_with_the_refresh_token_not_a_new_code(self):
+        api = FakePlatform(stages=self.STAGES)
+        pool, _ = self.campaign(api, 1)
+        api.expired.update(a['email'].split('@')[0] for a in pool.accounts)
+        before = (api.otp_requests, dict(api.refreshes))
+        pool, results = self.campaign(api, 1, pool)
+        self.assertEqual(results, [{}])
+        self.assertEqual(api.otp_requests, before[0])
+        for owner in ('pa', 'pb'):
+            self.assertEqual(api.refreshes[owner], before[1][owner] + 1)
+            self.assertEqual(api.sign_ins[owner], 1)
+
+    def test_a_refused_refresh_signs_in_once_and_the_session_is_then_reused(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        pool, results = self.campaign(api, 3)
+        self.assertEqual(results, [{}] * 3)
+        self.assertEqual(api.sign_ins, {'pa': 2, 'pb': 2})  # creation + one sign-in each, then reuse
+        self.assertEqual(api.otp_requests, 4)
+
+    def test_an_otp_429_is_waited_out_once_for_the_reported_time(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        pool = pa.AccountPool(create=api.create_accounts)
+        api.otp_limit = 2  # the two creations fill the window; the first sign-in is refused
+        _, results = self.campaign(api, 1, pool)
+        self.assertEqual(results, [{}])
+        self.assertEqual(api.slept, [7 + 5])  # "try again in 7 seconds" plus the margin, once
+
+    def test_a_429_that_persists_after_the_wait_fails_the_run_without_looping(self):
+        api = FakePlatform(stages=self.STAGES, broken=('refresh-refused',))
+        api.otp_limit = 0
+        checks, _, _ = run_flow(api, self.STAGES)
+        self.assertTrue(checks and all(v == 'FAIL' for v in checks.values()), checks)
+        self.assertEqual(api.slept, [12])  # one wait, then the run stops
+        self.assertLessEqual(api.otp_requests, 4)
+        self.assertEqual(api.users, {})
+
+    def test_an_account_retires_at_the_organization_budget(self):
+        made = []
+
+        def create(namespace):
+            pair = [{'email': '%s-%d@x' % (namespace, i)} for i in range(2)]
+            made.extend(pair)
+            return pair
+        pool = pa.AccountPool(create=create)
+        first = pool.pair('t1')
+        for a in first:
+            a['orgs'] = pa.ORG_BUDGET - 1
+        self.assertEqual(pool.pair('t2'), first)
+        for a in first:
+            a['orgs'] = pa.ORG_BUDGET
+        second = pool.pair('t3')
+        self.assertTrue(set(map(id, second)).isdisjoint(map(id, first)))
+        self.assertEqual(len(made), 4)
+        self.assertLess(pa.ORG_BUDGET, 5)  # one below Organizations CREATION_LIMIT_PER_DAY
+
+
+class SignInRateLimit(unittest.TestCase):
+    def test_the_wait_follows_what_the_server_reports_and_never_exceeds_the_window(self):
+        wait = pa.app_acceptance.rate_limit_wait
+        self.assertEqual(wait({'retry-after': '30'}, {}), 35)
+        self.assertEqual(wait({}, {'error': {'retryAfterSeconds': 40}}), 45)
+        self.assertEqual(wait({}, {'error': {'message': 'Too many requests. Please try again in 612 seconds.'}}), 617)
+        self.assertEqual(wait({}, {}), 905)
+        self.assertEqual(wait({'retry-after': '99999'}, {}), 905)
+        self.assertEqual(wait({}, {'error': {'message': 'try again in 0 seconds'}}), 6)
+
+    def http_429(self):
+        body = io.BytesIO(json.dumps({'error': {'code': 'TOO_MANY_REQUESTS',
+                                                'message': 'Too many requests. Please try again in 9 seconds.'}}).encode())
+        return pa.urllib.error.HTTPError('https://api.cfmeet.com/api/v1/auth/otp/request', 429,
+                                         'Too Many Requests', {}, body)
+
+    def test_account_creation_waits_out_one_429_then_continues(self):
+        ok = contextlib.nullcontext(io.BytesIO(b'{"message": "sent"}'))
+        slept = []
+        with patch.object(pa.app_acceptance.urllib.request, 'urlopen', side_effect=[self.http_429(), ok]), \
+                patch.object(pa.app_acceptance.time, 'sleep', slept.append), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(pa.app_acceptance.api('otp/request', {'email': 'a@x'}), {'message': 'sent'})
+        self.assertEqual(slept, [14])
+        self.assertIn('signInRateLimitWait', out.getvalue())
+
+    def test_account_creation_fails_on_a_second_429(self):
+        slept = []
+        with patch.object(pa.app_acceptance.urllib.request, 'urlopen', side_effect=[self.http_429(), self.http_429()]), \
+                patch.object(pa.app_acceptance.time, 'sleep', slept.append), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(pa.urllib.error.HTTPError):
+                pa.app_acceptance.api('otp/request', {'email': 'a@x'})
+        self.assertEqual(slept, [14])

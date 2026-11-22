@@ -94,6 +94,7 @@ def off_status(answer):
     status, value = answer
     return status if status != 503 or error_code(value) == 'FEATURE_DISABLED' else 599
 CORS_WAIT = (12, 5)        # attempts, seconds: the gateway polls the origins feed every <= 30 s
+MEETING_CHAT_WAIT = (10, 2)  # join syncs at once; the background pass runs every 2 s
 REVOCATION_WAIT = (12, 5)  # verify results are cached for <= 30 s
 
 
@@ -109,7 +110,7 @@ class Client(da.Client):
         try:
             return self._call(method, path, body, expected, token, idempotent, headers)
         except da.Expired:
-            self.token = login(self.account)
+            self.token = login(self.account, renew=True)
             return self._call(method, path, body, expected, token, idempotent, headers)
 
     def _call(self, method, path, body, expected, token, idempotent, headers=None):
@@ -147,10 +148,69 @@ class Client(da.Client):
         return status, value
 
 
-def login(account):
-    """Passwordless sign-in of a controlled account (code replaced in Redis, VPS only)."""
+# Self-service organizations an account may create per 24 hours (Organizations
+# CREATION_LIMIT_PER_DAY = 5). Every acceptance creates one per tenant account; a pooled
+# account is retired after this many, one below the limit.
+ORG_BUDGET = 4
+
+
+class AccountPool:
+    """The controlled accounts of every acceptance in this process (one campaign run).
+
+    An account is created once (its first sign-in creates it) and its session is reused by
+    every later acceptance: an expired access token is renewed with the refresh token, and
+    only a refused refresh signs in again with a code. This keeps a campaign far below the
+    per-address code limit (5 per 15 minutes) and the per-client-address OTP limit (20 per 15
+    minutes) that consecutive acceptances used to exhaust. Sessions live in memory only."""
+
+    def __init__(self, create=None):
+        self.accounts = []
+        self.create = create or (lambda namespace: app_acceptance.accounts(namespace, count=2, keep_sessions=True))
+
+    def pair(self, tag):
+        free = [a for a in self.accounts if a.get('orgs', 0) < ORG_BUDGET]
+        if len(free) < 2:
+            self.accounts.extend(self.create('platform-' + tag))
+            free = [a for a in self.accounts if a.get('orgs', 0) < ORG_BUDGET]
+        return free[:2]
+
+
+POOL = AccountPool()
+
+
+def sign_in_post(path, body):
+    """One sign-in call; a 429 is waited out once for the time the server reports."""
     client = Client()
-    return app_acceptance.sign_in_via(lambda path, body: client.call('POST', path, body)[1], account)['access_token']
+    for attempt in (1, 2):
+        status, value = client.call('POST', path, body, expected=(200, 201, 429))
+        if status != 429:
+            return value
+        if attempt == 2:
+            break
+        seconds = app_acceptance.rate_limit_wait(client.last_headers, value)
+        app_acceptance.note_wait(path, seconds)
+        time.sleep(seconds)
+    raise da.Failed('%s is still rate limited after waiting out the window' % path)
+
+
+def login(account, renew=False):
+    """The account's access token: the current one, else renewed with its refresh token, else
+    (refresh refused or absent) a passwordless sign-in (code replaced in Redis, VPS only)."""
+    if account.get('accessToken') and not renew:
+        return account['accessToken']
+    if account.get('refreshToken'):
+        status, value = Client().call('POST', '/api/v1/auth/refresh', {'refresh_token': account['refreshToken']},
+                                      expected=(200, 400, 401, 403))
+        value = data(value)
+        if status == 200 and value.get('access_token'):
+            account.update(accessToken=value['access_token'],
+                           refreshToken=value.get('refresh_token') or account['refreshToken'])
+            return account['accessToken']
+        account.pop('refreshToken', None)
+    value = data(app_acceptance.sign_in_via(sign_in_post, account))
+    account.update(accessToken=value['access_token'], refreshToken=value.get('refresh_token'),
+                   signIns=account.get('signIns', 0) + 1)
+    return account['accessToken']
 
 
 def data(value):
@@ -270,6 +330,7 @@ class Journey:
 
     def tenant(self, label, account):
         console = Client(login(account), account)
+        account['orgs'] = account.get('orgs', 0) + 1  # counted before the attempt (see ORG_BUDGET)
         _, org = console.call('POST', '/v1/organizations', {'displayName': 'Platform acceptance %s %s' % (label, self.run_id)},
                               expected=(201,), idempotent=True)
         self.cleanup.append(('POST', '/v1/organizations/%s/close' % org['id'], console))
@@ -514,14 +575,17 @@ class Journey:
         offer = retry(invitation, 6, 2)
         self.check('calls %s: customer\'s device sees the invitation' % label, bool(offer),
                    invitationId=(offer or {}).get('invitationId'))
-        t.update(call=call['callId'], invitation=(offer or {}).get('invitationId'), customerSignaling=customer['signalingCredential'])
+        t.update(call=call['callId'], invitation=(offer or {}).get('invitationId'),
+                 invitationVersion=(offer or {}).get('callVersion'),
+                 customerSignaling=customer['signalingCredential'])
 
     def calls_isolation(self, a, b):
         status, _ = b['machine'].call('GET', '/v1/calls/%s' % a['call'], expected=(200, 403, 404))
         self.check('isolation calls: B\'s server reads A\'s call -> 404', status == 404)
         if a.get('invitation'):
             status, _ = Client(b['customerSignaling']).call(
-                'POST', '/v1/calling/invitations/%s/accept' % a['invitation'], {}, expected=(200, 403, 404, 409))
+                'POST', '/v1/calling/invitations/%s/accept' % a['invitation'],
+                {'expectedVersion': a['invitationVersion']}, expected=(200, 403, 404, 409))
             self.check('isolation calls: B\'s device accepts A\'s invitation -> 404/403', status in (403, 404))
 
     # --- push (B5) ---------------------------------------------------------------------------
@@ -564,10 +628,18 @@ class Journey:
         _, conference = relay.call('POST', '/api/v2/meeting-spaces/%s/conferences' % space.get('id'), {},
                                    expected=(201,), idempotent=True)
         conference = data(conference)
-        self.undo(relay, 'POST', '/api/v2/conferences/%s/end' % conference.get('id'))
+        # A conference that never goes live is cancelled at cleanup (/end answers CONFERENCE_NOT_LIVE
+        # for it); a live one is ended first, after which the cancel is a tolerated 409 no-op.
+        self.undo(relay, 'POST', '/api/v2/conferences/%s/cancel' % conference.get('id'))
         self.check('meetings %s: partner server creates a space and a conference (gateway)' % label,
                    bool(space.get('id')) and bool(conference.get('id')), fatal=True, conferenceId=conference.get('id'))
         conf = conference['id']
+        # Joins are admitted only while the conference is LIVE (409 CONFERENCE_NOT_LIVE otherwise), so the
+        # partner's server starts it (machine family, meetings.write) before any user token joins.
+        _, started = relay.call('POST', '/api/v2/conferences/%s/start' % conf, {}, expected=(200,))
+        self.undo(relay, 'POST', '/api/v2/conferences/%s/end' % conf)
+        self.check('meetings %s: partner server starts the conference (gateway, LIVE)' % label,
+                   (data(started).get('conference') or {}).get('status') == 'LIVE', fatal=True)
         grants = dict(self.grants(), mtg=[{'c': conf, 'r': 'PARTICIPANT'}])
         _, minted = self.mint(t, t['rider'], grants)
         token = minted.get('token')
@@ -587,11 +659,63 @@ class Journey:
         status, _ = join(t['customerToken'], expected=(200, 201, 403))
         self.check('meetings %s: token without a grant for the conference -> 403' % label, status == 403)
         if joined.get('participantToken'):
-            status, value = Client().call('GET', '/api/v2/conferences/%s/messages' % conf, expected=(200, 403, 409, 503),
+            # Not a partner chat surface (ADR 0062 section 8: partner users use their Messaging
+            # partner session device, below). Its answer for a partner meeting depends on the
+            # collaboration flag and the chat migration state (503 CHAT_UNAVAILABLE once
+            # Messaging is authoritative), so it is recorded for diagnosis, not asserted.
+            status, value = Client().call('GET', '/api/v2/conferences/%s/messages' % conf,
+                                          expected=(200, 403, 404, 409, 503),
                                           headers={'X-Participant-Token': joined['participantToken']})
-            self.check('meetings %s: partner meeting chat available' % label,
-                       status == 200 and code(value) != 'CHAT_UNAVAILABLE')
+            self.emit('platformAcceptanceNote', {'meetings %s first-party chat route' % label:
+                                                 {'status': status, 'code': code(value)}})
         t.update(conference=conf)
+        self.meeting_chat(t, conf, grants)
+
+    def meeting_conversation(self, client_token, conf):
+        """The MANAGED meeting conversation of `conf` as one partner session device lists it."""
+        _, page = device(client_token).call('GET', '/v1/conversations?contextClass=MEETING&limit=100')
+        for c in page.get('conversations', []):
+            context = c.get('context') or {}
+            if context.get('namespace') == 'meeting' and context.get('reference') == 'conference:%s' % conf:
+                return c
+        return None
+
+    def meeting_chat(self, t, conf, grants):
+        """Partner meeting chat: Meeting Service links a MANAGED conversation in the partner's own
+        scope and admits partner users who joined; they use it with their Messaging partner session
+        device. Someone who has not joined is not a member."""
+        label = t['label']
+        if not (t.get('riderClient') and t.get('customerClient')):
+            self.emit('platformAcceptanceNote', {'meetings chat': 'needs the chat stage\'s partner session devices'})
+            return
+        found = retry(lambda: self.meeting_conversation(t['riderClient'], conf), *MEETING_CHAT_WAIT)
+        self.check('meetings %s: partner meeting chat linked; the joined rider\'s device sees the MANAGED '
+                   'meeting conversation' % label,
+                   bool(found) and found.get('securityProfile') == 'MANAGED' and bool(found.get('conversationId')),
+                   fatal=True)
+        mconv = found['conversationId']
+        path = '/v1/conversations/%s/messages' % mconv
+        status, _ = device(t['customerClient']).call('GET', path, expected=(200, 403, 404))
+        self.check('meetings %s: a user who has not joined cannot read the meeting chat -> 404/403' % label,
+                   status in (403, 404), status=status)
+        status, _ = device(t['customerClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
+                                                     expected=(200, 201, 403, 404), idempotent=True)
+        self.check('meetings %s: a user who has not joined cannot send into the meeting chat -> 404/403' % label,
+                   status in (403, 404), status=status)
+        _, minted = self.mint(t, t['customer'], dict(grants))
+        Client().call('POST', '/api/v2/conferences/%s/join' % conf, {}, token=minted.get('token'), expected=(200, 201))
+        self.check('meetings %s: the customer who joined becomes a member of the meeting chat' % label,
+                   bool(retry(lambda: self.meeting_conversation(t['customerClient'], conf), *MEETING_CHAT_WAIT)))
+        message_id = str(uuid.uuid4())
+        device(t['riderClient']).call('POST', path, {'clientMessageId': message_id, 'text': 'meeting %s' % self.tag},
+                                      expected=(200, 201), idempotent=True)
+
+        def received():
+            _, page = device(t['customerClient']).call('GET', path)
+            return any(m.get('clientMessageId') == message_id for m in page.get('messages', []))
+        self.check('meetings %s: rider\'s device sends, customer\'s device receives in the meeting chat' % label,
+                   bool(retry(received, *MEETING_CHAT_WAIT)))
+        t.update(meetingConversation=mconv)
 
     def meetings_isolation(self, a, b):
         status, value = self.mint(b, b['rider'], dict(mtg=[{'c': a['conference'], 'r': 'HOST'}]),
@@ -604,6 +728,16 @@ class Journey:
             self.check('isolation meetings: B cannot mint a grant for A\'s conference', status in (403, 404, 422))
         status, _ = b['relay'].call('GET', '/api/v2/conferences/%s' % a['conference'], expected=(200, 403, 404))
         self.check('isolation meetings: B\'s server reads A\'s conference -> 404', status == 404)
+        if a.get('meetingConversation') and b.get('riderClient'):
+            path = '/v1/conversations/%s/messages' % a['meetingConversation']
+            status, _ = device(b['riderClient']).call('GET', path, expected=(200, 403, 404))
+            self.check('isolation meetings: B\'s device reads A\'s meeting chat -> 404/403', status in (403, 404))
+            status, _ = device(b['riderClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
+                                                      expected=(200, 201, 403, 404), idempotent=True)
+            self.check('isolation meetings: B\'s device sends into A\'s meeting chat -> 404/403', status in (403, 404))
+            status, _ = b['machine'].call('GET', '/v1/conversations/%s' % a['meetingConversation'],
+                                          expected=(200, 403, 404))
+            self.check('isolation meetings: B\'s server reads A\'s meeting chat -> 404', status == 404)
 
     # --- CF Meet Apps (ADR 0064 / 0065) --------------------------------------------------------
 
@@ -864,6 +998,15 @@ class Journey:
         for method, path, client in self.cleanup:
             try:
                 body = {'origins': []} if method == 'PUT' else None
+                if method == 'POST' and path.startswith('/v1/calls/') and path.endswith('/cancel'):
+                    # Calling control routes require the current version; an empty
+                    # request is rejected before authorization or state handling.
+                    code, view = client.call('GET', path[:-7], expected=(200, 404))
+                    if code == 404:
+                        continue
+                    if view.get('state') in ('ENDED', 'DECLINED', 'BUSY', 'NO_ANSWER', 'FAILED', 'CANCELLED'):
+                        continue
+                    body = {'expectedVersion': view['version']}
                 client.call(method, path, body, expected=(200, 204, 404, 409))
             except (da.Failed, OSError) as error:
                 problems.append(str(error))
@@ -891,7 +1034,7 @@ def run(run_id, stages, emit, apps=None):
     """{check: PASS|FAIL}. `stages` ⊆ STAGES, the phases that are on; `apps` ⊆ APP_FEATURES,
     the CF Meet Apps features on (with the `apps` stage; default: all)."""
     journey = Journey(run_id, stages, emit, apps)
-    accounts = app_acceptance.accounts('platform-' + journey.tag, count=2)
+    accounts = POOL.pair(journey.tag)
     try:
         a = journey.tenant('A', accounts[0])
         b = journey.tenant('B', accounts[1])

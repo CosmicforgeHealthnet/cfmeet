@@ -9,16 +9,53 @@ receive a refresh token of a session opened here instead (`refresh_token_for`).
 """
 import json
 import re
+import time
+import urllib.error
 import urllib.request
 import uuid
 import controlled_otp
 import production as p
 
 
+# The Meeting Service limits sign-in per client address in fixed windows (OTP requests: 20
+# per 15 minutes; handlers/auth.rs `limit_by_client`). A 429 is waited out ONCE for the time
+# the server reports (bounded by the window), then retried; a second 429 fails the run.
+SIGN_IN_WINDOW_SECS=15*60
+SIGN_IN_WAIT_MARGIN_SECS=5
+
+
+def rate_limit_wait(headers,value):
+    """Seconds to wait after a 429: Retry-After, else `retryAfterSeconds`, else the
+    "try again in N seconds" message, else the whole window; never more than the window."""
+    candidates=[(headers or {}).get('retry-after')]
+    err=value.get('error') if isinstance(value,dict) else None
+    if isinstance(err,dict):
+        candidates.append(err.get('retryAfterSeconds'))
+        m=re.search(r'in (\d+) seconds',str(err.get('message') or ''))
+        candidates.append(m and m.group(1))
+    for c in candidates:
+        if c is not None and str(c).strip().isdigit():
+            return min(max(int(str(c).strip()),1),SIGN_IN_WINDOW_SECS)+SIGN_IN_WAIT_MARGIN_SECS
+    return SIGN_IN_WINDOW_SECS+SIGN_IN_WAIT_MARGIN_SECS
+
+
+def note_wait(path,seconds):
+    print(json.dumps({'signInRateLimitWait':{'path':path,'seconds':seconds}}),flush=True)
+
+
 def api(path,body):
     request=urllib.request.Request('https://api.cfmeet.com/api/v1/auth/'+path,
         data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(request,timeout=30) as response: return json.load(response)
+    for attempt in (1,2):
+        try:
+            with urllib.request.urlopen(request,timeout=30) as response: return json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code!=429 or attempt==2: raise
+            try: value=json.loads(error.read() or b'{}')
+            except ValueError: value={}
+            seconds=rate_limit_wait({k.lower():v for k,v in (error.headers or {}).items()},value)
+            note_wait('/api/v1/auth/'+path,seconds)
+            time.sleep(seconds)
 
 
 def controlled_input(redis_url,key):

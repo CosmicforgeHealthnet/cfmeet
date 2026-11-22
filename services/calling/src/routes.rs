@@ -168,7 +168,9 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     match state.db.execute_unprepared("SELECT 1").await {
         Ok(_) => (
             StatusCode::OK,
-            Json(json!({ "status": "ok", "service": "calling" })),
+            Json(
+                json!({ "status": "ok", "service": "calling", "sendPolicyProtocol":1, "sendPolicySynchronous":std::env::var("CALLING_SYNCHRONOUS_BLOCK_PROJECTION_ENABLED").ok().as_deref()==Some("true"), "sendPolicyGeneration":std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION").ok().and_then(|v| uuid::Uuid::parse_str(&v).ok()) }),
+            ),
         ),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,

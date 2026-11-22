@@ -59,6 +59,50 @@ impl AppCallService {
             .is_none())
     }
 
+    pub(crate) async fn confirm_block_projection(
+        &self,
+        ctx: &crate::platform::context::PlatformAuthContext,
+        rule: &crate::calls::app::blocks::BlockRuleView,
+    ) -> CallResult<()> {
+        if std::env::var("CALLING_SYNCHRONOUS_BLOCK_PROJECTION_ENABLED")
+            .ok()
+            .as_deref()
+            != Some("true")
+            || rule.blocked_kind != "PRINCIPAL"
+        {
+            return Ok(());
+        }
+        let client = self
+            .communications
+            .as_ref()
+            .ok_or(CallError::CommunicationsPolicyUnavailable)?;
+        if !client.governs(scope(CallScope::of_platform(ctx))) {
+            return Ok(());
+        }
+        let generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+            .ok()
+            .and_then(|v| Uuid::parse_str(&v).ok())
+            .ok_or(CallError::CommunicationsPolicyUnavailable)?;
+        let delegated = crate::internal_auth::delegation::delegated_context(ctx, None)
+            .map_err(|_| CallError::CommunicationsPolicyUnavailable)?;
+        client
+            .project_block_rule(
+                delegated,
+                &cf_communications_policy::BlockRuleProjection {
+                    rule_id: rule.id,
+                    actor: rule.blocker_principal_id,
+                    target: rule
+                        .blocked_principal_id
+                        .ok_or(CallError::CommunicationsPolicyUnavailable)?,
+                    version: rule.version,
+                    active: rule.status == "ACTIVE",
+                    generation,
+                },
+            )
+            .await
+            .map_err(policy_error)
+    }
+
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
         self.communications = client;
         self

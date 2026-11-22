@@ -172,7 +172,14 @@ async fn evidence_is_composed_from_calling_records_with_authoritative_timing() {
         "key_version",
         "binding",
     ] {
-        assert!(!lower.contains(forbidden), "{forbidden} in {}", r.text);
+        // A random UUID can contain the hex substring e164. Check the forbidden
+        // field itself; the canonical schema below still rejects extra properties.
+        let leaked = if forbidden == "e164" {
+            lower.contains("\"e164\":")
+        } else {
+            lower.contains(forbidden)
+        };
+        assert!(!leaked, "{forbidden} in {}", r.text);
     }
     // The response is the canonical contract (no additional members anywhere).
     let contracts =

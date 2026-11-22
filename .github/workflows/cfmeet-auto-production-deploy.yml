@@ -1,0 +1,30 @@
+name: CF Meet automatic production deploy
+
+# Catch up the latest eligible main commit against the last completed VPS release,
+# then retain unchanged service images; later merges start another automatic run.
+# to the production VPS. Frontend/Vercel failures are intentionally not a
+# backend gate. The reusable coordinated release owns the production lock,
+# image validation, migrations, rollback and public smoke checks.
+concurrency:
+  # Keep running releases intact; replace an older pending run with the newest.
+  group: cfmeet-auto-latest-main
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Deploy backend to VPS when backend CI is green
+    uses: ./.github/workflows/cfmeet-coordinated-release.yml
+    with:
+      operation: release
+      release_sha: ${{ github.sha }}
+    secrets: inherit

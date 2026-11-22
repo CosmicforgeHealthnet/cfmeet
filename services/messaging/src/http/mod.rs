@@ -195,6 +195,9 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let mut body = json!({
         "status": if ok { "ready" } else { "not_ready" },
         "service": "messaging",
+        "sendPolicyProtocol": if messaging_migration::send_policy_projection_ready(&state.db).await.unwrap_or(false) { Some(1) } else { None },
+        "sendPolicyLocalEnabled":state.local_send_policy,
+        "sendPolicyGeneration":state.local_send_generation,
         "database": database,
         "migrations": migrations,
         "e2eeDevices": if state.devices.enabled { "enabled" } else { "disabled" },

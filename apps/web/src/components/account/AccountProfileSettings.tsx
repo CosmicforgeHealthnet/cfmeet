@@ -17,6 +17,8 @@ import { BadgeCheck, Camera, Check, Copy, Hash, ImagePlus, KeyRound, Mail, Trash
 import { useHubProfile } from "@/hooks/v2/useCommunications";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import EmailCodeConfirm from "./EmailCodeConfirm";
+import PhoneSettings from "./PhoneSettings";
+import { privateHistoryFromThisDevice } from "@/lib/messaging/device-export";
 import { getErrorMessage } from "@/utils/error";
 import {
   Dialog,
@@ -66,6 +68,7 @@ export default function AccountProfileSettings() {
       {/* Remount on a new server version so the form starts from the saved values. */}
       <ProfileEditor key={`${profile.data.userId}:${profile.data.profileUpdatedAt ?? ""}:${profile.data.username}`} profile={profile.data} />
       <YourData />
+      <PhoneSettings email={profile.data.email} />
       <DangerZone profile={profile.data} />
     </div>
   );
@@ -318,13 +321,13 @@ function AvatarUpload({ avatar, initials }: { avatar: string | null; initials: s
 function YourData() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const download = async () => {
+  const download = async (fromDevice = false) => {
     setBusy(true); setError(null);
     try {
-      const data = await accountService.dataExport();
+      const data = fromDevice ? await privateHistoryFromThisDevice() : await accountService.dataExport();
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
       const a = document.createElement("a");
-      a.href = url; a.download = `cfmeet-my-data-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      a.href = url; a.download = `cfmeet-${fromDevice ? "private-chats-this-device" : "my-data"}-${new Date().toISOString().slice(0, 10)}.json`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) { setError(getErrorMessage(e, "Your data couldn't be prepared. Try again.")); }
     finally { setBusy(false); }
@@ -333,10 +336,14 @@ function YourData() {
     <div className="flex flex-col justify-between gap-3 rounded-2xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:p-6">
       <div className="space-y-1">
         <p className="font-semibold">Your data</p>
-        <p className="text-sm text-muted-foreground">Download a copy of what CF Meet keeps about you.</p>
+        <p className="text-sm text-muted-foreground">Download a copy of what CF Meet keeps about you. Private-chat text can be downloaded separately from this device.</p>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </div>
-      <Button variant="outline" className="w-full rounded-xl sm:w-auto" loading={busy} onClick={() => void download()}>Download my data</Button>
+      <div className="flex shrink-0 flex-col gap-2">
+        <Button variant="outline" className="w-full rounded-xl sm:w-auto" disabled={busy} onClick={() => void download()}>Download my data</Button>
+        <Button variant="outline" className="w-full rounded-xl sm:w-auto" disabled={busy} onClick={() => void download(true)}>Download private chats from this device</Button>
+        <p className="max-w-xs text-xs text-muted-foreground">The private-chat file contains readable text stored in this browser. It excludes attachment files and history held only on other devices.</p>
+      </div>
     </div>
   );
 }

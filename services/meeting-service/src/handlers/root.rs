@@ -112,6 +112,10 @@ pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
         "service": "CosmicForge RTC",
         "version": env!("CARGO_PKG_VERSION")
     });
+    health["recordingStorageProtocol"] = json!(1);
+    health["recordingStorageConfigured"] =
+        json!(state.meeting.core.artifacts.storage.is_configured());
+    health["recordingEnabled"] = json!(state.meeting.core.flags.recording_v2_enabled);
     // Notification Service routing fence (Document 4 §9.6): `routingProtocol` is reported
     // only once the fence migration history is applied; activation tooling refuses to
     // leave LEGACY_ONLY unless every replica reports it. Absent on any read error.

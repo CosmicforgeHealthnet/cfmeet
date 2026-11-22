@@ -45,6 +45,8 @@ export const ROUTES = {
 
   // ---- Me (v2) --------------------------------------------------------------------------
   myProfile: r("GET", "v2", () => "/me/profile"),
+  registerNativePush: r("PUT", "v2", (device: string) => `/notifications/devices/${seg(device)}/push`),
+  removeNativePush: r("DELETE", "v2", (device: string) => `/notifications/devices/${seg(device)}/push`),
   updateMyProfile: r("PATCH", "v2", () => "/me/profile"),
   mySessions: r("GET", "v2", () => "/me/sessions"),
   revokeMySession: r("POST", "v2", (sessionId: string) => `/me/sessions/${seg(sessionId)}/revoke`),

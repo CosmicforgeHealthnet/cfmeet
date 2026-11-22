@@ -231,6 +231,7 @@ impl PersonalStack {
                 db::migrate(&self.bin.join("gap-closure-migration"), &owner)?;
                 db::migrate(&self.bin.join("meeting-audit-migration"), &owner)?;
                 db::migrate(&self.bin.join("account-privacy-migration"), &owner)?;
+                db::migrate(&self.bin.join("account-phone-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {
@@ -241,6 +242,12 @@ impl PersonalStack {
                     self.legacy_accounts.push(id);
                 }
                 conn.close().await?;
+            }
+            if name == "messaging" {
+                db::migrate(
+                    &self.bin.join("messaging-send-policy-projection-migration"),
+                    &owner,
+                )?;
             }
             if let Some(feature) = feature {
                 db::migrate(&self.bin.join(feature), &owner)?;

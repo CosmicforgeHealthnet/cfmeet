@@ -9,6 +9,14 @@ use axum::{
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/otp/request", post(auth::request_otp))
+        .route(
+            "/phone/request",
+            post(crate::handlers::v2::account_phone::request_signin),
+        )
+        .route(
+            "/phone/verify",
+            post(crate::handlers::v2::account_phone::verify_signin),
+        )
         .route("/otp/verify", post(auth::verify_otp))
         .route("/otp/verify-link", post(auth::verify_otp_link))
         .route("/mfa/verify", post(auth::verify_mfa))

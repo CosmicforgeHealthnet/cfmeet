@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import axios from "axios";
+import * as privateShares from "../src/lib/messaging/private-shares.ts";
 
 function load(path, dependencies = {}, globals = {}) {
   const exports = {};
@@ -182,6 +183,7 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
     "@/services/messaging-realtime": { MessagingRealtimeTransport: Transport },
     "@/services/messaging-session": { messagingClientAccessToken: () => ({}), messagingSessionDeviceToken: () => ({}) },
     "./api": {},
+    "./private-shares": privateShares,
     "./managed-store": load("../src/lib/messaging/managed-store.ts"),
     "./outbox": load("../src/lib/messaging/outbox.ts"),
     "./routes": routes,

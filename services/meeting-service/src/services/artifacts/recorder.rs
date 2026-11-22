@@ -177,6 +177,7 @@ pub struct LiveKitEgressRecorder {
     client: EgressClient,
     timeout: Duration,
     encoding: RecordingEncoding,
+    storage: Option<proto::encoded_file_output::Output>,
 }
 
 impl LiveKitEgressRecorder {
@@ -207,6 +208,33 @@ impl LiveKitEgressRecorder {
             client: EgressClient::with_api_key(api_url, &config.api_key, &config.api_secret),
             timeout,
             encoding,
+            storage: None,
+        }
+    }
+
+    /// A shared Egress worker otherwise uses Calling's default bucket. Every Meeting
+    /// request must explicitly choose the same scoped store the artifact service reads.
+    pub fn with_storage(mut self, config: &crate::config::operations::ObjectStorageConfig) -> Self {
+        if config.is_configured() {
+            self.storage = Some(proto::encoded_file_output::Output::S3(proto::S3Upload {
+                access_key: config.access_key.clone(),
+                secret: config.secret_key.clone(),
+                endpoint: config.endpoint.clone().unwrap_or_default(),
+                region: config.region.clone(),
+                bucket: config.bucket.clone(),
+                force_path_style: config.path_style,
+                ..Default::default()
+            }));
+        }
+        self
+    }
+
+    fn file_output(&self, request: &CompositeRecordingRequest) -> proto::EncodedFileOutput {
+        proto::EncodedFileOutput {
+            file_type: proto::EncodedFileType::Mp4 as i32,
+            filepath: request.output_key.clone(),
+            disable_manifest: true,
+            output: self.storage.clone(),
         }
     }
 
@@ -271,12 +299,7 @@ impl RecordingProvider for LiveKitEgressRecorder {
         &self,
         request: &CompositeRecordingRequest,
     ) -> RecordingResult<ProviderRecording> {
-        let output = proto::EncodedFileOutput {
-            file_type: proto::EncodedFileType::Mp4 as i32,
-            filepath: request.output_key.clone(),
-            disable_manifest: true,
-            output: None,
-        };
+        let output = self.file_output(request);
         let info = self
             .bounded(self.client.start_room_composite_egress(
                 &request.room_name,
@@ -338,6 +361,45 @@ impl RecordingProvider for LiveKitEgressRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meeting_capture_explicitly_targets_its_own_storage_instead_of_the_worker_default() {
+        let config = LiveKitConfig {
+            url: "wss://livekit.example.test".into(),
+            api_key: "test-key".into(),
+            api_secret: "test-secret".into(),
+        };
+        let storage = crate::config::operations::ObjectStorageConfig {
+            endpoint: Some("http://meeting-store:9000".into()),
+            region: "us-east-1".into(),
+            bucket: "cfmeet-meeting-artifacts".into(),
+            access_key: "meeting-user".into(),
+            secret_key: "meeting-secret".into(),
+            path_style: true,
+            ..Default::default()
+        };
+        let recorder = LiveKitEgressRecorder::with_api_url(
+            &config,
+            "http://127.0.0.1:1",
+            Duration::from_secs(1),
+            RecordingEncoding::H264Opus,
+        )
+        .with_storage(&storage);
+        let output = recorder.file_output(&CompositeRecordingRequest {
+            room_name: "meeting-only".into(),
+            layout: "grid".into(),
+            output_key: "artifacts/test/recording.mp4".into(),
+        });
+        assert_eq!(output.filepath, "artifacts/test/recording.mp4");
+        assert!(output.disable_manifest);
+        let Some(proto::encoded_file_output::Output::S3(s3)) = output.output else {
+            panic!("expected an explicit S3 destination");
+        };
+        assert_eq!(s3.bucket, storage.bucket);
+        assert_eq!(s3.endpoint, storage.endpoint.unwrap());
+        assert_eq!(s3.secret, storage.secret_key);
+        assert!(s3.force_path_style);
+    }
 
     #[test]
     fn egress_info_maps_to_provider_neutral_recording() {

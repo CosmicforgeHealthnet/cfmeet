@@ -1,0 +1,96 @@
+name: CF Meet one-time Platform and Apps activation campaign
+
+# Owner-approved November 21 campaign: read-only certify, Platform B3-B6,
+# Apps I1-I7, final two-tenant acceptance and production certification.
+# Run only after latest-main automatic VPS deployment is green. The script
+# is fail-closed, verifies current runtime state, skips already-live phases,
+# refuses drift/failed/rolled-back history and never replays a failed campaign.
+on:
+  workflow_run:
+    workflows: ["CF Meet automatic production deploy"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  activate:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 330
+    # Same lock as coordinated release and activation reconciliation.
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact release and owner-approved activation script
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Set up VPS production SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$VPS_HOST" && -n "$VPS_USER" && -n "$VPS_SSH_KEY" ]]
+          mkdir -p -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 7 -H "$VPS_HOST" > "$HOME/.ssh/known_hosts"
+      - name: Verify release head and audit campaign script
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          main=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+          [[ "$main" == "$RELEASE_SHA" ]] || {
+            echo "Newer main version superseded this release; its own campaign run will take priority"
+            echo "SKIP_CAMPAIGN=true" >> "$GITHUB_ENV"
+            exit 0
+          }
+          (cd infra/calling/production && python3 -m unittest -v test_platform_activation_campaign)
+      - name: Execute the owner's thirteen-step production campaign
+        if: env.SKIP_CAMPAIGN != 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          main=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+          [[ "$main" == "$RELEASE_SHA" ]] || { echo "::error::Main advanced; no mutations allowed"; exit 1; }
+          remote="/opt/cfmeet-core/platform-activation-campaigns/$RELEASE_SHA/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            "cd '$remote' && python3 -u platform_activation_campaign.py '$RELEASE_SHA' '$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT'" | tee platform-activation-campaign.jsonl
+          python3 - <<'PY'
+          import json, os
+          items = []
+          for line in open('platform-activation-campaign.jsonl'):
+              marker = line.find('{"campaignComplete":')
+              if marker >= 0:
+                  items.append(json.loads(line[marker:])['campaignComplete'])
+          if not items:
+              raise SystemExit('Campaign ended without the signed completion record')
+          latest = items[-1]
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('## CF Meet Platform + Apps production activation\n\n')
+              out.write('Campaign: ' + latest['campaign'] + '\n\n')
+              out.write('| Operation | Result |\n|---|---|\n')
+              for phase in latest.get('steps', []):
+                  out.write('| ' + phase['operation'] + ' | ' + phase['result'] + ' |\n')
+              out.write('\nFinal platform acceptance and production certification passed.\n')
+      - name: Save redacted campaign result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-platform-apps-activation-${{ github.run_id }}
+          path: platform-activation-campaign.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

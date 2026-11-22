@@ -846,7 +846,8 @@ async fn resolve_meeting(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EmailLookup {
-    email: String,
+    email: Option<String>,
+    phone_number: Option<String>,
 }
 /// Contacts audit KF1: the account whose VERIFIED email address is exactly `email`
 /// (case-insensitive), for the Hub's "find people by email". Only active, non-guest
@@ -862,7 +863,26 @@ async fn email_lookup(
     Json(body): Json<EmailLookup>,
 ) -> ApiResult<Json<Value>> {
     internal_scope(&state, &Hop::of(method, &uri), &headers).await?;
-    let email = body.email.trim().to_lowercase();
+    if let Some(phone) = body.phone_number {
+        if body.email.is_some() {
+            return Err(ApiError::BadRequest("Send one lookup identifier".into()));
+        }
+        if std::env::var("PHONE_ACCOUNTS_ENABLED").ok().as_deref() != Some("true") {
+            return Ok(Json(json!({"schemaVersion":1,"found":false})));
+        }
+        let id = crate::services::account_phone::find(&state.db, &phone, true).await?;
+        return Ok(Json(match id {
+            Some(id) => {
+                json!({"schemaVersion":1,"found":true,"accountReference":format!("cfmeet-user:{id}")})
+            }
+            None => json!({"schemaVersion":1,"found":false}),
+        }));
+    }
+    let email = body
+        .email
+        .ok_or_else(|| ApiError::BadRequest("A lookup identifier is required".into()))?
+        .trim()
+        .to_lowercase();
     if email.is_empty() || email.len() > 254 || !email.contains('@') {
         return Err(ApiError::domain(
             ErrorCode::ValidationError,
