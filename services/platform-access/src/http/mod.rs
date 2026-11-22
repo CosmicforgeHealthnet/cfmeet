@@ -14,6 +14,7 @@ pub mod internal;
 pub mod meeting_platform;
 pub mod middleware;
 pub mod oauth;
+pub mod operator_reads;
 pub mod organization_scopes;
 pub mod user_tokens;
 
@@ -61,6 +62,8 @@ pub fn app(state: AppState) -> Router {
                 .merge(meeting_platform::routes())
                 // ADR 0064 (CF Meet Apps): behind PLATFORM_ACCESS_OAUTH_ENABLED.
                 .merge(oauth::routes())
+                // ADR 0068: the admin bridge's operator reads.
+                .merge(operator_reads::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

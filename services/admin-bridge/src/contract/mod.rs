@@ -8,4 +8,5 @@ pub mod events;
 pub mod model;
 pub mod render;
 pub mod schemas;
+pub mod schemas_identity;
 pub mod schemas_partners;

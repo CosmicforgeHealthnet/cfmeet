@@ -1,0 +1,93 @@
+{
+  "description": "One grant (installation) of an OAuth app. Accounts and organizations are opaque CF Meet ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "grant_id",
+    "target",
+    "account_id",
+    "organization_id",
+    "installed_by_account_id",
+    "environment_id",
+    "principal_id",
+    "scopes",
+    "status",
+    "revoked_at",
+    "revoke_reason",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "grant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target": {
+      "enum": [
+        "USER",
+        "ORGANIZATION"
+      ]
+    },
+    "account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "organization_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "installed_by_account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scopes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoke_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 32
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

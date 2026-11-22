@@ -1,0 +1,78 @@
+{
+  "description": "One CF Meet Apps OAuth client. The number of redirect URIs, never the URIs or the test accounts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application_id",
+    "tenant_id",
+    "name",
+    "distribution",
+    "status",
+    "user_scopes",
+    "bot_scopes",
+    "redirect_uri_count",
+    "revision",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "distribution": {
+      "enum": [
+        "PRIVATE",
+        "PUBLIC"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "user_scopes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "bot_scopes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "redirect_uri_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

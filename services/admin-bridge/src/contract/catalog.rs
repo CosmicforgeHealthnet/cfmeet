@@ -1843,15 +1843,12 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R1, V::Personal),
     );
     c.push(
-        dp(
-            get(
-                "partners.keys.list",
-                "/partners/workspaces/{workspace_id}/keys",
-                Q::ScopedPage,
-            ),
-            S::New,
-            P::A2,
+        get(
+            "partners.keys.list",
+            "/partners/workspaces/{workspace_id}/keys",
+            Q::ScopedPage,
         )
+        .at(PlatformAccess, S::New, P::A2)
         .risk(R::R1, V::Internal),
     );
     c.push(
@@ -1866,15 +1863,12 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R3, V::Internal),
     );
     c.push(
-        dp(
-            get(
-                "partners.service-accounts.list",
-                "/partners/workspaces/{workspace_id}/service-accounts",
-                Q::ScopedPage,
-            ),
-            S::New,
-            P::A2,
+        get(
+            "partners.service-accounts.list",
+            "/partners/workspaces/{workspace_id}/service-accounts",
+            Q::ScopedPage,
         )
+        .at(PlatformAccess, S::New, P::A2)
         .risk(R::R1, V::Internal),
     );
     c.push(
@@ -1889,15 +1883,12 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R3, V::Internal),
     );
     c.push(
-        dp(
-            get(
-                "partners.websites.list",
-                "/partners/workspaces/{workspace_id}/websites",
-                Q::ScopedPage,
-            ),
-            S::New,
-            P::A2,
+        get(
+            "partners.websites.list",
+            "/partners/workspaces/{workspace_id}/websites",
+            Q::ScopedPage,
         )
+        .at(PlatformAccess, S::New, P::A2)
         .risk(R::R1, V::Internal),
     );
     c.push(
@@ -1935,15 +1926,12 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R3, V::Internal),
     );
     c.push(
-        dp(
-            get(
-                "partners.users.list",
-                "/partners/workspaces/{workspace_id}/users",
-                Q::ScopedSearch,
-            ),
-            S::New,
-            P::A2,
+        get(
+            "partners.users.list",
+            "/partners/workspaces/{workspace_id}/users",
+            Q::ScopedSearch,
         )
+        .at(PlatformAccess, S::New, P::A2)
         .risk(R::R1, V::Personal),
     );
     c.push(
@@ -2934,6 +2922,9 @@ const CONTACT_SEARCH: &[&str] = &[
     "partners.users.list",
     "identity.partner-users.list",
     "notifications.suppressions.list",
+    // A partner-chosen principal reference may be an email address (plaintext telephone
+    // numbers are refused by Platform Access at registration).
+    "identity.records.list",
 ];
 
 /// Owner reads the bridge serves, by phase: (capability, result schema, covering tests).
@@ -3070,5 +3061,81 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "apps.installs.list",
         "AppInstallPage",
         &["partners_lists_translate_strictly"],
+    ),
+    // A2.3 Platform Access.
+    (
+        "identity.tenants.list",
+        "IdentityTenantPage",
+        &["identity_tenants_search_translates"],
+    ),
+    (
+        "identity.applications.list",
+        "IdentityApplicationPage",
+        &["identity_tenant_lists_translate_strictly"],
+    ),
+    (
+        "identity.environments.list",
+        "IdentityEnvironmentPage",
+        &["identity_tenant_lists_translate_strictly"],
+    ),
+    (
+        "identity.service-accounts.list",
+        "IdentityServiceAccountPage",
+        &["identity_tenant_lists_translate_strictly"],
+    ),
+    (
+        "identity.scope-grants.list",
+        "IdentityScopeGrantPage",
+        &["identity_scope_grants_check_the_cursor"],
+    ),
+    (
+        "identity.keys.list",
+        "IdentityKeyPage",
+        &["identity_keys_never_carry_secret_material"],
+    ),
+    (
+        "identity.records.list",
+        "IdentityPrincipalPage",
+        &["identity_records_never_echo_the_reference"],
+    ),
+    (
+        "identity.oauth-apps.list",
+        "IdentityOAuthAppPage",
+        &["identity_oauth_apps_and_grants_translate"],
+    ),
+    (
+        "identity.app-grants.list",
+        "IdentityAppGrantPage",
+        &["identity_oauth_apps_and_grants_translate"],
+    ),
+    (
+        "identity.partner-users.list",
+        "IdentityPrincipalPage",
+        &["identity_partner_users_filter_the_kind"],
+    ),
+    (
+        "identity.audit.list",
+        "IdentityAuditEntryPage",
+        &["identity_audit_maps_the_window"],
+    ),
+    (
+        "partners.keys.list",
+        "IdentityKeyPage",
+        &["partners_identity_reads_use_the_workspace_tenant"],
+    ),
+    (
+        "partners.service-accounts.list",
+        "IdentityServiceAccountPage",
+        &["partners_identity_reads_use_the_workspace_tenant"],
+    ),
+    (
+        "partners.websites.list",
+        "PartnerWebsitesPage",
+        &["partners_identity_reads_use_the_workspace_tenant"],
+    ),
+    (
+        "partners.users.list",
+        "IdentityPrincipalPage",
+        &["partners_identity_reads_use_the_workspace_tenant"],
     ),
 ];
