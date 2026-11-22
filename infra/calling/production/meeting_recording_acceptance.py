@@ -7,6 +7,7 @@ import urllib.request
 import uuid
 
 import app_acceptance
+import audit_operations
 import production as p
 
 
@@ -47,6 +48,7 @@ def run(cr, run_id):
         report_path = folder / 'report.json'
         report = json.loads(report_path.read_text()) if report_path.is_file() else {}
         if result.returncode or report.get('result') != 'PASS':
+            cr.emit('meetingRecordingFailure', audit_operations.recording_receipt(report, run_id))
             raise RuntimeError('Meeting recording acceptance failed; protected receipt retained on VPS')
         return report
     except subprocess.TimeoutExpired:

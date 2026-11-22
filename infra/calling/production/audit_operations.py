@@ -2,6 +2,7 @@
 import time
 import datetime
 import json
+import re
 from pathlib import Path
 import shutil
 
@@ -236,3 +237,46 @@ def activate_service_logs(cr, sha, run_id, confirm):
     cr.commit(entry)
     cr.emit('serviceLogs', {'containers': names, 'minimumRetentionDays': 14,
                            'archiveStartedNow': True, 'historicalRecovery': 'AVAILABLE_DOCKER_LOGS_ONLY'})
+
+
+RECORDING_CHECKS = frozenset((
+    'real_rtc_synthetic_media', 'default_retention_30_days',
+    'host_start_stop_and_object_finalization', 'signed_download_checksum_and_playable_audio_video',
+    'unrelated_account_denied', 'anonymous_storage_denied', 'authenticated_recording_deletion',
+))
+RECORDING_PHASES = frozenset(('setup', 'synthetic_media', 'capture', 'authorized_download', 'deletion'))
+
+
+def recording_receipt(value, run_id):
+    """An allowlisted projection. Credentials, URLs, media and exception text never leave the VPS."""
+    if not isinstance(value, dict):
+        value = {}
+    checks = value.get('checks') if isinstance(value.get('checks'), dict) else {}
+    error = value.get('errorClass')
+    phase = value.get('phase')
+    return dict(runId=run_id, result=value.get('result') if value.get('result') in ('PASS', 'FAIL') else 'INVALID',
+                phase=phase if isinstance(phase, str) and phase in RECORDING_PHASES else 'unknown',
+                errorClass=error if error in ('AssertionError', 'RuntimeError', 'TimeoutError', 'HTTPError',
+                            'URLError', 'KeyError', 'ValueError', 'OSError', 'FileNotFoundError', 'TypeError') else None,
+                checks={key: checks[key] for key in RECORDING_CHECKS if checks.get(key) in ('PASS', 'FAIL')})
+
+
+def recording_receipts(cr):
+    """Read-only evidence of the last five controlled recording journeys, including rolled-back attempts."""
+    root = p.ROOT / 'meeting-recording' / 'acceptance'
+    receipts = []
+    if root.is_dir() and not root.is_symlink():
+        for folder in sorted(root.iterdir(), key=lambda path: path.name, reverse=True):
+            if not re.fullmatch(r'[0-9]{1,20}-[0-9]{1,5}', folder.name) or folder.is_symlink() or not folder.is_dir():
+                continue
+            file = folder / 'report.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+                continue
+            try:
+                value = json.loads(file.read_text())
+            except (OSError, ValueError):
+                value = {}
+            receipts.append(recording_receipt(value, folder.name))
+            if len(receipts) == 5:
+                break
+    cr.emit('meetingRecordingReceipts', receipts)

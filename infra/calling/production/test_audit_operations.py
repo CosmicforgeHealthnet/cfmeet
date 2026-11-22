@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,3 +86,29 @@ class Capacity(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RecordingReceipts(unittest.TestCase):
+    def test_only_known_receipt_fields_are_emitted_and_private_files_are_not_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'meeting-recording' / 'acceptance' / '12345-1'
+            folder.mkdir(parents=True)
+            (folder / 'credentials.private.json').write_text('private-token')
+            (folder / 'report.json').write_text(json.dumps(dict(result='FAIL', phase='capture',
+                errorClass='AssertionError', url='https://private-token', secret='private-token',
+                checks={'real_rtc_synthetic_media': 'PASS', 'private-token': 'PASS'})))
+            fake = SimpleNamespace(emit=Mock())
+            with patch.object(ao.p, 'ROOT', root):
+                ao.recording_receipts(fake)
+            key, receipts = fake.emit.call_args.args
+            self.assertEqual(key, 'meetingRecordingReceipts')
+            self.assertEqual(receipts[0]['phase'], 'capture')
+            self.assertEqual(receipts[0]['checks'], {'real_rtc_synthetic_media': 'PASS'})
+            self.assertNotIn('private-token', json.dumps(receipts))
+
+    def test_malformed_receipt_fields_cannot_escape_the_allowlist(self):
+        value = ao.recording_receipt(dict(result='private-token', phase={'private-token': True},
+                                       errorClass='private-token', checks=[]), '12345-1')
+        self.assertNotIn('private-token', json.dumps(value))
+        self.assertEqual(value['result'], 'INVALID')

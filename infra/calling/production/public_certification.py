@@ -101,7 +101,7 @@ def judge_public(route, status):
     outcome = classify(status)
     if outcome in ('ERROR', 'NO_RESPONSE'):
         return 'FAIL', outcome
-    if outcome == 'OPEN' and route.get('auth'):
+    if outcome == 'OPEN' and route.get('auth') and route['auth'] != ['ANONYMOUS']:
         return 'FAIL', 'authenticated route answered without credentials'
     if in_gateway_family(route['pattern']) and outcome == 'NOT_ROUTED':
         return 'FAIL', 'activated gateway family route is not routed'
