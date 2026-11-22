@@ -15,6 +15,17 @@ LOG_UNIT = Path('/etc/systemd/system/cfmeet-service-logs.service')
 MAX_CONNECTIONS = 256
 BACKEND_MEMORY_MIB = 16
 MEMORY_RESERVE_MIB = 2048
+LOG_DEPENDENCIES = frozenset((
+    'cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio',
+    'cfmeet-postgres', 'cfmeet-redis', 'cfmeet-calling-redis', 'cfmeet-calling-artifacts',
+    'cfmeet-calling-egress', 'cfmeet-storage-ingress', 'cfmeet-messaging-ingress',
+    'cfmeet-gateway-ingress', 'cfmeet-prometheus', 'cfmeet-alertmanager',
+    'cfmeet-blackbox', 'cfmeet-heartbeat-exporter', 'cfmeet-messaging-kt-witness',
+))
+
+
+def log_containers(catalogue, running):
+    return sorted(({spec['container'] for spec in catalogue.values()} | LOG_DEPENDENCIES) & set(running))
 
 
 def persistent_meeting_logs(cfg):
@@ -176,11 +187,9 @@ def activate_service_logs(cr, sha, run_id, confirm):
         raise RuntimeError('Unexpected production archive root')
     if shutil.disk_usage(root).free < 2 * 1024**3:
         raise RuntimeError('At least 2 GiB free disk is required before starting log archival')
-    allowed = {spec['container'] for spec in cr.SERVICES.values()}
-    allowed.update(('cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio', 'cfmeet-redis', 'cfmeet-messaging-kt-witness'))
     # The catalogue is authoritative; unrelated/staging/previous containers are excluded.
     running = set(p.run('docker', 'ps', '--format', '{{.Names}}').splitlines())
-    names = sorted(n for n in allowed & running if n.startswith('cfmeet-'))
+    names = log_containers(cr.SERVICES, running)
     if not names:
         raise RuntimeError('No running CF Meet services to archive')
     directory = root / 'logs' / 'services'
