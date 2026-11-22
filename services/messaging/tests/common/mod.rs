@@ -128,6 +128,9 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
+            messaging_migration::SendPolicyProjectionMigrator::up(&tmpl, None)
+                .await
+                .expect("send policy projection migrations apply");
             messaging_migration::Migrator::up(&tmpl, None)
                 .await
                 .expect("migrations apply");

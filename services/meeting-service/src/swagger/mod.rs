@@ -13,6 +13,13 @@ use utoipa::OpenApi;
         crate::handlers::root::get_app_info,
         crate::handlers::root::health_check,
         // Authentication endpoints
+        crate::handlers::v2::account_phone::request_signin,
+        crate::handlers::v2::account_phone::verify_signin,
+        crate::handlers::v2::account_phone::get_my_phone,
+        crate::handlers::v2::account_phone::request_binding,
+        crate::handlers::v2::account_phone::confirm_binding,
+        crate::handlers::v2::account_phone::update_privacy,
+        crate::handlers::v2::account_phone::remove_phone,
         crate::handlers::auth::request_otp,
         crate::handlers::auth::verify_otp,
         crate::handlers::auth::verify_otp_link,
@@ -363,6 +370,13 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::services::account_phone::PhoneView,
+            crate::services::account_phone::PhoneRequest,
+            crate::services::account_phone::PhoneConfirm,
+            crate::services::account_phone::PhoneChallenge,
+            crate::handlers::v2::account_phone::PhoneBindRequest,
+            crate::handlers::v2::account_phone::PhoneSettings,
+            crate::handlers::v2::account_phone::PhoneRemove,
             crate::handlers::v2::specialized::CancelOwnRegistrationRequest,
             // Auth schemas
             crate::dto::OtpRequest,

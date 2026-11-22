@@ -11,7 +11,7 @@ fn env_str(name: &str) -> Option<String> {
 }
 
 /// S3-compatible object storage (AWS S3, MinIO, Cloudflare R2, …).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ObjectStorageConfig {
     /// Server-side endpoint, e.g. `https://s3.eu-west-1.amazonaws.com` or
     /// `http://minio:9000`. `None` → artefact storage is not configured.
@@ -28,6 +28,40 @@ pub struct ObjectStorageConfig {
     pub prefix: String,
 }
 
+impl std::fmt::Debug for ObjectStorageConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectStorageConfig")
+            .field("endpoint", &self.endpoint)
+            .field("public_endpoint", &self.public_endpoint)
+            .field("region", &self.region)
+            .field("bucket", &self.bucket)
+            .field("access_key", &"[REDACTED]")
+            .field("secret_key", &"[REDACTED]")
+            .field("path_style", &self.path_style)
+            .field("prefix", &self.prefix)
+            .finish()
+    }
+}
+
+fn storage_secret(
+    name: &str,
+    get: impl Fn(&str) -> Option<String>,
+) -> Result<String, &'static str> {
+    if let Some(file) = get(&format!("{name}_FILE")) {
+        let metadata = std::fs::metadata(&file).map_err(|_| "unreadable storage secret file")?;
+        if !metadata.is_file() || metadata.len() > 65536 {
+            return Err("invalid storage secret file");
+        }
+        let secret = std::fs::read_to_string(file).map_err(|_| "unreadable storage secret file")?;
+        let secret = secret.trim();
+        if secret.is_empty() {
+            return Err("empty storage secret file");
+        }
+        return Ok(secret.to_owned());
+    }
+    Ok(get(name).unwrap_or_default())
+}
+
 impl ObjectStorageConfig {
     pub fn from_env() -> Self {
         Self {
@@ -35,8 +69,10 @@ impl ObjectStorageConfig {
             public_endpoint: env_str("ARTIFACT_STORAGE_PUBLIC_ENDPOINT"),
             region: env_str("ARTIFACT_STORAGE_REGION").unwrap_or_else(|| "us-east-1".into()),
             bucket: env_str("ARTIFACT_STORAGE_BUCKET").unwrap_or_else(|| "cfmeet-artifacts".into()),
-            access_key: env_str("ARTIFACT_STORAGE_ACCESS_KEY").unwrap_or_default(),
-            secret_key: env_str("ARTIFACT_STORAGE_SECRET_KEY").unwrap_or_default(),
+            access_key: storage_secret("ARTIFACT_STORAGE_ACCESS_KEY", env_str)
+                .expect("ARTIFACT_STORAGE_ACCESS_KEY configuration"),
+            secret_key: storage_secret("ARTIFACT_STORAGE_SECRET_KEY", env_str)
+                .expect("ARTIFACT_STORAGE_SECRET_KEY configuration"),
             path_style: env_bool("ARTIFACT_STORAGE_PATH_STYLE", true),
             prefix: env_str("ARTIFACT_STORAGE_PREFIX").unwrap_or_else(|| "artifacts".into()),
         }
@@ -283,5 +319,37 @@ mod tests {
     fn storage_is_unconfigured_by_default() {
         assert!(!ObjectStorageConfig::default().is_configured());
         assert!(ArtifactConfig::default().signed_url_ttl_secs <= 900);
+    }
+}
+
+#[cfg(test)]
+mod storage_secret_tests {
+    use super::*;
+    #[test]
+    fn secret_files_take_precedence_and_missing_files_never_fall_back_to_environment() {
+        let file =
+            std::env::temp_dir().join(format!("cfmeet-storage-secret-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&file, " file-secret\n").unwrap();
+        let lookup = |key: &str| {
+            if key.ends_with("_FILE") {
+                Some(file.to_string_lossy().into_owned())
+            } else {
+                Some("old-secret".into())
+            }
+        };
+        assert_eq!(
+            storage_secret("ARTIFACT_STORAGE_SECRET_KEY", lookup).unwrap(),
+            "file-secret"
+        );
+        std::fs::remove_file(&file).unwrap();
+        assert!(storage_secret("ARTIFACT_STORAGE_SECRET_KEY", lookup).is_err());
+        let config = ObjectStorageConfig {
+            access_key: "private-access-key".into(),
+            secret_key: "private-secret-key".into(),
+            ..Default::default()
+        };
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("private-access-key"));
+        assert!(!debug.contains("private-secret-key"));
     }
 }

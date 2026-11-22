@@ -283,6 +283,22 @@ pub trait EmailProvider: Send + Sync {
     async fn send(&self, message: &ProviderMessage<'_>) -> Result<Option<String>, ProviderError>;
 }
 
+/// RFC 2606 .invalid recipients are test fixtures, never public mail destinations.
+/// Refuse before the provider hop rather than create hours of delivery-delay retries.
+fn reject_reserved_recipient(recipient: &str) -> Result<(), ProviderError> {
+    let domain = recipient
+        .rsplit_once('@')
+        .map(|(_, d)| d.trim_end_matches('.').to_ascii_lowercase())
+        .unwrap_or_default();
+    if domain == "invalid" || domain.ends_with(".invalid") {
+        return Err(ProviderError::Permanent {
+            class: "RESERVED_INVALID_RECIPIENT",
+            status: None,
+        });
+    }
+    Ok(())
+}
+
 /// Resend HTTPS API (`POST /emails`), with the message id as `Idempotency-Key`.
 pub struct ResendProvider {
     client: reqwest::Client,
@@ -371,6 +387,7 @@ impl EmailProvider for ResendProvider {
     }
 
     async fn send(&self, m: &ProviderMessage<'_>) -> Result<Option<String>, ProviderError> {
+        reject_reserved_recipient(m.to)?;
         let response = self
             .client
             .post(format!("{}/emails", self.base_url))
@@ -1178,7 +1195,8 @@ fn rank(status: &str) -> i32 {
         "ACCEPTED" => 1,
         "DELAYED" => 2,
         "DELIVERED" => 3,
-        "BOUNCED" | "COMPLAINED" | "FAILED" => 4,
+        "BOUNCED" | "FAILED" => 4,
+        "COMPLAINED" => 5,
         _ => 0,
     }
 }
@@ -1287,12 +1305,21 @@ pub async fn apply_provider_event(
                     .map_err(internal)?;
                 }
                 "BOUNCED" => {
+                    let reason = if payload.pointer("/data/bounce/type").and_then(Value::as_str)
+                        == Some("Permanent")
+                    {
+                        "HARD_BOUNCE"
+                    } else {
+                        "SOFT_BOUNCE"
+                    };
                     db::exec(
                         db_conn,
-                        "INSERT INTO notif_email_suppressions (recipient_digest, reason, bounce_count) VALUES ($1, 'SOFT_BOUNCE', 1)
+                        "INSERT INTO notif_email_suppressions (recipient_digest, reason, bounce_count) VALUES ($1, $2, 1)
                          ON CONFLICT (recipient_digest) DO UPDATE SET bounce_count = notif_email_suppressions.bounce_count + 1,
+                             reason = CASE WHEN notif_email_suppressions.reason IN ('COMPLAINED','MANUAL','HARD_BOUNCE')
+                                           THEN notif_email_suppressions.reason ELSE EXCLUDED.reason END,
                              updated_at = now()",
-                        vec![digest.into()],
+                        vec![digest.into(), reason.into()],
                     )
                     .await
                     .map_err(internal)?;
@@ -1411,5 +1438,33 @@ mod tests {
         assert_eq!(b["from"], "CF Meet <no-reply@cfmeet.com>");
         assert_eq!(b["to"][0], "Ada <ada@example.com>");
         assert_eq!(b["tags"][0]["value"], "auth_verification");
+    }
+}
+
+#[cfg(test)]
+mod reserved_recipient_tests {
+    use super::*;
+    #[test]
+    fn reserved_invalid_addresses_never_reach_the_live_email_provider() {
+        for recipient in [
+            "fixture@example.invalid",
+            "fixture@INVALID",
+            "fixture@sub.example.INVALID.",
+        ] {
+            assert!(matches!(
+                reject_reserved_recipient(recipient),
+                Err(ProviderError::Permanent {
+                    class: "RESERVED_INVALID_RECIPIENT",
+                    ..
+                })
+            ));
+        }
+        for recipient in [
+            "delivered@resend.dev",
+            "user@example.invalid.com",
+            "user@gmail.com",
+        ] {
+            assert!(reject_reserved_recipient(recipient).is_ok());
+        }
     }
 }

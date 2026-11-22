@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 268 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -92,11 +92,11 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | `CALENDAR_FEED_DIRECT_INGRESS` | 4 | meetings | Private calendar subscription feed of a CF Meet account (audit MF2): managed by the signed-in account in the CF Meet apps and read by calendar clients with the feed token in a `.ics` path; the gateway route grammar has no file-extension segments and it is not a partner API, so it stays on the Meeting Service ingress. |
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
-| `FIRST_PARTY_APP_ACCOUNT` | 34 | meetings | The CF Meet app's own account profile. |
+| `FIRST_PARTY_APP_ACCOUNT` | 41 | meetings | The CF Meet app's own account profile. |
 | `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
 | `FIRST_PARTY_APP_CONSENT` | 6 | meetings | The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
-| `FIRST_PARTY_COMMUNICATIONS_HUB` | 76 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
+| `FIRST_PARTY_COMMUNICATIONS_HUB` | 77 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
 | `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
 | `FIRST_PARTY_ORGANIZATIONS` | 49 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
@@ -104,7 +104,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **260** | | |
+| **Total** | **268** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -138,12 +138,14 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/disable` | `disableContact` | `cfmeet.privacy-relay.http-api` |
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/verification` | `assertContactVerification` | `cfmeet.privacy-relay.http-api` |
 
-#### `FIRST_PARTY_APP_ACCOUNT` (34)
+#### `FIRST_PARTY_APP_ACCOUNT` (41)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
 | POST | `/api/v1/auth/oauth/google/exchange` | `oauth_google_exchange` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/auth/oauth/google/native` | `oauth_google_native` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/phone/request` | `request_phone_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/phone/verify` | `verify_phone_otp` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/avatars/{avatarId}` | `v2_get_avatar` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/account/delete` | `v2_delete_my_account` | `cfmeet.meeting-service.http-api` |
 | DELETE | `/api/v2/me/avatar` | `v2_remove_my_avatar` | `cfmeet.meeting-service.http-api` |
@@ -167,6 +169,11 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | POST | `/api/v2/me/mfa/disable` | `v2_disable_my_mfa` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/mfa/totp/confirm` | `v2_confirm_my_totp` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/mfa/totp/setup` | `v2_setup_my_totp` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/phone` | `v2_remove_phone` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/phone` | `v2_get_my_phone` | `cfmeet.meeting-service.http-api` |
+| PATCH | `/api/v2/me/phone` | `v2_update_phone_privacy` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/phone/confirm` | `v2_confirm_phone_binding` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/phone/verification` | `v2_request_phone_binding` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/profile` | `v2_get_my_profile` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/me/profile` | `v2_update_my_profile` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/security-events` | `v2_list_my_security_events` | `cfmeet.meeting-service.http-api` |
@@ -223,7 +230,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | GET | `/api/v2/notifications/unread-count` | `v2_notifications_unread_count` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/notifications/{notificationId}` | `v2_notifications_update` | `cfmeet.meeting-service.http-api` |
 
-#### `FIRST_PARTY_COMMUNICATIONS_HUB` (76)
+#### `FIRST_PARTY_COMMUNICATIONS_HUB` (77)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -276,6 +283,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 260 
 | PUT | `/api/v2/communications/devices/{deviceId}/sync-state` | `acknowledgeCommunicationsDeviceSync` | `cfmeet.communications.http-api` |
 | POST | `/api/v2/communications/discovery/email/resolve` | `resolveCommunicationsEmail` | `cfmeet.communications.http-api` |
 | POST | `/api/v2/communications/discovery/invites/resolve` | `resolveCommunicationsInvitation` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/phone/resolve` | `resolveProfileByPhone` | `cfmeet.communications.http-api` |
 | POST | `/api/v2/communications/discovery/public-id/resolve` | `resolveCommunicationsPublicId` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/events` | `listCommunicationsEvents` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/inbox` | `getCommunicationsInboxOverlay` | `cfmeet.communications.http-api` |

@@ -128,10 +128,10 @@ fn artifact_backends_from_env(
         }
     }
     if !livekit.api_key.is_empty() {
-        backends.recorder = Arc::new(LiveKitEgressRecorder::new(
-            livekit,
-            config.recording_encoding,
-        ));
+        backends.recorder = Arc::new(
+            LiveKitEgressRecorder::new(livekit, config.recording_encoding)
+                .with_storage(&config.storage),
+        );
     }
     backends
 }

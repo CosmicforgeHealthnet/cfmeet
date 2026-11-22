@@ -50,6 +50,27 @@ mod m20261118_000006_team_channel_sync;
 mod m20261118_000007_platform_user_participants;
 mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
+mod m20261121_000001_account_phones;
+
+/// Independent, additive phone-account history: old images ignore it after rollback.
+pub struct AccountPhoneMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountPhoneMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261121_000001_account_phones::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_account_phone_migrations").into_iden()
+    }
+}
+
+pub async fn account_phone_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, DbErr> {
+    Ok(pending_migrations::<AccountPhoneMigrator, _>(db)
+        .await?
+        .is_empty())
+}
 
 pub mod phase2_backfill;
 

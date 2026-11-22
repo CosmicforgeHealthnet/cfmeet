@@ -30,6 +30,7 @@ pub enum StepUpPurpose {
     DeleteAccount,
     /// Gap audit A1: turning the authenticator-app second factor off.
     DisableMfa,
+    ManagePhone,
 }
 
 impl StepUpPurpose {
@@ -39,6 +40,7 @@ impl StepUpPurpose {
             StepUpPurpose::ChangeEmail => "CHANGE_EMAIL",
             StepUpPurpose::DeleteAccount => "DELETE_ACCOUNT",
             StepUpPurpose::DisableMfa => "DISABLE_MFA",
+            StepUpPurpose::ManagePhone => "MANAGE_PHONE",
         }
     }
 
@@ -49,6 +51,9 @@ impl StepUpPurpose {
             StepUpPurpose::ChangeEmail => "change the email address of your CF Meet account",
             StepUpPurpose::DeleteAccount => "permanently delete your CF Meet account",
             StepUpPurpose::DisableMfa => "turn off two-step sign-in for your CF Meet account",
+            StepUpPurpose::ManagePhone => {
+                "change the verified phone number of your CF Meet account"
+            }
         }
     }
 }

@@ -180,7 +180,15 @@ function linkPreview(v) {
     fail("PAYLOAD_INVALID");
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") fail("PAYLOAD_INVALID");
-  return { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+  const result = { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+  if (v.imageDataUrl !== undefined && v.imageDataUrl !== null) {
+    const image = str(v.imageDataUrl, 24576, 32);
+    // Inline JPEG only: never fetch a recipient's IP-revealing remote image,
+    // execute an SVG, or accept an unbounded attachment in a preview.
+    if (!/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(image)) fail("PAYLOAD_INVALID");
+    result.imageDataUrl = image;
+  }
+  return result;
 }
 function coordinate(v, limit) {
   return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit ? Math.round(v * 1e6) / 1e6 : fail("PAYLOAD_INVALID");
@@ -238,6 +246,19 @@ function view(r) {
     out.payload = { t: "file", caption: r.payload.caption ?? null, attachmentId: r.attachmentId ?? null, name: r.fileName ?? null, mediaType: r.mediaType ?? null };
   }
   return out;
+}
+
+/** Deliberate plaintext export; never export the stored MLS state or file descriptor. */
+function exportRecord(conversationId, r) {
+  const visible = view(r);
+  return {
+    conversationId, sequence: r.sequence, messageId: r.messageId ?? null,
+    clientMessageId: r.clientMessageId ?? null, senderPrincipalId: r.senderPrincipalId ?? null,
+    senderDeviceId: r.senderDeviceId ?? null, createdAt: r.createdAt ?? null,
+    status: r.status, content: ["SENT", "DECRYPTED"].includes(r.status) ? visible.payload ?? null : null,
+    attachmentId: r.attachmentId ?? null, fileName: r.fileName ?? null,
+    mediaType: r.mediaType ?? null, size: r.size ?? null,
+  };
 }
 
 async function loadRecord(conversationId, sequence) {
@@ -579,6 +600,34 @@ const ops = {
 
   async cursor({ conversationId }) {
     return ctx?.meta?.cursors?.[uuid(conversationId)] ?? 0;
+  },
+
+  /** Stored history of a conversation, newest last (at most `limit`). */
+  async exportLocalHistory({ account, after = null }) {
+    // Read-only: no device registration, key creation, MLS state export or network call.
+    uuid(account);
+    const d = await db();
+    const key = await req(d.transaction("keys").objectStore("keys").get(account));
+    if (!key) return { records: [], next: null };
+    let lower = [account, "", 0];
+    if (after) {
+      uuid(after.conversationId);
+      if (!Number.isSafeInteger(after.sequence) || after.sequence < 0) fail("BAD_CURSOR");
+      lower = [account, after.conversationId, after.sequence];
+    }
+    const range = IDBKeyRange.bound(lower, [account, "\uffff", Number.MAX_SAFE_INTEGER], !!after);
+    const store = d.transaction("records").objectStore("records");
+    const keysPromise = req(store.getAllKeys(range, 101));
+    const valuesPromise = req(store.getAll(range, 101));
+    const [keys, values] = await Promise.all([keysPromise, valuesPromise]);
+    const records = [];
+    for (let i = 0; i < Math.min(values.length, 100); i++) {
+      const [, conversationId, sequence] = keys[i];
+      const record = JSON.parse(dec.decode(await unseal(key, recordAad(account, conversationId, sequence), values[i])));
+      records.push(exportRecord(conversationId, record));
+    }
+    const last = keys[Math.min(keys.length, 100) - 1];
+    return { records, next: keys.length > 100 ? { conversationId: last[1], sequence: last[2] } : null };
   },
 
   /** Stored history of a conversation, newest last (at most `limit`). */

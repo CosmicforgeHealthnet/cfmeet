@@ -116,6 +116,7 @@ export const communicationsService = {
   // ---- discovery and invites
   resolvePublicId: (cfMeetId: string) => call<PublicProfile>("POST", "/discovery/public-id/resolve", { cfMeetId }),
   /** 1.9.0: find someone by their verified email (only people who allow it). */
+  resolvePhone: (phoneNumber: string) => call<PublicProfile>("POST", "/discovery/phone/resolve", { phoneNumber }),
   resolveEmail: (email: string) => call<PublicProfile>("POST", "/discovery/email/resolve", { email }),
   resolveInvite: (token: string, idempotencyKey?: string) => call<PublicProfile>("POST", "/discovery/invites/resolve", { token, purpose: "CONNECT" }, idempotencyKey),
   createInvite: (expiresInSeconds: number, maxUses: number) => call<Invite>("POST", "/invites", { purpose: "CONNECT", expiresInSeconds, maxUses }),
@@ -144,7 +145,7 @@ export const communicationsService = {
 
   // ---- contact lists ("Family", "Work"…; private to you)
   contactLists: () => call<{ data: ContactList[]; limit: number }>("GET", "/contact-lists"),
-  contactList: (listId: string) => call<ContactList & { members: Contact[]; nextCursor: string | null }>("GET", `/contact-lists/${seg(listId)}${q({ limit: 200 })}`),
+  contactList: (listId: string, cursor?: string) => call<ContactList & { members: Contact[]; nextCursor: string | null }>("GET", `/contact-lists/${seg(listId)}${q({ limit: 200, cursor })}`),
   createContactList: (name: string) => call<ContactList>("POST", "/contact-lists", { name }),
   renameContactList: (listId: string, name: string, expectedVersion: number) => call<ContactList>("PATCH", `/contact-lists/${seg(listId)}`, { name, expectedVersion }),
   deleteContactList: (listId: string, expectedVersion: number) => call<unknown>("DELETE", `/contact-lists/${seg(listId)}`, { expectedVersion }),

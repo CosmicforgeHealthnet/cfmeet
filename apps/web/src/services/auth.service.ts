@@ -57,6 +57,15 @@ function mfaOrThrow(e: unknown): never {
 }
 
 export const authService = {
+  requestPhoneCode: async (phoneNumber: string) =>
+    (await publicApi.post<{ challengeId: string }>("/auth/phone/request", { phoneNumber })).data,
+
+  verifyPhoneCode: async (challengeId: string, code: string, rememberMe = true) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/phone/verify", { challengeId, code }).catch(mfaOrThrow);
+    await establish(response.data as unknown as LoginResponse, rememberMe);
+    return response.data;
+  },
+
   /**
    * Passwordless sign-in and sign-up (one flow). Step 1: email a 6-digit code and a one-click
    * link (valid 10 minutes). The answer is the same for every address; never infer from it.

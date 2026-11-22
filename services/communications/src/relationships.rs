@@ -504,11 +504,12 @@ impl State {
             .as_ref()
             .is_some_and(|a| a.chars().count() > 160 || a.chars().any(char::is_control))
             || update.notifications.as_ref().is_some_and(|n| {
-                !matches!(n.as_str(), "ALL" | "MUTED")
-                    // K11: a contact's level governs private (one-to-one, end-to-end
-                    // encrypted) chats, where mentions cannot be read; offered again once
-                    // they can (crate::policy::MENTIONS_IN_PRIVATE_CHATS).
-                    && !(n == "MENTIONS" && crate::policy::MENTIONS_IN_PRIVATE_CHATS)
+                // Private chats cannot expose mentions to the server.
+                match n.as_str() {
+                    "ALL" | "MUTED" => false,
+                    "MENTIONS" => !crate::policy::MENTIONS_IN_PRIVATE_CHATS,
+                    _ => true,
+                }
             })
         {
             return Err(Error::Validation);
@@ -687,7 +688,7 @@ impl State {
                 json!({}),
             )
             .await?;
-        self.store.event(&txn,p,"communications.block.changed",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"blocked":active})).await?;
+        self.store.event(&txn,p,"communications.block.changed",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"blocked":active,"projectionGeneration":if self.config.synchronous_policy_events {self.config.send_policy_generation} else {None}})).await?;
         // The blocker's devices refresh their block list; the other person's devices
         // refresh the relationship (no block state is disclosed to them). After an unblock
         // the blocker's contact list may change too (K5). Entries are written in profile

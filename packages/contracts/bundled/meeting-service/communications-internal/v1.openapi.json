@@ -252,7 +252,7 @@
       "post": {
         "operationId": "lookupCommunicationsAccountByEmail",
         "summary": "Find the account with a verified email address",
-        "description": "Find the account whose VERIFIED email address is exactly the given one (case-insensitive), for the Hub's find-people-by-email (contacts audit KF1). Only active, non-guest accounts with a verified address match; anything else is found:false, the same as no account. The Hub applies the person's emailDiscoverable setting, its rate limit and the block and visibility rules, and never relays the account reference to clients. The address is never logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "description": "Find the account whose VERIFIED email address is exactly the given one (case-insensitive), for the Hub's find-people-by-email (contacts audit KF1). Only active, non-guest accounts with a verified address match; anything else is found:false, the same as no account. The Hub applies the person's emailDiscoverable setting, its rate limit and the block and visibility rules, and never relays the account reference to clients. The address is never logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Also accepts phoneNumber instead of email: only verified, active, explicitly discoverable bindings match, and the Hub enforces blocks and visibility. Disabled phone accounts always return found:false.",
         "tags": [
           "Communications integration"
         ],
@@ -754,10 +754,24 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 254
+          },
+          "phoneNumber": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{7,14}$",
+            "maxLength": 16
           }
         },
-        "required": [
-          "email"
+        "oneOf": [
+          {
+            "required": [
+              "email"
+            ]
+          },
+          {
+            "required": [
+              "phoneNumber"
+            ]
+          }
         ]
       },
       "EmailLookupResult": {

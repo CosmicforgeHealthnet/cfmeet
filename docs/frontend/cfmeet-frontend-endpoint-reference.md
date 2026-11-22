@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.9.0 | 312 |
-| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.9.0 | 76 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.32.0 | 146 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.9.0 | 319 |
+| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.33.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
-| **Total** | | | **745** |
+| **Total** | | | **753** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -76,6 +76,11 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v2/me/mfa/disable` | account session | Turn two-step sign-in off | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_disable_my_mfa` |
 | POST | `/api/v2/me/mfa/totp/confirm` | account session | Enable the authenticator app | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_my_totp` |
 | POST | `/api/v2/me/mfa/totp/setup` | account session | Start enrolling an authenticator app | 200, 401, 403, 409 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_setup_my_totp` |
+| DELETE | `/api/v2/me/phone` | account session | Remove my phone | 204, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_phone` |
+| GET | `/api/v2/me/phone` | account session | Get my linked phone | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_phone` |
+| PATCH | `/api/v2/me/phone` | account session | Update phone discovery | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_update_phone_privacy` |
+| POST | `/api/v2/me/phone/confirm` | account session | Confirm phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_phone_binding` |
+| POST | `/api/v2/me/phone/verification` | account session | Request phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_phone_binding` |
 | POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |
 | POST | `/api/v2/me/step-up/verify` | account session | Verify a step-up code | 200, 400, 401, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_verify_step_up` |
 
@@ -128,6 +133,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v1/auth/otp/request` | none (public) | Request a sign-in code | 200, 400, 429 | — | `openapi/meeting-service.json#request_otp` |
 | POST | `/api/v1/auth/otp/verify` | none (public) | Verify a sign-in code | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp` |
 | POST | `/api/v1/auth/otp/verify-link` | none (public) | Verify a sign-in link | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp_link` |
+| POST | `/api/v1/auth/phone/request` | none (public) | Request phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#request_phone_otp` |
+| POST | `/api/v1/auth/phone/verify` | none (public) | Verify phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#verify_phone_otp` |
 | POST | `/api/v1/auth/refresh` | none (public) | Refresh access token | 200, 401 | — | `openapi/meeting-service.json#refresh_token` |
 
 ### Backstage (v2)
@@ -549,7 +556,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 
 ## Communications Hub (contacts, CF Meet ID / QR, timeline, activity)
 
-Contract `packages/contracts/communications/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
+Contract `packages/contracts/communications/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
 
 ### Calls
 
@@ -628,6 +635,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.9.
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/communications/discovery/email/resolve` | account session | Find a person by their verified email address | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsEmail` |
 | POST | `/api/v2/communications/discovery/invites/resolve` | account session | Resolve an invitation without granting a connection | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsInvitation` |
+| POST | `/api/v2/communications/discovery/phone/resolve` | account session | Find a profile by a verified, opted-in phone number | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveProfileByPhone` |
 | POST | `/api/v2/communications/discovery/public-id/resolve` | account session | Resolve an exact permitted public ID | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsPublicId` |
 | GET | `/api/v2/communications/profiles/{cfMeetId}` | account session | Read a permitted exact public profile | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsPublicProfile` |
 
@@ -694,7 +702,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.9.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.32.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.33.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 

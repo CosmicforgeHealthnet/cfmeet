@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -2237,6 +2237,17 @@
           },
           "duplicate": {
             "type": "boolean"
+          },
+          "sendPolicyProjection": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "sendPolicyGeneration": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         },
         "required": [

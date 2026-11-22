@@ -292,6 +292,67 @@ impl State {
                 _ => Error::NotFound,
             })
     }
+    /// Verified, explicitly discoverable phone binding from Account authority, then
+    /// the same Hub visibility and block checks as CF Meet ID discovery.
+    pub async fn resolve_phone(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        body: Value,
+    ) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Resolve {
+            phone_number: String,
+        }
+        let request: Resolve = serde_json::from_value(body).map_err(|_| Error::Validation)?;
+        let phone = request.phone_number.trim();
+        if !(9..=16).contains(&phone.len())
+            || !phone.starts_with('+')
+            || !phone.as_bytes()[1].is_ascii_digit()
+            || phone.as_bytes()[1] == b'0'
+            || !phone.as_bytes()[2..].iter().all(u8::is_ascii_digit)
+        {
+            return Err(Error::Validation);
+        }
+        self.limit_attempt(p, "discovery.phone", EMAIL_LOOKUPS_PER_HOUR)
+            .await?;
+        self.limit_attempt(p, "discovery.resolve", 120).await?;
+        let req = OutboundServiceRequest::new_operation(ServiceId::meeting_service())
+            .with_delegated_context(scope.clone());
+        let response = self
+            .config
+            .client
+            .post_json(
+                &req,
+                "/internal/v1/accounts/communications/email-lookup",
+                &json!({"phoneNumber":phone}),
+            )
+            .await
+            .map_err(|_| Error::Unavailable)?;
+        let answer: Value = match response.status() {
+            200 => response.json().map_err(|_| Error::Unavailable)?,
+            // An older Account image cannot resolve verified phone numbers.
+            404 => return Err(Error::NotFound),
+            _ => return Err(Error::Unavailable),
+        };
+        if answer["found"] != true {
+            return Err(Error::NotFound);
+        }
+        let reference = answer["accountReference"]
+            .as_str()
+            .filter(|r| r.len() <= 80)
+            .ok_or(Error::Unavailable)?;
+        let mut v = store::scoped(p.scope());
+        v.push(reference.into());
+        let target: Profile = store::one(&self.store.db,"SELECT to_jsonb(p) doc FROM communication_profiles p WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND account_reference=$4",v).await?.ok_or(Error::NotFound)?;
+        self.visible_profile(scope, p, &target, false)
+            .await
+            .map_err(|e| match e {
+                e @ (Error::Unavailable | Error::Database(_)) => e,
+                _ => Error::NotFound,
+            })
+    }
     pub async fn rotate_public_id(
         &self,
         p: &Profile,

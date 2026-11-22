@@ -60,6 +60,10 @@ import notification_operations as notif_ops
 import key_rotation
 import platform_operations as platform_ops
 import integrate_operations as integrate_ops
+import meeting_recording_operations
+import send_policy_operations
+import audit_operations
+import provider_operations
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -131,7 +135,7 @@ SERVICES = {
         env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-2')),
     'messaging': _service('cfmeet-messaging', 8097, '/ready', tls=8444, db='cfmeet_messaging',
         role='messaging', migrations=['messaging-migration', 'messaging-communications-migration',
-                                      'messaging-notification-fence-migration'],
+                                      'messaging-notification-fence-migration', 'messaging-send-policy-projection-migration'],
         history=['messaging_seaql_migrations'], existing=True),
     'calling': _service('cfmeet-calling', 8090, '/health', tls=8445, db='cfmeet_calling', role='calling',
         migrations=['calling-migration', 'calling-communications-migration'],
@@ -163,7 +167,7 @@ SERVICES = {
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
                     'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
-                    'account-privacy-migration'],
+                    'account-privacy-migration','account-phone-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -1268,6 +1272,8 @@ def deploy(name, image_id, sha, run_id, entry):
         added = release_env_defaults(name, p.env_of(c)) if name in RELEASE_ENV_DEFAULTS else {}
         added.update(RELEASE_PINNED_ENV.get(name, {}))
         cfg = release.clone(c, container, image_id, added, False)
+        if name == 'meeting-service':
+            audit_operations.persistent_meeting_logs(cfg)
         labels = cfg.setdefault('Labels', {}) or {}
         cfg['Labels'] = labels
         # The cloned container labels would shadow the new image's OCI labels (Docker keeps
@@ -1322,6 +1328,8 @@ def safe_defaults():
     webhook delivery may be `active` once activate-developer-webhooks is recorded. Production
     auto-approval and every provider-dependent switch stay fixed."""
     rules = copy.deepcopy(SAFE_DEFAULTS)
+    # SMS credentials and owner acceptance are required before a future activation.
+    rules.setdefault('meeting-service', {})['PHONE_ACCOUNTS_ENABLED'] = (None, '', 'false', 'true') if done(provider_operations.PHONE_OPERATION) else (None, '', 'false')
     rules['developer-platform-worker'] = dict(rules['developer-platform'])
     if done('activate-developer-webhooks'):
         for name in ('developer-platform', 'developer-platform-worker'):
@@ -1338,6 +1346,10 @@ def safe_defaults():
     if done('activate-notifications-push'):
         for name in ('notifications', 'notifications-2'):
             rules[name]['NOTIFICATIONS_PUSH_PROVIDER'] = (None, '', 'none', 'live')
+    rules.setdefault('meeting-service', {})[meeting_recording_operations.FLAG] = \
+        (None, '', 'false', 'true') if done(meeting_recording_operations.OPERATION) else (None, '', 'false')
+    for name, flag in dict(send_policy_operations.SOURCE_FLAGS, messaging=send_policy_operations.FAST).items():
+        rules.setdefault(name, {})[flag] = (None, '', 'false', 'true') if done(send_policy_operations.OPERATION) else (None, '', 'false')
     # Audit M4: the Meeting in-app-only path is on only after its gated activation.
     rules.setdefault('meeting-service', {})[notif_ops.MEETING_IN_APP_FLAG] = \
         (None, '', 'false', 'true') if done(notif_ops.MEETING_IN_APP_OPERATION) else (None, '', 'false')
@@ -1370,6 +1382,11 @@ def safe_default_violations(envs):
         for var, allowed in rules.items():
             if env.get(var) not in allowed:
                 violations.append('%s %s' % (name, var))
+    for replica in notif_ops.REPLICAS:
+        if not done(provider_operations.NATIVE_OPERATION):
+            for key, value in (envs.get(replica) or {}).items():
+                if value and key.startswith(('NOTIFICATIONS_PUSH_APNS_', 'NOTIFICATIONS_PUSH_FCM_')):
+                    violations.append(replica + ' ' + key)
     # The push adapters switch on from their credential variables whatever
     # MESSAGING_PUSH_PROVIDER says (services/messaging/src/config/mod.rs): none may be present.
     messaging = envs.get('messaging') or {}
@@ -1392,6 +1409,7 @@ def running_envs():
 
 
 def release_all(sha, run_id):
+    send_policy_operations.require_remote_path(sys.modules[__name__])
     p.identity()
     # Unchanged services retain their verified previous image and OCI revision.
     # The manifest intentionally contains only the newly required images.
@@ -1627,18 +1645,22 @@ def rollback(sha, run_id):
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
                   and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
                        or e.get('notificationFence') or e.get('preferenceAuthority')
-                       or e.get('edgeLimits') or e.get('platformEdge'))]
+                       or e.get('edgeLimits') or e.get('platformEdge') or e.get('databaseCapacity') or e.get('serviceLogs'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
     if entry.get('irreversible'):
         raise RuntimeError('%s cannot be rolled back (organizations-cutover-runbook §7: never back to a stale writer)'
                            % entry['operation'])
+    if any(component['service'] in ('communications', 'calling') for component in entry['components']):
+        send_policy_operations.require_remote_path(sys.modules[__name__])
     # Routing fence rollback floor (Document 4 §9.6): checked for every producer before anything moves.
     for component in entry['components']:
         previous = component.get('previous')
         if previous and component['status'] not in ('unchanged', 'rolled-back') and previous in container_names():
             notif_ops.rollback_floor(sys.modules[__name__], component['service'], p.inspect(previous)['Image'])
+    if entry.get('serviceLogs'):
+        audit_operations.restore_service_logs(entry['serviceLogs'])
     if entry.get('routing'):
         undo_gateway_routing(entry['routing'])
     if entry['operation'] == 'activate-gateway-families' and GATEWAY_SNIPPET.exists():
@@ -1661,6 +1683,8 @@ def rollback(sha, run_id):
         notif_ops.undo_fence(sys.modules[__name__], entry['notificationFence'], run_id)
     if entry.get('preferenceAuthority'):
         notif_ops.undo_preference_authority(sys.modules[__name__], entry['preferenceAuthority'], run_id)
+    if entry.get('databaseCapacity'):
+        audit_operations.restore_capacity(sys.modules[__name__], entry['databaseCapacity'])
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -1683,6 +1707,8 @@ def recreate(name, overrides, bundle, run_id, entry, extra=None):
     container = SERVICES[name]['container']
     c = p.inspect(container)
     cfg = release.clone(c, container, c['Image'], overrides, False)
+    if name == 'meeting-service':
+        audit_operations.persistent_meeting_logs(cfg)
     if bundle:
         set_mount(cfg, bundle[0], bundle[1])
     for source, target in (extra or {}).get('mounts', ()):
@@ -2964,6 +2990,14 @@ ACTIVATIONS = {
     'activate-account-privacy': ((), activate_account_privacy),
     # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
+    audit_operations.CAPACITY_OPERATION: ((), _platform(audit_operations.activate_database_capacity)),
+    send_policy_operations.OPERATION: ((), lambda sha, run_id, confirm:
+        send_policy_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
+    meeting_recording_operations.OPERATION: ((), lambda sha, run_id, confirm:
+        meeting_recording_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
+    audit_operations.LOGS_OPERATION: ((), _platform(audit_operations.activate_service_logs)),
+    provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
+    provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
         sys.modules[__name__], sha, run_id, confirm)),
@@ -3053,6 +3087,7 @@ def run(operation, sha, run_id, confirm=''):
             raise RuntimeError('diagnose takes no confirmation')
         mail_ops.diagnose(sys.modules[__name__], sha, run_id)
         notif_ops.notification_diagnostics(sys.modules[__name__])
+        provider_operations.resend_domain_facts(sys.modules[__name__])
     elif operation == 'developer-access-review':
         # One audited operator decision (or read) by a named reviewer; no image change.
         developer_access.review(sys.modules[__name__], sha, run_id, confirm)
@@ -3107,6 +3142,7 @@ def run(operation, sha, run_id, confirm=''):
         checks = notifications_acceptance.run(run_id, emit)
         emit('notificationsAcceptanceSummary', checks)
         notif_ops.notification_diagnostics(sys.modules[__name__])
+        provider_operations.resend_domain_facts(sys.modules[__name__])
         if any(v != 'PASS' for v in checks.values()):
             raise RuntimeError('Notification acceptance failed')
     elif operation == platform_ops.ACCEPTANCE:

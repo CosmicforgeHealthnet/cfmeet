@@ -50,7 +50,7 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
         for method in item.as_object().unwrap().keys() {
             let m: Method = method.to_uppercase().parse().unwrap();
             let uri = fill(path);
-            let body = (m != Method::GET && m != Method::DELETE).then_some("{}");
+            let body = item[method].get("requestBody").is_some().then_some("{}");
             let (s, h, v) = raw(&app, m.clone(), &uri, &[], body).await;
             probed += 1;
             assert_ne!(code(&v), "ENDPOINT_NOT_FOUND", "{method} {path} not routed");
@@ -84,7 +84,8 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // list / revoke, conference apps, app-context token, app-context keys).
     // + 5 server-audit operations (conference extend; calendar feed read / create / delete and
     // the token-authenticated feed).
-    assert_eq!(probed, 284, "all v2 operations probed");
+    // + 5 optional phone binding, privacy and removal operations.
+    assert_eq!(probed, 289, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

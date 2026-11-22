@@ -332,7 +332,7 @@ async fn ready(HttpState(s): HttpState<State>) -> impl IntoResponse {
             StatusCode::SERVICE_UNAVAILABLE
         },
         Json(
-            json!({"status":if ready {"ready"} else {"not_ready"},"service":"communications","databaseMigrationsCurrent":ready}),
+            json!({"status":if ready {"ready"} else {"not_ready"},"service":"communications","databaseMigrationsCurrent":ready,"sendPolicyProtocol":1,"sendPolicySynchronous":s.config.synchronous_policy_events,"sendPolicyGeneration":s.config.send_policy_generation}),
         ),
     )
 }
@@ -370,6 +370,7 @@ async fn dispatch(
     let result = dispatch_inner(&s, &scope, &profile, request).await;
     match result {
         Ok(value) => {
+            s.flush_scope_policy(&scope).await?;
             let mut r = Json(value).into_response();
             r.headers_mut()
                 .insert("cache-control", HeaderValue::from_static("no-store"));
@@ -516,6 +517,7 @@ async fn dispatch_inner(
             s.visible_profile(scope, p, &target, false).await
         }
         ("POST", ["discovery", "email", "resolve"]) => s.resolve_email(scope, p, body(&r)).await,
+        ("POST", ["discovery", "phone", "resolve"]) => s.resolve_phone(scope, p, body(&r)).await,
         ("GET", ["profiles", public_id]) => {
             s.limit_attempt(p, "discovery.resolve", 120).await?;
             let target = s

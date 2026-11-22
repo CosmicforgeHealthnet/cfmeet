@@ -14238,6 +14238,26 @@
             "type": "integer",
             "minimum": 1,
             "description": "Routing fence protocol of the Notification Service cutover (Document 4 §9) this replica implements; present only once its migration history is applied. Absent from pre-fence binaries."
+          },
+          "sendPolicyProtocol": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Block projection protocol, or null before its additive migration is ready."
+          },
+          "sendPolicyGeneration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Rollout generation shared with synchronous block producers, or null when unprepared."
+          },
+          "sendPolicyLocalEnabled": {
+            "type": "boolean",
+            "description": "Whether direct sends use the prepared local block projection."
           }
         }
       },

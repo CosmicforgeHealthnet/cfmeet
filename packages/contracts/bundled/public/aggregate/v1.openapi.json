@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.32.0"
+      "description": "cfmeet.calling.http-api 1.33.0"
     },
     {
       "name": "privacy-relay",
@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.9.0"
+      "description": "cfmeet.communications.http-api 1.10.0"
     }
   ],
   "paths": {
