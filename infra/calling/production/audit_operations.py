@@ -177,7 +177,7 @@ def activate_service_logs(cr, sha, run_id, confirm):
     if shutil.disk_usage(root).free < 2 * 1024**3:
         raise RuntimeError('At least 2 GiB free disk is required before starting log archival')
     allowed = {spec['container'] for spec in cr.SERVICES.values()}
-    allowed.update(('cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio', 'cfmeet-redis'))
+    allowed.update(('cfmeet-core-db', 'cfmeet-core-redis', 'cfmeet-core-minio', 'cfmeet-minio', 'cfmeet-redis', 'cfmeet-messaging-kt-witness'))
     # The catalogue is authoritative; unrelated/staging/previous containers are excluded.
     running = set(p.run('docker', 'ps', '--format', '{{.Names}}').splitlines())
     names = sorted(n for n in allowed & running if n.startswith('cfmeet-'))

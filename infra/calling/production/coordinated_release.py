@@ -62,6 +62,7 @@ import platform_operations as platform_ops
 import integrate_operations as integrate_ops
 import meeting_recording_operations
 import send_policy_operations
+import kt_witness_operations
 import audit_operations
 import provider_operations
 
@@ -2998,6 +2999,7 @@ ACTIVATIONS = {
     audit_operations.LOGS_OPERATION: ((), _platform(audit_operations.activate_service_logs)),
     provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
     provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),
+    kt_witness_operations.OPERATION: ((), _platform(kt_witness_operations.activate)),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
         sys.modules[__name__], sha, run_id, confirm)),

@@ -97,7 +97,25 @@ Device lifecycle below; it is deliberately not enabled by the current mobile scr
 
 [Expo SDK 57 notifications reference](https://docs.expo.dev/versions/v57.0.0/sdk/notifications/).
 
-## Independently witnessed security codes
+## Operator-managed and independent security-code witnesses
+
+Owner decision, 22 November 2026: use a CF Meet-operated cosigner; no outside operator
+is required for this deployment. `activate-managed-kt-witness`, with
+`confirm=operator-managed`, starts the existing Rust witness program in an isolated
+container, preserves the current log signing identity, pins its public key, and retains
+monotonic state across restarts. The separate signing key has protected recovery material.
+Messaging is configured with quorum 1 only inside a rollback-protected activation which
+must observe a verified cosignature of the current head. Its witness ID is
+`cfmeet.operated`. This is an **operator-managed cosignature**, not independent oversight:
+the same administrator can control both the log and its cosigner. Do not restore the
+witness state to an older snapshot or implicitly replace its key.
+
+Run this after releasing the image containing `messaging-kt-witness` and before enabling
+the local send-policy fast path. Re-run `activate-service-log-collector` afterwards so
+its container joins the archived inventory. The activation reports
+`independentOperator=false` explicitly. The older independent-operator setup below is
+optional and remains the stronger trust model.
+
 
 Do not operate a second key on the same administrative account and label it independent.
 An external party must control its own signing key, host and durable monotonic state.
@@ -120,8 +138,8 @@ the pinned log identity and the web `NEXT_PUBLIC_MESSAGING_KT_LOG_ID` / `_LOG_KE
 
 Acceptance requires actual distinct cosignatures, proof verification and client display
 of `WITNESSED`, plus refusal of inconsistent/stale checkpoints and truthful degradation
-when quorum is lost. No independent witness has been supplied; production remains
-`UNWITNESSED` until that evidence exists.
+when quorum is lost. An operator-managed cosigner does not satisfy that independent-operator acceptance.
+Report the actual cosignature state and who controls the configured witness separately.
 
 ## Other production dependencies
 
