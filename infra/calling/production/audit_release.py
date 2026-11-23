@@ -15,7 +15,7 @@ import kt_witness_operations as witness
 import meeting_recording_operations as recording
 import send_policy_operations as policy
 
-VERSIONS = {'witness': 1, 'logs': 1, 'recording': 1, 'send-policy': 1}
+VERSIONS = {'witness': 1, 'logs': 1, 'recording': 2, 'send-policy': 1}
 
 
 def release(cr, sha, run_id, after_release=None):
@@ -87,6 +87,8 @@ def ensure_recording(cr, sha, run_id):
             raise RuntimeError('Active recording has no configured storage; preserve it for diagnosis')
         if not audit.recording_acceptance_proven():
             raise RuntimeError('Active recording has no complete controlled acceptance receipt; preserve it for review')
+        if not recording.media_path.prepared():
+            raise RuntimeError('Active recording media ingress has drifted; preserve it for review')
         recording.ensure_callback(cr, run_id + '-audit-recording-check')
         return
     recording.activate(cr, sha, run_id + '-audit-recording-prepare', 'prepare')

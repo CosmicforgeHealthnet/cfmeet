@@ -447,6 +447,22 @@ Any failure restores the previous recording-disabled container; storage is prese
 This acceptance is prepared code, not evidence that production recording has passed it.
 It must actually pass on the approved release before recording is reported as live.
 
+Recording preparation also validates the shared SFU's UDP ingress. The 23 November
+controlled run reached secure signaling but timed out before media: LiveKit advertised
+UDP 50000–60000 while Docker published none of those ports; its 96 recorded ICE pairs
+received no response. `meeting_recording_media.py` changes only the known range-based
+configuration to a single UDP mux on 7882 and publishes that port. It preserves the
+immutable image, all keys, mounts, resource/security settings, networks and TCP/TURN
+bindings. Unknown layouts, Compose-managed containers, custom ports/static addresses,
+port collisions, active participants or active Egress prevent replacement.
+
+This is a narrow exception for the known shared media integration; the core container
+ownership guard still refuses `lk-server`. Its old container and protected configuration
+are retained. Startup, readiness or regression failure restores both; a later failed
+capture leaves healthy UDP ingress prepared while rolling back the recording flag.
+The recording campaign stage is version 2 for this reviewed fix; it permits one retry
+of the earlier failed recording stage without resetting witness state or its key.
+
 References: [LiveKit storage outputs](https://docs.livekit.io/transport/media/ingress-egress/egress/outputs/),
 [MinIO bucket quotas](https://docs.min.io/aistor/administration/bucket-quotas/).
 

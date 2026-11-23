@@ -10,6 +10,12 @@ import meeting_recording_operations as mr
 
 
 class RecordingStorage(unittest.TestCase):
+    def setUp(self):
+        for name, kwargs in [('prepared', {'return_value': True}), ('ensure', {})]:
+            patcher = patch.object(mr.media_path, name, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_signed_route_keeps_host_and_never_accepts_uploads_or_logs_signatures(self):
         route = mr.route_text()
         self.assertIn('/' + mr.BUCKET + '/', route)

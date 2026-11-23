@@ -13,6 +13,7 @@ import provider_operations as providers
 import storage_encryption as storage
 import storage_relay as relay
 import livekit_webhook as media_webhook
+import meeting_recording_media as media_path
 
 OPERATION = 'activate-meeting-recording'
 BUCKET = 'cfmeet-meeting-artifacts'
@@ -111,6 +112,8 @@ def activate(cr, sha, run_id, confirm):
         overrides = recording_provider_overrides(cr)
         if set(overrides) != {FLAG}:
             raise RuntimeError('Prepare the Meeting provider callback signer before enabling capture')
+        if not media_path.prepared():
+            raise RuntimeError('Prepare the shared media UDP ingress before enabling recording')
         ensure_callback(cr, run_id)
         import meeting_recording_acceptance
         def post():
@@ -149,6 +152,7 @@ def activate(cr, sha, run_id, confirm):
             status = facts(cr)
             if status.get('recordingStorageConfigured') is not True or status.get('recordingEnabled') is not False:
                 raise RuntimeError('Prepared Meeting storage is not ready with capture disabled')
+            media_path.ensure(cr, run_id)
             ensure_callback(cr, run_id)
         cr.apply_activation(OPERATION, sha, run_id,
                             [('meeting-service', overrides, {'mounts': list(zip(paths, (ACCESS, SECRET)))})], post=post)
