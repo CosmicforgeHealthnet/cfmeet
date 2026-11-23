@@ -12,7 +12,9 @@ use crate::{
         },
         AppSettings,
     },
+    bridge_events::BridgeEvents,
     config::{service_auth::ServiceAuthRuntime, BuildFeatures, FeatureFlags},
+    control::owner_delivery::OwnerDelivery,
     notification_publications::Publishing,
     platform_access::{PlatformAccessPort, UnconfiguredPlatformAccess},
     push_providers::PushProviders,
@@ -51,6 +53,13 @@ pub struct AppState {
     pub account_profiles: Arc<dyn AccountProfiles>,
     /// ADR 0064 / 0065: reviewers and the advertised OAuth endpoints.
     pub apps: Arc<AppSettings>,
+    /// ADR 0068 A4: owner-delivered secrets (the Notification Service and its sealing key);
+    /// `None`: a bridge command that must deliver a secret answers 503
+    /// `CAPABILITY_UNAVAILABLE`, nothing done.
+    pub owner_delivery: Option<OwnerDelivery>,
+    /// ADR 0068 A7: owner events to the admin bridge (on only with
+    /// `CF_ADMIN_BRIDGE_BASE_URL`; off: nothing is stored).
+    pub bridge_events: BridgeEvents,
 }
 
 impl AppState {
@@ -70,7 +79,21 @@ impl AppState {
             oauth: Arc::new(UnconfiguredPlatformOAuth),
             account_profiles: Arc::new(UnconfiguredAccountProfiles),
             apps: Arc::new(AppSettings::default()),
+            owner_delivery: None,
+            bridge_events: BridgeEvents::OFF,
         }
+    }
+
+    /// ADR 0068 A4: owner-delivered secrets (only with `CF_NOTIFICATIONS_BASE_URL` and
+    /// `CF_NOTIFICATIONS_SEALING_KEY`).
+    pub fn with_bridge_events(mut self, events: BridgeEvents) -> Self {
+        self.bridge_events = events;
+        self
+    }
+
+    pub fn with_owner_delivery(mut self, delivery: OwnerDelivery) -> Self {
+        self.owner_delivery = Some(delivery);
+        self
     }
 
     pub fn with_oauth(mut self, oauth: Arc<dyn PlatformOAuthPort>) -> Self {

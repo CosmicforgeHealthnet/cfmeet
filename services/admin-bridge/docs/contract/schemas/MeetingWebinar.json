@@ -1,0 +1,66 @@
+{
+  "description": "One webinar or town hall space with its registration counts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "space_id",
+    "meeting_code",
+    "meeting_type",
+    "status",
+    "owner_user_id",
+    "organization_id",
+    "registrations_active",
+    "registrations_cancelled",
+    "created_at",
+    "version"
+  ],
+  "properties": {
+    "space_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "meeting_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "owner_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "organization_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "registrations_active": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "registrations_cancelled": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

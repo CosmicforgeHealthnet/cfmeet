@@ -1614,7 +1614,7 @@
       }
     },
     "ErrorCode": {
-      "description": "Stable error codes of the Platform Access envelope. ADR 0062 (CF Meet Platform \"Build\") adds SCOPE_REQUIRED (403: the forwarded credential lacks a required scope), LIMIT_EXCEEDED (409: an environment partner-user cap is reached), RATE_LIMITED (429: more than 120 user-token mints per user per hour) and USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED (401: user-token verification). ADR 0064 (CF Meet Apps) adds INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED and APP_NOT_AVAILABLE (400: OAuth authorization-request validation) and the RFC 6749 token-endpoint codes invalid_grant (400), invalid_client (401), unsupported_grant_type (400) and invalid_request (400), lower snake case as the RFC writes them.",
+      "description": "Stable error codes of the Platform Access envelope. ADR 0062 (CF Meet Platform \"Build\") adds SCOPE_REQUIRED (403: the forwarded credential lacks a required scope), LIMIT_EXCEEDED (409: an environment partner-user cap is reached), RATE_LIMITED (429: more than 120 user-token mints per user per hour) and USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED (401: user-token verification). ADR 0064 (CF Meet Apps) adds INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED and APP_NOT_AVAILABLE (400: OAuth authorization-request validation) and the RFC 6749 token-endpoint codes invalid_grant (400), invalid_client (401), unsupported_grant_type (400) and invalid_request (400), lower snake case as the RFC writes them. ADR 0068 (admin bridge) adds VERSION_CONFLICT (409: a bridge command's expectedVersion is not the resource's current version; nothing was changed).",
       "type": "string",
       "enum": [
         "VALIDATION_ERROR",
@@ -1645,7 +1645,8 @@
         "invalid_grant",
         "invalid_client",
         "unsupported_grant_type",
-        "invalid_request"
+        "invalid_request",
+        "VERSION_CONFLICT"
       ]
     },
     "Error": {

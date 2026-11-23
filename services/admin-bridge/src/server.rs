@@ -263,6 +263,11 @@ pub async fn run_maintenance(bridge: Arc<Bridge>) {
             if settled > 0 {
                 tracing::info!(settled, "operations settled");
             }
+            // HQ's daily datasets: bounded owner pulls and feed counts.
+            let c = crate::datasets::collect(&bridge).await;
+            if c.merged > 0 {
+                tracing::info!(merged = c.merged, pulls = c.pulls, "dataset days collected");
+            }
         }
     }
 }

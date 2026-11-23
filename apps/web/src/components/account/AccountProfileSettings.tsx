@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { Popover } from "radix-ui";
 import { toast } from "@/components/ui/toast";
@@ -337,6 +338,10 @@ function YourData() {
       <div className="space-y-1">
         <p className="font-semibold">Your data</p>
         <p className="text-sm text-muted-foreground">Download a copy of what CF Meet keeps about you. Private-chat text can be downloaded separately from this device.</p>
+        <p className="text-sm text-muted-foreground">
+          Copies CF Meet support requested for you wait in{" "}
+          <Link className="underline" href="/dashboard/data-exports">Data exports</Link>.
+        </p>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </div>
       <div className="flex shrink-0 flex-col gap-2">

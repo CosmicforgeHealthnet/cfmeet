@@ -1,0 +1,105 @@
+{
+  "description": "The bridge's hash-chained audit of HQ requests (allowed and refused), oldest first. next_cursor is the last sequence. Never a body, a request digest or a path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "correlation_id",
+          "occurred_at",
+          "actor",
+          "capability_id",
+          "method",
+          "purpose",
+          "decision",
+          "http_status",
+          "approval_id",
+          "approver"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|unauthenticated)$",
+            "maxLength": 160
+          },
+          "capability_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$",
+            "maxLength": 96
+          },
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          },
+          "purpose": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z][a-z-]{1,63}$"
+          },
+          "decision": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "http_status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          },
+          "approval_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+          },
+          "approver": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          }
+        }
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]{1,19}$"
+    }
+  }
+}

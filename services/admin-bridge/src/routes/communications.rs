@@ -80,6 +80,7 @@ pub fn report(r: &Value) -> T<Value> {
         ("reporter_cfmeet_id", t::opt_string(r, "reporterCfMeetId")?),
         ("target_cfmeet_id", t::opt_string(r, "targetCfMeetId")?),
         ("target_report_count", t::int(r, "targetReportCount")?),
+        ("version", t::int(r, "version")?),
         ("review", review(r.get("review").unwrap_or(&Value::Null))?),
         ("created_at", t::time(r, "createdAt")?),
     ]))

@@ -377,7 +377,11 @@ class RealRepository(unittest.TestCase):
                                      "calling_communication_revocations",
                                      # Roadmap N7: Calling's outbox of publications to the
                                      # Notification Service (its own history).
-                                     "calling_notification_publications"}
+                                     "calling_notification_publications",
+                                     # ADR 0068 A4 / A7: the admin bridge's operator
+                                     # command ledger and owner events outbox.
+                                     "calling_admin_operations",
+                                     "calling_admin_bridge_events"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

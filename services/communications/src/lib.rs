@@ -1,3 +1,4 @@
+pub mod admin_events;
 pub mod api;
 pub mod auth;
 pub mod calls;
@@ -14,6 +15,7 @@ pub mod meetings;
 pub mod model;
 pub mod notification_publications;
 pub mod operator;
+pub mod operator_commands;
 pub mod owners;
 pub mod policy;
 pub mod preference_authority;

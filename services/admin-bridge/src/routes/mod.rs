@@ -4,12 +4,18 @@
 pub mod calling;
 pub mod commands;
 pub mod communications;
+pub mod cross_ops;
+pub mod hq;
 pub mod identity;
+pub mod local;
 pub mod meetings;
 pub mod messaging;
 pub mod notifications;
+pub mod operations;
 pub mod organizations;
+pub mod owner_commands;
 pub mod partners;
+pub mod pricing;
 pub mod translate;
 pub mod verification;
 
@@ -32,6 +38,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
     {
         return commands::generic(bridge, auth, *owner, path).await;
     }
+    if let Some(answer) = owner_commands::dispatch(bridge, auth).await {
+        return answer;
+    }
     if let Some(answer) = organizations::dispatch(bridge, auth).await {
         return answer;
     }
@@ -39,6 +48,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = partners::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = pricing::dispatch(bridge, auth).await {
         return answer;
     }
     if let Some(answer) = identity::dispatch(bridge, auth).await {
@@ -57,6 +69,18 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = verification::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = local::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = hq::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = cross_ops::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = operations::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {
@@ -139,6 +163,11 @@ impl HealthProbe {
             .expect("http client");
         HealthProbe { urls, client }
     }
+}
+
+/// The aggregate health answer (`bridge.health.read`, `operations.health.read`).
+pub async fn health_answer(bridge: &Bridge) -> Answer {
+    health(bridge).await
 }
 
 async fn health(bridge: &Bridge) -> Answer {

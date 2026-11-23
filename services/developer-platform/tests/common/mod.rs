@@ -201,8 +201,8 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the gateway.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
-    /// The admin bridge (ADR 0068); granted `developer-platform.administer` only in the
-    /// [`Control`] harness bundle.
+    /// The admin bridge (ADR 0068); granted `developer-platform.administer` and
+    /// `pricing.administer` only in the [`Control`] harness bundle.
     pub bridge: Arc<ServiceTokenSigner>,
 }
 
@@ -552,6 +552,9 @@ pub const FAKE_REGISTRY: &[(&str, &str)] = &[
     ("numbers.admin", "PRIVILEGED_OPERATOR"),
 ];
 
+/// A held owner-delivered key: (environment, credential, secret, expires at).
+pub type HeldDelivery = (Uuid, Uuid, String, chrono::DateTime<chrono::Utc>);
+
 #[derive(Default)]
 pub struct MemoryPlatformAccess {
     /// §54: credentials issued through delegation.
@@ -579,6 +582,9 @@ pub struct MemoryPlatformAccess {
     pub end_users_refusal: StdMutex<Option<(u16, String)>>,
     /// ADR 0062 §2.3: environment -> allowed origins.
     pub origins: StdMutex<std::collections::HashMap<Uuid, Vec<String>>>,
+    /// ADR 0068 A4: owner-delivered keys held for one reveal: ref -> (env, credential,
+    /// secret, expires at).
+    pub deliveries: StdMutex<std::collections::HashMap<Uuid, HeldDelivery>>,
 }
 
 /// A partner user of the fake (§2.1).
@@ -765,6 +771,26 @@ impl MemoryPlatformAccess {
     /// Whether delegated machine-identity changes are allowed in `env` (PA's rule).
     fn delegable(&self, env: &MemEnv, env_id: Uuid) -> bool {
         env.kind != "PRODUCTION" || self.activated.lock().unwrap().get(&env.app) == Some(&env_id)
+    }
+
+    /// ADR 0068 A4: a key HQ staff issued through the admin bridge, held for ONE reveal:
+    /// (delivery ref, credential id, secret).
+    pub fn hold_delivery(&self, env: Uuid, service_account: Uuid) -> (Uuid, Uuid, String) {
+        let (id, _) = self
+            .issue(env, service_account, vec![], Some("HQ issued".into()))
+            .expect("issuable");
+        let r = Uuid::new_v4();
+        let secret = format!("cfmk_test_{}", Uuid::new_v4().simple());
+        self.deliveries.lock().unwrap().insert(
+            r,
+            (
+                env,
+                id,
+                secret.clone(),
+                chrono::Utc::now() + chrono::Duration::days(7),
+            ),
+        );
+        (r, id, secret)
     }
 
     fn issue(
@@ -1616,6 +1642,51 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 t["user"] = user;
                 Ok(Delegated::Ok(t))
             }
+            DelegationCall::ListCredentialDeliveries { environment_id } => {
+                let list: Vec<Value> = self
+                    .deliveries
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, d)| d.0 == environment_id)
+                    .map(|(r, d)| {
+                        let c = self.credentials.lock().unwrap().get(&d.1).cloned().unwrap();
+                        let v = self.view_credential(d.1, &c);
+                        json!({ "deliveryRef": r, "delivery": "OWNER_DELIVERED",
+                                "deliveryChannel": "CONSOLE_REVEAL_ONCE", "state": "PENDING",
+                                "credentialId": d.1, "publicId": v["publicId"],
+                                "serviceAccountId": c.sa, "createdAt": v["createdAt"],
+                                "expiresAt": d.3 })
+                    })
+                    .collect();
+                Ok(Delegated::Ok(json!({ "deliveries": list })))
+            }
+            DelegationCall::RevealCredentialDelivery {
+                environment_id,
+                delivery_ref,
+                actor,
+            } => {
+                if !actor.header_value().starts_with("u-") {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                let held = self.deliveries.lock().unwrap().remove(&delivery_ref);
+                match held {
+                    Some((env, credential, secret, _)) if env == environment_id => {
+                        let c = self
+                            .credentials
+                            .lock()
+                            .unwrap()
+                            .get(&credential)
+                            .cloned()
+                            .unwrap();
+                        Ok(Delegated::Ok(json!({
+                            "credential": self.view_credential(credential, &c),
+                            "secret": secret,
+                        })))
+                    }
+                    _ => refused(404, "NOT_FOUND"),
+                }
+            }
         }
     }
 }
@@ -2058,11 +2129,17 @@ pub fn service_auth_with_producers() -> (
         issuer(
             svc::ADMIN_BRIDGE,
             &bridge,
-            &["developer-platform.administer"],
+            &["developer-platform.administer", "pricing.administer"],
         ),
     ];
     for (s, k) in &producer_keys {
-        issuers.push(issuer(s, k, &["developer-event.publish"]));
+        // ADR 0068 A6: the Meeting Service and Messaging also read plan limits.
+        let perms: &[&str] = if *s == svc::MEETING_SERVICE || *s == svc::MESSAGING {
+            &["developer-event.publish", "developer-entitlement.read"]
+        } else {
+            &["developer-event.publish"]
+        };
+        issuers.push(issuer(s, k, perms));
     }
     let bundle = json!({
         "bundle_version": 1, "receiver": svc::DEVELOPER_PLATFORM, "runtime_environment": ENV,

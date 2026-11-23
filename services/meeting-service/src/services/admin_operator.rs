@@ -9,6 +9,16 @@
 //! * `meeting.administer` (bridge only): meeting spaces, conferences (search, detail,
 //!   live), conference participants and the conference audit.
 //!
+//! The account reads answer `version`: the account's administration version
+//! (`users.account_version`), the `expectedVersion` of the account commands.
+//!
+//! A4–A7 add the bridge's R3 / R4 COMMANDS ([`commands`]: account status, role, email,
+//! sessions, devices, MFA, deletion and duplicate enforcement; ending meetings, archiving
+//! and transferring spaces, deleting recordings and transcripts, the chat migration and the
+//! CRITICAL lane; A7: the owner-delivered personal-data export), further reads ([`reads`]:
+//! with A7 the export's state) and the settlement record
+//! (`GET /internal/v1/operator/operations/{key}`, table `meeting_admin_operations`).
+//!
 //! Every request must also name the HQ staff member it reads for (`X-CF-Operator:
 //! hq:<staff>`), parsed once by [`cf_service_auth::OperatorAttribution`]; attribution from
 //! any other caller is refused on EVERY internal route of the service
@@ -31,7 +41,7 @@ use axum::{
     extract::{OriginalUri, Path, Query, State},
     http::{request::Parts, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use cf_service_auth::{
@@ -45,6 +55,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{config::env_bool, state::AppState};
+
+pub mod commands;
+pub mod datasets;
+pub mod reads;
 
 pub const USERS: &str = "/internal/v1/operator/accounts/users";
 pub const USER: &str = "/internal/v1/operator/accounts/users/:user_id";
@@ -142,6 +156,58 @@ pub fn router(app: AppState, verifier: Arc<ServiceTokenVerifier>) -> Router {
         .route(PARTICIPANTS, get(participants))
         .route(LIVE, get(live))
         .route(AUDIT, get(audit))
+        // A4–A7 reads and the settlement record.
+        .route(reads::DUPLICATES, get(reads::duplicates))
+        .route(reads::TEST_ACCOUNTS, get(reads::test_accounts))
+        .route(reads::CONFERENCE_HEALTH, get(reads::conference_health))
+        .route(reads::RECORDINGS, get(reads::recordings))
+        .route(reads::TRANSCRIPTS, get(reads::transcripts))
+        .route(reads::WEBINARS, get(reads::webinars))
+        .route(
+            reads::WEBINAR_REGISTRATIONS,
+            get(reads::webinar_registrations),
+        )
+        .route(reads::CHAT_MIGRATION, get(reads::chat_migration))
+        .route(reads::EMAIL_DELIVERY, get(reads::email_delivery))
+        .route(reads::CRITICAL_LANE, get(reads::critical_lane))
+        .route(reads::OPERATION, get(reads::operation))
+        // A4–A7 commands (R3 / R4: Idempotency-Key, expected version, second person).
+        .route(commands::USER_STATUS, post(commands::user_status))
+        .route(commands::USER_ROLE, post(commands::user_role))
+        .route(commands::USER_EMAIL, post(commands::user_email))
+        .route(
+            commands::USER_SESSIONS_REVOKE,
+            post(commands::user_sessions_revoke),
+        )
+        .route(
+            commands::USER_DEVICE_REVOKE,
+            post(commands::user_device_revoke),
+        )
+        .route(commands::USER_MFA_RESET, post(commands::user_mfa_reset))
+        .route(commands::USER_DELETE, post(commands::user_delete))
+        // A7: the owner-delivered personal-data export and its state.
+        .route(commands::USER_EXPORT, post(commands::user_export))
+        .route(reads::USER_EXPORTS, get(reads::user_exports))
+        .route(reads::EXPORT, get(reads::export))
+        // A7: the bridge's daily dataset pull.
+        .route(datasets::DATASET_DAY, get(datasets::dataset_day))
+        .route(
+            commands::DUPLICATES_ENFORCE,
+            post(commands::duplicates_enforce),
+        )
+        .route(commands::CONFERENCE_END, post(commands::conference_end))
+        .route(commands::SPACE_ARCHIVE, post(commands::space_archive))
+        .route(commands::SPACE_TRANSFER, post(commands::space_transfer))
+        .route(commands::RECORDING_DELETE, post(commands::recording_delete))
+        .route(
+            commands::TRANSCRIPT_DELETE,
+            post(commands::transcript_delete),
+        )
+        .route(
+            commands::CHAT_MIGRATION_TRANSITION,
+            post(commands::chat_migration_transition),
+        )
+        .route(commands::CRITICAL_REROUTE, post(commands::critical_reroute))
         .with_state(OperatorState { app, verifier })
 }
 
@@ -424,10 +490,11 @@ struct UserRow {
     status: String,
     created_at: DateTime<Utc>,
     last_login_at: Option<DateTime<Utc>>,
+    version: i64,
 }
 
 const USER_COLUMNS: &str = "id, username, display_name, role::text AS role, status::text AS status, \
-     (created_at AT TIME ZONE 'UTC') AS created_at, (last_login AT TIME ZONE 'UTC') AS last_login_at";
+     (created_at AT TIME ZONE 'UTC') AS created_at, (last_login AT TIME ZONE 'UTC') AS last_login_at,      account_version::bigint AS version";
 
 fn user_json(u: &UserRow) -> Value {
     json!({
@@ -438,6 +505,7 @@ fn user_json(u: &UserRow) -> Value {
         "status": u.status,
         "createdAt": rfc(u.created_at),
         "lastLoginAt": opt_rfc(u.last_login_at),
+        "version": u.version,
     })
 }
 
@@ -487,6 +555,7 @@ struct UserDetailRow {
     status: String,
     created_at: DateTime<Utc>,
     last_login_at: Option<DateTime<Utc>>,
+    version: i64,
     email: String,
     auth_type: String,
     email_verified_at: Option<DateTime<Utc>>,
@@ -522,6 +591,7 @@ async fn user(State(s): State<OperatorState>, Path(id): Path<String>, req: Parts
         "authType": u.auth_type,
         "locale": u.locale,
         "timezone": u.timezone,
+        "version": u.version,
     }))
 }
 

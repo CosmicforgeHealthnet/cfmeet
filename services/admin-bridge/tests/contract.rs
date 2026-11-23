@@ -127,86 +127,186 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "bridge.health.read",
             "bridge.datasets.read",
             "bridge.operations.read",
+            "hq.events.feed",
+            "hq.events.ack",
             "hq.projections.status",
             "accounts.users.search",
             "accounts.users.read",
+            "accounts.user.status.change",
+            "accounts.user.role.change",
+            "accounts.user.email.change",
             "accounts.sessions.list",
+            "accounts.sessions.revoke-all",
             "accounts.devices.list",
+            "accounts.device.revoke",
             "accounts.mfa.read",
+            "accounts.mfa.reset",
             "accounts.security-history.list",
+            "accounts.duplicates.list",
+            "accounts.duplicates.enforce-all",
+            "accounts.user.export",
+            "accounts.user.delete",
+            "accounts.test-accounts.list",
             "meetings.spaces.search",
             "meetings.meetings.search",
             "meetings.meetings.read",
             "meetings.live.list",
+            "meetings.live-health.read",
             "meetings.participants.list",
+            "meetings.meeting.end",
+            "meetings.space.archive",
+            "meetings.space.transfer",
+            "meetings.recording.delete",
+            "meetings.meeting-recordings.list",
+            "meetings.transcript.delete",
+            "meetings.meeting-transcripts.list",
+            "meetings.webinars.list",
+            "meetings.webinar-registrations.list",
             "meetings.audit.list",
+            "meetings.chat-migration.read",
+            "meetings.chat-migration.change",
+            "meetings.email-deliveries.read",
+            "meetings.critical-lane.read",
+            "meetings.critical-lane.change",
             "messaging.reports.list",
             "messaging.reports.read",
+            "messaging.conversations.read",
+            "messaging.members.read",
+            "messaging.message.remove",
+            "messaging.member.mute",
+            "messaging.member.remove",
+            "messaging.conversation.restrict",
+            "messaging.report.dismiss",
+            "messaging.environment-policy.read",
+            "messaging.policy.change",
             "messaging.holds.list",
+            "messaging.hold.place",
+            "messaging.hold.release",
             "messaging.exports.list",
+            "messaging.export.request",
             "messaging.deletion-requests.list",
+            "messaging.deletion-request.create",
             "messaging.audit.list",
             "messaging.switches.list",
+            "messaging.switch.change",
             "messaging.incidents.list",
+            "messaging.incident.record",
             "messaging.failed-messages.list",
+            "messaging.failed-message.retry",
             "messaging.key-transparency.read",
+            "messaging.key-transparency.checkpoint",
             "calling.calls.list",
             "calling.calls.read",
             "calling.live.list",
             "calling.abuse-reports.list",
+            "calling.abuse-report.resolve",
             "calling.blocks.list",
+            "calling.block.release",
             "calling.limits.read",
+            "calling.limits.change",
             "calling.routing.read",
+            "calling.routing.change",
             "calling.enterprise-features.read",
+            "calling.enterprise-features.change",
             "calling.spend-limits.read",
+            "calling.spend-limits.change",
             "calling.recordings.list",
             "calling.voicemail.list",
+            "calling.recording.delete",
             "calling.retention-holds.list",
+            "calling.retention-hold.place",
+            "calling.retention-hold.release",
             "calling.incidents.list",
+            "calling.incident.record",
             "calling.webhook-keys.list",
+            "calling.webhook-keys.reseal",
             "calling.audit.list",
             "communications.profiles.read",
+            "communications.profile.suspend",
+            "communications.profile.restore",
             "communications.reports.list",
+            "communications.report.review",
             "communications.holds.list",
             "communications.audit.list",
             "communications.metrics.read",
+            "communications.backfill.run",
+            "communications.events.replay",
             "organizations.organizations.search",
             "organizations.organizations.read",
+            "organizations.organization.create",
+            "organizations.organization.suspend",
+            "organizations.organization.archive",
+            "organizations.organization.reactivate",
+            "organizations.ownership.recover",
             "organizations.bindings.list",
+            "organizations.binding.change",
+            "organizations.organization.export",
             "organizations.audit.list",
             "organizations.global-audit.list",
+            "organizations.provisioning.retry",
+            "organizations.events.replay",
             "organizations.members.list",
             "organizations.teams.list",
             "organizations.policies.read",
+            "organizations.member.change",
+            "organizations.team.change",
+            "organizations.policies.change",
             "partners.workspaces.search",
             "partners.workspaces.read",
             "partners.workspace-activity.list",
+            "partners.workspace.state.change",
+            "partners.workspace.register-first-party",
             "partners.projects.list",
             "partners.environments.list",
             "partners.members.list",
             "partners.invitations.list",
             "partners.keys.list",
+            "partners.key.revoke",
             "partners.service-accounts.list",
+            "partners.service-account.suspend",
             "partners.websites.list",
+            "partners.website.remove",
             "partners.push-keys.list",
+            "partners.push-key.disable",
             "partners.users.list",
+            "partners.user.sign-out",
             "partners.webhooks.list",
             "partners.webhook-deliveries.list",
+            "partners.webhook-delivery.retry",
+            "partners.usage.read",
+            "partners.usage.reprocess",
+            "partners.support-tier.change",
+            "partners.incidents.list",
+            "partners.incident.record",
             "identity.tenants.list",
             "identity.applications.list",
             "identity.environments.list",
             "identity.service-accounts.list",
+            "identity.status.change",
             "identity.scope-grants.list",
+            "identity.scope-grant.change",
+            "identity.privileged-scope-grant.change",
             "identity.keys.list",
+            "identity.key.issue",
+            "identity.key.rotate",
+            "identity.key.revoke",
+            "identity.key.suspend",
+            "identity.key.resume",
             "identity.records.list",
+            "identity.record.register",
+            "identity.record.status.change",
+            "identity.record.remove",
             "identity.oauth-apps.list",
             "identity.app-grants.list",
+            "identity.app-grant.revoke",
             "identity.partner-users.list",
             "identity.audit.list",
             "apps.apps.search",
             "apps.apps.read",
             "apps.versions.list",
             "apps.installs.list",
+            "apps.app.suspend",
+            "apps.app.lift-suspension",
             "verification.cases.list",
             "verification.cases.read",
             "verification.case-history.list",
@@ -217,11 +317,52 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "verification.app-review.approve",
             "verification.app-review.reject",
             "verification.app-review.publish",
+            "pricing.price-books.list",
+            "pricing.versions.list",
+            "pricing.versions.read",
+            "pricing.version.draft",
+            "pricing.version.edit",
+            "pricing.version.submit",
+            "pricing.version.approve",
+            "pricing.version.reject",
+            "pricing.activations.list",
+            "pricing.version.schedule",
+            "pricing.version.activate",
+            "pricing.price-book.rollback",
+            "pricing.freezes.list",
+            "pricing.market.freeze",
+            "pricing.market.unfreeze",
+            "pricing.plans.list",
+            "pricing.plan-assignments.list",
+            "pricing.plan.assign",
+            "pricing.overrides.list",
+            "pricing.override.change",
+            "pricing.charges.simulate",
+            "finance.usage.report",
+            "finance.estimated-charges.report",
+            "finance.plan-spread.report",
             "notifications.deliveries.list",
             "notifications.failed-deliveries.list",
+            "notifications.delivery.retry",
             "notifications.suppressions.list",
+            "notifications.suppression.remove",
             "notifications.routing.read",
-            "notifications.providers.read"
+            "notifications.routing.change",
+            "notifications.reroute.cancel",
+            "notifications.providers.read",
+            "privacy.requests.list",
+            "privacy.requests.read",
+            "privacy.request.register",
+            "privacy.request.complete-service",
+            "operations.health.read",
+            "operations.incidents.list",
+            "operations.incident.resolve",
+            "operations.switches.list",
+            "operations.switch.change",
+            "operations.activations.list",
+            "operations.activation.request",
+            "operations.releases.list",
+            "audit.entries.list",
         ]
     );
     for c in catalog() {
@@ -452,14 +593,15 @@ fn datasets_and_event_adapters_are_as_agreed_with_hq() {
             "cfmeet.operations_health",
         ]
     );
-    assert_eq!(ADAPTERS.len(), 13);
+    assert_eq!(ADAPTERS.len(), 12);
     let mut keys = HashSet::new();
     for a in ADAPTERS {
         assert!(keys.insert((a.source, a.export_type)), "duplicate adapter");
     }
     let count = |t: &str| ADAPTERS.iter().filter(|a| a.export_type == t).count();
     assert_eq!(count("abuse.report.changed.v1"), 4);
-    assert_eq!(count("incident.changed.v1"), 5);
+    // Notifications has no incident entity (agreed with HQ).
+    assert_eq!(count("incident.changed.v1"), 4);
     assert_eq!(count("pricing.version.changed.v1"), 1);
 }
 
@@ -499,7 +641,7 @@ fn compat_gate_accepts_additive_and_refuses_breaking_changes() {
 
     // An announced major bump allows breaking changes.
     let mut major = removed.clone();
-    major["contract_version"] = json!("2.0.0");
+    major["contract_version"] = json!("3.0.0");
     assert!(breaking_changes(&caps, &schemas, &major, &schemas).is_empty());
 }
 
@@ -704,6 +846,72 @@ fn no_schema_uses_a_key_hq_treats_as_personal_data() {
         })
         .collect();
     assert!(banned.is_empty(), "properties HQ would refuse: {banned:?}");
+}
+
+/// Agreed with HQ (2026-11-21): no schema property may be named like a secret, a link or a
+/// sealed blob. Secrets and exports are delivered by the owner to their recipient; the
+/// bridge carries references only (delivery, delivery_channel, delivery_ref,
+/// recipient_masked, expires_at, ...). HQ refuses such a name at pin time.
+fn looks_like_secret_or_link(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [
+        "secret",
+        "token",
+        "password",
+        "passphrase",
+        "private_key",
+        "key_material",
+        "ciphertext",
+        "sealed",
+        "signed_url",
+        "presigned",
+        "claim_link",
+        "download_link",
+    ]
+    .iter()
+    .any(|w| n.contains(w))
+        || n == "url"
+        || n == "uri"
+        || n.ends_with("_url")
+        || n.ends_with("_uri")
+}
+
+#[test]
+fn no_schema_names_a_secret_or_a_link() {
+    let schemas = rendered("bridge-schemas.v1.json");
+    let mut names = Vec::new();
+    for (name, schema) in schemas["components"]["schemas"].as_object().unwrap() {
+        collect_property_names(schema, name, &mut names);
+    }
+    let refused: Vec<&String> = names
+        .iter()
+        .filter(|p| looks_like_secret_or_link(p.rsplit('.').next().unwrap()))
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "properties HQ refuses (secret or link): {refused:?}"
+    );
+    for ok in [
+        "delivery_ref",
+        "recipient_masked",
+        "expires_at",
+        "public_id",
+        "last4",
+        "sha256",
+        "last_cosigned_size",
+    ] {
+        assert!(!looks_like_secret_or_link(ok), "{ok}");
+    }
+    for bad in [
+        "client_secret",
+        "invitation_token",
+        "claim_url",
+        "download_link",
+        "uri",
+        "sealed_value",
+    ] {
+        assert!(looks_like_secret_or_link(bad), "{bad}");
+    }
 }
 
 /// Agreed with HQ Track B: `x-contact-search` marks exactly the searches whose `q` may carry

@@ -175,7 +175,7 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
     let contract = read(EVENTS);
     let entries = contract["x-cfmeet-catalogue"].as_array().unwrap();
     assert_eq!(entries.len(), CATALOGUE.len());
-    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 40);
+    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 42);
     assert_eq!(CATALOGUE.iter().filter(|s| s.optional).count(), 1);
     for (e, s) in entries.iter().zip(CATALOGUE) {
         let what = s.event_type;

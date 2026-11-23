@@ -26,7 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::http::{Method, StatusCode};
 use calling::platform::scopes::names;
 use calling_migration::{
-    CallKindOfferMigrator, GapClosureMigrator, Migrator, MigratorTrait,
+    AdminOperationsMigrator, CallKindOfferMigrator, GapClosureMigrator, Migrator, MigratorTrait,
     GAP_CLOSURE_MIGRATION_TABLE, MIGRATION_TABLE,
 };
 use common::{
@@ -221,6 +221,7 @@ async fn fingerprint(
         if table == MIGRATION_TABLE
             || table == GAP_CLOSURE_MIGRATION_TABLE
             || table == calling_migration::CALL_KIND_OFFER_MIGRATION_TABLE
+            || table == calling_migration::ADMIN_OPERATIONS_MIGRATION_TABLE
         {
             continue;
         }
@@ -274,6 +275,7 @@ async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> u
         if table == MIGRATION_TABLE
             || table == GAP_CLOSURE_MIGRATION_TABLE
             || table == calling_migration::CALL_KIND_OFFER_MIGRATION_TABLE
+            || table == calling_migration::ADMIN_OPERATIONS_MIGRATION_TABLE
         {
             continue;
         }
@@ -335,6 +337,17 @@ async fn seed(d: &Deployment) {
             a.w.consumer.tenant.id,
             calling::platform::limits::LimitValues {
                 requests_per_minute: Some(1000),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    h.platform
+        .operator_set_application_limits(
+            &calling::platform::operator::OperatorContext::new("ops.upgrade-cert").unwrap(),
+            a.w.consumer.application.id,
+            calling::platform::limits::LimitValues {
+                max_concurrent_communications: Some(50),
                 ..Default::default()
             },
         )
@@ -517,9 +530,14 @@ async fn seed(d: &Deployment) {
     .unwrap();
 }
 
-/// The newest migration lives in the call-kind-offer history when it has any (applied
-/// last by `up_all`), else in the gap-closure history when it has any (applied after the
-/// main history), else in the main history.
+/// The newest migration lives in the admin-operations history when it has any (applied
+/// last by `up_all`), else in the call-kind-offer history when it has any, else in the
+/// gap-closure history when it has any (applied after the main history), else in the
+/// main history.
+fn admin_operations_newest() -> bool {
+    !AdminOperationsMigrator::migrations().is_empty()
+}
+
 fn kind_offer_newest() -> bool {
     !CallKindOfferMigrator::migrations().is_empty()
 }
@@ -530,7 +548,18 @@ fn gap_closure_newest() -> bool {
 
 /// Every migration but the newest.
 async fn up_previous(conn: &DatabaseConnection) {
-    if kind_offer_newest() {
+    if admin_operations_newest() {
+        let a = AdminOperationsMigrator::migrations().len();
+        Migrator::up(conn, None).await.unwrap();
+        calling_migration::NotificationPublicationsMigrator::up(conn, None)
+            .await
+            .unwrap();
+        GapClosureMigrator::up(conn, None).await.unwrap();
+        CallKindOfferMigrator::up(conn, None).await.unwrap();
+        AdminOperationsMigrator::up(conn, Some((a - 1) as u32))
+            .await
+            .unwrap();
+    } else if kind_offer_newest() {
         let k = CallKindOfferMigrator::migrations().len();
         Migrator::up(conn, None).await.unwrap();
         calling_migration::NotificationPublicationsMigrator::up(conn, None)
@@ -561,7 +590,9 @@ async fn up_head(conn: &DatabaseConnection) {
 }
 
 async fn down_one(conn: &DatabaseConnection) {
-    if kind_offer_newest() {
+    if admin_operations_newest() {
+        AdminOperationsMigrator::down(conn, Some(1)).await.unwrap();
+    } else if kind_offer_newest() {
         CallKindOfferMigrator::down(conn, Some(1)).await.unwrap();
     } else if gap_closure_newest() {
         GapClosureMigrator::down(conn, Some(1)).await.unwrap();
@@ -591,6 +622,13 @@ async fn pending(conn: &DatabaseConnection) -> Vec<String> {
             .iter()
             .map(|m| m.name().to_string()),
     );
+    out.extend(
+        AdminOperationsMigrator::get_pending_migrations(conn)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.name().to_string()),
+    );
     out
 }
 
@@ -603,7 +641,9 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     let donor = d.h().conn();
     let head_schema = schema(donor).await;
 
-    let all: Vec<String> = if kind_offer_newest() {
+    let all: Vec<String> = if admin_operations_newest() {
+        <AdminOperationsMigrator as MigratorTrait>::migrations()
+    } else if kind_offer_newest() {
         <CallKindOfferMigrator as MigratorTrait>::migrations()
     } else if gap_closure_newest() {
         <GapClosureMigrator as MigratorTrait>::migrations()

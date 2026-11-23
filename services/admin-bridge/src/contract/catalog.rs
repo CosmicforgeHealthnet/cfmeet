@@ -330,7 +330,12 @@ pub fn catalog() -> Vec<Capability> {
             .risk(R::R0, V::OperationsMinimized)
             .perm("hq.events.read")
             .roles(&[L::SourceSync])
-            .purposes(&[U::EventSync]),
+            .purposes(&[U::EventSync])
+            .result("HqEventPage")
+            .served(&[
+                "owner_events_are_deduplicated_versioned_and_quarantined",
+                "the_feed_pages_in_sequence_and_acknowledgements_never_move_back",
+            ]),
     );
     c.push(
         B::new(
@@ -344,7 +349,10 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R0, V::OperationsMinimized)
         .perm("hq.events.ack")
         .roles(&[L::SourceSync])
-        .purposes(&[U::EventSync]),
+        .purposes(&[U::EventSync])
+        .body("HqEventAckRequest")
+        .result("HqEventAck")
+        .served(&["the_feed_pages_in_sequence_and_acknowledgements_never_move_back"]),
     );
     c.push(
         get("hq.projections.status", "/hq/projections/status", Q::Scoped)
@@ -531,6 +539,20 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R3, V::Personal)
         .roles(&[L::SecurityAdmin, L::TrustSafety]),
     );
+    // The owner enforces uniqueness across every group at once: the group-less command
+    // says so (an approval binds the exact target).
+    c.push(
+        ms(
+            cmd(
+                "accounts.duplicates.enforce-all",
+                "/accounts/duplicates/enforce",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .risk(R::R3, V::Personal)
+        .roles(&[L::SecurityAdmin, L::TrustSafety]),
+    );
     c.push(
         ms(
             cmd("accounts.user.export", "/accounts/users/{user_id}/export"),
@@ -694,6 +716,18 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
+                "meetings.meeting-recordings.list",
+                "/meetings/meetings/{meeting_id}/recordings",
+                Q::ScopedPage,
+            ),
+            S::New,
+            P::A4,
+        )
+        .risk(R::R1, V::Personal),
+    );
+    c.push(
+        ms(
+            get(
                 "meetings.transcripts.list",
                 "/meetings/transcripts",
                 Q::ScopedWindow,
@@ -713,6 +747,18 @@ pub fn catalog() -> Vec<Capability> {
             P::A4,
         )
         .risk(R::R4, V::Personal),
+    );
+    c.push(
+        ms(
+            get(
+                "meetings.meeting-transcripts.list",
+                "/meetings/meetings/{meeting_id}/transcripts",
+                Q::ScopedPage,
+            ),
+            S::New,
+            P::A4,
+        )
+        .risk(R::R1, V::Personal),
     );
     c.push(
         ms(
@@ -805,6 +851,19 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
+                "meetings.email-deliveries.read",
+                "/meetings/email-deliveries/{delivery_id}",
+                Q::Scoped,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("delivery_id")
+        .risk(R::R1, V::OperationsMinimized),
+    );
+    c.push(
+        ms(
+            get(
                 "meetings.critical-lane.read",
                 "/meetings/critical-lane",
                 Q::Scoped,
@@ -852,6 +911,32 @@ pub fn catalog() -> Vec<Capability> {
             P::A2,
         )
         .risk(R::R1, V::SafetyEvidence),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.conversations.read",
+                "/messaging/conversations/{conversation_id}",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A4,
+        )
+        .uuid("conversation_id")
+        .risk(R::R1, V::OperationsMinimized),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.members.read",
+                "/messaging/conversations/{conversation_id}/members/{principal_id}",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A4,
+        )
+        .uuid("conversation_id")
+        .risk(R::R1, V::OperationsMinimized),
     );
     c.push(
         mg(
@@ -919,6 +1004,19 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A2,
         )
+        .risk(R::R1, V::Internal),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.environment-policy.read",
+                "/messaging/environments/{environment_id}/policy",
+                Q::Scoped,
+            ),
+            S::New,
+            P::A5,
+        )
+        .uuid("environment_id")
         .risk(R::R1, V::Internal),
     );
     c.push(
@@ -1367,6 +1465,20 @@ pub fn catalog() -> Vec<Capability> {
             cmd(
                 "calling.webhook-key.reseal",
                 "/calling/webhook-keys/{key_id}/reseal",
+            ),
+            S::CliToApi,
+            P::A5,
+        )
+        .risk(R::R3, V::Internal)
+        .roles(&[L::PlatformOps]),
+    );
+    // The owner reseals every webhook subscription of the tenant: the tenant-wide command
+    // says so (an approval binds the exact target).
+    c.push(
+        cl(
+            cmd(
+                "calling.webhook-keys.reseal",
+                "/calling/webhook-keys/reseal",
             ),
             S::CliToApi,
             P::A5,
@@ -2667,6 +2779,7 @@ pub fn catalog() -> Vec<Capability> {
             Q::Scoped,
         )
         .at(DeveloperPlatform, S::New, P::A6)
+        .body("PricingChargeSimulationRequest")
         .risk(R::R1, V::FinancialSensitive),
     );
 
@@ -2805,7 +2918,9 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         get("privacy.requests.list", "/privacy/requests", Q::ScopedPage)
             .at(AdminBridge, S::Local, P::A7)
-            .risk(R::R1, V::OperationsMinimized),
+            .risk(R::R1, V::OperationsMinimized)
+            .result("PrivacyRequestPage")
+            .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         get(
@@ -2815,12 +2930,17 @@ pub fn catalog() -> Vec<Capability> {
         )
         .at(AdminBridge, S::Local, P::A7)
         .uuid("request_id")
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .result("PrivacyRequest")
+        .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         cmd("privacy.request.register", "/privacy/requests")
             .at(AdminBridge, S::Local, P::A7)
-            .risk(R::R3, V::Personal),
+            .risk(R::R3, V::Personal)
+            .body("PrivacyRegisterRequest")
+            .result("PrivacyCommandResult")
+            .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         cmd(
@@ -2829,7 +2949,10 @@ pub fn catalog() -> Vec<Capability> {
         )
         .at(AdminBridge, S::Local, P::A7)
         .uuid("request_id")
-        .risk(R::R4, V::Personal),
+        .risk(R::R4, V::Personal)
+        .body("PrivacyCompleteServiceRequest")
+        .result("PrivacyCommandResult")
+        .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
 
     // ---- 6.15 Operations ---------------------------------------------------------
@@ -2839,7 +2962,9 @@ pub fn catalog() -> Vec<Capability> {
             get("operations.health.read", "/operations/health", Q::Scoped),
             P::A2,
         )
-        .risk(R::R0, V::OperationsMinimized),
+        .risk(R::R0, V::OperationsMinimized)
+        .result("Health")
+        .served(&["operations_health_is_the_aggregate_health"]),
     );
     c.push(
         op(
@@ -2850,7 +2975,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .source("GET /internal/v1/operator/incidents (messaging, calling, developer-platform)")
+        .result("OperationsIncidentPage")
+        .served(&["operations_incidents_aggregate_the_owners"]),
     );
     c.push(
         op(
@@ -2861,7 +2989,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R2, V::OperationsMinimized)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+        .source("POST /internal/v1/operator/incidents/{incident_id}/resolve (messaging, calling)")
+        .body("OperationsIncidentResolveRequest")
+        .result("OperationsIncidentResolveResult")
+        .served(&["operations_incident_resolve_routes_to_the_owner"]),
     );
     c.push(
         op(
@@ -2872,7 +3004,10 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A2,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+            .source("GET /internal/v1/operator/switches (messaging), GET /internal/v1/admin/routing (notifications)")
+            .result("OperationsSwitchPage")
+            .served(&["operations_switches_join_kill_switches_and_routing_modes"]),
     );
     c.push(
         op(
@@ -2883,7 +3018,11 @@ pub fn catalog() -> Vec<Capability> {
             P::A8,
         )
         .risk(R::R3, V::Internal)
-        .purposes(&[U::OpsIncident]),
+        .purposes(&[U::OpsIncident])
+            .source("POST /internal/v1/operator/switches/{name} (messaging), POST /internal/v1/operator/routing/{category}/{channel}/mode (notifications)")
+            .body("OperationsSwitchChangeRequest")
+            .result("OperationsSwitchChangeResult")
+            .served(&["operations_switch_change_routes_to_the_owner"]),
     );
     c.push(
         op(
@@ -2894,7 +3033,9 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A8,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+        .result("OperationsActivationPage")
+        .served(&["activation_requests_dispatch_once_and_list_their_runs"]),
     );
     c.push(
         op(
@@ -2903,7 +3044,17 @@ pub fn catalog() -> Vec<Capability> {
         )
         .risk(R::R4, V::Internal)
         .roles(&[L::ReleaseManager])
-        .purposes(&[U::ReleaseRequest]),
+        .purposes(&[U::ReleaseRequest])
+        .source(
+            "POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches",
+        )
+        .body("OperationsActivationRequest")
+        .result("OperationsActivationCommandResult")
+        .served(&[
+            "activation_requests_dispatch_once_and_list_their_runs",
+            "an_unknown_dispatch_settles_from_the_runs_list_and_is_never_resent",
+            "activation_requests_are_disabled_without_github",
+        ]),
     );
     c.push(
         op(
@@ -2914,14 +3065,22 @@ pub fn catalog() -> Vec<Capability> {
             ),
             P::A8,
         )
-        .risk(R::R0, V::Internal),
+        .risk(R::R0, V::Internal)
+        .source("GET /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/runs")
+        .result("OperationsReleasePage")
+        .served(&[
+            "release_history_is_the_workflow_runs_without_logs",
+            "activation_requests_are_disabled_without_github",
+        ]),
     );
 
     // ---- 6.16 Audit ------------------------------------------------------------
     c.push(
         get("audit.entries.list", "/audit/entries", Q::ScopedWindow)
             .at(AdminBridge, S::Local, P::A2)
-            .risk(R::R1, V::OperationsMinimized),
+            .risk(R::R1, V::OperationsMinimized)
+            .result("AuditEntryPage")
+            .served(&["audit_entries_page_the_hash_chained_audit"]),
     );
 
     // ---- 6.17 Telecom (read-only while telecom is off) ---------------------------
@@ -2960,6 +3119,30 @@ pub fn catalog() -> Vec<Capability> {
             "{id}: only searches take q"
         );
         cap.contact_search = true;
+    }
+    // Owner commands served from their rows (contract::owner_commands).
+    for row in super::owner_commands::COMMANDS {
+        let cap = caps
+            .iter_mut()
+            .find(|c| c.id == row.id)
+            .unwrap_or_else(|| panic!("{}: not in the catalog", row.id));
+        assert_eq!(cap.kind, Kind::Command, "{}: commands only", row.id);
+        // The row is the authority on the owner (e.g. partner keys live in Platform Access).
+        cap.owner = row.owner;
+        cap.served = true;
+        cap.source_endpoint = Some(row.source);
+        cap.body = Some(row.body_schema);
+        cap.result = Some(row.result_schema);
+        cap.tests = vec!["owner_commands_follow_their_rows"];
+        if matches!(
+            cap.owner_status,
+            OwnerStatus::ExistsNotGranted
+                | OwnerStatus::New
+                | OwnerStatus::CliToApi
+                | OwnerStatus::DbToApi
+        ) {
+            cap.owner_status = OwnerStatus::Exists;
+        }
     }
     // bridge.operations.read: whoever may run a command may read its operation back, for
     // that command's purposes (the readback also checks the operation's own purpose).
@@ -3118,6 +3301,17 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "PartnerWebhookDeliveryPage",
         &["partners_activity_maps_window_and_workspace"],
     ),
+    // A4 Developer Platform.
+    (
+        "partners.usage.read",
+        "PartnerUsagePage",
+        &["partners_usage_and_incidents_map_the_window"],
+    ),
+    (
+        "partners.incidents.list",
+        "PartnerIncidentPage",
+        &["partners_usage_and_incidents_map_the_window"],
+    ),
     ("apps.apps.search", "AppPage", &["apps_search_and_detail"]),
     ("apps.apps.read", "AppDetail", &["apps_search_and_detail"]),
     (
@@ -3129,6 +3323,67 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "apps.installs.list",
         "AppInstallPage",
         &["partners_lists_translate_strictly"],
+    ),
+    // A6 Developer Platform: pricing, plans and finance.
+    (
+        "pricing.price-books.list",
+        "PricingPriceBookPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.versions.list",
+        "PricingVersionPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.versions.read",
+        "PricingVersionDetail",
+        &["pricing_version_detail_carries_the_content_by_product_line"],
+    ),
+    (
+        "pricing.activations.list",
+        "PricingActivationPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.freezes.list",
+        "PricingFreezePage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.plans.list",
+        "PricingPlanPage",
+        &["pricing_plans_are_one_page"],
+    ),
+    (
+        "pricing.plan-assignments.list",
+        "PricingPlanAssignmentPage",
+        &["pricing_plan_assignments_search_by_holder_or_plan"],
+    ),
+    (
+        "pricing.overrides.list",
+        "PricingOverridePage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.charges.simulate",
+        "PricingChargeSimulation",
+        &["pricing_simulation_is_a_checked_post_read"],
+    ),
+    (
+        "finance.usage.report",
+        "FinanceUsageReport",
+        &["finance_reports_map_the_window"],
+    ),
+    (
+        "finance.estimated-charges.report",
+        "FinanceEstimatedChargesReport",
+        &["finance_estimated_charges_use_the_market_partner_book"],
+    ),
+    (
+        "finance.plan-spread.report",
+        "FinancePlanSpreadReport",
+        &["finance_reports_map_the_window"],
     ),
     // A2.3 Platform Access.
     (
@@ -3293,6 +3548,57 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "MeetingAuditEventPage",
         &["meetings_audit_maps_window_and_time_cursor"],
     ),
+    // A5-A7 Meeting Service.
+    (
+        "accounts.duplicates.list",
+        "AccountDuplicates",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "accounts.test-accounts.list",
+        "AccountTestAccountPage",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.live-health.read",
+        "MeetingLiveHealth",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.webinars.list",
+        "MeetingWebinarPage",
+        &["meetings_webinars_keep_the_window"],
+    ),
+    (
+        "meetings.webinar-registrations.list",
+        "MeetingWebinarRegistrationPage",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.chat-migration.read",
+        "MeetingChatMigration",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.critical-lane.read",
+        "MeetingCriticalLane",
+        &["meetings_operator_reads_translate_strictly"],
+    ),
+    (
+        "meetings.meeting-recordings.list",
+        "MeetingArtifactPage",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
+    (
+        "meetings.meeting-transcripts.list",
+        "MeetingArtifactPage",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
+    (
+        "meetings.email-deliveries.read",
+        "MeetingEmailDelivery",
+        &["meetings_artifacts_and_deliveries_by_id"],
+    ),
     // A2.6 Messaging.
     (
         "messaging.reports.list",
@@ -3303,6 +3609,21 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "messaging.reports.read",
         "MessagingReportDetail",
         &["messaging_report_detail_carries_actions_not_evidence"],
+    ),
+    (
+        "messaging.conversations.read",
+        "MessagingConversation",
+        &["messaging_conversation_and_member_carry_versions"],
+    ),
+    (
+        "messaging.members.read",
+        "MessagingMember",
+        &["messaging_conversation_and_member_carry_versions"],
+    ),
+    (
+        "messaging.environment-policy.read",
+        "MessagingEnvironmentPolicy",
+        &["messaging_environment_policy_is_tenant_scoped_and_closed"],
     ),
     (
         "messaging.holds.list",

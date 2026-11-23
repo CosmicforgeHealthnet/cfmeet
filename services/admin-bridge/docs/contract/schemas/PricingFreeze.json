@@ -1,0 +1,49 @@
+{
+  "description": "One market's price freeze.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "market_code",
+    "freeze_state",
+    "reason_code",
+    "changed_by",
+    "frozen_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "market_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "freeze_state": {
+      "enum": [
+        "FROZEN",
+        "UNFROZEN"
+      ]
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "changed_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "description": "The HQ staff member (hq:<sub>)."
+    },
+    "frozen_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    }
+  }
+}

@@ -1239,7 +1239,7 @@ impl Processor {
         now: DateTime<Utc>,
     ) -> Result<(), DbErr> {
         let boundary = routing::reminder_boundary(&self.db).await?;
-        if !boundary.is_some_and(|b| starts >= b) || job.shadow {
+        if boundary.is_none_or(|b| starts < b) || job.shadow {
             return Ok(());
         }
         let release = starts - Duration::minutes(REMINDER_LEAD_MINUTES);

@@ -2,7 +2,7 @@
   "contract": "cfmeet.admin-events.v1",
   "export_schema": "cosmicforge.product-admin-event.v1",
   "max_event_bytes": 16384,
-  "status": "PROVISIONAL: adapter fields are defined in phase A7; until then the bridge accepts no owner event",
+  "status": "ACTIVE (A7): the source service posts {event_id, type, subject {kind, id}, state, version, occurred_at} to the bridge's private event listener (POST /internal/v1/hq-bridge/events, cf-service+jwt with hq-bridge-events.publish); the producer is the authenticated service; an event of a type its source does not publish here is quarantined; ids, states, versions and times only",
   "exportable_classifications": [
     "INTERNAL",
     "OPERATIONS_MINIMIZED",
@@ -68,13 +68,6 @@
     },
     {
       "source_service": "calling",
-      "export_type": "incident.changed.v1",
-      "entity_type": "incident",
-      "classification": "OPERATIONS_MINIMIZED",
-      "fields": {}
-    },
-    {
-      "source_service": "notifications",
       "export_type": "incident.changed.v1",
       "entity_type": "incident",
       "classification": "OPERATIONS_MINIMIZED",

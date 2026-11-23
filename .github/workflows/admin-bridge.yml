@@ -173,6 +173,26 @@ jobs:
           must_fail "UPDATE admin_operations SET status = 'FAILED'"
           must_fail "DELETE FROM admin_operations"
           must_fail "TRUNCATE admin_operations"
+          # Privacy requests: insert and update only.
+          rt "INSERT INTO admin_privacy_requests (request_id, kind, subject_ref, state, created_by, created_at, updated_at, version) VALUES ('6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'ERASURE', gen_random_uuid(), 'OPEN', 'hq:x', now(), now(), 1)"
+          must_fail "DELETE FROM admin_privacy_requests"
+          must_fail "TRUNCATE admin_privacy_request_services"
+          # Owner events and the HQ feed: append-only; acknowledgements only move forward.
+          rt "INSERT INTO admin_event_inbox (producer, event_id, event_type, disposition, received_at) VALUES ('developer-platform', '6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'verification.case.changed.v1', 'APPENDED', now())"
+          rt "INSERT INTO admin_hq_outbox (producer, event_id, event_type, subject_kind, subject_id, state, version, occurred_at, appended_at) VALUES ('developer-platform', '6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'verification.case.changed.v1', 'verification_case', 'case-1', 'APPROVED', 2, now(), now())"
+          must_fail "UPDATE admin_hq_outbox SET state = 'REJECTED'"
+          must_fail "DELETE FROM admin_hq_outbox"
+          must_fail "DELETE FROM admin_event_inbox"
+          must_fail "TRUNCATE admin_hq_outbox"
+          rt "INSERT INTO admin_hq_consumer_cursors (consumer, acknowledged_sequence, updated_at) VALUES ('hq-worker', 1, now())"
+          must_fail "UPDATE admin_hq_consumer_cursors SET acknowledged_sequence = 0"
+          must_fail "DELETE FROM admin_hq_consumer_cursors"
+          # Switch-on requests: REQUESTED -> DISPATCHED | FAILED, the run linked once, never deleted.
+          rt "INSERT INTO admin_activation_requests (request_id, operation, release_sha, requested_by, approver, approval_id, state, created_at) VALUES ('6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'inspect', repeat('a', 40), 'hq:a', 'hq:b', 'ap-1', 'REQUESTED', now())"
+          rt "UPDATE admin_activation_requests SET state = 'DISPATCHED', dispatched_at = now(), run_id = 7"
+          must_fail "UPDATE admin_activation_requests SET run_id = 8"
+          must_fail "UPDATE admin_activation_requests SET operation = 'release'"
+          must_fail "DELETE FROM admin_activation_requests"
           echo "runtime role is least-privilege"
 
 

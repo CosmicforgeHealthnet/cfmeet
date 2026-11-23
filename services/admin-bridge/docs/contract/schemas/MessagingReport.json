@@ -17,7 +17,8 @@
     "status",
     "resolution",
     "resolved_at",
-    "created_at"
+    "created_at",
+    "version"
   ],
   "properties": {
     "report_id": {
@@ -110,6 +111,11 @@
     "created_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The report's row version (expected_version of its moderation commands)."
     }
   }
 }

@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 40 inbound types, the routing category (the unit of the cutover: one row per
+//! the 42 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -644,6 +644,38 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // ADR 0068 A4 (event contract 1.6.0): the first-party workspace owner invitation, email
+    // only, to the sealed address of its one email principal (the owner may have no account
+    // yet); the single-use claim link is rebuilt from the sealed token.
+    TypeRoute {
+        email_category: Some("DEVELOPER_PLATFORM"),
+        ..r(
+            "developer-platform.workspace.owner-invitation.email-requested",
+            "DEVELOPER_PLATFORM",
+            C::DeveloperUpdates,
+            &[E],
+            "developer.workspace_owner_invitation",
+            "NONE",
+            None,
+        )
+    },
+    // ADR 0068 A4 (event contract 1.7.0): an organization export's single-use download
+    // link, email only, to the owner's account (X1 resolves the verified address and
+    // authorizes the send); the link is rebuilt from the sealed token. SECURITY preference
+    // (fixed on): a link HQ requested for the owner is never dropped by a mute or quiet
+    // hours — it would expire and lose the export.
+    TypeRoute {
+        email_category: Some("ORGANIZATION_EXPORT"),
+        ..r(
+            "organizations.organization.export_ready",
+            "ORGANIZATIONS",
+            C::Security,
+            &[E],
+            "org.export_ready",
+            "NONE",
+            None,
+        )
+    },
     TypeRoute {
         email_category: Some("OPERATIONS_ALERT"),
         ..r(
@@ -705,7 +737,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 40);
+        assert_eq!(inbound.len(), 42);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -713,7 +745,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 40);
+        assert_eq!(ROUTES.len(), 42);
     }
 
     #[test]
@@ -781,10 +813,12 @@ mod tests {
 
     #[test]
     fn routing_rows_match_the_migration_seed() {
-        // The foundation seed, then the rows later migrations add (ACCOUNT_NOTICES).
+        // The foundation seed, then the rows later migrations add (ACCOUNT_NOTICES,
+        // ORGANIZATIONS).
         let seed = [
             include_str!("../migration/src/m20261116_000001_notifications_foundation.rs"),
             include_str!("../migration/src/m20261118_000001_account_notices.rs"),
+            include_str!("../migration/src/m20261121_000001_organization_exports.rs"),
         ]
         .concat();
         let rows = routing_rows();

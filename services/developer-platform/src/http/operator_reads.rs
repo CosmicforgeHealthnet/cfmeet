@@ -79,6 +79,186 @@ pub fn routes() -> Router<AppState> {
             "/operator/operations/:idempotency_key",
             get(operation_record),
         )
+        // ADR 0068 A4: a workspace's usage and the recorded platform incidents.
+        .route(
+            "/operator/organizations/:organization_id/usage",
+            get(organization_usage),
+        )
+        .route("/operator/incidents", get(incidents))
+        // ADR 0068 A4: the state of an owner-delivered secret (a reference, never the
+        // secret, a link or the address).
+        .route(
+            "/operator/owner-deliveries/:delivery_ref",
+            get(owner_delivery),
+        )
+        // ADR 0068 A7: the daily datasets the admin bridge pulls.
+        .route("/operator/datasets/:dataset_id/days/:day", get(dataset_day))
+}
+
+/// `GET /internal/v1/operator/datasets/{datasetId}/days/{yyyy-mm-dd}` — the admin bridge
+/// only (404 for every other caller and for an unknown dataset): one UTC day's counts.
+async fn dataset_day(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((dataset, day)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    if caller.bridge_operator().is_none() {
+        return Err(ApiError(ErrorCode::NotFound));
+    }
+    let date = crate::control::usage::parse_day(&day)?;
+    // The activity history the purge keeps (the worker's own setting, read the same way).
+    let retention =
+        crate::retention::RetentionSettings::from_lookup(&|k: &str| std::env::var(k).ok())
+            .unwrap_or_default();
+    let activity_days = if retention.enabled {
+        retention.days(crate::retention::Class::ActivityEvents)
+    } else {
+        None
+    };
+    let ctx = crate::control::datasets::DatasetContext {
+        installs_known: s.build.install_events,
+        activity_days,
+        now: Utc::now(),
+    };
+    Ok(Json(
+        crate::control::datasets::day(&s.db, &dataset, date, ctx).await?,
+    ))
+}
+
+/// `GET /internal/v1/operator/owner-deliveries/{deliveryRef}` — the admin bridge only
+/// (404 for every other caller and for an unknown or purged reference).
+async fn owner_delivery(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(delivery_ref): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    if caller.bridge_operator().is_none() {
+        return Err(ApiError(ErrorCode::NotFound));
+    }
+    crate::control::owner_delivery::view(&s.db, delivery_ref)
+        .await?
+        .map(Json)
+        .ok_or(ApiError(ErrorCode::NotFound))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UsageParams {
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// `GET …/organizations/{id}/usage?since&until` — the workspace's metered usage per
+/// environment and usage type over `[since, until)` (UTC days, at most 31; default the
+/// last 30 days), from the daily rollups: quantities and counts only. Offset-paginated
+/// over a stable order (the aggregate is bounded by environments × usage types).
+async fn organization_usage(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(q): Query<UsageParams>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    let (since, until) = window(q.since.as_deref(), q.until.as_deref())?;
+    let p = Page::from_query(&PageQuery {
+        limit: q.limit,
+        cursor: q.cursor,
+    })?;
+    let offset = match (p.has_cursor(), p.cursor_seq()) {
+        (false, _) => 0,
+        (true, Some(n)) if n >= 0 => n,
+        _ => return Err(ApiError(ErrorCode::ValidationError)),
+    };
+    existing(&s.db, id).await?;
+    let until = until.unwrap_or_else(|| since.map_or_else(Utc::now, |s| s + Duration::days(30)));
+    let since = since.unwrap_or(until - Duration::days(30));
+    if until <= since || until - since > Duration::days(MAX_WINDOW_DAYS) {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
+    // UTC days touched by the window: `[from, end)`; a window ending inside a day
+    // includes that day.
+    let from = since.date_naive();
+    let end = if until.time() == chrono::NaiveTime::MIN {
+        until.date_naive()
+    } else {
+        until.date_naive() + Duration::days(1)
+    };
+    let rows = s
+        .db
+        .query_all(stmt(
+            "SELECT jsonb_build_object('projectId', application_id, 'environmentId', environment_id,                     'environmentKind', environment_kind, 'usageType', usage_type, 'unit', unit,                     'quantity', SUM(quantity)::bigint, 'factCount', SUM(fact_count)::bigint) AS v              FROM devplat_usage_rollups_daily              WHERE tenant_id = $1 AND usage_day >= $2 AND usage_day < $3              GROUP BY application_id, environment_id, environment_kind, usage_type, unit              ORDER BY environment_id, usage_type, unit OFFSET $4 LIMIT $5",
+            vec![
+                id.into(),
+                from.into(),
+                end.into(),
+                offset.into(),
+                (p.limit as i64 + 1).into(),
+            ],
+        ))
+        .await?;
+    let mut items = Vec::new();
+    for r in rows.iter().take(p.limit) {
+        items.push(r.try_get::<Value>("", "v")?);
+    }
+    let next = (rows.len() > p.limit).then(|| Page::seq_cursor(offset + p.limit as i64));
+    Ok(Json(json!({
+        "items": items,
+        "nextCursor": next,
+        "from": from.to_string(),
+        "to": (end - Duration::days(1)).to_string(),
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IncidentParams {
+    #[serde(default)]
+    organization_id: Option<Uuid>,
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// `GET /operator/incidents?organizationId&since&until` — the platform incidents recorded
+/// against workspaces (every record, newest first; the support profile keeps only the
+/// last): the incident reference and times, never ticket content or the operator.
+async fn incidents(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Query(q): Query<IncidentParams>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    let (since, until) = window(q.since.as_deref(), q.until.as_deref())?;
+    let p = page(q.limit, q.cursor)?;
+    if let Some(o) = q.organization_id {
+        existing(&s.db, o).await?;
+    }
+    Ok(Json(
+        keyset(
+            &s.db,
+            "SELECT e.occurred_at AS k_at, e.id AS k_id, jsonb_build_object(                  'incidentRecordId', e.id, 'organizationId', e.tenant_id,                  'incidentRef', e.summary->>'incidentRef', 'occurredAt', e.summary->>'occurredAt',                  'recordedAt', e.occurred_at) AS v              FROM devplat_activity_events e              WHERE ($1::uuid IS NULL OR e.tenant_id = $1)                AND e.action = 'support_profile.incident_recorded' AND e.outcome = 'SUCCEEDED'                AND ($2::timestamptz IS NULL OR (e.occurred_at, e.id) < ($2, $3::uuid))                AND ($5::timestamptz IS NULL OR e.occurred_at >= $5)                AND ($6::timestamptz IS NULL OR e.occurred_at < $6)              ORDER BY e.occurred_at DESC, e.id DESC LIMIT $4",
+            vec![q.organization_id.into(), since.into(), until.into()],
+            &p,
+        )
+        .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -204,7 +384,7 @@ struct SearchParams {
     cursor: Option<String>,
 }
 
-fn page(limit: Option<usize>, cursor: Option<String>) -> Result<Page, ApiError> {
+pub(crate) fn page(limit: Option<usize>, cursor: Option<String>) -> Result<Page, ApiError> {
     let p = Page::from_query(&PageQuery { limit, cursor })?;
     if p.has_cursor() && p.cursor_key().is_none() {
         return Err(ApiError(ErrorCode::ValidationError));
@@ -225,7 +405,7 @@ async fn existing<C: ConnectionTrait>(db: &C, tenant_id: Uuid) -> Result<(), Api
 
 /// Runs a keyset page query whose rows carry `k_at`, `k_id` and `v` (a JSON object), the
 /// cursor bound as `$2` / `$3` and the limit (+1) as `$4`.
-async fn keyset<C: ConnectionTrait>(
+pub(crate) async fn keyset<C: ConnectionTrait>(
     db: &C,
     sql: &str,
     mut values: Vec<DbValue>,
@@ -391,7 +571,8 @@ async fn push_providers(
                  'fcmProjectId', pp.fcm_project_id, 'fingerprint', pp.fingerprint, \
                  'verification', pp.verification, 'lastVerifiedAt', pp.last_verified_at, \
                  'lastErrorCode', pp.last_error_code, 'createdAt', pp.created_at, \
-                 'updatedAt', pp.updated_at) AS v \
+                 'updatedAt', pp.updated_at, 'state', pp.state, 'disabledAt', pp.disabled_at, \
+                 'version', pp.version) AS v \
              FROM devplat_push_providers pp WHERE pp.tenant_id = $1 \
                AND ($2::timestamptz IS NULL OR (pp.created_at, pp.id) < ($2, $3::uuid)) \
              ORDER BY pp.created_at DESC, pp.id DESC LIMIT $4",

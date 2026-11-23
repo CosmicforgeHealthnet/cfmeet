@@ -44,7 +44,7 @@ fn report_json() -> Value {
         "id": ID, "conversationId": ID, "securityProfile": "PRIVATE_E2EE",
         "reporterPrincipalId": ID, "reportedPrincipalId": null, "messageIds": [ID],
         "category": "HARASSMENT", "evidenceKind": "REPORTER_DISCLOSURE", "status": "OPEN",
-        "resolution": null, "resolvedAt": null, "createdAt": T0,
+        "resolution": null, "resolvedAt": null, "createdAt": T0, "version": 3,
         // Fields the bridge must drop even if an owner ever sent them.
         "sealedEvidence": "c2VhbGVkLWNpcGhlcnRleHQ=", "plaintext": "never-relay-this-text"
     }))
@@ -82,7 +82,7 @@ impl OwnerPort for FakeMessaging {
             "/holds" => json!({"items": [with_scope(json!({
                 "id": ID, "scopeKind": "CONVERSATION", "conversationId": ID, "principalId": null,
                 "reasonCategory": "LITIGATION", "status": "ACTIVE", "createdAt": T0, "expiresAt": null,
-                "releasedAt": null, "releaseReason": null, "caseReference": "CASE-SECRET-42"
+                "releasedAt": null, "releaseReason": null, "caseReference": "CASE-SECRET-42", "version": 2
             }))], "nextCursor": null}),
             "/exports" => json!({"items": [with_scope(json!({
                 "id": ID, "conversationId": ID, "status": "READY", "size": 2048, "messageCount": 12,
@@ -117,6 +117,26 @@ impl OwnerPort for FakeMessaging {
                 "head": {"treeSize": 42, "rootHash": ROOT, "updatedAt": T0},
                 "witnesses": [{"witnessId": "witness-1.example", "treeSize": 42, "rootHash": ROOT, "updatedAt": T0, "lastCosignedSize": 40}]
             }),
+            x if x == format!("/conversations/{ID}") => with_scope(json!({
+                "id": ID, "contextClass": "GROUP", "securityProfile": "MANAGED", "lifecycleState": "ACTIVE",
+                "version": 5, "createdAt": T0, "stateChangedAt": T0, "title": "never-relay-this-text"})),
+            x if x == format!("/conversations/{ID}/members/{ID}") => json!({
+                "conversationId": ID, "principalId": ID, "role": "MEMBER", "state": "ACTIVE",
+                "sendRestrictedUntil": null, "version": 2, "updatedAt": T0}),
+            "/policy" => with_scope(json!({
+                "version": 3, "digest": ROOT, "platformPolicyVersion": 4, "applicationBaseline": null,
+                "policy": {"note": "never-relay-this-text"},
+                "effective": {
+                    "schemaVersion": 1, "platformPolicyVersion": 4, "applicationPolicyVersion": 3,
+                    "sendingEnabled": true,
+                    "contexts": {"DIRECT": {"enabled": true, "allowedProfiles": ["PRIVATE_E2EE", "MANAGED"],
+                        "defaultProfile": "PRIVATE_E2EE", "maxMembers": 2, "maxLifetimeSeconds": null,
+                        "reopenAllowed": true, "legalHoldEligible": false, "smsBridgeEligible": false,
+                        "regulated": false, "centralArchiveRequired": false, "reportingEnabled": true,
+                        "exportsEnabled": false, "attachmentsEnabled": true, "retentionDays": null,
+                        "requestsRequireAcceptance": true, "comment": "never-relay-this-text"}},
+                    "messages": {"replies": true, "threads": true, "reactions": true, "pins": false},
+                    "backups": {"enabled": false, "maxBytes": 1048576, "retainCount": 3}}})),
             _ => return Err(OwnerError::NotFound),
         })
     }
@@ -178,6 +198,8 @@ async fn messaging_reports_relay_no_evidence() {
     assert_eq!(item["evidence_kind"], "REPORTER_DISCLOSURE");
     assert_eq!(item["message_ids"][0], ID);
     assert_eq!(item["created_at"], "2026-11-01T10:00:00Z");
+    // The row version the moderation commands act on.
+    assert_eq!(item["version"], 3);
     assert_eq!(v["result"]["next_cursor"], CUR);
     let text = v.to_string();
     assert!(
@@ -235,6 +257,13 @@ async fn messaging_lists_translate_strictly() {
             "/internal/v1/operator/holds",
             "reason_category",
             "LITIGATION",
+        ),
+        (
+            "/messaging/holds",
+            "messaging.holds.read",
+            "/internal/v1/operator/holds",
+            "version",
+            "2",
         ),
         (
             "/messaging/exports",
@@ -362,4 +391,104 @@ async fn messaging_policy_stays_blocked() {
     );
     assert_eq!(code(&send(&h, &c).await.1), "CAPABILITY_DISABLED");
     assert!(fake.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn messaging_conversation_and_member_carry_versions() {
+    let (h, fake) = harness().await;
+    let c = call(
+        &format!("/messaging/conversations/{ID}"),
+        &scoped("abuse-review"),
+        "messaging.conversations.read",
+        ts(),
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last_call(&fake).1,
+        format!("/internal/v1/operator/conversations/{ID}")
+    );
+    let r = &v["result"];
+    assert_eq!(
+        (r["version"].clone(), r["context_class"].clone()),
+        (json!(5), json!("GROUP"))
+    );
+    assert!(!v.to_string().contains("never-relay-this-text"), "no title");
+
+    let c = call(
+        &format!("/messaging/conversations/{ID}/members/{ID}"),
+        &scoped("abuse-review"),
+        "messaging.members.read",
+        ts(),
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last_call(&fake).1,
+        format!("/internal/v1/operator/conversations/{ID}/members/{ID}")
+    );
+    assert_eq!(v["result"]["member_state"], "ACTIVE");
+    assert_eq!(v["result"]["version"], 2);
+
+    // A principal reference that is not a Platform Access id names nothing; no owner call.
+    let before = fake.calls.lock().unwrap().len();
+    let c = call(
+        &format!("/messaging/conversations/{ID}/members/ext:abc"),
+        &scoped("abuse-review"),
+        "messaging.members.read",
+        ts(),
+    );
+    assert_eq!(code(&send(&h, &c).await.1), "RESOURCE_NOT_FOUND");
+    assert_eq!(fake.calls.lock().unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn messaging_environment_policy_is_tenant_scoped_and_closed() {
+    let (h, fake) = harness().await;
+    let mut c = call(
+        &format!("/messaging/environments/{ID}/policy"),
+        &format!(
+            "market=GLOBAL&organization=cfmeet&zone=production&tenant={TENANT_ID}&purpose=ops-incident"
+        ),
+        "messaging.environment-policy.read",
+        &["cfmeet.platform_ops"],
+    );
+    c.tenant_scopes = vec![TENANT_ID];
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last_call(&fake);
+    assert_eq!(path, "/internal/v1/operator/policy");
+    assert_eq!(
+        query,
+        vec![
+            ("tenantId".to_string(), TENANT_ID.to_string()),
+            ("environmentId".to_string(), ID.to_string())
+        ]
+    );
+    let r = &v["result"];
+    assert_eq!(
+        (r["version"].clone(), r["digest"].clone()),
+        (json!(3), json!(ROOT))
+    );
+    let e = &r["effective"];
+    assert_eq!(e["contexts"][0]["context_class"], "DIRECT");
+    assert_eq!(e["contexts"][0]["max_members"], 2);
+    assert_eq!(e["messages"]["pins"], false);
+    assert!(e["messages"]["forwarding"].is_null());
+    assert!(e["privacy"].is_null());
+    assert!(
+        !v.to_string().contains("never-relay-this-text"),
+        "the override document and unknown fields are not relayed"
+    );
+
+    // The default harness tenant is not a Platform Access tenant id: nothing to read.
+    let before = fake.calls.lock().unwrap().len();
+    let c = call(
+        &format!("/messaging/environments/{ID}/policy"),
+        &scoped("ops-incident"),
+        "messaging.environment-policy.read",
+        &["cfmeet.platform_ops"],
+    );
+    assert_eq!(code(&send(&h, &c).await.1), "RESOURCE_NOT_FOUND");
+    assert_eq!(fake.calls.lock().unwrap().len(), before);
 }

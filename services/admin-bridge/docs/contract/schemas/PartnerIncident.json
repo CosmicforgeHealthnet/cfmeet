@@ -1,0 +1,40 @@
+{
+  "description": "One incident recorded against a workspace's support profile (the reference and time the operator gave).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_record_id",
+    "workspace_id",
+    "incident_ref",
+    "occurred_at",
+    "recorded_at"
+  ],
+  "properties": {
+    "incident_record_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "incident_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "occurred_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

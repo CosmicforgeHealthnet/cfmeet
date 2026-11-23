@@ -1,0 +1,319 @@
+{
+  "description": "One price version with its content and who drafted, submitted and approved it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version_id",
+    "price_book_id",
+    "seq",
+    "version_state",
+    "rates_digest",
+    "submitted_at",
+    "approved_at",
+    "approval_expires_at",
+    "rejected_reason",
+    "decided_at",
+    "created_at",
+    "updated_at",
+    "version",
+    "product_line",
+    "market_code",
+    "partner_rates",
+    "consumer_plans",
+    "submitted_digest",
+    "drafted_by",
+    "submitted_by",
+    "approved_by",
+    "approver_ref",
+    "effective"
+  ],
+  "properties": {
+    "version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "version_state": {
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "APPROVED",
+        "REJECTED",
+        "SUPERSEDED"
+      ]
+    },
+    "rates_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approval_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "rejected_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "product_line": {
+      "enum": [
+        "PARTNER_PLATFORM",
+        "CONSUMER"
+      ]
+    },
+    "market_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "partner_rates": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 7,
+      "items": {
+        "description": "The rate of one usage type.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "usage_type",
+          "unit_amount_minor",
+          "included_quantity",
+          "minimum_monthly_minor",
+          "tiers"
+        ],
+        "properties": {
+          "usage_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "unit_amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "included_quantity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "minimum_monthly_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "tiers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 16,
+            "items": {
+              "description": "A graduated tier over the quantity beyond the included amount (up_to null: open).",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "up_to",
+                "unit_amount_minor"
+              ],
+              "properties": {
+                "up_to": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "unit_amount_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "PARTNER_PLATFORM content (null for CONSUMER)."
+    },
+    "consumer_plans": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 20,
+      "items": {
+        "description": "One CF Meet user plan.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan_code",
+          "label",
+          "monthly_minor",
+          "yearly_minor",
+          "limits"
+        ],
+        "properties": {
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "monthly_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "yearly_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plan limits (an override sets a subset; an absent limit is null).",
+            "additionalProperties": false,
+            "required": [
+              "meeting_minutes",
+              "participants",
+              "recording",
+              "storage_bytes",
+              "attachment_bytes",
+              "webinars"
+            ],
+            "properties": {
+              "meeting_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "participants": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "recording": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "storage_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "attachment_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "webinars": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "description": "CONSUMER content (null for PARTNER_PLATFORM)."
+    },
+    "submitted_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "drafted_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "description": "The HQ staff member (hq:<sub>)."
+    },
+    "submitted_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "approved_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "approver_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "effective": {
+      "type": "boolean"
+    }
+  }
+}

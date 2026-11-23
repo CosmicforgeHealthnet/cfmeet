@@ -55,7 +55,7 @@ impl OwnerPort for FakeHub {
             }),
             "/reports" => json!({"items": [{
                 "reportId": ID, "reason": "HARASSMENT", "createdAt": T0,
-                "reporterCfMeetId": "CF-REPORT", "targetCfMeetId": CF, "targetReportCount": 2,
+                "reporterCfMeetId": "CF-REPORT", "targetCfMeetId": CF, "targetReportCount": 2, "version": 1,
                 "review": null, "body": "free text that must never travel"
             }], "nextCursor": CUR}),
             "/holds" => {

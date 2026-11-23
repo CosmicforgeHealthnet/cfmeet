@@ -1,0 +1,53 @@
+{
+  "description": "One webinar registration: ids, state and times (no registrant name or address).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registration_id",
+    "space_id",
+    "meeting_id",
+    "status",
+    "user_id",
+    "created_at",
+    "cancelled_at"
+  ],
+  "properties": {
+    "registration_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "space_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cancelled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

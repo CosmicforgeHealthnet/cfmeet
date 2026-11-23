@@ -76,6 +76,14 @@ impl TestAccounts {
         Ok(Self { codes })
     }
 
+    /// The configured addresses, sorted (never the codes). For the admin bridge's
+    /// test-account list, which answers them masked.
+    pub fn addresses(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.codes.keys().map(String::as_str).collect();
+        out.sort_unstable();
+        out
+    }
+
     pub fn is_test_account(&self, email: &str) -> bool {
         self.codes.contains_key(&normalize_email(email))
     }

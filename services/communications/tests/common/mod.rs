@@ -693,6 +693,14 @@ impl Harness {
     }
     /// A harness whose Hub has `CF_NOTIFICATIONS_BASE_URL` set to `notifications_url`.
     pub async fn with_notifications(notifications_url: Option<&str>) -> Self {
+        Self::with_targets(notifications_url, None).await
+    }
+    /// A harness whose Hub has `CF_ADMIN_BRIDGE_BASE_URL` set to `admin_bridge_url` (ADR
+    /// 0068 A7 owner events).
+    pub async fn with_admin_bridge(admin_bridge_url: &str) -> Self {
+        Self::with_targets(None, Some(admin_bridge_url)).await
+    }
+    async fn with_targets(notifications_url: Option<&str>, admin_bridge_url: Option<&str>) -> Self {
         let url = std::env::var("TEST_DATABASE_URL").expect(
             "PostgreSQL acceptance tests require TEST_DATABASE_URL; there is no implicit skip",
         );
@@ -827,6 +835,9 @@ impl Harness {
         targets
             .insert(ServiceId::notifications(), &notifications_target)
             .unwrap();
+        if let Some(url) = admin_bridge_url {
+            targets.insert(ServiceId::admin_bridge(), url).unwrap();
+        }
         let inbound = verifier(
             ServiceId::communications(),
             vec![
@@ -890,6 +901,7 @@ impl Harness {
                 messaging_configured: true,
                 notifications_configured: true,
                 notifications_publications: notifications_url.is_some(),
+                admin_bridge_events: admin_bridge_url.is_some(),
             }),
             metrics: Arc::new(Metrics::default()),
         };

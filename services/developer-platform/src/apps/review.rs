@@ -43,6 +43,8 @@ pub enum Command {
     Reject,
     Publish,
     Suspend,
+    /// ADR 0068 A4: SUSPENDED → the status the app had before (admin bridge only).
+    LiftSuspension,
 }
 
 impl Command {
@@ -53,13 +55,26 @@ impl Command {
             "reject" => Command::Reject,
             "publish" => Command::Publish,
             "suspend" => Command::Suspend,
+            "lift-suspension" => Command::LiftSuspension,
             _ => return None,
         })
     }
 
     /// Whether only a named, non-member reviewer may run the command.
     pub fn needs_reviewer(&self) -> bool {
-        !matches!(self, Command::Suspend)
+        !matches!(self, Command::Suspend | Command::LiftSuspension)
+    }
+
+    /// Commands served to the admin bridge only (the operator console never lifts a
+    /// suspension: HQ decides it with two people).
+    pub fn bridge_only(&self) -> bool {
+        matches!(self, Command::LiftSuspension)
+    }
+
+    /// Commands answered with the standard A4 shape (`{status, version, resource}`)
+    /// rather than HQ's verification case.
+    pub fn standard_answer(&self) -> bool {
+        matches!(self, Command::Suspend | Command::LiftSuspension)
     }
 
     /// Decisions HQ takes with two people (claiming a review is not one).
@@ -75,6 +90,7 @@ impl Command {
             Command::Reject => "app.reject",
             Command::Publish => "app.publish",
             Command::Suspend => "app.suspend",
+            Command::LiftSuspension => "app.lift-suspension",
         }
     }
 }
@@ -178,7 +194,12 @@ pub async fn operator_decide(
         .await?
         .ok_or(ApiError(ErrorCode::NotFound))?;
     if let Some(b) = bridge {
-        if bridge_command::replayed(&state.db, b, command.as_str(), Subject::App, app_id).await? {
+        if let Some((st, v)) =
+            bridge_command::prior(&state.db, b, command.as_str(), Subject::App, app_id).await?
+        {
+            if command.standard_answer() {
+                return Ok(bridge_command::answer(&st, v, bridge_resource(&current)));
+            }
             return view(&state.db, &current).await;
         }
         if let Some(user) = b.linked_user {
@@ -190,6 +211,8 @@ pub async fn operator_decide(
                 return Err(ApiError(ErrorCode::SelfApprovalForbidden));
             }
         }
+    } else if command.bridge_only() {
+        return Err(ApiError(ErrorCode::InternalPermissionDenied));
     } else if command.needs_reviewer() {
         // Named reviewers only (none named: no decision is possible).
         if !state.apps.reviewers.iter().any(|n| n == operator) {
@@ -214,6 +237,13 @@ pub async fn operator_decide(
         .ok_or(ApiError(ErrorCode::NotFound))?;
     let reviewer = format!("operator:{operator}");
     let now = Utc::now();
+    // lift-suspension: back to the status the app had when it was suspended, with that
+    // status's own decision reason (a rejection keeps its reason code).
+    let lifted = if command == Command::LiftSuspension {
+        Some(before_suspension(&txn, app_id).await?)
+    } else {
+        None
+    };
     let (from, to, set, values, code, action): (
         &[&str],
         &str,
@@ -269,6 +299,18 @@ pub async fn operator_decide(
                 "app.suspended",
             )
         }
+        Command::LiftSuspension => {
+            let c = reason(&d, "SUSPENSION_LIFTED")?;
+            let (prior, prior_reason) = lifted.as_ref().ok_or(ApiError(ErrorCode::InternalError))?;
+            (
+                &["SUSPENDED"],
+                prior.as_str(),
+                ", decision_reason_code = $3",
+                vec![prior_reason.clone().into()],
+                Some(c),
+                "app.suspension_lifted",
+            )
+        }
     };
     if !from.contains(&row.status.as_str()) {
         return Err(ApiError(ErrorCode::InvalidState));
@@ -288,10 +330,11 @@ pub async fn operator_decide(
             row.submitted_version.unwrap_or(row.current_version)
         }
         Command::Publish => row.reviewed_version.unwrap_or(row.current_version),
-        Command::Suspend => row.current_version,
+        Command::Suspend | Command::LiftSuspension => row.current_version,
     };
     record_transition(
         &txn,
+        state.bridge_events,
         app_id,
         row.tenant_id,
         Some(&row.status),
@@ -332,9 +375,67 @@ pub async fn operator_decide(
             row.tenant_id,
         )
         .await?;
+        if command.standard_answer() {
+            let version = app_version(&txn, app_id).await?;
+            txn.commit().await?;
+            return Ok(bridge_command::answer(
+                &updated.status,
+                Some(version),
+                bridge_resource(&updated),
+            ));
+        }
     }
     txn.commit().await?;
     Ok(v)
+}
+
+/// The app as the admin bridge's A4 command answer shows it.
+fn bridge_resource(row: &registration::AppRow) -> Value {
+    json!({
+        "appId": row.app_id,
+        "organizationId": row.tenant_id,
+        "state": row.status,
+        "publishedVersion": row.published_version,
+        "updatedAt": row.updated_at.to_rfc3339(),
+    })
+}
+
+async fn app_version<C: ConnectionTrait>(db: &C, app_id: Uuid) -> Result<i64, ApiError> {
+    Ok(db
+        .query_one(stmt(
+            "SELECT version FROM devplat_apps WHERE app_id = $1",
+            vec![app_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::InternalError))?
+        .try_get("", "version")?)
+}
+
+/// `(status, decision reason)` the app had when it was last suspended (from the
+/// append-only transition history).
+async fn before_suspension<C: ConnectionTrait>(
+    db: &C,
+    app_id: Uuid,
+) -> Result<(String, Option<String>), ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT t.from_status, \
+                    (SELECT p.reason_code FROM devplat_app_transitions p \
+                      WHERE p.app_id = t.app_id AND p.to_status = t.from_status AND p.seq < t.seq \
+                      ORDER BY p.seq DESC LIMIT 1) AS prior_reason \
+             FROM devplat_app_transitions t WHERE t.app_id = $1 AND t.to_status = 'SUSPENDED' \
+             ORDER BY t.seq DESC LIMIT 1",
+            vec![app_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::InvalidState))?;
+    let from: Option<String> = row.try_get("", "from_status")?;
+    let from = from
+        .filter(|f| STATUSES.contains(&f.as_str()) && f != "SUSPENDED")
+        .ok_or(ApiError(ErrorCode::InvalidState))?;
+    let reason: Option<String> = row.try_get("", "prior_reason")?;
+    // Only a rejection carries its decision reason; every other status has none.
+    Ok((from.clone(), reason.filter(|_| from == "REJECTED")))
 }
 
 #[cfg(test)]

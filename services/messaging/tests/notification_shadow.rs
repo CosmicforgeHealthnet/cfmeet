@@ -531,6 +531,9 @@ async fn legacy_only_writes_no_fence_rows_and_identical_push_jobs() {
     messaging_migration::ChatControlsMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let mut plain = Harness::on(db, |_| {});
     let g = fixture(&mut plain).await;
     let e2 = send(&plain, &g, "legacy").await;
@@ -1005,6 +1008,9 @@ async fn unpublishable_rows_are_skipped_retried_or_expired_and_content_is_refuse
         .await
         .unwrap();
     messaging_migration::ChatControlsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let plain = Harness::on(db, |_| {});

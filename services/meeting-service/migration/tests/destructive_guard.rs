@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-const BINARIES: [&str; 14] = [
+const BINARIES: [&str; 15] = [
     env!("CARGO_BIN_EXE_migration"),
     env!("CARGO_BIN_EXE_account-security-migration"),
     env!("CARGO_BIN_EXE_meetings-calendar-migration"),
@@ -23,6 +23,7 @@ const BINARIES: [&str; 14] = [
     env!("CARGO_BIN_EXE_meeting-audit-migration"),
     env!("CARGO_BIN_EXE_account-privacy-migration"),
     env!("CARGO_BIN_EXE_account-phone-migration"),
+    env!("CARGO_BIN_EXE_admin-operations-migration"),
 ];
 
 const UNSUPPORTED_DATABASE_URL: &str = "sec015-no-such-driver://guard-check/none";

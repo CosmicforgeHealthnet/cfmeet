@@ -1202,6 +1202,59 @@ pub async fn operator_reroute(
     fail_over_txn(db, &key, keys, false, now).await
 }
 
+/// ADR 0068 `meetings.critical-lane.change`: the same operator reroute of one CRITICAL
+/// decision, by an HQ staff member through the admin bridge (R3, approved by a second
+/// person), at HQ's expected `decision_version`. Only a reroute that happened
+/// (`Failover::Sent`) commits, and it is recorded in the same transaction (`meeting_admin_operations`, `REROUTED`); every other outcome
+/// changes nothing and is answered as a refusal by the caller.
+pub async fn operator_reroute_bridge(
+    db: &DatabaseConnection,
+    keys: Option<&CriticalKeys>,
+    decision_id: Uuid,
+    now: DateTime<Utc>,
+    cmd: &crate::services::admin_operations::BridgeCommand,
+) -> ApiResult<Failover> {
+    use crate::services::admin_operations;
+    let Some(key) = critical_key(db, decision_id).await? else {
+        return Ok(Failover::Unknown);
+    };
+    let version_of = |sql: &'static str| stmt(sql, vec![decision_id.into()]);
+    let txn = db.begin().await?;
+    admin_operations::claim(&txn, cmd).await?;
+    let current: i64 = txn
+        .query_one(version_of(
+            "SELECT decision_version::bigint AS v FROM notification_route_decisions               WHERE decision_id = $1 FOR UPDATE",
+        ))
+        .await?
+        .map(|r| r.try_get::<i64>("", "v"))
+        .transpose()?
+        .ok_or_else(|| ApiError::NotFound("No such decision".into()))?;
+    admin_operations::check_version(cmd, current)?;
+    let outcome = fail_over(&txn, &key, keys, false, now).await?;
+    if matches!(outcome, Failover::Sent { .. }) {
+        let version: Option<i64> = txn
+            .query_one(version_of(
+                "SELECT decision_version::bigint AS v FROM notification_route_decisions                   WHERE decision_id = $1",
+            ))
+            .await?
+            .map(|r| r.try_get::<i64>("", "v"))
+            .transpose()?;
+        admin_operations::record(
+            &txn,
+            cmd,
+            admin_operations::subject::CRITICAL_DECISION,
+            decision_id,
+            "REROUTED",
+            version,
+        )
+        .await?;
+        txn.commit().await?;
+    } else {
+        txn.rollback().await?;
+    }
+    Ok(outcome)
+}
+
 async fn critical_key<C: ConnectionTrait>(
     conn: &C,
     decision_id: Uuid,

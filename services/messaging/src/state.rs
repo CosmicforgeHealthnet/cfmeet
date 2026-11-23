@@ -67,6 +67,9 @@ pub struct AppState {
     /// Notification Service: set when `CF_NOTIFICATIONS_BASE_URL` is configured (default
     /// off: nothing is written).
     pub member_notices: bool,
+    /// ADR 0068 A6: CF Meet user plan limits (`MESSAGING_PLAN_ENFORCEMENT=on`; `None`, the
+    /// default: today's limits only).
+    pub plans: Option<Arc<crate::plans::PlanEnforcement>>,
 }
 
 impl AppState {
@@ -108,6 +111,7 @@ impl AppState {
             apps: crate::apps::AppsSettings::default(),
             organization_wakeups: false,
             member_notices: false,
+            plans: None,
         }
     }
 

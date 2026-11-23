@@ -392,6 +392,19 @@ pub enum DelegationCall {
         environment_id: Uuid,
         credential_id: Uuid,
     },
+    /// ADR 0068 A4: the owner-delivered keys of `environment_id` (issued or rotated by HQ
+    /// staff through the admin bridge) still waiting for their one reveal; never a secret.
+    ListCredentialDeliveries {
+        environment_id: Uuid,
+    },
+    /// ADR 0068 A4: the ONE reveal of an owner-delivered key to a signed-in human member:
+    /// `{credential, secret}`, the sealed copy destroyed by Platform Access. Never stored
+    /// or replayed here.
+    RevealCredentialDelivery {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        delivery_ref: Uuid,
+    },
     /// §54: allows a STANDARD scope on the application for `environment_kinds`
     /// (FIRST_PARTY_ONLY only as an operator command; PRODUCTION only once activated).
     GrantApplicationScope {
@@ -686,6 +699,24 @@ impl DelegationCall {
                 Method::POST,
                 format!(
                     "/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}/resume"
+                ),
+                None,
+                Some(*actor),
+            ),
+            DelegationCall::ListCredentialDeliveries { environment_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}/credential-deliveries"),
+                None,
+                None,
+            ),
+            DelegationCall::RevealCredentialDelivery {
+                actor,
+                environment_id,
+                delivery_ref,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/credential-deliveries/{delivery_ref}/reveal"
                 ),
                 None,
                 Some(*actor),

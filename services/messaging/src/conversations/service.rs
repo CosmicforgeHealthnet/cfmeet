@@ -1992,7 +1992,31 @@ pub async fn update_policy(
     ctx: &TrustedContext,
     update: PolicyUpdate,
 ) -> Result<Value> {
-    let baseline = policy::load_baseline(&state.db, ctx.scope.environment_id).await?;
+    let resolved = check_policy_update(state, ctx.scope.environment_id, &update).await?;
+    let st = state.clone();
+    let ctx2 = ctx.clone();
+    let request_ctx = request_context();
+    state
+        .db
+        .transaction::<_, i64, Error>(move |txn| {
+            Box::pin(async move {
+                write_policy_in(txn, &ctx2, &update, &resolved, st.now(), &request_ctx).await
+            })
+        })
+        .await
+        .map_err(Error::from)?;
+    policy_view(state, ctx).await
+}
+
+/// Validates a policy update for `environment_id` (no change): the layered document
+/// resolves at the next version, and every context it configures keeps a profile this
+/// deployment can run. Returns the effective policy it would produce.
+pub(crate) async fn check_policy_update(
+    state: &AppState,
+    environment_id: Uuid,
+    update: &PolicyUpdate,
+) -> Result<policy::EffectivePolicy> {
+    let baseline = policy::load_baseline(&state.db, environment_id).await?;
     let resolved = policy::resolve(
         &policy::layer(baseline, &update.policy),
         update.expected_version + 1,
@@ -2023,77 +2047,79 @@ pub async fn update_policy(
             )));
         }
     }
-    let st = state.clone();
-    let ctx2 = ctx.clone();
-    let request_ctx = request_context();
-    state
-        .db
-        .transaction::<_, (), Error>(move |txn| {
-            Box::pin(async move {
-                let now = st.now();
-                let env = ctx2.scope.environment_id;
-                // Serialize writers of this environment's policy (also when none exists yet).
-                db::exec(
-                    txn,
-                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 11))",
-                    vec![format!("messaging-policy:{env}").into()],
-                )
-                .await?;
-                let (_, current) = policy::load_application_policy(txn, env, true).await?;
-                if current != update.expected_version {
-                    return Err(Error::code(ErrorCode::PolicyVersionConflict));
-                }
-                let document = serde_json::to_value(&update.policy).expect("serializes");
-                db::exec(
-                    txn,
-                    "INSERT INTO messaging_application_policies (environment_id, tenant_id, application_id, version, \
-                       document, updated_by_credential_id, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-                     ON CONFLICT (environment_id) DO UPDATE SET version = EXCLUDED.version, document = EXCLUDED.document, \
-                       updated_by_credential_id = EXCLUDED.updated_by_credential_id, updated_at = EXCLUDED.updated_at",
-                    vec![
-                        env.into(),
-                        ctx2.scope.tenant_id.into(),
-                        ctx2.scope.application_id.into(),
-                        (current + 1).into(),
-                        document.into(),
-                        ctx2.credential_id.into(),
-                        now.into(),
-                    ],
-                )
-                .await?;
-                // A changed storage budget may make room for thumbnails deferred for it.
-                crate::attachments::derivatives::requeue_quota_deferred(txn, env, now).await?;
-                audit::record(
-                    txn,
-                    AuditEntry {
-                        ctx: &ctx2,
-                        principal_id: None,
-                        action: "POLICY_UPDATED",
-                        target_kind: "MESSAGING_POLICY",
-                        target_id: env,
-                        detail: json!({ "version": current + 1, "digest": resolved.digest() }),
-                    },
-                    &request_ctx,
-                    now,
-                )
-                .await?;
-                outbox::enqueue(
-                    txn,
-                    NewEvent {
-                        event_type: "messaging.policy.updated",
-                        aggregate_type: "MESSAGING_POLICY",
-                        aggregate_id: env,
-                        scope: scope_of(&ctx2),
-                        payload: json!({ "version": current + 1, "policy_digest": resolved.digest() }),
-                    },
-                    &request_ctx,
-                    now,
-                )
-                .await?;
-                Ok(())
-            })
-        })
-        .await
-        .map_err(Error::from)?;
-    policy_view(state, ctx).await
+    Ok(resolved)
+}
+
+/// Writes a [`check_policy_update`]d document inside the caller's transaction, only at
+/// `update.expected_version` (else `POLICY_VERSION_CONFLICT`), with its audit entry and
+/// event. Returns the new version. Also used by the admin bridge
+/// ([`crate::operator_commands::policy`]).
+pub(crate) async fn write_policy_in<C: ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    update: &PolicyUpdate,
+    resolved: &policy::EffectivePolicy,
+    now: DateTime<Utc>,
+    request_ctx: &RequestContext,
+) -> Result<i64> {
+    let env = ctx.scope.environment_id;
+    // Serialize writers of this environment's policy (also when none exists yet).
+    db::exec(
+        txn,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 11))",
+        vec![format!("messaging-policy:{env}").into()],
+    )
+    .await?;
+    let (_, current) = policy::load_application_policy(txn, env, true).await?;
+    if current != update.expected_version {
+        return Err(Error::code(ErrorCode::PolicyVersionConflict));
+    }
+    let document = serde_json::to_value(&update.policy).expect("serializes");
+    db::exec(
+        txn,
+        "INSERT INTO messaging_application_policies (environment_id, tenant_id, application_id, version, \
+           document, updated_by_credential_id, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         ON CONFLICT (environment_id) DO UPDATE SET version = EXCLUDED.version, document = EXCLUDED.document, \
+           updated_by_credential_id = EXCLUDED.updated_by_credential_id, updated_at = EXCLUDED.updated_at",
+        vec![
+            env.into(),
+            ctx.scope.tenant_id.into(),
+            ctx.scope.application_id.into(),
+            (current + 1).into(),
+            document.into(),
+            ctx.credential_id.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    // A changed storage budget may make room for thumbnails deferred for it.
+    crate::attachments::derivatives::requeue_quota_deferred(txn, env, now).await?;
+    audit::record(
+        txn,
+        AuditEntry {
+            ctx,
+            principal_id: None,
+            action: "POLICY_UPDATED",
+            target_kind: "MESSAGING_POLICY",
+            target_id: env,
+            detail: json!({ "version": current + 1, "digest": resolved.digest() }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    outbox::enqueue(
+        txn,
+        NewEvent {
+            event_type: "messaging.policy.updated",
+            aggregate_type: "MESSAGING_POLICY",
+            aggregate_id: env,
+            scope: scope_of(ctx),
+            payload: json!({ "version": current + 1, "policy_digest": resolved.digest() }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    Ok(current + 1)
 }

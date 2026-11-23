@@ -105,6 +105,13 @@ pub struct OutboundSettings {
     pub base_urls: BTreeMap<Owner, String>,
 }
 
+/// The owner event listener (design §11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventsSettings {
+    pub bind: SocketAddr,
+    pub trust_bundle_file: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub runtime_environment: RuntimeEnvironment,
@@ -118,6 +125,10 @@ pub struct Config {
     pub security: Option<SecurityConfig>,
     pub health_urls: BTreeMap<Owner, String>,
     pub outbound: Option<OutboundSettings>,
+    /// `None`: no owner event listener.
+    pub events: Option<EventsSettings>,
+    /// `None`: feature switch-on requests are disabled and release history is UNAVAILABLE.
+    pub github: Option<crate::releases::GitHubSettings>,
     pub json_logs: bool,
 }
 
@@ -315,6 +326,8 @@ impl Config {
                 security: None,
                 health_urls,
                 outbound,
+                events: None,
+                github: None,
                 json_logs,
             });
         }
@@ -400,6 +413,26 @@ impl Config {
                 10_000,
             )?,
         };
+        let events = match env.get("ADMIN_BRIDGE_EVENTS_BIND_ADDRESS") {
+            None => None,
+            Some(_) => {
+                let bind = addr(env, "ADMIN_BRIDGE_EVENTS_BIND_ADDRESS", "")?;
+                if bind == hq_bind || bind == ops_bind {
+                    return Err(invalid(
+                        "ADMIN_BRIDGE_EVENTS_BIND_ADDRESS",
+                        "must differ from the HQ and ops listeners",
+                    ));
+                }
+                Some(EventsSettings {
+                    bind,
+                    trust_bundle_file: PathBuf::from(required(
+                        env,
+                        "CF_SERVICE_TRUST_BUNDLE_FILE",
+                    )?),
+                })
+            }
+        };
+        let github = github(env, runtime_environment)?;
         Ok(Config {
             runtime_environment,
             switches,
@@ -411,9 +444,74 @@ impl Config {
             security: Some(security),
             health_urls,
             outbound,
+            events,
+            github,
             json_logs,
         })
     }
+}
+
+/// `ADMIN_BRIDGE_GITHUB_*`: the release workflow, or `None` when no token file is set.
+fn github(
+    env: &dyn Env,
+    runtime_environment: RuntimeEnvironment,
+) -> Result<Option<crate::releases::GitHubSettings>, ConfigError> {
+    if env.get("ADMIN_BRIDGE_GITHUB_TOKEN").is_some() {
+        return Err(invalid(
+            "ADMIN_BRIDGE_GITHUB_TOKEN",
+            "inline tokens are refused; use ADMIN_BRIDGE_GITHUB_TOKEN_FILE",
+        ));
+    }
+    let Some(token_file) = env.get("ADMIN_BRIDGE_GITHUB_TOKEN_FILE") else {
+        if env.get("ADMIN_BRIDGE_GITHUB_REPOSITORY").is_some() {
+            return Err(invalid(
+                "ADMIN_BRIDGE_GITHUB_REPOSITORY",
+                "set together with ADMIN_BRIDGE_GITHUB_TOKEN_FILE",
+            ));
+        }
+        return Ok(None);
+    };
+    let repository = required(env, "ADMIN_BRIDGE_GITHUB_REPOSITORY")?;
+    if !crate::releases::repository_ok(&repository) {
+        return Err(invalid(
+            "ADMIN_BRIDGE_GITHUB_REPOSITORY",
+            "expected owner/name",
+        ));
+    }
+    let api_url = env
+        .get("ADMIN_BRIDGE_GITHUB_API_URL")
+        .unwrap_or_else(|| crate::releases::DEFAULT_API_URL.to_string());
+    let loopback = |rest: &str| {
+        ["127.0.0.1", "localhost", "[::1]"].iter().any(|h| {
+            rest.strip_prefix(h)
+                .is_some_and(|after| after.is_empty() || after.starts_with([':', '/']))
+        })
+    };
+    let ok = match (
+        api_url.strip_prefix("https://"),
+        api_url.strip_prefix("http://"),
+    ) {
+        (Some(rest), _) => !rest.is_empty(),
+        (None, Some(rest)) => {
+            loopback(rest)
+                && matches!(
+                    runtime_environment,
+                    RuntimeEnvironment::Local | RuntimeEnvironment::Test
+                )
+        }
+        _ => false,
+    };
+    if !ok || api_url.len() > 256 || api_url.contains(['?', '#', '@', ' ']) {
+        return Err(invalid(
+            "ADMIN_BRIDGE_GITHUB_API_URL",
+            "must be https (http only to a loopback host in local / test)",
+        ));
+    }
+    Ok(Some(crate::releases::GitHubSettings {
+        api_url,
+        repository,
+        token_file: PathBuf::from(token_file),
+    }))
 }
 
 #[cfg(test)]
@@ -581,6 +679,105 @@ mod tests {
         }
         // local and test fixtures may stay readable
         assert!(Config::from_env(&V(enabled(&[]))).is_ok());
+    }
+
+    #[test]
+    fn the_event_listener_needs_a_trust_bundle_and_its_own_address() {
+        assert!(Config::from_env(&V(enabled(&[]))).unwrap().events.is_none());
+        let e = Config::from_env(&V(enabled(&[(
+            "ADMIN_BRIDGE_EVENTS_BIND_ADDRESS",
+            "10.0.0.5:8191",
+        )])))
+        .unwrap_err();
+        assert_eq!(e, ConfigError::Missing("CF_SERVICE_TRUST_BUNDLE_FILE"));
+        let c = Config::from_env(&V(enabled(&[
+            ("ADMIN_BRIDGE_EVENTS_BIND_ADDRESS", "10.0.0.5:8191"),
+            ("CF_SERVICE_TRUST_BUNDLE_FILE", "/trust.json"),
+        ])))
+        .unwrap();
+        assert_eq!(
+            c.events.unwrap().bind,
+            "10.0.0.5:8191".parse::<SocketAddr>().unwrap()
+        );
+        for bad in ["127.0.0.1:8190", "127.0.0.1:8443", "not-an-address"] {
+            assert!(
+                Config::from_env(&V(enabled(&[
+                    ("ADMIN_BRIDGE_EVENTS_BIND_ADDRESS", bad),
+                    ("CF_SERVICE_TRUST_BUNDLE_FILE", "/trust.json"),
+                ])))
+                .is_err(),
+                "{bad}"
+            );
+        }
+        // Disabled: no listener whatever is set.
+        let off = Config::from_env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("ADMIN_BRIDGE_EVENTS_BIND_ADDRESS", "10.0.0.5:8191"),
+        ])
+        .unwrap();
+        assert!(off.events.is_none() && off.github.is_none());
+    }
+
+    #[test]
+    fn github_needs_a_token_file_and_a_repository() {
+        assert!(Config::from_env(&V(enabled(&[]))).unwrap().github.is_none());
+        let g = Config::from_env(&V(enabled(&[
+            ("ADMIN_BRIDGE_GITHUB_TOKEN_FILE", "/run/secrets/gh"),
+            (
+                "ADMIN_BRIDGE_GITHUB_REPOSITORY",
+                "CosmicforgeHealthnet/cfmeet",
+            ),
+        ])))
+        .unwrap()
+        .github
+        .unwrap();
+        assert_eq!(g.api_url, "https://api.github.com");
+        assert_eq!(
+            Config::from_env(&V(enabled(&[(
+                "ADMIN_BRIDGE_GITHUB_TOKEN_FILE",
+                "/run/secrets/gh"
+            )])))
+            .unwrap_err(),
+            ConfigError::Missing("ADMIN_BRIDGE_GITHUB_REPOSITORY")
+        );
+        let e = Config::from_env(&V(enabled(&[(
+            "ADMIN_BRIDGE_GITHUB_TOKEN",
+            "ghp_secretvalue",
+        )])))
+        .unwrap_err();
+        assert!(!e.to_string().contains("ghp_secretvalue"));
+        for (var, value) in [
+            ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "not a repo"),
+            ("ADMIN_BRIDGE_GITHUB_API_URL", "http://api.github.com"),
+            ("ADMIN_BRIDGE_GITHUB_API_URL", "ftp://x"),
+        ] {
+            assert!(
+                Config::from_env(&V(enabled(&[
+                    ("ADMIN_BRIDGE_GITHUB_TOKEN_FILE", "/run/secrets/gh"),
+                    ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "o/n"),
+                    (var, value),
+                ])))
+                .is_err(),
+                "{var}={value}"
+            );
+        }
+        // A loopback fake in test only.
+        assert!(Config::from_env(&V(enabled(&[
+            ("ADMIN_BRIDGE_GITHUB_TOKEN_FILE", "/run/secrets/gh"),
+            ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "o/n"),
+            ("ADMIN_BRIDGE_GITHUB_API_URL", "http://127.0.0.1:9999"),
+        ])))
+        .is_ok());
+        assert!(Config::from_env(&V(enabled(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("ADMIN_BRIDGE_GITHUB_TOKEN_FILE", "/run/secrets/gh"),
+            ("ADMIN_BRIDGE_GITHUB_REPOSITORY", "o/n"),
+            ("ADMIN_BRIDGE_GITHUB_API_URL", "http://127.0.0.1:9999"),
+        ])))
+        .is_err());
+        assert!(
+            Config::from_env(&V(enabled(&[("ADMIN_BRIDGE_GITHUB_REPOSITORY", "o/n")]))).is_err()
+        );
     }
 
     #[test]

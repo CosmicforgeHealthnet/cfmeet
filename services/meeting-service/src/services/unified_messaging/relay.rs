@@ -156,6 +156,10 @@ const EVENTS: &[&str] = &["after", "limit"];
 /// `afterEventSequence` on the REST replay). Only the canonical key is ever forwarded.
 pub const QUERY_ALIASES: &[(&str, &str)] = &[("afterEventSequence", "after")];
 
+/// ADR 0068: the recipient's owner-delivered exports on Messaging's delegated mirror
+/// (served only there, so never part of the [`ROUTES`] allowlist of customer operations).
+pub const EXPORT_DELIVERIES: &str = "/internal/v1/delegated/v1/messaging/export-deliveries";
+
 /// Every HTTP method the allowlist uses; `routes::v2` mounts exactly these on
 /// `/api/v2/messaging/relay/*path` (a unit test keeps the two in step).
 pub const RELAY_METHODS: &[Method] = &[
@@ -762,6 +766,53 @@ impl UnifiedMessaging {
                 &format!("/internal/v1/delegated/{}", req.path),
                 &query,
                 &headers,
+                body.as_ref(),
+            )
+            .await
+            .map_err(|e| chat_error(&e))
+    }
+
+    /// ADR 0068 (owner-delivered exports): the caller's own owner-delivered Messaging exports
+    /// (`GET /internal/v1/delegated/v1/messaging/export-deliveries`, newest first, at most
+    /// 20), as references. Messaging answers only the recipient's own exports.
+    pub async fn export_deliveries(&self, user_id: Uuid) -> ApiResult<(u16, Value)> {
+        self.export_call(user_id, Method::GET, EXPORT_DELIVERIES.to_string(), None)
+            .await
+    }
+
+    /// ADR 0068: the caller's single claim of an owner-delivered export
+    /// (`POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim`): one
+    /// short-lived forced-download grant, answered once and never stored or logged here.
+    pub async fn claim_export(&self, user_id: Uuid, export_id: Uuid) -> ApiResult<(u16, Value)> {
+        self.export_call(
+            user_id,
+            Method::POST,
+            format!("/internal/v1/delegated/v1/messaging/exports/{export_id}/claim"),
+            Some(json!({})),
+        )
+        .await
+    }
+
+    async fn export_call(
+        &self,
+        user_id: Uuid,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+    ) -> ApiResult<(u16, Value)> {
+        let principal = self.principal_for_user(user_id).await?;
+        let acting = Acting {
+            principal_id: principal,
+            kind: PrincipalKind::NativeCfUser,
+        };
+        self.gateway
+            .call_raw_with_headers(
+                Peer::Messaging,
+                Some(acting),
+                method,
+                &path,
+                &[],
+                &[],
                 body.as_ref(),
             )
             .await

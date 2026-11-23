@@ -224,6 +224,7 @@ fn contract_paths_equal_the_registered_routes() {
             || path.ends_with("src/organization_members.rs")
             || path.ends_with("src/account_privacy.rs")
             || path.ends_with("src/operator_reads.rs")
+            || path.ends_with("src/operator_commands.rs")
             || path.ends_with("src/communications.rs")
         {
             "/internal/v1"

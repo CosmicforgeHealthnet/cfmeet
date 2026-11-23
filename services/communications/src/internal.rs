@@ -346,15 +346,7 @@ pub async fn review_report(
     Extension(ctx): Extension<InternalServiceContext>,
     Json(input): Json<ReviewReport>,
 ) -> Result<Json<Value>> {
-    let valid = match input.decision.as_str() {
-        "DISMISSED" => input.reason == "NO_VIOLATION" && !input.hold_target,
-        "ACTIONED" => matches!(
-            input.reason.as_str(),
-            "ABUSE" | "SECURITY" | "LEGAL" | "OTHER"
-        ),
-        _ => false,
-    };
-    if !valid {
+    if !crate::operator_commands::valid_review(&input.decision, &input.reason, input.hold_target) {
         return Err(Error::Validation);
     }
     let scope = auth::delegated(&ctx)?;
@@ -379,6 +371,9 @@ pub async fn review_report(
     if inserted == 0 {
         return Err(Error::Version);
     }
+    // ADR 0068 A7: the reviewed report (version 2) to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(&s, &txn, input.report_id, Some(&input.decision), 2)
+        .await?;
     if input.hold_target {
         let hold_reason = if input.reason == "SECURITY" || input.reason == "LEGAL" {
             input.reason.clone()

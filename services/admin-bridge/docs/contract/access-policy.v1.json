@@ -1,6 +1,6 @@
 {
   "policy": "cfmeet-admin-bridge.access-policy-ceiling.v1",
-  "contract_version": "1.12.0",
+  "contract_version": "2.0.0",
   "rule": "The runtime access policy is signed by CF Meet (Ed25519) and pinned by revision; every grant it makes must be inside this ceiling, or the bridge refuses to load it. A permission is effective only when the staff assertion lists it AND one of the asserted roles is granted it with the request's purpose. A role is never inferred from list order.",
   "roles": {
     "cfmeet.viewer": {
@@ -139,6 +139,12 @@
           "privacy-request",
           "support-review"
         ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
         "meetings.email-delivery.read": [
           "abuse-review",
           "ops-incident",
@@ -152,6 +158,18 @@
           "support-review"
         ],
         "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request",
@@ -361,6 +379,11 @@
           "support-review"
         ],
         "accounts.duplicates.enforce": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce-all": [
           "abuse-review",
           "privacy-request",
           "support-review"
@@ -594,6 +617,12 @@
           "privacy-request",
           "support-review"
         ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
         "meetings.email-delivery.read": [
           "abuse-review",
           "ops-incident",
@@ -607,6 +636,18 @@
           "support-review"
         ],
         "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request",
@@ -706,7 +747,17 @@
           "ops-incident",
           "privacy-request"
         ],
+        "messaging.conversations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
         "messaging.deletion-requests.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.environment-policy.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request"
@@ -756,6 +807,11 @@
           "privacy-request"
         ],
         "messaging.member.remove": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.members.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request"
@@ -1557,6 +1613,11 @@
           "ops-incident",
           "privacy-request"
         ],
+        "calling.webhook-keys.reseal": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
         "communications.backfill.run": [
           "ops-incident"
         ],
@@ -1597,6 +1658,12 @@
           "privacy-request",
           "support-review"
         ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
         "meetings.email-delivery.read": [
           "abuse-review",
           "ops-incident",
@@ -1610,6 +1677,18 @@
           "support-review"
         ],
         "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request",
@@ -1698,7 +1777,17 @@
           "ops-incident",
           "privacy-request"
         ],
+        "messaging.conversations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
         "messaging.deletion-requests.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.environment-policy.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request"
@@ -1733,6 +1822,11 @@
           "ops-incident"
         ],
         "messaging.key-transparency.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.members.read": [
           "abuse-review",
           "ops-incident",
           "privacy-request"
@@ -1863,6 +1957,11 @@
           "support-review"
         ],
         "accounts.duplicates.enforce": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce-all": [
           "abuse-review",
           "privacy-request",
           "support-review"

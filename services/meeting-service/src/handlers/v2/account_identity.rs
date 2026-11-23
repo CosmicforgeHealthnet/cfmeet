@@ -1,13 +1,22 @@
 //! Step-up confirmation and secure email change for the signed-in account (passwordless
 //! sign-in: the email address is the credential).
 
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{
+        header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderMap, HeaderValue,
+    },
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
-use super::{account_sessions::current_session, V2Json};
+use super::{account_sessions::current_session, V2Json, V2Query};
 use crate::{
-    error::{ApiError, ApiResult},
+    error::{ApiError, ApiResult, ErrorCode},
     models::users,
     services::{
         actor::ActorContext,
@@ -229,6 +238,19 @@ pub async fn confirm_email_change(
     }))
 }
 
+/// ADR 0068 A7: which owner-delivered export to download (the emailed link's `export`).
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DataExportQuery {
+    /// An export CF Meet support requested for this account (from the emailed download link;
+    /// its `token` goes in the `X-CF-Data-Export-Token` header). Omitted: the live export.
+    pub export_id: Option<uuid::Uuid>,
+}
+
+/// The header carrying the single-use token of an emailed download link.
+pub const DATA_EXPORT_TOKEN_HEADER: &str = "x-cf-data-export-token";
+
 /// Export my personal data
 ///
 /// Gap audit A2: one JSON document of everything the Meeting Service holds about the
@@ -237,12 +259,24 @@ pub async fn confirm_email_change(
 /// `elsewhere`, what Messaging (conversations), the Communications Hub (profile, CF Meet ID,
 /// contacts, lists, saved messages, settings) and Calling (call history) hold about it; an
 /// owner that cannot answer is reported as unavailable. Requires a session-bound sign-in.
+///
+/// ADR 0068 A7: with `exportId` and the `X-CF-Data-Export-Token` header (both from the emailed
+/// link of an export CF Meet support requested for the owner), the stored copy of THAT export
+/// is answered instead, once (it is deleted at once): this needs a sign-in made within the
+/// re-authentication window (otherwise 403 `REAUTHENTICATION_REQUIRED`: sign in again), and a
+/// used, foreign, wrong or expired link (7 days) is 404.
 #[utoipa::path(
     get, path = "/api/v2/me/data-export", tag = "Account security (v2)", operation_id = "v2_export_my_data",
+    params(
+        DataExportQuery,
+        ("X-CF-Data-Export-Token" = Option<String>, Header, description = "The single-use token of the emailed download link (with exportId)"),
+    ),
     responses(
         (status = 200, description = "The personal-data export", body = Object),
+        (status = 400, description = "VALIDATION_ERROR - exportId without X-CF-Data-Export-Token (or the reverse)", body = ErrorEnvelope),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
-        (status = 403, description = "REAUTHENTICATION_REQUIRED - the token has no session; sign in again", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - the token has no session, or (exportId) the sign-in is not recent; sign in again", body = ErrorEnvelope),
+        (status = 404, description = "NOT_FOUND - (exportId) the link is invalid, already used or expired", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -250,11 +284,52 @@ pub async fn export_my_data(
     State(state): State<AppState>,
     actor: ActorContext,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+    V2Query(query): V2Query<DataExportQuery>,
+) -> ApiResult<Response> {
     let (user, _) = signed_in(&state, &actor, &headers).await?;
-    Ok(Json(
-        crate::services::account_erasure::export(&state, user.id).await?,
-    ))
+    let token = headers
+        .get(DATA_EXPORT_TOKEN_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    match (query.export_id, token) {
+        (None, None) => Ok(
+            Json(crate::services::account_erasure::export(&state, user.id).await?).into_response(),
+        ),
+        (Some(export_id), Some(token)) => {
+            let recent = headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .and_then(|t| state.jwt_service.verify_token(t).ok())
+                .is_some_and(|claims| {
+                    state
+                        .auth_policy
+                        .recently_authenticated(&claims, chrono::Utc::now().timestamp())
+                });
+            if !recent {
+                return Err(ApiError::domain(
+                    ErrorCode::ReauthenticationRequired,
+                    "Downloading your data needs a recent sign-in; sign in again",
+                ));
+            }
+            let document =
+                crate::services::account_export::download(&state, user.id, export_id, token)
+                    .await?;
+            let mut response = Response::new(Body::from(document.to_vec()));
+            let h = response.headers_mut();
+            h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            h.insert(
+                CONTENT_DISPOSITION,
+                HeaderValue::from_static("attachment; filename=\"cfmeet-data-export.json\""),
+            );
+            h.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            Ok(response)
+        }
+        _ => Err(ApiError::BadRequest(
+            "exportId and X-CF-Data-Export-Token go together".into(),
+        )),
+    }
 }
 
 /// Gap audit A2: the confirmation of an account deletion.

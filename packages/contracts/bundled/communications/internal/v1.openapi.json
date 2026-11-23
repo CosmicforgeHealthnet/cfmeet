@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.10.0",
-    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.10.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator."
+    "version": "1.11.0",
+    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.10.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.11.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/communications/operator/profiles/{cfMeetId}/suspend and /restore and /operator/reports/{reportId}/review (R3: X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest required), /operator/backfill and /operator/replay (R2), each requiring communications.administer, X-CF-Operator and Idempotency-Key, answering {status, version, resource} and recorded in communication_admin_operations in the same transaction; GET /internal/v1/operator/operations/{idempotencyKey}, the bridge's settlement record; OperatorReport.version (1 open, 2 reviewed)."
   },
   "tags": [
     {
@@ -2150,6 +2150,920 @@
           }
         }
       }
+    },
+    "/internal/v1/communications/operator/profiles/{cfMeetId}/suspend": {
+      "post": {
+        "operationId": "operatorSuspendProfile",
+        "summary": "Suspend a profile (admin bridge, R3)",
+        "description": "Places the operator hold on the profile (new personal communications are denied by the policy decision; meetings admission and the Account lifecycle are unaffected) at the profile's expectedVersion (the version of the operator profile read); the profile version advances. An active hold takes the new reason. Answers SUSPENDED. Audited with the operator and approver. Requires communications.administer (cfmeet.admin-bridge only), X-CF-Operator and Idempotency-Key, and the two-person approval headers (R3).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068), recorded with the change. Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (a UUID). The change and its record in communication_admin_operations commit together; the same key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or not a UUID: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "R3: the second person who approved the action (a different HQ staff member than X-CF-Operator). Without the approval headers the command is refused (403 PERMISSION_DENIED), nothing done.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's approval reference, recorded with the change.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's intent digest of the approved action.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "cfMeetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorSuspendProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the same key replayed): the resulting state, version and resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid body (unknown fields refused), expectedVersion below 1, or Idempotency-Key missing / not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, operator attribution not from cfmeet.admin-bridge, or the R3 approval headers missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: no profile has this current CF Meet ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: the subject is not at expectedVersion or not in a state the command applies to; IDEMPOTENCY_CONFLICT: the key was used for another command or subject. Nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/profiles/{cfMeetId}/restore": {
+      "post": {
+        "operationId": "operatorRestoreProfile",
+        "summary": "Restore a profile (admin bridge, R3)",
+        "description": "Releases the operator hold at the profile's expectedVersion; the profile version advances. A profile without an active hold is refused (409 VERSION_CONFLICT). Answers RESTORED. Audited with the operator and approver. Requires communications.administer (cfmeet.admin-bridge only), X-CF-Operator and Idempotency-Key, and the two-person approval headers (R3).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068), recorded with the change. Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (a UUID). The change and its record in communication_admin_operations commit together; the same key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or not a UUID: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "R3: the second person who approved the action (a different HQ staff member than X-CF-Operator). Without the approval headers the command is refused (403 PERMISSION_DENIED), nothing done.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's approval reference, recorded with the change.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's intent digest of the approved action.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "cfMeetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRestoreProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the same key replayed): the resulting state, version and resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid body (unknown fields refused), expectedVersion below 1, or Idempotency-Key missing / not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, operator attribution not from cfmeet.admin-bridge, or the R3 approval headers missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: no profile has this current CF Meet ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: the subject is not at expectedVersion or not in a state the command applies to; IDEMPOTENCY_CONFLICT: the key was used for another command or subject. Nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/reports/{reportId}/review": {
+      "post": {
+        "operationId": "operatorReviewReport",
+        "summary": "Review a profile report (admin bridge, R3)",
+        "description": "Records the decision on one report once, with the HQ staff member as reviewer, at the report's expectedVersion (1 while open, 2 once reviewed: a reviewed report always conflicts). With holdTarget (ACTIONED only) the reported profile is held in the same transaction and its version advances. Answers the decision (DISMISSED or ACTIONED), version \"2\". Requires communications.administer (cfmeet.admin-bridge only), X-CF-Operator and Idempotency-Key, and the two-person approval headers (R3).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068), recorded with the change. Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (a UUID). The change and its record in communication_admin_operations commit together; the same key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or not a UUID: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "R3: the second person who approved the action (a different HQ staff member than X-CF-Operator). Without the approval headers the command is refused (403 PERMISSION_DENIED), nothing done.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's approval reference, recorded with the change.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "R3: HQ's intent digest of the approved action.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReviewReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the same key replayed): the resulting state, version and resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid body (unknown fields refused), expectedVersion below 1, or Idempotency-Key missing / not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, operator attribution not from cfmeet.admin-bridge, or the R3 approval headers missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: the subject is not at expectedVersion or not in a state the command applies to; IDEMPOTENCY_CONFLICT: the key was used for another command or subject. Nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/backfill": {
+      "post": {
+        "operationId": "operatorRunBackfill",
+        "summary": "Backfill one page of profiles (admin bridge, R2)",
+        "description": "Asks the Account for one page of native accounts in the environment (environmentId, optional while the Hub knows exactly one first-party environment; several: 400) and creates the missing profiles in one transaction with the record (existing profiles are kept). Unversioned: no expectedVersion, version null. Answers COMPLETED with {environmentId, created, nextCursor}; a repeated key returns that answer without asking the Account again. Requires communications.administer (cfmeet.admin-bridge only), X-CF-Operator and Idempotency-Key (R2: no second person).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068), recorded with the change. Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (a UUID). The change and its record in communication_admin_operations commit together; the same key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or not a UUID: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRunBackfill"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the same key replayed): the resulting state, version and resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid body (unknown fields refused), expectedVersion below 1, or Idempotency-Key missing / not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: the Hub knows no such environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: the subject is not at expectedVersion or not in a state the command applies to; IDEMPOTENCY_CONFLICT: the key was used for another command or subject. Nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/replay": {
+      "post": {
+        "operationId": "operatorReplayEvent",
+        "summary": "Re-queue a dead outbox event (admin bridge, R2)",
+        "description": "Re-queues the DEAD deliveries of one outbox event (any scope). Unversioned: no expectedVersion, version null. Nothing DEAD: 409 VERSION_CONFLICT, nothing done. Answers REQUEUED with {eventId, requeued}; a repeated key returns that answer. Requires communications.administer (cfmeet.admin-bridge only), X-CF-Operator and Idempotency-Key (R2: no second person).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge acts for (ADR 0068), recorded with the change. Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's operation id (a UUID). The change and its record in communication_admin_operations commit together; the same key for the same command and subject answers the current resource without applying again; for anything else 409 IDEMPOTENCY_CONFLICT. Missing or not a UUID: 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorReplayEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the same key replayed): the resulting state, version and resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid body (unknown fields refused), expectedVersion below 1, or Idempotency-Key missing / not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT: the subject is not at expectedVersion or not in a state the command applies to; IDEMPOTENCY_CONFLICT: the key was used for another command or subject. Nothing done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "operationId": "operatorGetOperation",
+        "summary": "The record of an admin bridge command",
+        "description": "The bridge's settlement read (ADR 0068 §17.6): the command applied under this Idempotency-Key, written in the same transaction as the change, with the status and version the command answered. A key that is not here was never applied. Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator; 404 for any other caller and for an unknown key.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The applied command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorOperationRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: the bridge sent no or a malformed X-CF-Operator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown key, or a caller other than the admin bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2781,6 +3695,222 @@
           }
         }
       },
+      "OperatorCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "description": "The answer of every admin bridge command.",
+        "properties": {
+          "status": {
+            "enum": [
+              "SUSPENDED",
+              "RESTORED",
+              "OPEN",
+              "DISMISSED",
+              "ACTIONED",
+              "COMPLETED",
+              "REQUEUED"
+            ],
+            "description": "Profiles: SUSPENDED (operator hold active) or RESTORED. Reports: the decision (OPEN only if never reviewed). Backfill: COMPLETED. Replay: REQUEUED."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The resulting row version as the string of the integer (profiles: the profile version; reports: \"2\"); null for backfill and replay."
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "cfMeetId",
+                  "activationState",
+                  "held",
+                  "hold",
+                  "version",
+                  "updatedAt"
+                ],
+                "description": "Profile commands (never a name, avatar, About line or contact data).",
+                "properties": {
+                  "cfMeetId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^CF-[A-Z2-7]{6,26}$"
+                  },
+                  "activationState": {
+                    "enum": [
+                      "ACCOUNT_CREATED",
+                      "ACTIVE",
+                      "SUSPENDED",
+                      "DEACTIVATED"
+                    ]
+                  },
+                  "held": {
+                    "type": "boolean"
+                  },
+                  "hold": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "reason",
+                          "active",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "reason": {
+                            "enum": [
+                              "ABUSE",
+                              "SECURITY",
+                              "LEGAL",
+                              "OTHER"
+                            ]
+                          },
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reportId",
+                  "targetCfMeetId",
+                  "decision",
+                  "reason",
+                  "held",
+                  "reviewedAt",
+                  "version"
+                ],
+                "description": "Report review.",
+                "properties": {
+                  "reportId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "targetCfMeetId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^CF-[A-Z2-7]{6,26}$"
+                  },
+                  "decision": {
+                    "enum": [
+                      "DISMISSED",
+                      "ACTIONED",
+                      null
+                    ]
+                  },
+                  "reason": {
+                    "enum": [
+                      "NO_VIOLATION",
+                      "ABUSE",
+                      "SECURITY",
+                      "LEGAL",
+                      "OTHER",
+                      null
+                    ]
+                  },
+                  "held": {
+                    "type": "boolean"
+                  },
+                  "reviewedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "environmentId",
+                  "created",
+                  "nextCursor"
+                ],
+                "description": "Backfill.",
+                "properties": {
+                  "environmentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "created": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "nextCursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eventId",
+                  "requeued"
+                ],
+                "description": "Replay.",
+                "properties": {
+                  "eventId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "requeued": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
       "OperatorHold": {
         "type": "object",
         "additionalProperties": false,
@@ -2887,6 +4017,42 @@
           }
         }
       },
+      "OperatorOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "const": "APPLIED"
+          },
+          "source_status": {
+            "enum": [
+              "SUSPENDED",
+              "RESTORED",
+              "DISMISSED",
+              "ACTIONED",
+              "COMPLETED",
+              "REQUEUED"
+            ]
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      },
       "OperatorProfile": {
         "type": "object",
         "additionalProperties": false,
@@ -2979,6 +4145,19 @@
           }
         }
       },
+      "OperatorReplayEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventId"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "OperatorReport": {
         "type": "object",
         "additionalProperties": false,
@@ -2989,7 +4168,8 @@
           "reporterCfMeetId",
           "targetCfMeetId",
           "targetReportCount",
-          "review"
+          "review",
+          "version"
         ],
         "properties": {
           "reportId": {
@@ -3066,6 +4246,12 @@
                 }
               }
             ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2,
+            "description": "1 while open, 2 once reviewed: the expectedVersion of the review command."
           }
         }
       },
@@ -3090,6 +4276,110 @@
               "null"
             ],
             "pattern": "^[0-9]+\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorRestoreProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The profile's version (operator profile read)."
+          }
+        }
+      },
+      "OperatorReviewReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "decision",
+          "reason"
+        ],
+        "description": "DISMISSED takes reason NO_VIOLATION and no hold; ACTIONED takes ABUSE, SECURITY, LEGAL or OTHER.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The report's version (1 open, 2 reviewed)."
+          },
+          "decision": {
+            "enum": [
+              "DISMISSED",
+              "ACTIONED"
+            ]
+          },
+          "reason": {
+            "enum": [
+              "NO_VIOLATION",
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
+          },
+          "holdTarget": {
+            "type": "boolean",
+            "default": false,
+            "description": "ACTIONED only: also hold the reported profile."
+          }
+        }
+      },
+      "OperatorRunBackfill": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "limit"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The previous page's nextCursor."
+          },
+          "environmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional while the Hub knows exactly one first-party environment."
+          }
+        }
+      },
+      "OperatorSuspendProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "reason"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The profile's version (operator profile read)."
+          },
+          "reason": {
+            "enum": [
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
           }
         }
       },

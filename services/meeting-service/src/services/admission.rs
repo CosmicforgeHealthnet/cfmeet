@@ -387,14 +387,19 @@ impl AdmissionService {
     ///
     /// Every seat-taking path runs under the conference row lock (`lock_conference`),
     /// so two requests can never both take the last seat.
+    ///
+    /// ADR 0068 A6: `plan_cap` is the participants-per-meeting limit of the space holder's
+    /// plan (when plan enforcement is on): every live seat of the conference, interactive
+    /// and viewer alike, counts against it.
     async fn ensure_capacity<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
         conference_id: Uuid,
         role: Role,
+        plan_cap: Option<u32>,
     ) -> ApiResult<()> {
         let viewer_pool = role == Role::Viewer && space.viewer_capacity > 0;
-        let mut q = conference_participants::Entity::find()
+        let seated = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted));
         let live = Query::select()
@@ -411,7 +416,16 @@ impl AdmissionService {
                     .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
             )
             .to_owned();
-        q = q.filter(conference_participants::Column::Id.in_subquery(live));
+        let seated = seated.filter(conference_participants::Column::Id.in_subquery(live));
+        if let Some(cap) = plan_cap {
+            if seated.clone().count(conn).await? >= u64::from(cap) {
+                return Err(ApiError::domain(
+                    ErrorCode::MeetingCapacityReached,
+                    "This meeting has reached the participant limit of its plan",
+                ));
+            }
+        }
+        let mut q = seated;
         let limit = if viewer_pool {
             q = q.filter(conference_participants::Column::Role.eq(Role::Viewer));
             space.viewer_capacity
@@ -438,6 +452,7 @@ impl AdmissionService {
         conn: &C,
         space: &meeting_spaces::Model,
         participant: &conference_participants::Model,
+        plan_cap: Option<u32>,
     ) -> ApiResult<()> {
         let now = Utc::now();
         let holds_seat = Self::active_sessions(conn, participant.id)
@@ -447,7 +462,14 @@ impl AdmissionService {
         if holds_seat {
             return Ok(());
         }
-        Self::ensure_capacity(conn, space, participant.conference_id, participant.role).await
+        Self::ensure_capacity(
+            conn,
+            space,
+            participant.conference_id,
+            participant.role,
+            plan_cap,
+        )
+        .await
     }
 
     fn is_internal(space: &meeting_spaces::Model, ctx: &ActorContext) -> bool {
@@ -463,6 +485,14 @@ impl AdmissionService {
         r.verified_domain()
             .map(|d| domains.iter().any(|a| a.eq_ignore_ascii_case(&d)))
             .unwrap_or(false)
+    }
+
+    /// ADR 0068 A6: the participants-per-meeting limit of the space holder's plan (`None`:
+    /// enforcement off, no plan limit, or the plan read unavailable — fail open).
+    async fn plan_participants(&self, space: &meeting_spaces::Model) -> Option<u32> {
+        crate::services::plan_limits::for_space(&self.core.plan_limits, space)
+            .await
+            .and_then(|p| p.participants())
     }
 
     async fn custom_waiting(
@@ -1110,7 +1140,8 @@ impl AdmissionService {
         let newly_admitted =
             target == AdmissionState::Admitted && previous_state != Some(AdmissionState::Admitted);
         if newly_admitted && !exempt {
-            Self::ensure_capacity(&txn, &space, conference_id, role).await?;
+            let plan_cap = self.plan_participants(&space).await;
+            Self::ensure_capacity(&txn, &space, conference_id, role, plan_cap).await?;
         }
 
         // 12. Commit the logical participant (one per person per conference).
@@ -1374,7 +1405,8 @@ impl AdmissionService {
         // participants were checked above).
         let session = if participant.admission_state == AdmissionState::Admitted {
             if !newly_admitted && !exempt {
-                Self::ensure_seat(&txn, &space, &participant).await?;
+                let plan_cap = self.plan_participants(&space).await;
+                Self::ensure_seat(&txn, &space, &participant, plan_cap).await?;
             }
             Some(
                 self.establish_session(
@@ -1799,7 +1831,9 @@ impl AdmissionService {
                         continue;
                     }
                     if !pctx.allows(p.role, Permission::ParticipantAdmit) {
-                        Self::ensure_capacity(&txn, &space, conference_id, p.role).await?;
+                        let plan_cap = self.plan_participants(&space).await;
+                        Self::ensure_capacity(&txn, &space, conference_id, p.role, plan_cap)
+                            .await?;
                     }
                     let mut am: conference_participants::ActiveModel = p.clone().into();
                     am.admission_state = Set(AdmissionState::Admitted);

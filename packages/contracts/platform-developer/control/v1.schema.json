@@ -1930,6 +1930,11 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the workspace version the change applies to."
         }
       }
     },
@@ -3762,6 +3767,11 @@
         "supportReference": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -3780,6 +3790,11 @@
         "occurredAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -5926,7 +5941,7 @@
       }
     },
     "AppDecisionRequest": {
-      "description": "ADR 0065: an operator app decision (reject / suspend: safe reason code).",
+      "description": "ADR 0065: an operator app decision (reject / suspend / lift-suspension: safe reason code).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -6684,7 +6699,10 @@
         "lastVerifiedAt",
         "lastErrorCode",
         "createdAt",
-        "updatedAt"
+        "updatedAt",
+        "state",
+        "disabledAt",
+        "version"
       ],
       "properties": {
         "pushProviderId": {
@@ -6771,6 +6789,25 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "DISABLED"
+          ],
+          "description": "ADR 0068 A4: DISABLED by HQ (deleted from the vault)."
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The row version (the expectedVersion of partners.push-key.disable)."
         }
       }
     },
@@ -7685,7 +7722,7 @@
       }
     },
     "AdminOperationRecord": {
-      "description": "ADR 0068 A3: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404).",
+      "description": "ADR 0068 A3 / A4: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404). source_status: the case state as HQ sees it for the A3 verification decisions, otherwise the command's resulting state (as its AdminCommandResult status); source_version: the resulting row version, null for unversioned subjects (a webhook delivery retry, a usage reprocess).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -7707,8 +7744,2139 @@
           "pattern": "^[A-Z][A-Z_]{1,23}$"
         },
         "source_version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminCommandResult": {
+      "description": "ADR 0068 A4: the answer of an admin bridge command: the resulting state (upper snake), the resulting row version as a string (null when the subject is unversioned) and a small closed resource (ids, states, timestamps; never an address, name, content or secret).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "version",
+        "resource"
+      ],
+      "properties": {
+        "status": {
           "type": "string",
-          "pattern": "^[0-9]{1,19}$"
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "type": "object",
+          "maxProperties": 24,
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z]{0,39}$"
+          }
+        }
+      }
+    },
+    "PushKeyDisableRequest": {
+      "description": "ADR 0068 A4: HQ disables a partner push credential (R3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the row version the change applies to."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "description": "Default OPERATOR_DISABLED."
+        }
+      }
+    },
+    "OperatorIncident": {
+      "description": "ADR 0068 A4: a platform incident recorded against a workspace (reference and times only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incidentRecordId",
+        "organizationId",
+        "incidentRef",
+        "occurredAt",
+        "recordedAt"
+      ],
+      "properties": {
+        "incidentRecordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "organizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "incidentRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "occurredAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorIncidentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorIncident"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorUsage": {
+      "description": "ADR 0068 A4: a workspace's metered usage of one environment and usage type over the window (quantities and counts only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "usageType",
+        "unit",
+        "quantity",
+        "factCount"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "usageType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "factCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorUsageList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorUsage"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date",
+          "description": "First UTC day of the window."
+        },
+        "to": {
+          "type": "string",
+          "format": "date",
+          "description": "Last UTC day of the window."
+        }
+      }
+    },
+    "PriceBook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "productLine",
+        "currency",
+        "marketCode",
+        "effectiveVersionId",
+        "frozen",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "marketCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+        },
+        "effectiveVersionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "frozen": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price book lineage (product line, currency, market); its effective version is its latest activation already effective."
+    },
+    "PriceBookList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceBook"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price version (no rates). DRAFT → SUBMITTED → APPROVED | REJECTED → SUPERSEDED; an approval expires after 12 hours."
+    },
+    "PriceVersionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceVersion"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersionDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "productLine",
+        "marketCode",
+        "rates",
+        "submittedDigest",
+        "draftedBy",
+        "submittedBy",
+        "approvedBy",
+        "approverRef",
+        "effective"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "rates": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PartnerRateCard"
+            },
+            {
+              "$ref": "#/$defs/ConsumerPlanSet"
+            }
+          ]
+        },
+        "submittedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "draftedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "submittedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approvedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effective": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: a price version with its rates and the HQ staff who drafted, submitted and approved it."
+    },
+    "PartnerRateCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rates"
+      ],
+      "properties": {
+        "rates": {
+          "type": "array",
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "unitAmountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "enum": [
+                  "MONTHLY_ACTIVE_USERS",
+                  "MEETING_MINUTES",
+                  "IN_APP_CALL_MINUTES",
+                  "MESSAGES",
+                  "RECORDING_MINUTES",
+                  "STORAGE",
+                  "API_CALLS"
+                ]
+              },
+              "unitAmountMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minimumMonthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tiers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unitAmountMinor"
+                  ],
+                  "properties": {
+                    "upTo": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1
+                    },
+                    "unitAmountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "description": "One usage type's rate (minor units): graduated tiers over the quantity beyond the included amount, at least the minimum monthly charge."
+          }
+        }
+      },
+      "description": "ADR 0068 A6: PARTNER_PLATFORM content (one rate per usage type)."
+    },
+    "ConsumerPlanSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plans"
+      ],
+      "properties": {
+        "plans": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "label",
+              "monthlyMinor",
+              "yearlyMinor",
+              "limits"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z_]{1,23}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "monthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "yearlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetingMinutes",
+                  "participants",
+                  "recording",
+                  "storageBytes",
+                  "attachmentBytes",
+                  "webinars"
+                ],
+                "properties": {
+                  "meetingMinutes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "participants": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "recording": {
+                    "type": "boolean"
+                  },
+                  "storageBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "attachmentBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "webinars": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "ADR 0068 A6: CONSUMER content: CF Meet user plans (FREE required at 0 when submitted)."
+    },
+    "PriceActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activationId",
+        "priceBookId",
+        "versionId",
+        "kind",
+        "effectiveFrom",
+        "operatorRef",
+        "approverRef",
+        "recordedAt"
+      ],
+      "properties": {
+        "activationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "SCHEDULED",
+            "ACTIVATED",
+            "ROLLED_BACK"
+          ]
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "operatorRef": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: one entry of the append-only activation history."
+    },
+    "PriceActivationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceActivation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MarketFreeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marketCode",
+        "state",
+        "reasonCode",
+        "changedBy",
+        "frozenAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "marketCode": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "FROZEN",
+            "UNFROZEN"
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "frozenAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a market's freeze (a frozen market refuses submit, approve, schedule, activate and rollback)."
+    },
+    "MarketFreezeList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/MarketFreeze"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PricingPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "currency",
+        "marketCode",
+        "versionId",
+        "planCode",
+        "label",
+        "monthlyMinor",
+        "yearlyMinor",
+        "limits"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "monthlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "yearlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "meetingMinutes",
+                "participants",
+                "recording",
+                "storageBytes",
+                "attachmentBytes",
+                "webinars"
+              ],
+              "properties": {
+                "meetingMinutes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "participants": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "recording": {
+                  "type": "boolean"
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attachmentBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "webinars": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a CF Meet user plan of a CONSUMER lineage's effective version (FREE always listed; limits null when no version is effective)."
+    },
+    "PricingPlanList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PricingPlan"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "ConsumerPlanAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId",
+        "reasonCode",
+        "assignedBy",
+        "effectiveFrom",
+        "current"
+      ],
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "assignedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: one CF Meet user plan assignment (append-only history; a holder never assigned is on FREE)."
+    },
+    "ConsumerPlanAssignmentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/ConsumerPlanAssignment"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PlanOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overrideId",
+        "holderKind",
+        "holderId",
+        "state",
+        "limits",
+        "reasonCode",
+        "changedBy",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "overrideId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "REVOKED"
+          ]
+        },
+        "limits": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a holder's limit override."
+    },
+    "PlanOverrideList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PlanOverride"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ChargeSimulation": {
+      "description": "ADR 0068 A6: an estimate (minor units of the lineage's currency; nothing is charged). Partner: lines per rate and totalMinor; CF Meet user plan: planCode, cycle and totalMinor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "versionState",
+        "currency",
+        "estimate",
+        "totalMinor"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionState": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "totalMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "quantity",
+              "includedQuantity",
+              "billableQuantity",
+              "amountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "billableQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      }
+    },
+    "FinanceUsageReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "planCode",
+              "usageType",
+              "unit",
+              "quantity",
+              "factCount"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "planCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "usageType": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "factCount": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: metered usage per partner workspace and usage type over the window's UTC days, with the workspace's commercial plan code."
+    },
+    "EstimatedChargesReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "currency",
+        "estimate",
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "lines",
+              "totalMinor"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "usageType",
+                    "quantity",
+                    "includedQuantity",
+                    "billableQuantity",
+                    "amountMinor"
+                  ],
+                  "properties": {
+                    "usageType": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "includedQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "billableQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "amountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "totalMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: estimated charges per partner workspace under a PARTNER_PLATFORM lineage's effective version (one currency, minor units; an estimate, never revenue, nothing charged)."
+    },
+    "PlanSpreadReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "asOf"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "planCode",
+              "holderKind",
+              "holders",
+              "assignedInWindow"
+            ],
+            "properties": {
+              "planCode": {
+                "type": "string"
+              },
+              "holderKind": {
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              "holders": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assignedInWindow": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: holders per CF Meet user plan as of `asOf` (never-assigned users and organizations are on FREE and not counted) and the assignments made in the window."
+    },
+    "PriceVersionDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; rates omitted: a copy of the effective (else latest) version."
+    },
+    "PriceVersionCommandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: edit (rates, DRAFT only), submit / approve / activate (expectedVersion only), reject (reasonCode, default NOT_APPROVED), schedule (effectiveFrom, more than 1 minute and at most 366 days ahead). expectedVersion is the version's row version."
+    },
+    "PriceBookRollbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "versionId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; versionId a SUPERSEDED version of the book that was activated before."
+    },
+    "MarketFreezeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the market freeze's version (0: never frozen)."
+    },
+    "ConsumerPlanAssignRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "billingAccountRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the holder's version (0: never assigned, on FREE). The plan must exist in the CONSUMER lineage's effective version (FREE always)."
+    },
+    "PlanOverrideChangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "limits",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "minProperties": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the override's version (0: none yet); limits null revokes."
+    },
+    "ChargeSimulationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a usage vector (PARTNER_PLATFORM) or a plan and cycle (CONSUMER); versionId omitted: the effective version."
+    },
+    "OwnerDelivery": {
+      "description": "ADR 0068 A4: an owner-delivered secret as HQ may see it — a reference only. The secret (today the one-time owner invitation of a first-party workspace) goes directly to its recipient's address as a single-use claim link, sealed for the Notification Service; never the token, the link or the address.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "sentAt",
+        "createdAt",
+        "organizationId",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sentAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "FirstPartyRegistrationResource": {
+      "description": "ADR 0068 A4: the resource of the admin bridge's partners.workspace.register-first-party answer (AdminCommandResult.resource): the workspace (organizationId = the Platform Access tenant id), its state and version, and the owner delivery reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "state",
+        "version",
+        "createdAt",
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "DatasetDay": {
+      "description": "ADR 0068 A7: one UTC day of a dataset the admin bridge pulls (datasets.v1.json): end-of-day counts reconstructed from history; null where a metric cannot be computed (never a guessed 0). cfmeet.partners_daily: workspaces_active, workspaces_restricted, workspaces_suspended (null beyond the activity history kept), partners_live, partner_mau (null: not metered). cfmeet.apps_daily: apps_draft, apps_in_review, apps_published, apps_suspended, installs (null while the installation projection is off).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "date",
+        "metrics"
+      ],
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "enum": [
+            "cfmeet.partners_daily",
+            "cfmeet.apps_daily"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "metrics": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "enum": [
+              "workspaces_active",
+              "workspaces_restricted",
+              "workspaces_suspended",
+              "partners_live",
+              "partner_mau",
+              "apps_draft",
+              "apps_in_review",
+              "apps_published",
+              "apps_suspended",
+              "installs"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "EffectivePlanLimits": {
+      "description": "ADR 0068 A6: the effective CF Meet plan limits of a user or business organization, for the services that enforce them where the usage happens (the Meeting Service, Messaging): the holder's plan (FREE when never assigned) priced by the effective version of its CONSUMER lineage, an ACTIVE override applied key by key. A null limit is not set by the plan (keep today's behaviour). cacheSeconds bounds the caller's cache.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "holderKind",
+        "holderId",
+        "planCode",
+        "assigned",
+        "holderVersion",
+        "priceBookId",
+        "versionId",
+        "overrideApplied",
+        "overrideVersion",
+        "limits",
+        "evaluatedAt",
+        "cacheSeconds"
+      ],
+      "properties": {
+        "holderKind": {
+          "type": "string",
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "assigned": {
+          "type": "boolean"
+        },
+        "holderVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "priceBookId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overrideApplied": {
+          "type": "boolean"
+        },
+        "overrideVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "meetingMinutes",
+            "participants",
+            "recording",
+            "storageBytes",
+            "attachmentBytes",
+            "webinars"
+          ],
+          "properties": {
+            "meetingMinutes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "participants": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recording": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "storageBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attachmentBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "webinars": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "evaluatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cacheSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "CredentialDelivery": {
+      "description": "ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliveryRef",
+        "deliveryChannel",
+        "state",
+        "environmentId",
+        "credentialId",
+        "publicId",
+        "serviceAccountId",
+        "createdAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CONSOLE_REVEAL_ONCE"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING"
+          ]
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "publicId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CredentialDeliveryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CredentialDelivery"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
         }
       }
     }

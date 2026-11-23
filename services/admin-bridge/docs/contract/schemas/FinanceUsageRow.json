@@ -1,0 +1,42 @@
+{
+  "description": "Metered usage of one workspace and usage type over the window.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_id",
+    "plan_code",
+    "usage_type",
+    "unit",
+    "quantity",
+    "fact_count"
+  ],
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "plan_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "usage_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "quantity": {
+      "type": "integer"
+    },
+    "fact_count": {
+      "type": "integer"
+    }
+  }
+}

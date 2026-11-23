@@ -178,9 +178,14 @@ where
         .iter()
         .map(|m| m.name().to_string())
         .collect();
+    let admin_operations: Vec<String> = AdminOperationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
     let mut pending = pending_in(db, MIGRATION_TABLE, main).await?;
     pending.extend(pending_in(db, GAP_CLOSURE_MIGRATION_TABLE, gap).await?);
     pending.extend(pending_in(db, CALL_KIND_OFFER_MIGRATION_TABLE, kind_offer).await?);
+    pending.extend(pending_in(db, ADMIN_OPERATIONS_MIGRATION_TABLE, admin_operations).await?);
     Ok(pending)
 }
 
@@ -363,14 +368,41 @@ impl MigratorTrait for CallKindOfferMigrator {
     }
 }
 
+mod admin_operations;
+
+/// Where [`AdminOperationsMigrator`] records its migrations.
+pub const ADMIN_OPERATIONS_MIGRATION_TABLE: &str = "calling_admin_operations_seaql_migrations";
+
+/// ADR 0068 phase A4 (the commands the HQ admin bridge relays, and the limit row
+/// versions they lock to) and A7 (the owner event outbox): its OWN history, for the same rollback-safety reason as
+/// [`CallKindOfferMigrator`]. The previous image fails closed on a migration of the main,
+/// gap-closure or call-kind-offer history it does not know, and never reads this table,
+/// so it keeps starting (and reporting ready) after a rollback; this image requires it
+/// ([`pending_migrations`]). Never merge it.
+pub struct AdminOperationsMigrator;
+
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(admin_operations::m20261210_000058_calling_admin_operations::Migration),
+            Box::new(admin_operations::m20261211_000059_calling_admin_bridge_events::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(ADMIN_OPERATIONS_MIGRATION_TABLE).into_iden()
+    }
+}
+
 /// `calling-migration up`: the main history, then the notification-publications, the
-/// gap-closure and the call-kind-offer ones (the Communications history keeps its own
-/// binary). All additive.
+/// gap-closure, the call-kind-offer and the admin-operations ones (the Communications
+/// history keeps its own binary). All additive.
 pub async fn up_all(
     db: &sea_orm_migration::sea_orm::DatabaseConnection,
 ) -> Result<(), sea_orm_migration::sea_orm::DbErr> {
     Migrator::up(db, None).await?;
     NotificationPublicationsMigrator::up(db, None).await?;
     GapClosureMigrator::up(db, None).await?;
-    CallKindOfferMigrator::up(db, None).await
+    CallKindOfferMigrator::up(db, None).await?;
+    AdminOperationsMigrator::up(db, None).await
 }

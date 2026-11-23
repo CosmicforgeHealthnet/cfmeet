@@ -130,6 +130,31 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/operator/metrics",
             get(crate::operator::metrics),
         )
+        // ADR 0068 A4: the admin bridge's operator commands and their settlement record.
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/suspend",
+            post(crate::operator_commands::suspend_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/restore",
+            post(crate::operator_commands::restore_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/reports/:report_id/review",
+            post(crate::operator_commands::review_report),
+        )
+        .route(
+            "/internal/v1/communications/operator/backfill",
+            post(crate::operator_commands::run_backfill),
+        )
+        .route(
+            "/internal/v1/communications/operator/replay",
+            post(crate::operator_commands::replay_event),
+        )
+        .route(
+            "/internal/v1/operator/operations/:idempotency_key",
+            get(crate::operator_commands::operation_record),
+        )
         .route(
             "/internal/v1/communications/verification/callback",
             post(crate::internal::phone_deferred),
@@ -759,6 +784,8 @@ async fn report(s: &State, p: &Profile, cf_id: &str, body: Value, key: Uuid) -> 
     }
     let id = Uuid::new_v4();
     execute(&txn,"INSERT INTO communication_profile_reports(id,reporter_profile_id,target_profile_id,reason) VALUES($1,$2,$3,$4)",vec![id.into(),p.id.into(),target.id.into(),request.reason.clone().into()]).await?;
+    // ADR 0068 A7: the new report, OPEN at version 1, to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(s, &txn, id, None, 1).await?;
     s.store
         .audit(
             &txn,

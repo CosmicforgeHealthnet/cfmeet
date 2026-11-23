@@ -1,0 +1,51 @@
+{
+  "description": "One membership: role, state, send restriction, version and time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conversation_id",
+    "principal_id",
+    "role",
+    "member_state",
+    "send_restricted_until",
+    "version",
+    "updated_at"
+  ],
+  "properties": {
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "member_state": {
+      "enum": [
+        "ACTIVE",
+        "REMOVED",
+        "LEFT"
+      ]
+    },
+    "send_restricted_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The membership's version (expected_version of messaging.member.mute / remove)."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

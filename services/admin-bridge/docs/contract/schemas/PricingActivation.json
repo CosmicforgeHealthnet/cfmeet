@@ -1,0 +1,56 @@
+{
+  "description": "One append-only activation of a price version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "activation_id",
+    "price_book_id",
+    "version_id",
+    "kind",
+    "effective_from",
+    "operator_ref",
+    "approver_ref",
+    "recorded_at"
+  ],
+  "properties": {
+    "activation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "enum": [
+        "SCHEDULED",
+        "ACTIVATED",
+        "ROLLED_BACK"
+      ]
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "operator_ref": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "description": "The HQ staff member (hq:<sub>)."
+    },
+    "approver_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -47,6 +47,7 @@ use super::{
     delegate, delegate_with, membership, stmt, Caller,
 };
 use crate::{
+    bridge_events::{self, BridgeEvents, Source},
     domain::{rbac::Action, RequestContext},
     http::error::{ApiError, ErrorCode},
     notification_publications,
@@ -279,6 +280,7 @@ impl Actor<'_> {
 #[allow(clippy::too_many_arguments)]
 async fn transition<C: ConnectionTrait>(
     db: &C,
+    ev: BridgeEvents,
     id: Uuid,
     tenant_id: Uuid,
     from: &[&str],
@@ -326,6 +328,8 @@ async fn transition<C: ConnectionTrait>(
         ],
     ))
     .await?;
+    // ADR 0068 A7: the verification case changed (same transaction).
+    bridge_events::record(db, ev, Source::ProductionAccess(id)).await?;
     Ok(old)
 }
 
@@ -476,6 +480,7 @@ pub async fn submit(
         ],
     ))
     .await?;
+    bridge_events::record(&txn, state.bridge_events, Source::ProductionAccess(id)).await?;
     record_activity(
         &txn,
         &customer,
@@ -493,6 +498,7 @@ pub async fn submit(
         let policy = Actor::Policy(&caller.request);
         transition(
             &txn,
+            state.bridge_events,
             id,
             tenant_id,
             &["PRODUCTION_REQUESTED"],
@@ -546,7 +552,7 @@ pub async fn list(
     if page.has_cursor() && page.cursor_key().is_none() {
         return Err(ApiError(ErrorCode::ValidationError));
     }
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     let (at, id) = page.cursor_key().unzip();
     let rows = state
         .db
@@ -584,7 +590,7 @@ pub async fn list(
 pub async fn get(state: &AppState, caller: &Caller, id: Uuid) -> Result<Value, ApiError> {
     let r = load(&state.db, id).await?;
     authorize(state, caller, r.tenant_id, Action::ProductionAccessRead).await?;
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     view(&state.db, id, true).await
 }
 
@@ -596,7 +602,7 @@ pub async fn status(
 ) -> Result<Value, ApiError> {
     let (tenant_id, _) = project_tenant(&state.db, project_id).await?;
     authorize(state, caller, tenant_id, Action::ProductionAccessRead).await?;
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     project_status(&state.db, project_id).await
 }
 
@@ -662,6 +668,7 @@ pub async fn cancel(state: &AppState, caller: &Caller, id: Uuid) -> Result<Value
     let txn = state.db.begin().await?;
     transition(
         &txn,
+        state.bridge_events,
         id,
         r.tenant_id,
         &["PRODUCTION_REQUESTED", "UNDER_REVIEW", "APPROVED"],
@@ -727,7 +734,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
         return Err(ApiError(ErrorCode::InvalidState));
     }
     if r.approval_expires_at.is_some_and(|t| t <= Utc::now()) {
-        expire_due(&state.db).await?;
+        expire_due(&state.db, state.bridge_events).await?;
         return Err(ApiError(ErrorCode::ApprovalExpired));
     }
     let actor = caller.delegation_actor();
@@ -801,6 +808,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
     let customer = Actor::Customer(caller);
     transition(
         &txn,
+        state.bridge_events,
         id,
         r.tenant_id,
         &["APPROVED"],
@@ -826,7 +834,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
 }
 
 /// Approvals not activated in time become REJECTED (`APPROVAL_EXPIRED`).
-pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
+pub async fn expire_due(db: &DatabaseConnection, ev: BridgeEvents) -> Result<u64, ApiError> {
     let rows = db
         .query_all(stmt(
             "SELECT id, tenant_id FROM devplat_production_access_requests \
@@ -843,6 +851,7 @@ pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
         let txn = db.begin().await?;
         if transition(
             &txn,
+            ev,
             id,
             tenant,
             &["APPROVED"],
@@ -878,9 +887,10 @@ pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
 /// `GET /internal/v1/operator/production-access-requests?state=`.
 pub async fn operator_list(
     db: &DatabaseConnection,
+    ev: BridgeEvents,
     state: Option<&str>,
 ) -> Result<Value, ApiError> {
-    expire_due(db).await?;
+    expire_due(db, ev).await?;
     if let Some(s) = state {
         if !matches!(
             s,
@@ -1063,6 +1073,7 @@ pub async fn operator_decide(
             }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &["PRODUCTION_REQUESTED"],
@@ -1112,6 +1123,7 @@ pub async fn operator_decide(
             };
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 from,
@@ -1152,6 +1164,7 @@ pub async fn operator_decide(
             }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &["PRODUCTION_REQUESTED", "UNDER_REVIEW", "APPROVED"],
@@ -1241,6 +1254,7 @@ pub async fn operator_decide(
             }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &[from],

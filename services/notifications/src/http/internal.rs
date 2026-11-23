@@ -586,26 +586,57 @@ async fn replay_one(state: &AppState, id: &str) -> ApiResult<&'static str> {
         )
         .await?;
         let Some(d) = d else { return Ok("NOT_FOUND") };
-        if d.lane == "CRITICAL" || d.expires_at.is_some_and(|e| e <= Utc::now()) {
-            return Ok("REFUSED_EXPIRED");
+        if let Some(refusal) = delivery_retry_refusal(
+            &d.lane,
+            d.expires_at,
+            &d.status,
+            &d.channel,
+            d.last_error_class.as_deref(),
+        ) {
+            return Ok(match refusal {
+                RetryRefusal::Expired => "REFUSED_EXPIRED",
+                RetryRefusal::NotRetryable | RetryRefusal::NotFailed => "REFUSED_SUPERSEDED",
+            });
         }
-        if d.status != "FAILED"
-            || d.channel != "PUSH"
-            || d.last_error_class.as_deref() == Some("INVALID_HANDLE")
-        {
-            return Ok("REFUSED_SUPERSEDED");
-        }
-        db::exec(
-            &state.db,
-            "UPDATE notif_deliveries SET status = 'PENDING', next_attempt_at = now(), attempts = 0, completed_at = NULL WHERE id = $1 AND status = 'FAILED'",
-            vec![delivery.into()],
-        )
-        .await?;
+        db::exec(&state.db, RETRY_DELIVERY_SQL, vec![delivery.into()]).await?;
         Ok("REPLAYED")
     } else {
         Ok("NOT_FOUND")
     }
 }
+
+/// Why a delivery cannot be retried (I6 and the admin bridge's retry share the rule).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RetryRefusal {
+    /// CRITICAL (a code is never re-sent: the user requests a new one) or past its expiry.
+    Expired,
+    /// Not a push delivery (email content is erased at its final state) or its handle is
+    /// invalid.
+    NotRetryable,
+    /// Not (or no longer) FAILED.
+    NotFailed,
+}
+
+pub(super) fn delivery_retry_refusal(
+    lane: &str,
+    expires_at: Option<DateTime<Utc>>,
+    status: &str,
+    channel: &str,
+    last_error_class: Option<&str>,
+) -> Option<RetryRefusal> {
+    if lane == "CRITICAL" || expires_at.is_some_and(|e| e <= Utc::now()) {
+        Some(RetryRefusal::Expired)
+    } else if channel != "PUSH" || last_error_class == Some("INVALID_HANDLE") {
+        Some(RetryRefusal::NotRetryable)
+    } else if status != "FAILED" {
+        Some(RetryRefusal::NotFailed)
+    } else {
+        None
+    }
+}
+
+/// Puts a FAILED delivery back to PENDING, due now, with a fresh attempt budget.
+pub(super) const RETRY_DELIVERY_SQL: &str = "UPDATE notif_deliveries SET status = 'PENDING', next_attempt_at = now(), attempts = 0, completed_at = NULL WHERE id = $1 AND status = 'FAILED'";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -792,25 +823,56 @@ pub async fn reroute_cancel(
 async fn reroute_one(state: &AppState, decision: Uuid) -> ApiResult<&'static str> {
     use sea_orm::TransactionTrait;
     let txn = state.db.begin().await?;
+    let Some(ev) = lock_decision(&txn, decision).await? else {
+        txn.rollback().await?;
+        return Ok("UNKNOWN");
+    };
+    if ev.state == "REJECTED" {
+        txn.rollback().await?;
+        return Ok("CANCELLED");
+    }
+    if !cancel_for_reroute(&txn, &ev).await? {
+        txn.rollback().await?;
+        return Ok("IN_FLIGHT_OR_SENT");
+    }
+    txn.commit().await?;
+    Ok("CANCELLED")
+}
+
+/// The (non-shadow) event of a route decision, locked for the reroute.
+pub(super) struct DecisionEvent {
+    pub producer: String,
+    pub event_id: String,
+    pub state: String,
+}
+
+pub(super) async fn lock_decision<C: ConnectionTrait>(
+    txn: &C,
+    decision: Uuid,
+) -> ApiResult<Option<DecisionEvent>> {
     let ev = txn
         .query_one(db::stmt(
             "SELECT producer, event_id, state FROM notif_event_inbox WHERE route_decision_id = $1 AND NOT shadow FOR UPDATE",
             vec![decision.into()],
         ))
         .await?;
-    let Some(ev) = ev else {
-        txn.rollback().await?;
-        return Ok("UNKNOWN");
-    };
-    let producer: String = ev.try_get("", "producer").map_err(ApiError::from)?;
-    let event_id: String = ev.try_get("", "event_id").map_err(ApiError::from)?;
-    let st: String = ev.try_get("", "state").map_err(ApiError::from)?;
-    if st == "REJECTED" {
-        txn.rollback().await?;
-        return Ok("CANCELLED");
-    }
+    let Some(ev) = ev else { return Ok(None) };
+    Ok(Some(DecisionEvent {
+        producer: ev.try_get("", "producer").map_err(ApiError::from)?,
+        event_id: ev.try_get("", "event_id").map_err(ApiError::from)?,
+        state: ev.try_get("", "state").map_err(ApiError::from)?,
+    }))
+}
+
+/// The cancellation of a locked, not REJECTED decision (in the caller's transaction):
+/// `false` (nothing changed) when any of its deliveries has started or been sent.
+pub(super) async fn cancel_for_reroute<C: ConnectionTrait>(
+    txn: &C,
+    ev: &DecisionEvent,
+) -> ApiResult<bool> {
+    let (producer, event_id) = (&ev.producer, &ev.event_id);
     let started = db::scalar_i64(
-        &txn,
+        txn,
         "SELECT count(*)::bigint AS n FROM notif_deliveries d JOIN notif_notifications n ON n.id = d.notification_id
           LEFT JOIN notif_email_messages m ON m.delivery_id = d.id
           WHERE n.source_producer = $1 AND n.source_event_id = $2
@@ -820,11 +882,10 @@ async fn reroute_one(state: &AppState, decision: Uuid) -> ApiResult<&'static str
     )
     .await?;
     if started > 0 {
-        txn.rollback().await?;
-        return Ok("IN_FLIGHT_OR_SENT");
+        return Ok(false);
     }
     db::exec(
-        &txn,
+        txn,
         "UPDATE notif_email_messages SET status = 'FAILED', last_error_class = 'CANCELLED_FOR_REROUTE', body_sealed = NULL, final_at = now()
           WHERE status = 'QUEUED' AND delivery_id IN (SELECT d.id FROM notif_deliveries d JOIN notif_notifications n ON n.id = d.notification_id
                                                       WHERE n.source_producer = $1 AND n.source_event_id = $2)",
@@ -832,28 +893,27 @@ async fn reroute_one(state: &AppState, decision: Uuid) -> ApiResult<&'static str
     )
     .await?;
     db::exec(
-        &txn,
+        txn,
         "UPDATE notif_deliveries SET status = 'CANCELLED', completed_at = now()
           WHERE status IN ('PENDING', 'DEFERRED') AND notification_id IN (SELECT id FROM notif_notifications WHERE source_producer = $1 AND source_event_id = $2)",
         vec![producer.clone().into(), event_id.clone().into()],
     )
     .await?;
     db::exec(
-        &txn,
+        txn,
         "UPDATE notif_notifications SET state = 'CANCELLED_FOR_REROUTE' WHERE source_producer = $1 AND source_event_id = $2",
         vec![producer.clone().into(), event_id.clone().into()],
     )
     .await?;
     db::exec(
-        &txn,
+        txn,
         "UPDATE notif_event_inbox SET state = 'REJECTED', reject_reason = 'CANCELLED_FOR_REROUTE', processed_at = now(),
                 lease_id = NULL, lease_until = NULL, envelope = envelope - 'sealed'
           WHERE producer = $1 AND event_id = $2",
-        vec![producer.into(), event_id.into()],
+        vec![producer.clone().into(), event_id.clone().into()],
     )
     .await?;
-    txn.commit().await?;
-    Ok("CANCELLED")
+    Ok(true)
 }
 
 #[derive(Debug, Deserialize)]

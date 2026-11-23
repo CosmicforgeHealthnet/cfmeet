@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.9.0 | 319 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.34.0 | 146 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
-| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
-| **Total** | | | **753** |
+| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
+| **Total** | | | **758** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.11.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -69,7 +69,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/me/account/delete` | account session | Delete my account | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_my_account` |
-| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_export_my_data` |
+| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 400, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, REAUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_export_my_data` |
 | POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
 | POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
 | GET | `/api/v2/me/mfa` | account session | My two-step sign-in state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_mfa` |
@@ -327,6 +327,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v2/messaging/devices/{deviceId}/revoke` | account session | Revoke one of the caller's devices. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_device` |
 | GET | `/api/v2/messaging/directory` | account session | Colleagues (active members of the caller's organizations) the caller may message. | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_directory` |
 | POST | `/api/v2/messaging/directory/resolve` | account session | The Messaging principals of directory colleagues (so they can be added). | 200, 404 | NOT_FOUND | `openapi/meeting-service.json#v2_messaging_directory_resolve` |
+| GET | `/api/v2/messaging/export-deliveries` | account session | Data exports waiting for me (Messaging) | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_export_deliveries` |
+| POST | `/api/v2/messaging/exports/{exportId}/claim` | account session | Claim a Messaging data export once | 200, 401, 404, 409, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, EXPORT_ALREADY_DELIVERED, EXPORT_EXPIRED, EXPORT_NOT_READY, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_claim_export` |
 | GET | `/api/v2/messaging/me` | account session | The caller's Messaging principal and device binding scope. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_me` |
 | POST | `/api/v2/messaging/principals/names` | account session | Display names of the principals the caller can see (self, colleagues and connected contacts). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_principal_names` |
 | DELETE | `/api/v2/messaging/relay/{path}` | account session | Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_delete` |
@@ -373,6 +375,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | POST | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling create / action (allowlisted path). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_post` |
 | PUT | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling replace (allowlisted path, e.g. members or schedules). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_put` |
 | GET | `/api/v2/organizations/{id}/export` | account session | Export the organization's data. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_export_organization` |
+| POST | `/api/v2/organizations/{id}/exports/{exportId}/download` | account session | Download an owner-delivered organization export. | 200, 400, 401, 404, 410, 503 | AUTHENTICATION_REQUIRED, EXPORT_LINK_EXPIRED, EXPORT_LINK_INVALID, FEATURE_DISABLED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_download_organization_export` |
 | GET | `/api/v2/organizations/{id}/invitations` | account session | List an organization's invitations. | 200, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_organization_invitations` |
 | POST | `/api/v2/organizations/{id}/invitations` | account session | Invite someone to an organization by email or CF Meet ID. | 201, 400, 403, 404, 409, 429, 503 | ALREADY_MEMBER, CF_MEET_ID, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, INVITEE_NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_organization_invitation` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | account session | Revoke an organization invitation. | 200, 403, 404, 503 | FEATURE_DISABLED, INVITATION_INVALID, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_organization_invitation` |
@@ -702,7 +705,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.10
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.34.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -1245,7 +1248,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 
 ## Developer Portal (Developer Platform)
 
-Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
+Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
 
 ### Activity
 
@@ -1291,6 +1294,8 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/credential-deliveries` | account session (developer bridge); platform credential (server-side only) | List API keys waiting for their one reveal | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listCredentialDeliveries` |
+| POST | `/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal` | account session (developer bridge) | Reveal an owner-delivered API key once | 200, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#revealCredentialDelivery` |
 | GET | `/v1/environments/{environmentId}/credentials/{credentialId}` | account session (developer bridge); platform credential (server-side only) | Read one credential's metadata | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getCredential` |
 | PUT | `/v1/environments/{environmentId}/credentials/{credentialId}/limits` | account session (developer bridge); platform credential (server-side only) | Restrict a credential's API quota (only ever stricter) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#putCredentialLimits` |
 | POST | `/v1/environments/{environmentId}/credentials/{credentialId}/resume` | account session (developer bridge); platform credential (server-side only) | Resume a suspended credential | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#resumeCredential` |

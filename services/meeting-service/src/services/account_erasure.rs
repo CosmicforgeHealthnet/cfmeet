@@ -27,9 +27,24 @@ use sea_orm::{ConnectionTrait, DbBackend, Statement, TransactionTrait};
 
 use crate::{
     error::{ApiError, ApiResult},
-    services::account_security::{self as security, Outcome, RevokeReason, SecurityEvent},
+    services::account_security::{
+        self as security, ActorKind, Outcome, RevokeReason, SecurityEvent,
+    },
+    services::admin_operations::{self, BridgeCommand},
     state::AppState,
 };
+
+/// Whether the account was already deleted (anonymized by [`erase`]).
+async fn is_erased<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM users WHERE id = $1 AND email LIKE 'deleted+%@deleted.invalid'",
+            [user_id.into()],
+        ))
+        .await?
+        .is_some())
+}
 
 async fn rows<C: ConnectionTrait>(db: &C, sql: &str, user: Uuid) -> ApiResult<Value> {
     let found = db
@@ -84,21 +99,48 @@ pub async fn export(state: &AppState, user_id: Uuid) -> ApiResult<Value> {
 
 /// Deletes (anonymizes) the account; see the module documentation.
 pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> ApiResult<()> {
+    erase_with(state, user_id, session, None).await
+}
+
+/// [`erase`], or (ADR 0068, `accounts.user.delete`) the same deletion relayed by the HQ
+/// admin bridge: the key is claimed and the account locked at HQ's expected
+/// `account_version` in the deletion's transaction, the command is recorded there
+/// (`meeting_admin_operations`, state `DELETED`), and the confirmation to the address the
+/// person knew is queued only once the deletion committed (a refused command sends
+/// nothing).
+pub async fn erase_with(
+    state: &AppState,
+    user_id: Uuid,
+    session: Option<Uuid>,
+    bridge: Option<&BridgeCommand>,
+) -> ApiResult<()> {
     use sea_orm::EntityTrait;
-    crate::models::users::Entity::find_by_id(user_id)
+    let account = crate::models::users::Entity::find_by_id(user_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::NotFound("Account not found".into()))?;
-    // The confirmation goes to the address the person knew, before it is removed.
-    security::notify_security(
-        state,
-        user_id,
-        crate::services::email::SecurityNotice::Deleted,
-        &user_id.to_string(),
-    )
-    .await;
+    if bridge.is_none() {
+        // The confirmation goes to the address the person knew, before it is removed.
+        security::notify_security(
+            state,
+            user_id,
+            crate::services::email::SecurityNotice::Deleted,
+            &user_id.to_string(),
+        )
+        .await;
+    }
     let short = user_id.simple().to_string();
     let txn = state.db.begin().await?;
+    if let Some(cmd) = bridge {
+        admin_operations::claim(&txn, cmd).await?;
+        let version = admin_operations::account_version(&txn, user_id, true)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("Account not found".into()))?;
+        admin_operations::check_version(cmd, version)?;
+        if is_erased(&txn, user_id).await? {
+            return Err(ApiError::Conflict("This account is already deleted".into()));
+        }
+    }
     for (sql, values) in [
         (
             "UPDATE users SET email = $2, username = $3, display_name = NULL, avatar_url = NULL, timezone = NULL, \
@@ -140,14 +182,56 @@ pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> Ap
     security::revoke_all(&txn, user_id, RevokeReason::LogoutAll).await?;
     // S2: the data the other services hold goes too (durable, retried until confirmed).
     crate::services::account_privacy::queue_erasure(&txn, user_id).await?;
-    security::record_event(
-        &txn,
-        SecurityEvent::new("ACCOUNT_DELETED", Outcome::Success)
-            .by_user(user_id)
-            .detail(json!({ "session": session.is_some() })),
-    )
-    .await?;
+    match bridge {
+        None => {
+            security::record_event(
+                &txn,
+                SecurityEvent::new("ACCOUNT_DELETED", Outcome::Success)
+                    .by_user(user_id)
+                    .detail(json!({ "session": session.is_some() })),
+            )
+            .await?
+        }
+        Some(cmd) => {
+            security::record_event(
+                &txn,
+                SecurityEvent::new("ACCOUNT_DELETED", Outcome::Success)
+                    .user(user_id)
+                    .actor(ActorKind::Admin, None)
+                    .detail(json!({ "operator": cmd.operator(), "approver": cmd.approver() })),
+            )
+            .await?;
+            let version = admin_operations::account_version(&txn, user_id, false).await?;
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::USER,
+                user_id,
+                "DELETED",
+                version,
+            )
+            .await?;
+        }
+    }
     txn.commit().await?;
+    if bridge.is_some()
+        && account.role != crate::models::users::UserRole::Guest
+        && !account.email.trim().is_empty()
+    {
+        // The confirmation to the address the person knew (captured before removal).
+        if let Err(e) = state
+            .email_service
+            .send_security_notice(
+                &account.email,
+                &account.username,
+                crate::services::email::SecurityNotice::Deleted,
+                &user_id.to_string(),
+            )
+            .await
+        {
+            tracing::warn!(%user_id, "account deletion notice not queued: {e}");
+        }
+    }
     // Hub, Messaging, Calling and Platform Access follow (durable, retried).
     crate::services::communications::credentials_ended(state, user_id, "ACCOUNT_DELETED").await;
     // First delivery attempt now (the privacy worker retries whatever does not finish).

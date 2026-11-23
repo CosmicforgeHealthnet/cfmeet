@@ -233,6 +233,17 @@ impl AppCallService {
         .one(&txn)
         .await?
         .ok_or(CallError::Conflict("the abuse report was not recorded"))?;
+        // ADR 0068 A7: the bridge learns of the report (ids, state, version only).
+        crate::admin_bridge_events::enqueue(
+            &txn,
+            crate::admin_bridge_events::Subject::AbuseReport,
+            view.id,
+            Some(scope.tenant_id().as_uuid()),
+            &view.status,
+            view.version,
+            now,
+        )
+        .await?;
         if let Some(reported) = reported {
             self.note_burst(&txn, scope, reported, now).await?;
         }
@@ -329,7 +340,8 @@ impl AppCallService {
 }
 
 /// Operator review (`platform_admin abuse-report set-status`): moves the report to
-/// `status`, inside the caller's transaction (audited alongside). `None` = unknown id.
+/// `status`, inside the caller's transaction (audited alongside), with its owner event to
+/// the admin bridge (ADR 0068 A7, when configured). `None` = unknown id.
 pub async fn set_status<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
@@ -340,15 +352,31 @@ pub async fn set_status<C: ConnectionTrait>(
         AbuseReportStatus::Open => None,
         _ => Some(now),
     };
-    Ok(AbuseReportView::find_by_statement(stmt(
-        &format!(
-            "UPDATE calling_abuse_reports SET status = $2, reviewed_at = $3, version = version + 1 \
-             WHERE id = $1 RETURNING {VIEW_COLUMNS}"
-        ),
-        vec![id.into(), status.as_str().into(), reviewed_at.into()],
-    ))
-    .one(db)
-    .await?)
+    let Some(row) = db
+        .query_one(stmt(
+            &format!(
+                "UPDATE calling_abuse_reports SET status = $2, reviewed_at = $3, version = version + 1 \
+                 WHERE id = $1 RETURNING tenant_id, {VIEW_COLUMNS}"
+            ),
+            vec![id.into(), status.as_str().into(), reviewed_at.into()],
+        ))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let tenant: Uuid = row.try_get("", "tenant_id")?;
+    let view = AbuseReportView::from_query_result(&row, "")?;
+    crate::admin_bridge_events::enqueue(
+        db,
+        crate::admin_bridge_events::Subject::AbuseReport,
+        view.id,
+        Some(tenant),
+        &view.status,
+        view.version,
+        now,
+    )
+    .await?;
+    Ok(Some(view))
 }
 
 /// `platform_admin abuse-report set-status` (audited, one transaction). `None` = no
@@ -360,44 +388,53 @@ pub async fn operator_set_status(
     status: AbuseReportStatus,
     now: DateTime<Utc>,
 ) -> crate::platform::PlatformResult<AbuseReportView> {
+    crate::platform::operator::audited(db, operator, now, move |txn| {
+        Box::pin(operator_set_status_in(txn, id, status, now))
+    })
+    .await
+}
+
+/// The transition of [`operator_set_status`] in the caller's transaction, with the audit
+/// entry the caller records in that same transaction (the admin bridge, ADR 0068 A4).
+pub(crate) async fn operator_set_status_in<C: ConnectionTrait>(
+    txn: &C,
+    id: Uuid,
+    status: AbuseReportStatus,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<(AbuseReportView, crate::platform::operator::AuditEntry)> {
     use crate::platform::{
-        operator::{self, AuditEntry, AuditTargetKind, OperatorAction},
+        operator::{AuditEntry, AuditTargetKind, OperatorAction},
         PlatformError,
     };
     let db_error = |e: CallError| PlatformError::Database {
         summary: format!("abuse report ({})", e.code()),
         connectivity: false,
     };
-    operator::audited(db, operator, now, move |txn| {
-        Box::pin(async move {
-            let scope = txn
-                .query_one(stmt(
-                    "SELECT tenant_id, application_id, environment_id FROM calling_abuse_reports \
-                     WHERE id = $1 FOR UPDATE",
-                    vec![id.into()],
-                ))
-                .await?
-                .ok_or(PlatformError::NotFound("abuse report"))?;
-            let ids: (Uuid, Uuid, Uuid) = (
-                scope.try_get_by_index(0)?,
-                scope.try_get_by_index(1)?,
-                scope.try_get_by_index(2)?,
-            );
-            let view = set_status(txn, id, status, now)
-                .await
-                .map_err(db_error)?
-                .ok_or(PlatformError::NotFound("abuse report"))?;
-            let entry = AuditEntry::new(
-                OperatorAction::AbuseReportStatusSet,
-                AuditTargetKind::AbuseReport,
-                id,
-            )
-            .scope(Some(ids.0), Some(ids.1), Some(ids.2))
-            .detail(serde_json::json!({ "status": status.as_str(), "callId": view.call_id }));
-            Ok((view, entry))
-        })
-    })
-    .await
+    let scope = txn
+        .query_one(stmt(
+            "SELECT tenant_id, application_id, environment_id FROM calling_abuse_reports \
+             WHERE id = $1 FOR UPDATE",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(PlatformError::NotFound("abuse report"))?;
+    let ids: (Uuid, Uuid, Uuid) = (
+        scope.try_get_by_index(0)?,
+        scope.try_get_by_index(1)?,
+        scope.try_get_by_index(2)?,
+    );
+    let view = set_status(txn, id, status, now)
+        .await
+        .map_err(db_error)?
+        .ok_or(PlatformError::NotFound("abuse report"))?;
+    let entry = AuditEntry::new(
+        OperatorAction::AbuseReportStatusSet,
+        AuditTargetKind::AbuseReport,
+        id,
+    )
+    .scope(Some(ids.0), Some(ids.1), Some(ids.2))
+    .detail(serde_json::json!({ "status": status.as_str(), "callId": view.call_id }));
+    Ok((view, entry))
 }
 
 /// `platform_admin abuse-report show`.

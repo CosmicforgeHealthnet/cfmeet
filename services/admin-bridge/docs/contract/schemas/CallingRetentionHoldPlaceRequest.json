@@ -1,0 +1,57 @@
+{
+  "description": "Request of calling.retention-hold.place (POST /internal/v1/operator/retention-holds). The owner receives the request's tenant scope as its tenant; the body never names a tenant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "application_id",
+    "environment_id",
+    "data_class",
+    "reason"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "HQ's command id; equal to the Idempotency-Key header."
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+      "description": "Kept in the bridge's operation record; not sent to the owning service."
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data_class": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "reason": {
+      "enum": [
+        "POLICY_REVIEW",
+        "DISPUTE",
+        "SECURITY_INVESTIGATION",
+        "OTHER"
+      ]
+    }
+  }
+}

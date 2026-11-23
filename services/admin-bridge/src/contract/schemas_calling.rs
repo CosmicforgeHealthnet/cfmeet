@@ -114,7 +114,8 @@ pub fn insert(m: &mut Map<String, Value>) {
     let limit = json!({
         "requests_per_minute": nullable_int, "max_concurrent_communications": nullable_int,
         "telecom_spend_daily_limit_minor": nullable_int, "telecom_spend_monthly_limit_minor": nullable_int,
-        "updated_at": ts
+        "updated_at": ts,
+        "version": {"type": "integer", "minimum": 1, "description": "The level's limits version (expected_version of calling.limits.change)."}
     });
     m.insert(
         "CallingLimitPolicy".into(),
@@ -216,7 +217,8 @@ pub fn insert(m: &mut Map<String, Value>) {
             json!({
                 "recording_id": uuid, "call_id": uuid, "environment_id": uuid, "state": code,
                 "capture_source": code, "duration_ms": nullable_count, "size_bytes": nullable_count,
-                "retention_until": nullable_ts, "created_at": ts, "deleted_at": nullable_ts
+                "retention_until": nullable_ts, "created_at": ts, "deleted_at": nullable_ts,
+                "version": {"type": "integer", "minimum": 1}
             }),
         ),
     );

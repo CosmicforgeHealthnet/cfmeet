@@ -111,6 +111,7 @@ pub struct Options {
     pub catalog: Option<Vec<Capability>>,
     pub switches_all_on: bool,
     pub test_commands: Vec<(&'static str, Owner, &'static str)>,
+    pub releases: Option<Arc<admin_bridge::releases::ReleaseWorkflow>>,
 }
 
 impl Default for Options {
@@ -122,6 +123,7 @@ impl Default for Options {
             catalog: None,
             switches_all_on: false,
             test_commands: Vec::new(),
+            releases: None,
         }
     }
 }
@@ -208,6 +210,9 @@ pub async fn start(opts: Options) -> Harness {
     }
     if let Some(o) = opts.owners {
         bridge = bridge.with_owners(o);
+    }
+    if let Some(r) = opts.releases {
+        bridge = bridge.with_releases(r);
     }
     if !opts.test_commands.is_empty() {
         bridge = bridge.with_test_commands(opts.test_commands);

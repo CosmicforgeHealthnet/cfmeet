@@ -1,0 +1,76 @@
+{
+  "description": "One incident of an owning service: Messaging (platform), Calling (the request's tenant) or a Developer Platform partner incident record (immutable: RECORDED, never resolvable). incident_id names its owner (<owner>:<uuid>) and is what operations.incident.resolve takes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_id",
+    "owner",
+    "category",
+    "severity",
+    "status",
+    "occurrences",
+    "opened_at",
+    "last_seen_at",
+    "resolved_at",
+    "resolvable"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z-]{0,31}:[A-Za-z0-9._:-]{1,160}$"
+    },
+    "owner": {
+      "enum": [
+        "messaging",
+        "calling",
+        "developer-platform"
+      ]
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "severity": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "occurrences": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "opened_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_seen_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "resolvable": {
+      "type": "boolean"
+    }
+  }
+}

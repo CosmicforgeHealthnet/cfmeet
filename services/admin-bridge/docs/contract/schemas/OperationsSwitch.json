@@ -1,0 +1,54 @@
+{
+  "description": "One switch of an owning service: a Messaging kill switch at its scope (ENGAGED / RELEASED) or a Notifications routing mode per category and channel (OFF / SHADOW / ACTIVE). switch_id is what operations.switch.change takes; version is its expected_version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "switch_id",
+    "owner",
+    "name",
+    "scope",
+    "state",
+    "version",
+    "changed_at"
+  ],
+  "properties": {
+    "switch_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z-]{0,31}:[A-Za-z0-9._:-]{1,160}$"
+    },
+    "owner": {
+      "enum": [
+        "messaging",
+        "notifications"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "scope": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "state": {
+      "enum": [
+        "ENGAGED",
+        "RELEASED",
+        "OFF",
+        "SHADOW",
+        "ACTIVE"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "changed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

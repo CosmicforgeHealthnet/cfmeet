@@ -210,7 +210,8 @@ pub struct Peers {
     pub rogue_meeting: Arc<ServiceTokenSigner>,
     /// The Notification Service: `organization-invitations.read` only (X5).
     pub notifications: Arc<ServiceTokenSigner>,
-    /// The HQ admin bridge (ADR 0068): `organization.operator-read` only.
+    /// The HQ admin bridge (ADR 0068): `organization.operator-read` (reads) and
+    /// `organization.administer` (commands).
     pub bridge: Arc<ServiceTokenSigner>,
 }
 
@@ -248,7 +249,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
                 "organization-invitations.read",
             ]),
             issuer(cf_service_auth::services::ADMIN_BRIDGE, &bridge, &[
-                "organization.operator-read",
+                "organization.operator-read", "organization.administer",
             ]),
         ],
     })
@@ -347,6 +348,18 @@ impl<'a> Call<'a> {
         self.header("x-cf-operator", &value)
     }
 
+    /// The second person of an HQ two-person approval (`X-CF-Approver: hq:<approver>`,
+    /// approval reference and intent digest).
+    pub fn approved(self, approver: &str) -> Self {
+        let value = format!("hq:{approver}");
+        self.header("x-cf-approver", &value)
+            .header("x-cf-approval-ref", "apr-0001")
+            .header(
+                "x-cf-intent-digest",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+    }
+
     pub fn idem(mut self, key: &str) -> Self {
         self.headers
             .insert("idempotency-key", HeaderValue::from_str(key).unwrap());
@@ -430,6 +443,21 @@ impl Harness {
         let state = AppState::new(db.conn.clone(), verifier)
             .with_provisioning(true)
             .with_platform(Some(platform));
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness with owner-delivered exports configured (ADR 0068 A4): the at-rest keys
+    /// and the given notice builder.
+    pub async fn with_exports(
+        exports: Option<Arc<organizations::exports::ExportDelivery>>,
+    ) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_exports(exports);
         Some(Self {
             router: http::app(state),
             db,

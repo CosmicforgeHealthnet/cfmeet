@@ -75,3 +75,7 @@ path = "src/account-privacy-main.rs"
 [[bin]]
 name = "account-phone-migration"
 path = "src/account-phone-main.rs"
+
+[[bin]]
+name = "admin-operations-migration"
+path = "src/admin-operations-main.rs"

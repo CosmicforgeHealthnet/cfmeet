@@ -123,6 +123,9 @@ pub struct Bridge {
     pub owners: Arc<dyn crate::owners::OwnerPort>,
     /// False when no database is configured (disabled bridge): readiness says so.
     pub database_configured: bool,
+    /// The release workflow (feature switch-on requests, release history); `None`: not
+    /// configured.
+    pub releases: Option<Arc<crate::releases::ReleaseWorkflow>>,
     /// Tests only ([`Bridge::with_test_commands`]): capability id → owner and owner path.
     #[doc(hidden)]
     pub test_commands: Vec<(&'static str, crate::contract::model::Owner, &'static str)>,
@@ -207,6 +210,7 @@ impl Bridge {
             health,
             owners: Arc::new(crate::owners::NoOwners),
             database_configured: true,
+            releases: None,
             test_commands: Vec::new(),
             hmac_cache: Mutex::new(HashMap::new()),
         }
@@ -216,6 +220,12 @@ impl Bridge {
     /// phase serves yet). Never used by the binary.
     pub fn with_owners(mut self, owners: Arc<dyn crate::owners::OwnerPort>) -> Self {
         self.owners = owners;
+        self
+    }
+
+    /// The release workflow on GitHub (design §10).
+    pub fn with_releases(mut self, releases: Arc<crate::releases::ReleaseWorkflow>) -> Self {
+        self.releases = Some(releases);
         self
     }
 

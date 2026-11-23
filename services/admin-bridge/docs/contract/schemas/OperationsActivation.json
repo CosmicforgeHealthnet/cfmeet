@@ -1,0 +1,110 @@
+{
+  "description": "One feature switch-on request. state: REQUESTED (dispatch sent, outcome not yet known), DISPATCHED (GitHub started the workflow), FAILED (no run was started). run_id links the workflow run once it is listed; run_status, run_conclusion and run_updated_at are GitHub's latest view of that run (null when unknown).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "operation",
+    "release_sha",
+    "confirm",
+    "requested_by",
+    "approver",
+    "state",
+    "created_at",
+    "dispatched_at",
+    "run_id",
+    "run_status",
+    "run_conclusion",
+    "run_updated_at"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "release_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "confirm": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9][a-z0-9=,._:-]{0,127}$"
+    },
+    "requested_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "maxLength": 132
+    },
+    "approver": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "maxLength": 132
+    },
+    "state": {
+      "enum": [
+        "REQUESTED",
+        "DISPATCHED",
+        "FAILED"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "dispatched_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "run_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "run_status": {
+      "enum": [
+        "REQUESTED",
+        "QUEUED",
+        "PENDING",
+        "WAITING",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "UNKNOWN",
+        null
+      ]
+    },
+    "run_conclusion": {
+      "enum": [
+        "SUCCESS",
+        "FAILURE",
+        "NEUTRAL",
+        "CANCELLED",
+        "SKIPPED",
+        "TIMED_OUT",
+        "ACTION_REQUIRED",
+        "STALE",
+        "STARTUP_FAILURE",
+        "UNKNOWN",
+        null
+      ]
+    },
+    "run_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

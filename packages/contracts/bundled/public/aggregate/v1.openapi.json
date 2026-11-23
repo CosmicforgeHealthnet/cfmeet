@@ -14,11 +14,11 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.9.0"
+      "description": "cfmeet.meeting-service.http-api 1.11.0"
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.34.0"
+      "description": "cfmeet.calling.http-api 1.35.0"
     },
     {
       "name": "privacy-relay",
@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.9.0"
+      "description": "cfmeet.developer-platform.http-api 1.10.0"
     },
     {
       "name": "gateway",
@@ -27217,6 +27217,149 @@
         "x-cfmeet-auth": [
           "DEVELOPER_SESSION",
           "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/credential-deliveries": {
+      "get": {
+        "operationId": "listCredentialDeliveries",
+        "summary": "List API keys waiting for their one reveal",
+        "description": "List API keys waiting for their one reveal. ADR 0068 A4: keys HQ staff issued or rotated for this environment through the admin bridge are held sealed by Platform Access for ONE reveal in the console (never a secret here). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `credentials.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.CredentialDeliveryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-required-scope": "credentials.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listCredentialDeliveries",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal": {
+      "post": {
+        "operationId": "revealCredentialDelivery",
+        "summary": "Reveal an owner-delivered API key once",
+        "description": "Reveal an owner-delivered API key once. ADR 0068 A4: the ONE reveal of a key HQ staff issued or rotated through the admin bridge — the secret is in this response only (`Cache-Control: no-store`); Platform Access destroys its sealed copy, nothing is stored, replayed or resent (a lost response is recovered by rotating the key; an unknown, revealed or expired delivery is NOT_FOUND). A signed-in human member only: machine credentials are refused (PERMISSION_DENIED). Recorded as `credential.delivery_revealed` (never the secret). Roles: OWNER, ADMIN, DEVELOPER.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "deliveryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK (no-store).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.IssuedCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.revealCredentialDelivery",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
         ]
       }
     },
@@ -56745,6 +56888,79 @@
         },
         "description": "Section 54: metadata of a Platform Access API credential. Never a secret or verifier."
       },
+      "developer_platform.platform-developer.control.v1.CredentialDelivery": {
+        "description": "ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryRef",
+          "deliveryChannel",
+          "state",
+          "environmentId",
+          "credentialId",
+          "publicId",
+          "serviceAccountId",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "deliveryRef": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "deliveryChannel": {
+            "type": "string",
+            "enum": [
+              "CONSOLE_REVEAL_ONCE"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ]
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "credentialId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "developer_platform.platform-developer.control.v1.CredentialDeliveryList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.CredentialDelivery"
+            }
+          },
+          "nextCursor": {
+            "type": "null"
+          }
+        }
+      },
       "developer_platform.platform-developer.control.v1.CredentialEffectiveState": {
         "enum": [
           "ACTIVE",
@@ -64056,6 +64272,8 @@
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
           "CALENDAR_FEED_NOT_FOUND",
+          "EXPORT_LINK_INVALID",
+          "EXPORT_LINK_EXPIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]

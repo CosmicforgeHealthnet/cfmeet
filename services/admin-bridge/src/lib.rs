@@ -9,10 +9,13 @@
 pub mod chain;
 pub mod config;
 pub mod contract;
+pub mod datasets;
 pub mod errors;
+pub mod events;
 pub mod metrics;
 pub mod owners;
 pub mod policy;
+pub mod releases;
 pub mod routes;
 pub mod server;
 pub mod store;

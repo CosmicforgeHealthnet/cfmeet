@@ -21,7 +21,15 @@ import {
   shouldRetryQuery,
   type OneTimeSecret,
 } from "@/lib/developer-platform/presentation";
-import type { Credential, IssuedCredential, ProjectScopes, ServiceAccount, Workspace } from "@/lib/developer-platform/types";
+import type {
+  Credential,
+  CredentialDelivery,
+  CredentialDeliveryList,
+  IssuedCredential,
+  ProjectScopes,
+  ServiceAccount,
+  Workspace,
+} from "@/lib/developer-platform/types";
 import { useDeveloperPortal, useWorkspace } from "../DeveloperPortalProvider";
 import { EnvironmentPicker, useEnvironmentSelection } from "../EnvironmentPicker";
 import { RequireWorkspace } from "../PortalShell";
@@ -74,6 +82,7 @@ function Credentials() {
       ) : (
         <>
           <EnvironmentPicker workspace={workspace} />
+          {environmentId && can("CredentialsRead") && <KeyDeliveries key={`deliveries-${environmentId}`} workspace={workspace} environmentId={environmentId} />}
           {environmentId ? (
             <ServiceAccounts key={environmentId} workspace={workspace} projectId={projectId} environmentId={environmentId} />
           ) : (
@@ -82,6 +91,82 @@ function Credentials() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Keys CF Meet staff issued or rotated for this environment (ADR 0068 A4): each waits for
+ * ONE reveal here. The secret exists only in this component's state until "Done"; it is
+ * never stored, and revealing it again is impossible (rotate the key if it is lost).
+ */
+function KeyDeliveries({ workspace, environmentId }: { workspace: Workspace; environmentId: string }) {
+  const { client, can } = useDeveloperPortal();
+  const key = ["developer-portal", workspace.id, "credential-deliveries", environmentId];
+  const deliveries = useQuery({
+    queryKey: key,
+    queryFn: () => client.call<CredentialDeliveryList>({ operation: "listCredentialDeliveries", path: { environmentId } }),
+    retry: (count, error) => shouldRetryQuery(count, error),
+    retryDelay: (attempt, error) => retryDelayMs(attempt, error),
+  });
+  const [confirming, setConfirming] = useState<CredentialDelivery | null>(null);
+  const [secret, setSecret] = useState<OneTimeSecret | null>(null);
+  const reveal = useConsoleMutation(
+    (d: CredentialDelivery) =>
+      client.call<IssuedCredential>({ operation: "revealCredentialDelivery", path: { environmentId, deliveryRef: d.deliveryRef } }),
+    [key, ["developer-portal", workspace.id, "credentials", environmentId]],
+    (issued) => {
+      setConfirming(null);
+      setSecret(credentialSecret(issued));
+    },
+    "",
+  );
+  const items = deliveries.data?.items ?? [];
+  if (items.length === 0 && !secret) return null;
+  return (
+    <section aria-label="New API keys waiting" className="space-y-3">
+      {items.map((d) => (
+        <div key={d.deliveryRef} className="flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 sm:flex-row sm:items-center">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600"><KeyRound className="size-5" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">New API key waiting</p>
+            <p className="text-sm text-muted-foreground">
+              CF Meet issued key <Mono>{d.publicId}</Mono> for this environment. You can reveal it once, until {formatTimestamp(d.expiresAt)}.
+            </p>
+          </div>
+          {can("CredentialsManage") && (
+            <Button type="button" className="rounded-full" onClick={() => setConfirming(d)}>Reveal key</Button>
+          )}
+        </div>
+      ))}
+      <Dialog open={confirming !== null} onOpenChange={(open) => { if (!open) setConfirming(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle>Reveal this key once?</DialogTitle>
+            <DialogDescription>
+              The secret is shown only once. Have your server&apos;s secret settings ready, copy it, and store it there. If you lose it, rotate the key to get a new one.
+            </DialogDescription>
+          </DialogHeader>
+          <ErrorNotice error={reveal.error} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setConfirming(null)} className="h-10 rounded-full px-4 text-sm font-semibold hover:bg-muted">Cancel</button>
+            <Button type="button" className="rounded-full" loading={reveal.isPending} onClick={() => confirming && reveal.mutate(confirming)}>Reveal now</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={secret !== null} onOpenChange={() => undefined}>
+        <DialogContent className="sm:max-w-lg [&>button]:hidden">
+          <DialogHeader className="sr-only"><DialogTitle>API key</DialogTitle><DialogDescription>Copy and store this secret now. It is shown only once.</DialogDescription></DialogHeader>
+          {secret && (
+            <SecretOnce
+              title="Your API key"
+              secret={secret}
+              onDone={() => setSecret(null)}
+              redactedHelp="This key was already revealed, so the secret can't be shown again. If you didn't save it, rotate the key to get a new one."
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
   );
 }
 

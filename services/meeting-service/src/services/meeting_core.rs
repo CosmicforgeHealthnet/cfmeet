@@ -181,6 +181,8 @@ pub struct DomainCore {
     pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
     /// Part V H: Unified Messaging integration (`None` = legacy chat only).
     pub unified: Option<Arc<crate::services::unified_messaging::UnifiedMessaging>>,
+    /// ADR 0068 A6: CF Meet user plan limits (`None` = enforcement off, today's limits only).
+    pub plan_limits: Option<Arc<crate::services::plan_limits::PlanEnforcement>>,
 }
 
 pub type Core = Arc<DomainCore>;
