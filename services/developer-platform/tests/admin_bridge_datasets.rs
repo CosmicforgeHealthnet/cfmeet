@@ -46,7 +46,7 @@ async fn partner_workspaces_are_counted_by_their_state_at_the_end_of_each_day() 
     // The workspace existed (ACTIVE) for three days before HQ suspends it today.
     c.db.conn
         .execute_unprepared(&format!(
-            "UPDATE devplat_organizations SET created_at = now() - interval '3 days' WHERE tenant_id = '{org}'"
+            "ALTER TABLE devplat_organizations DISABLE TRIGGER USER; UPDATE devplat_organizations SET created_at = now() - interval '3 days' WHERE tenant_id = '{org}'; ALTER TABLE devplat_organizations ENABLE TRIGGER USER"
         ))
         .await
         .unwrap();
