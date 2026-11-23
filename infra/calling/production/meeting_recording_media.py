@@ -60,6 +60,8 @@ def plan(config, container):
 
 
 def known_identity(config, container):
+    if not p.env_of(container).keys().isdisjoint({'LIVEKIT_CONFIG', 'LIVEKIT_KEYS', 'REDIS_HOST', 'REDIS_PASSWORD'}):
+        raise RuntimeError('Alternate shared SFU configuration environment; preserved')
     key, secret = media.calling_key()
     if (config.get('keys') or {}).get(key) != secret:
         raise RuntimeError('Shared SFU identity does not match Calling; preserved')
@@ -109,6 +111,8 @@ def ensure(cr, run_id):
     known_identity(before, old)
     after, cfg, change = plan(before, old)
     if not change:
+        if not old['State']['Running']:
+            raise RuntimeError('Prepared shared SFU is not running; preserved')
         cr.emit('meetingMediaIngress', dict(udpMuxPort=PORT, prepared=True, reused=True))
         return
     idle()

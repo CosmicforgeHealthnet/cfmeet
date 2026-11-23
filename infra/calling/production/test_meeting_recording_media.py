@@ -69,6 +69,10 @@ class MediaPlan(unittest.TestCase):
         with patch.object(m.media, 'calling_key', return_value=('existing', 'wrong')):
             with self.assertRaisesRegex(RuntimeError, 'identity'):
                 m.known_identity(configuration(), container())
+        old = container()
+        old['Config']['Env'].append('LIVEKIT_KEYS=override')
+        with self.assertRaisesRegex(RuntimeError, 'Alternate'):
+            m.known_identity(configuration(), old)
 
 
 class MediaReplacement(unittest.TestCase):
