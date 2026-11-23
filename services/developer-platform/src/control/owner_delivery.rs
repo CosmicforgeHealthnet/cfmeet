@@ -28,9 +28,7 @@
 //! with backoff until the link expires (`EXPIRED`). Settled rows are purged after
 //! [`RETENTION`].
 
-use cf_notification_client::{
-    EnvelopeBuilder, Producer, RouteRef, SealedPlaintext, SealingKey, ROUTING_PROTOCOL,
-};
+use cf_notification_client::{EnvelopeBuilder, Producer, RouteRef, SealingKey, ROUTING_PROTOCOL};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, TransactionTrait};
 use serde_json::{json, Value};
@@ -135,11 +133,7 @@ pub fn seal_owner_invitation(
     .data("invitationId", invitation.clone())
     .data("organizationId", tenant_id.to_string())
     .data("expiresAt", rfc3339(expires_at))
-    .secret(
-        SealedPlaintext::default()
-            .with_token(token)
-            .with_address(address),
-    )
+    .sealed_token_for(token, address)
     .build_sealed(key)
     .map_err(|_| ApiError(ErrorCode::InternalError))?;
     let v = serde_json::to_value(envelope).map_err(|_| ApiError(ErrorCode::InternalError))?;

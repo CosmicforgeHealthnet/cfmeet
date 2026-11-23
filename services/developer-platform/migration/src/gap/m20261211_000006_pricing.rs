@@ -13,11 +13,11 @@
 //! * `devplat_market_freezes`: a frozen market refuses every price change.
 //! * `devplat_plan_holders` / `devplat_plan_assignments_consumer`: the CF Meet user plan of
 //!   a user or business organization (opaque ids; none: Free) and its append-only history;
-//!   a billing-account reference is kept ready for a future payment provider.
+//!   a billing-account reference is kept ready for a future billing provider.
 //! * `devplat_plan_overrides`: per-holder limit overrides.
 //!
 //! Nothing here charges anyone: amounts are in minor units of the lineage's currency,
-//! there is no card, invoice, tax or balance. Rollback: DOWN drops the tables and restores
+//! there is no card, tax or balance. Rollback: DOWN drops the tables and restores
 //! the A4 subject check (`NOT VALID`).
 
 use sea_orm_migration::prelude::*;

@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.9.0 | 319 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.10.0 | 319 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.34.0 | 146 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
-| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
-| **Total** | | | **753** |
+| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
+| **Total** | | | **755** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.10.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -69,7 +69,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.9.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/me/account/delete` | account session | Delete my account | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_my_account` |
-| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_export_my_data` |
+| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 400, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, REAUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_export_my_data` |
 | POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
 | POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
 | GET | `/api/v2/me/mfa` | account session | My two-step sign-in state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_mfa` |
@@ -702,7 +702,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.10
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.34.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -1245,7 +1245,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 
 ## Developer Portal (Developer Platform)
 
-Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
+Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
 
 ### Activity
 
@@ -1291,6 +1291,8 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/credential-deliveries` | account session (developer bridge); platform credential (server-side only) | List API keys waiting for their one reveal | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listCredentialDeliveries` |
+| POST | `/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal` | account session (developer bridge) | Reveal an owner-delivered API key once | 200, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#revealCredentialDelivery` |
 | GET | `/v1/environments/{environmentId}/credentials/{credentialId}` | account session (developer bridge); platform credential (server-side only) | Read one credential's metadata | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getCredential` |
 | PUT | `/v1/environments/{environmentId}/credentials/{credentialId}/limits` | account session (developer bridge); platform credential (server-side only) | Restrict a credential's API quota (only ever stricter) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#putCredentialLimits` |
 | POST | `/v1/environments/{environmentId}/credentials/{credentialId}/resume` | account session (developer bridge); platform credential (server-side only) | Resume a suspended credential | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#resumeCredential` |

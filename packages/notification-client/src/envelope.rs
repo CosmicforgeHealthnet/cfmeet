@@ -565,6 +565,17 @@ impl EnvelopeBuilder {
         self
     }
 
+    /// A one-time token and its delivery address, sealed at
+    /// [`build_sealed`](Self::build_sealed). For producers that hand over a claim link and
+    /// never handle the sealed form themselves.
+    pub fn sealed_token_for(self, token: impl Into<String>, address: impl Into<String>) -> Self {
+        self.secret(
+            SealedPlaintext::default()
+                .with_token(token)
+                .with_address(address),
+        )
+    }
+
     /// Builds an envelope that carries no sealed part.
     pub fn build(self) -> Result<Envelope, EnvelopeError> {
         if self.plaintext.is_some() {
