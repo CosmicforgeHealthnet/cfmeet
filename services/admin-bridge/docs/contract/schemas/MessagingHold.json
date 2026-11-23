@@ -1,0 +1,98 @@
+{
+  "description": "One legal hold. The case reference is not relayed: reason_category says why.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hold_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "scope_kind",
+    "conversation_id",
+    "principal_id",
+    "reason_category",
+    "status",
+    "created_at",
+    "expires_at",
+    "released_at",
+    "release_reason"
+  ],
+  "properties": {
+    "hold_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope_kind": {
+      "enum": [
+        "CONVERSATION",
+        "PRINCIPAL",
+        "ENVIRONMENT"
+      ]
+    },
+    "conversation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "reason_category": {
+      "enum": [
+        "LITIGATION",
+        "REGULATORY",
+        "INVESTIGATION",
+        "INTERNAL_POLICY"
+      ]
+    },
+    "status": {
+      "enum": [
+        "ACTIVE",
+        "RELEASED"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "released_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "release_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    }
+  }
+}

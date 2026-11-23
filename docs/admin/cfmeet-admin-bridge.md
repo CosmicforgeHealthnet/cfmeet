@@ -570,6 +570,9 @@ Agreed with the `centralize-admin` session building `services/cfmeet-admin` (202
 | 1.5.0 (A2.1) | *recorded when A2.1 merges* | Developer Platform reads served: partner workspaces (search, detail, staff activity), projects, environments, members, invitations, push key details, webhooks and deliveries; apps (search, detail, versions, installs). Keys, service accounts, websites and partner users wait for Platform Access; incidents have no list at the owner; usage waits for HQ's Summary shape. Additive over 1.4.0 |
 | 1.6.0 (A2.3) | *recorded when A2.3 merges* | Platform Access reads served: identity tenants (search), applications, environments, service accounts, scope grants, API keys (public id and last four only), identity-record search, OAuth apps and their grants, partner users, identity audit; the partner keys, service accounts, allowed websites and users reads move to Platform Access (a workspace id is its tenant id). Never a secret, verifier, label or external reference. `identity.records.list` joins `x-contact-search` (a partner-chosen principal reference may be an email address). Additive over 1.5.0 |
 | 1.7.0 (A2.4) | *recorded when A2.4 merges* | Communications reads served: profile by CF Meet ID (display name, activation state, operator hold; never contact fields), reports (safety evidence, no free text), operator holds, Hub audit (details dropped), metrics as HQ's `Summary` (with `Scope`, published verbatim). Additive over 1.6.0 (Platform Access) |
+| 1.8.0 (A2.5) | *recorded when A2.5 merges* | Meeting Service reads served: account search (email matched, never returned) and detail (email masked), sessions, devices, MFA status, security history; meeting spaces, meeting search and detail, live meetings, participants, conference audit. No address, token, session label, device key, MFA secret, IP address, location, content or media. Additive over 1.7.0 |
+| 1.9.0 (A2.6) | *recorded when A2.6 merges* | Messaging reads served: reports (list and detail with moderation actions), legal holds, exports, deletion requests, chat audit, emergency off-switches, incidents, failed messages (outbox dead letters), key-transparency status. Ids, categories, states, counts and times only: never message content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. `messaging.policy.read` stays blocked (per-environment free-form document; no environment selector). Additive over 1.8.0 |
+| 1.10.0 (A2.7) | *recorded when A2.7 merges* | Calling reads served, every one scoped to the request's tenant (a Platform Access tenant id; another tenant's data is never reached): calls (search, detail with participants by id), live calls, open abuse reports, block rules (a blocked contact only as present), limits, routing, enterprise and spend policies (bounded, `truncated`), recording and voicemail metadata, retention holds and incidents (tenant and platform), webhook sealing keys (counts), operator audit. Never a telephone number, SIP URI, display name, object key or key material. Additive over 1.9.0 |
 
 HQ pins a merged commit on `main` (the branch CF Meet production deploys from) and recomputes `SHA256SUMS`. The running bridge reports the sha256 of its own `openapi.json` in `bridge.capabilities.read`; HQ trusts runtime states only when it equals the pinned hash.
 
@@ -631,3 +634,42 @@ Every staff role also reaches discovery (`admin-ui-capabilities`) and datasets (
 ### 17.5 Reads that use POST
 
 Only `pricing.charges.simulate` (its input is a usage vector). Every other non-GET route is a command.
+
+### 17.6 Commands: the operations ledger and readback (A3.0, agreed with HQ)
+
+No command is served by A3.0 itself; it is the core every A3+ family runs through (`services/admin-bridge/src/routes/commands.rs`).
+
+- **One UUID per HQ command.** `Idempotency-Key` = body `operation_id` = the readback key. A body whose `operation_id` differs is `COMMAND_BODY_INVALID`.
+- **Every command body** is `{operation_id, expected_version, reason_code?, note?}` plus the family's own fields; unknown fields are refused. `expected_version` is a string or the owner's non-negative integer row version (the same slot either way).
+- **Ledger** (`admin_operations`), keyed by staff member + `Idempotency-Key`:
+  - A replay with the same intent (capability, path parameters, purpose, scope, exact body, approval) returns the stored outcome and does not consume the approval again.
+  - A different intent under the same key is `IDEMPOTENCY_CONFLICT`.
+  - Only one non-failed operation may hold a target's expected version: `VERSION_CONFLICT` (409, nothing done). An owner's 409 is also `VERSION_CONFLICT`.
+- **Send once.** `PENDING` → `SENT` is recorded before the owner call. The owner gets the bridge's own service token, `X-CF-Operator`, `Idempotency-Key` and, for two-person commands, `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`.
+  - 2xx: `SUCCEEDED`.
+  - 4xx: `FAILED` (404 `RESOURCE_NOT_FOUND`, 409 `VERSION_CONFLICT`, otherwise `OWNER_REFUSED`).
+  - Never sent (owner not configured): `FAILED`, `CAPABILITY_DISABLED`.
+  - Anything else: `UNKNOWN_OUTCOME` (502).
+  - Every outcome is audited after the accepted request's own audit row.
+- **Settlement, never a resend.** `GET /internal/v1/operator/operations/{idempotency_key}` on the owner returns `{idempotency_key, outcome: APPLIED|REFUSED, source_status, source_version}`, or 404.
+  - Every owner that serves a command must provide this record. It must write the key in the same transaction as the change.
+  - The bridge asks on each readback and in a one-minute sweep.
+  - With no record 600 s after sending, the operation is `FAILED` with `source_status` `NOT_RECEIVED`.
+  - A `PENDING` row older than 120 s was never sent: `FAILED`, `NOT_SENT`.
+- **`bridge.operations.read`**, `GET /hq/operations/{idempotency_key}` (SCOPED). Its roles and purposes are those of every command.
+  - It finds only the calling staff member's own operations; another's key is `RESOURCE_NOT_FOUND`.
+  - The original command's purpose (`PURPOSE_NOT_ALLOWED` otherwise) and exact scope (`SCOPE_DENIED` otherwise) are required.
+  - Result: `{idempotency_key, capability_id, status, source_status, source_version, settled_at}`.
+  - HQ settles on `SUCCEEDED` and `FAILED`; `PENDING`, `SENT` and `UNKNOWN_OUTCOME` stay unknown.
+- **Verification served (A3.1–A3.3, contract 1.12.0).**
+  - `verification.cases.list`, `.cases.read` and `.case-history.list` relay the Developer Platform's verification views (`GET /internal/v1/operator/verification/cases…`), re-extracted strictly.
+  - Kinds: `PARTNER_GO_LIVE` (a production-access request) and `APP_REVIEW` (an app; publish is a step of the same case). There is no `APP_PUBLISH`.
+  - States: `OPEN`, `CLAIMED`, `APPROVED`, `REJECTED`, `PUBLISHED`, `SUSPENDED`, `CANCELLED` (withdrawn: never listed, still readable).
+  - `details` appears on `.read` only.
+  - `case.claim` (R2) and the R4 decisions (partner go-live approve, reject, suspend; app approve, reject, publish) take `expected_version` as the case's integer version and go to the owner's decision route. From the bridge, the owner requires `Idempotency-Key` and `expectedVersion`, accepts HQ's approver in place of its named-reviewer lists, and answers with the case.
+  - The owner records the command in `devplat_admin_operations` in the same transaction; that is the settlement record.
+- **Verification scope (A3.1+).** `verification.*` reads and commands are operator functions scoped to CF Meet's first-party Platform Access tenant (the one HQ enrols). The partner's tenant is the case field `partner_tenant_id`.
+- **Staff link (A3.2).**
+  - Without `x-cf-operator-user-id`, an R4 decision is allowed and the owner records `link_status=UNLINKED`.
+  - With it, a member of the partner's workspace is refused (no self-review).
+  - Two-person approval (requester ≠ approver) applies either way.

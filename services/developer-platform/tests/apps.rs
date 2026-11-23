@@ -1573,3 +1573,108 @@ async fn with_every_flag_off_nothing_changes() {
     assert!(w.oauth.clients.lock().unwrap().is_empty());
     assert_eq!(c.count("SELECT count(*) FROM devplat_apps").await, 0);
 }
+
+// ---------------------------------------------------------------------------------------
+// ADR 0068 A3: app review from HQ through the admin bridge
+// ---------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn hq_reviews_and_publishes_an_app_with_two_people_and_no_named_reviewer() {
+    let Some(w) = world(all_on()).await else {
+        return;
+    };
+    let c = &w.c;
+    let (owner, owner_id) = c.sessions.sign_in("owner@hq-review.example");
+    let (_, project, _) = workspace(c, &owner).await;
+    let base = format!("/v1/projects/{project}/app");
+    let r = c
+        .req(As::User(&owner), Method::PUT, &base, Some(manifest()))
+        .await;
+    assert!(r.status.is_success(), "{}", r.json);
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/submit"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+
+    let hq = ("x-cf-operator", "hq:staff-0001");
+    let second = [
+        ("x-cf-approver", "hq:staff-0002"),
+        ("x-cf-approval-ref", "appr-7"),
+        (
+            "x-cf-intent-digest",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ),
+    ];
+    let case = format!("/internal/v1/operator/verification/cases/cfmeet:APP_REVIEW:{project}");
+    let read = c.bridge(&case, &[hq]).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.json);
+    assert_eq!(read.json["state"], "OPEN");
+    assert_eq!(read.json["evidence"][0]["kind"], "APP_MANIFEST");
+    conforms(&format!("{CTRL}VerificationCaseDetail"), &read.json);
+    assert!(read.json["details"]["app_version"].as_i64().is_some());
+
+    // The workspace owner's own linked account may not even claim it.
+    let key = Uuid::new_v4().to_string();
+    let owner_ref = owner_id.to_string();
+    let v = read.json["version"].as_i64().unwrap();
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "review"),
+            &[
+                hq,
+                ("idempotency-key", &key),
+                ("x-cf-operator-user-id", &owner_ref),
+            ],
+            Some(json!({ "expectedVersion": v })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.json);
+
+    let mut version = v;
+    for (command, two_person, state) in [
+        ("review", false, "CLAIMED"),
+        ("approve", true, "APPROVED"),
+        ("publish", true, "PUBLISHED"),
+    ] {
+        let key = Uuid::new_v4().to_string();
+        let mut headers = vec![hq, ("idempotency-key", key.as_str())];
+        if two_person {
+            headers.extend(second);
+        }
+        let r = c
+            .bridge_send(
+                Method::POST,
+                &decide(project, command),
+                &headers,
+                Some(json!({ "expectedVersion": version })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{command}: {}", r.json);
+        let read = c.bridge(&case, &[hq]).await;
+        assert_eq!(read.json["state"], state, "{command}");
+        let next = read.json["version"].as_i64().unwrap();
+        assert!(next > version);
+        version = next;
+        let rec = c
+            .bridge(&format!("/internal/v1/operator/operations/{key}"), &[hq])
+            .await;
+        assert_eq!(rec.json["source_version"], next.to_string());
+    }
+    // A two-person decision without its second person is refused.
+    let key = Uuid::new_v4().to_string();
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "approve"),
+            &[hq, ("idempotency-key", &key)],
+            Some(json!({ "expectedVersion": version })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.json);
+}

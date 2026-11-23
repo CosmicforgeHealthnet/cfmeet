@@ -217,7 +217,6 @@ impl B {
         }
         self
     }
-    #[allow(dead_code)]
     fn body(mut self, schema: &'static str) -> B {
         self.0.body = Some(schema);
         self
@@ -226,7 +225,6 @@ impl B {
         self.0.result = Some(schema);
         self
     }
-    #[allow(dead_code)]
     fn source(mut self, endpoint: &'static str) -> B {
         self.0.source_endpoint = Some(endpoint);
         self
@@ -307,6 +305,23 @@ pub fn catalog() -> Vec<Capability> {
         .served(&[
             "datasets_are_null_not_zero_until_sources_report",
             "worker_identity_reads_datasets_with_the_workload_acr",
+        ]),
+    );
+    // HQ's generic settlement of a command (roles and purposes: every command's, below).
+    c.push(
+        get(
+            "bridge.operations.read",
+            "/hq/operations/{idempotency_key}",
+            Q::Scoped,
+        )
+        .at(AdminBridge, S::Local, P::A3)
+        .risk(R::R1, V::Internal)
+        .perm("bridge.operations.read")
+        .uuid("idempotency_key")
+        .result("OperationReadback")
+        .served(&[
+            "operations_readback_settles_from_the_owner_record_and_never_resends",
+            "operations_readback_is_private_to_the_staff_member_purpose_and_scope",
         ]),
     );
     c.push(
@@ -2353,6 +2368,9 @@ pub fn catalog() -> Vec<Capability> {
     );
 
     // ---- 6.10 Verification -------------------------------------------------------
+    // A3: the verification queue (HQ's shared case shape) and its decisions, scoped to CF
+    // Meet's first-party tenant (an operator function); served through the command core.
+    const DP_CASES: &str = "GET /internal/v1/operator/verification/cases";
     c.push(
         dp(
             get(
@@ -2363,7 +2381,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::Internal),
+        .risk(R::R1, V::Internal)
+        .source(DP_CASES)
+        .result("VerificationCasePage")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2375,7 +2396,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::Internal),
+        .risk(R::R1, V::Internal)
+        .source("GET /internal/v1/operator/verification/cases/{caseId}")
+        .result("VerificationCaseDetail")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2387,7 +2411,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .source("GET /internal/v1/operator/verification/cases/{caseId}/history")
+        .result("VerificationCaseHistory")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2398,35 +2425,58 @@ pub fn catalog() -> Vec<Capability> {
             S::Exists,
             P::A3,
         )
-        .risk(R::R2, V::Internal),
+        .risk(R::R2, V::Internal)
+        .source("POST /internal/v1/operator/{production-access-requests|apps}/{id}/review")
+        .body("VerificationClaimRequest")
+        .result("VerificationCommandResult")
+        .served(&["verification_commands_reach_the_right_owner_route_once"]),
     );
-    for (id, path) in [
+    for (id, path, body, source) in [
         (
             "verification.partner-go-live.approve",
             "/verification/cases/{case_id}/partner-go-live/approve",
+            "PartnerGoLiveApproveRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/approve",
         ),
         (
             "verification.partner-go-live.reject",
             "/verification/cases/{case_id}/partner-go-live/reject",
+            "VerificationRejectRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/reject",
         ),
         (
             "verification.partner-go-live.suspend",
             "/verification/cases/{case_id}/partner-go-live/suspend",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/suspend",
         ),
         (
             "verification.app-review.approve",
             "/verification/cases/{case_id}/app-review/approve",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/apps/{appId}/approve",
         ),
         (
             "verification.app-review.reject",
             "/verification/cases/{case_id}/app-review/reject",
+            "VerificationRejectRequest",
+            "POST /internal/v1/operator/apps/{appId}/reject",
         ),
         (
             "verification.app-review.publish",
             "/verification/cases/{case_id}/app-review/publish",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/apps/{appId}/publish",
         ),
     ] {
-        c.push(dp(cmd(id, path), S::Exists, P::A3).risk(R::R4, V::Internal));
+        c.push(
+            dp(cmd(id, path), S::Exists, P::A3)
+                .risk(R::R4, V::Internal)
+                .source(source)
+                .body(body)
+                .result("VerificationCommandResult")
+                .served(&["verification_commands_reach_the_right_owner_route_once"]),
+        );
     }
     c.push(
         og(
@@ -2911,6 +2961,24 @@ pub fn catalog() -> Vec<Capability> {
         );
         cap.contact_search = true;
     }
+    // bridge.operations.read: whoever may run a command may read its operation back, for
+    // that command's purposes (the readback also checks the operation's own purpose).
+    let mut roles: Vec<Role> = Vec::new();
+    let mut purposes: Vec<Purpose> = Vec::new();
+    for c in caps.iter().filter(|c| c.kind == Kind::Command) {
+        roles.extend(c.roles.iter().copied());
+        purposes.extend(c.purposes.iter().copied());
+    }
+    roles.sort();
+    roles.dedup();
+    purposes.sort();
+    purposes.dedup();
+    let readback = caps
+        .iter_mut()
+        .find(|c| c.id == "bridge.operations.read")
+        .expect("bridge.operations.read");
+    readback.roles = roles;
+    readback.purposes = purposes;
     caps
 }
 
@@ -3163,5 +3231,193 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "communications.metrics.read",
         "Summary",
         &["communications_metrics_are_an_hq_summary"],
+    ),
+    // A2.5 Meeting Service (accounts, meetings).
+    (
+        "accounts.users.search",
+        "AccountUserPage",
+        &["meetings_user_search_never_returns_an_address"],
+    ),
+    (
+        "accounts.users.read",
+        "AccountUserDetail",
+        &["meetings_user_detail_masks_the_address"],
+    ),
+    (
+        "accounts.sessions.list",
+        "AccountSessionPage",
+        &["meetings_account_lists_translate_strictly"],
+    ),
+    (
+        "accounts.devices.list",
+        "AccountDevicePage",
+        &["meetings_account_lists_translate_strictly"],
+    ),
+    (
+        "accounts.mfa.read",
+        "AccountMfa",
+        &["meetings_mfa_reports_state_only"],
+    ),
+    (
+        "accounts.security-history.list",
+        "AccountSecurityEventPage",
+        &["meetings_security_history_maps_window_and_sequence_cursor"],
+    ),
+    (
+        "meetings.spaces.search",
+        "MeetingSpacePage",
+        &["meetings_space_and_meeting_search"],
+    ),
+    (
+        "meetings.meetings.search",
+        "MeetingConferencePage",
+        &["meetings_space_and_meeting_search"],
+    ),
+    (
+        "meetings.meetings.read",
+        "MeetingConference",
+        &["meetings_detail_and_participants"],
+    ),
+    (
+        "meetings.live.list",
+        "MeetingConferencePage",
+        &["meetings_live_list"],
+    ),
+    (
+        "meetings.participants.list",
+        "MeetingParticipantPage",
+        &["meetings_detail_and_participants"],
+    ),
+    (
+        "meetings.audit.list",
+        "MeetingAuditEventPage",
+        &["meetings_audit_maps_window_and_time_cursor"],
+    ),
+    // A2.6 Messaging.
+    (
+        "messaging.reports.list",
+        "MessagingReportPage",
+        &["messaging_reports_relay_no_evidence"],
+    ),
+    (
+        "messaging.reports.read",
+        "MessagingReportDetail",
+        &["messaging_report_detail_carries_actions_not_evidence"],
+    ),
+    (
+        "messaging.holds.list",
+        "MessagingHoldPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.exports.list",
+        "MessagingExportPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.deletion-requests.list",
+        "MessagingDeletionRequestPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.audit.list",
+        "MessagingAuditPage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.switches.list",
+        "MessagingSwitchPage",
+        &["messaging_switches_are_served"],
+    ),
+    (
+        "messaging.incidents.list",
+        "MessagingIncidentPage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.failed-messages.list",
+        "MessagingFailedMessagePage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.key-transparency.read",
+        "MessagingKeyTransparency",
+        &["messaging_key_transparency_is_hashes_and_sizes_only"],
+    ),
+    // A2.7 Calling.
+    (
+        "calling.calls.list",
+        "CallingCallPage",
+        &["calling_calls_are_tenant_scoped_and_minimized"],
+    ),
+    (
+        "calling.calls.read",
+        "CallingCallDetail",
+        &["calling_call_detail_lists_participants_by_id_only"],
+    ),
+    (
+        "calling.live.list",
+        "CallingCallPage",
+        &["calling_lists_translate_strictly"],
+    ),
+    (
+        "calling.abuse-reports.list",
+        "CallingAbuseReportPage",
+        &["calling_lists_translate_strictly"],
+    ),
+    (
+        "calling.blocks.list",
+        "CallingBlockRulePage",
+        &["calling_blocks_never_name_a_contact"],
+    ),
+    (
+        "calling.limits.read",
+        "CallingLimits",
+        &["calling_configuration_reads_are_bounded"],
+    ),
+    (
+        "calling.routing.read",
+        "CallingRoutingPolicies",
+        &["calling_configuration_reads_are_bounded"],
+    ),
+    (
+        "calling.enterprise-features.read",
+        "CallingEnterprisePolicies",
+        &["calling_configuration_reads_are_bounded"],
+    ),
+    (
+        "calling.spend-limits.read",
+        "CallingSpendPolicies",
+        &["calling_configuration_reads_are_bounded"],
+    ),
+    (
+        "calling.recordings.list",
+        "CallingRecordingPage",
+        &["calling_media_reads_are_metadata_only"],
+    ),
+    (
+        "calling.voicemail.list",
+        "CallingVoicemailPage",
+        &["calling_media_reads_are_metadata_only"],
+    ),
+    (
+        "calling.retention-holds.list",
+        "CallingRetentionHoldPage",
+        &["calling_lists_translate_strictly"],
+    ),
+    (
+        "calling.incidents.list",
+        "CallingIncidentPage",
+        &["calling_lists_translate_strictly"],
+    ),
+    (
+        "calling.webhook-keys.list",
+        "CallingWebhookKeyPage",
+        &["calling_lists_translate_strictly"],
+    ),
+    (
+        "calling.audit.list",
+        "CallingAuditEntryPage",
+        &["calling_lists_translate_strictly"],
     ),
 ];

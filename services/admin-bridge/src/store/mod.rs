@@ -183,6 +183,104 @@ pub struct ProjectionRow {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Send-once state of an HQ command (`admin_operations.status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OpStatus {
+    /// Accepted, never sent to the owner.
+    Pending,
+    /// Sent; no answer recorded yet.
+    Sent,
+    Succeeded,
+    Failed,
+    /// Sent and no clear answer came back: settled only from the owner's own record.
+    UnknownOutcome,
+}
+
+impl OpStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            OpStatus::Pending => "PENDING",
+            OpStatus::Sent => "SENT",
+            OpStatus::Succeeded => "SUCCEEDED",
+            OpStatus::Failed => "FAILED",
+            OpStatus::UnknownOutcome => "UNKNOWN_OUTCOME",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "PENDING" => OpStatus::Pending,
+            "SENT" => OpStatus::Sent,
+            "SUCCEEDED" => OpStatus::Succeeded,
+            "FAILED" => OpStatus::Failed,
+            "UNKNOWN_OUTCOME" => OpStatus::UnknownOutcome,
+            _ => return None,
+        })
+    }
+    pub const fn settled(self) -> bool {
+        matches!(self, OpStatus::Succeeded | OpStatus::Failed)
+    }
+    /// The only transitions the ledger (and its database trigger) allows.
+    pub const fn may_become(self, next: OpStatus) -> bool {
+        matches!(
+            (self, next),
+            (OpStatus::Pending, OpStatus::Sent | OpStatus::Failed)
+                | (
+                    OpStatus::Sent,
+                    OpStatus::Succeeded | OpStatus::Failed | OpStatus::UnknownOutcome
+                )
+                | (
+                    OpStatus::UnknownOutcome,
+                    OpStatus::Succeeded | OpStatus::Failed
+                )
+        )
+    }
+}
+
+/// One `admin_operations` row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Operation {
+    pub principal_sub: String,
+    pub idempotency_key: uuid::Uuid,
+    pub operation_id: uuid::Uuid,
+    pub capability: String,
+    pub owner: String,
+    pub purpose: String,
+    pub scope: Value,
+    pub intent_sha256: String,
+    pub target: String,
+    pub expected_version: String,
+    pub approval_id: Option<String>,
+    pub correlation_id: uuid::Uuid,
+    pub status: OpStatus,
+    pub source_status: Option<String>,
+    pub source_version: Option<String>,
+    pub error_code: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub settled_at: Option<DateTime<Utc>>,
+}
+
+/// How an outcome is recorded ([`Store::settle_operation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settlement {
+    pub status: OpStatus,
+    pub source_status: Option<String>,
+    pub source_version: Option<String>,
+    pub error_code: Option<String>,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BeginOutcome {
+    /// Recorded as `PENDING`.
+    Started,
+    /// The key is already used by this staff member (the stored row; the caller compares
+    /// intents).
+    Existing(Box<Operation>),
+    /// Another non-failed operation holds the target's expected version.
+    VersionTaken,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CleanupStats {
     pub claims: u64,
@@ -229,6 +327,29 @@ pub trait Store: Send + Sync + 'static {
     ) -> StoreResult<Vec<DatasetDay>>;
 
     async fn projections(&self) -> StoreResult<Vec<ProjectionRow>>;
+
+    /// Records a new `PENDING` operation, or reports why it cannot be.
+    async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome>;
+
+    /// `PENDING` → `SENT`. False when the row is no longer `PENDING` (never send then).
+    async fn mark_sent(&self, sub: &str, key: uuid::Uuid, at: DateTime<Utc>) -> StoreResult<bool>;
+
+    /// Records an outcome if the transition is allowed; false (nothing changed) otherwise.
+    async fn settle_operation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        s: &Settlement,
+    ) -> StoreResult<bool>;
+
+    async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>>;
+
+    /// Unsettled operations created before `before`, oldest first.
+    async fn open_operations(
+        &self,
+        before: DateTime<Utc>,
+        limit: u32,
+    ) -> StoreResult<Vec<Operation>>;
 
     /// Removes expired claims and rate buckets older than `now - 1 hour`.
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats>;

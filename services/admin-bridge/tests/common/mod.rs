@@ -30,6 +30,8 @@ pub const HMAC_KID: &str = "hq-hmac-1";
 pub const HMAC_KEY: &[u8] = b"test-hmac-key-material-at-least-32-bytes-long";
 pub const STAFF_KID: &str = "hq-staff-1";
 pub const TENANT: &str = "cfmeet-first-party";
+/// A Platform Access tenant id (owners that key data by tenant, e.g. Calling, need a UUID).
+pub const TENANT_ID: &str = "4d1f9a2e-7b3c-4e5d-8f6a-9b0c1d2e3f4a";
 
 pub struct Pki {
     pub dir: tempfile::TempDir,
@@ -99,6 +101,7 @@ pub struct Harness {
     pub pki: Pki,
     pub store: Arc<MemoryStore>,
     pub addr: std::net::SocketAddr,
+    pub bridge: Arc<Bridge>,
 }
 
 pub struct Options {
@@ -107,6 +110,7 @@ pub struct Options {
     pub policy: bool,
     pub catalog: Option<Vec<Capability>>,
     pub switches_all_on: bool,
+    pub test_commands: Vec<(&'static str, Owner, &'static str)>,
 }
 
 impl Default for Options {
@@ -117,6 +121,7 @@ impl Default for Options {
             policy: true,
             catalog: None,
             switches_all_on: false,
+            test_commands: Vec::new(),
         }
     }
 }
@@ -179,7 +184,7 @@ pub async fn start(opts: Options) -> Harness {
         strong_acr: HashSet::from(["urn:cosmicforge:acr:mfa".to_string()]),
         workload_acr: "urn:cosmicforge:acr:workload".into(),
         enrolled_markets: HashSet::from(["GLOBAL".to_string()]),
-        enrolled_tenants: HashSet::from([TENANT.to_string()]),
+        enrolled_tenants: HashSet::from([TENANT.to_string(), TENANT_ID.to_string()]),
         rate_limit_per_minute: 5,
     };
     let switches = Switches {
@@ -204,6 +209,9 @@ pub async fn start(opts: Options) -> Harness {
     if let Some(o) = opts.owners {
         bridge = bridge.with_owners(o);
     }
+    if !opts.test_commands.is_empty() {
+        bridge = bridge.with_test_commands(opts.test_commands);
+    }
     let bridge = Arc::new(bridge);
     if opts.policy {
         bridge.load_policy().await.unwrap();
@@ -216,8 +224,13 @@ pub async fn start(opts: Options) -> Harness {
     .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(server::run_hq(bridge, listener, acceptor));
-    Harness { pki, store, addr }
+    tokio::spawn(server::run_hq(bridge.clone(), listener, acceptor));
+    Harness {
+        pki,
+        store,
+        addr,
+        bridge,
+    }
 }
 
 // ---- HQ client side (mirrors karryam-admin signing.js with cfmeet values) ---------

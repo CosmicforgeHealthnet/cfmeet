@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.7.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.12.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -139,6 +139,8 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 | `CAPABILITY_DISABLED` | 503 | capability not served in this build, its module switch is off, or writes are off |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | command without a valid Idempotency-Key |
 | `IDEMPOTENCY_CONFLICT` | 409 | Idempotency-Key reused with a different request |
+| `VERSION_CONFLICT` | 409 | another operation already holds this target's expected version (in flight or succeeded); nothing was done: read back and use the current version |
+| `COMMAND_BODY_INVALID` | 400 | command body is not exactly the capability's request schema |
 | `RATE_LIMITED` | 429 | per staff member, permission and scope limit reached |
 | `AUDIT_UNAVAILABLE` | 503 | the audit row could not be written; nothing was done and no data is returned |
 | `DATASET_NOT_FOUND` | 404 | unknown dataset id |
@@ -165,7 +167,45 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `bridge.capabilities.read`
 - `bridge.health.read`
 - `bridge.datasets.read`
+- `bridge.operations.read`
 - `hq.projections.status`
+- `accounts.users.search`
+- `accounts.users.read`
+- `accounts.sessions.list`
+- `accounts.devices.list`
+- `accounts.mfa.read`
+- `accounts.security-history.list`
+- `meetings.spaces.search`
+- `meetings.meetings.search`
+- `meetings.meetings.read`
+- `meetings.live.list`
+- `meetings.participants.list`
+- `meetings.audit.list`
+- `messaging.reports.list`
+- `messaging.reports.read`
+- `messaging.holds.list`
+- `messaging.exports.list`
+- `messaging.deletion-requests.list`
+- `messaging.audit.list`
+- `messaging.switches.list`
+- `messaging.incidents.list`
+- `messaging.failed-messages.list`
+- `messaging.key-transparency.read`
+- `calling.calls.list`
+- `calling.calls.read`
+- `calling.live.list`
+- `calling.abuse-reports.list`
+- `calling.blocks.list`
+- `calling.limits.read`
+- `calling.routing.read`
+- `calling.enterprise-features.read`
+- `calling.spend-limits.read`
+- `calling.recordings.list`
+- `calling.voicemail.list`
+- `calling.retention-holds.list`
+- `calling.incidents.list`
+- `calling.webhook-keys.list`
+- `calling.audit.list`
 - `communications.profiles.read`
 - `communications.reports.list`
 - `communications.holds.list`
@@ -208,6 +248,16 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `apps.apps.read`
 - `apps.versions.list`
 - `apps.installs.list`
+- `verification.cases.list`
+- `verification.cases.read`
+- `verification.case-history.list`
+- `verification.case.claim`
+- `verification.partner-go-live.approve`
+- `verification.partner-go-live.reject`
+- `verification.partner-go-live.suspend`
+- `verification.app-review.approve`
+- `verification.app-review.reject`
+- `verification.app-review.publish`
 - `notifications.deliveries.list`
 - `notifications.failed-deliveries.list`
 - `notifications.suppressions.list`

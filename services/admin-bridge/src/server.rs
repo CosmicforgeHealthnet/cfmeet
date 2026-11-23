@@ -245,7 +245,8 @@ pub async fn run_ops(bridge: Arc<Bridge>, listener: TcpListener) {
     }
 }
 
-/// Maintenance: claim / rate-bucket cleanup and policy re-verification, every minute.
+/// Maintenance: claim / rate-bucket cleanup, policy re-verification and the settlement of
+/// open commands, every minute.
 pub async fn run_maintenance(bridge: Arc<Bridge>) {
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
@@ -256,6 +257,11 @@ pub async fn run_maintenance(bridge: Arc<Bridge>) {
         if bridge.switches.enabled {
             if let Err(e) = bridge.load_policy().await {
                 tracing::error!(error = %e, "access policy not verified: refusing every request with POLICY_UNAVAILABLE");
+            }
+            // Open commands are settled from the owners' records, never resent.
+            let settled = crate::routes::commands::sweep(&bridge).await;
+            if settled > 0 {
+                tracing::info!(settled, "operations settled");
             }
         }
     }

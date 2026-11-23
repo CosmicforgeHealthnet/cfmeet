@@ -293,6 +293,8 @@ pub struct Peers {
     pub communications: Arc<ServiceTokenSigner>,
     /// The operator console: `calling-abuse-reports.review` only (C21).
     pub operator_console: Arc<ServiceTokenSigner>,
+    /// The HQ admin bridge (ADR 0068): `calling.administer` only (operator reads).
+    pub admin_bridge: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -346,6 +348,7 @@ pub fn service_auth_fixture_targeting(
     let developer_platform_key = service_key("developer-platform-test-1");
     let communications_key = service_key("communications-test-1");
     let operator_console_key = service_key("operator-console-test-1");
+    let admin_bridge_key = service_key("admin-bridge-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -417,6 +420,11 @@ pub fn service_auth_fixture_targeting(
                     cf_service_auth::services::OPERATOR_CONSOLE,
                     vec![operator_console_key.public_jwk()],
                     &["calling-abuse-reports.review"],
+                ),
+                (
+                    cf_service_auth::services::ADMIN_BRIDGE,
+                    vec![admin_bridge_key.public_jwk()],
+                    &["calling.administer"],
                 ),
             ],
         ),
@@ -529,6 +537,13 @@ pub fn service_auth_fixture_targeting(
             ServiceId::operator_console(),
             env,
             operator_console_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        admin_bridge: Arc::new(ServiceTokenSigner::new(
+            ServiceId::admin_bridge(),
+            env,
+            admin_bridge_key,
             TokenTtl::default(),
             shared.clone(),
         )),

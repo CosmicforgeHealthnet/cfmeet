@@ -1,0 +1,75 @@
+{
+  "description": "One meeting space. No description, passcode or policy documents.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "space_id",
+    "meeting_code",
+    "title",
+    "meeting_type",
+    "status",
+    "owner_user_id",
+    "organization_id",
+    "created_at",
+    "updated_at",
+    "archived_at",
+    "version"
+  ],
+  "properties": {
+    "space_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "meeting_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "owner_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "organization_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

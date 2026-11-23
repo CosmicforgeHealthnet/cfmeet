@@ -27,6 +27,7 @@ use super::registration::{self, load, record_transition, sync, view, STATUSES};
 use crate::{
     control::{
         activity::{self, Event},
+        bridge_command::{self, BridgeCommand, Subject},
         membership, stmt,
     },
     domain::RequestContext,
@@ -60,6 +61,22 @@ impl Command {
     pub fn needs_reviewer(&self) -> bool {
         !matches!(self, Command::Suspend)
     }
+
+    /// Decisions HQ takes with two people (claiming a review is not one).
+    pub fn two_person(&self) -> bool {
+        !matches!(self, Command::Review)
+    }
+
+    /// The command's name in the bridge's operation record.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Command::Review => "app.review",
+            Command::Approve => "app.approve",
+            Command::Reject => "app.reject",
+            Command::Publish => "app.publish",
+            Command::Suspend => "app.suspend",
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -68,6 +85,9 @@ pub struct Decision {
     /// reject / suspend: a safe reason code.
     #[serde(default)]
     pub reason_code: Option<String>,
+    /// Admin bridge decisions: the app row version the decision applies to.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 /// `GET /internal/v1/operator/apps?status=`.
@@ -140,7 +160,10 @@ fn reason(d: &Decision, default: &str) -> Result<String, ApiError> {
     }
 }
 
-/// Runs an operator command on `app_id`.
+/// Runs an operator command on `app_id`. `bridge`: a decision relayed by the HQ admin
+/// bridge ([`bridge_command`]): HQ's two-person approval replaces the named reviewers, the
+/// change happens only at the expected version and is recorded in the same transaction.
+#[allow(clippy::too_many_arguments)]
 pub async fn operator_decide(
     state: &AppState,
     operator: &str,
@@ -149,11 +172,25 @@ pub async fn operator_decide(
     app_id: Uuid,
     command: Command,
     d: Decision,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
     let current = load(&state.db, app_id, false)
         .await?
         .ok_or(ApiError(ErrorCode::NotFound))?;
-    if command.needs_reviewer() {
+    if let Some(b) = bridge {
+        if bridge_command::replayed(&state.db, b, command.as_str(), Subject::App, app_id).await? {
+            return view(&state.db, &current).await;
+        }
+        if let Some(user) = b.linked_user {
+            if command.needs_reviewer()
+                && membership(&state.db, current.tenant_id, user)
+                    .await?
+                    .is_some()
+            {
+                return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+            }
+        }
+    } else if command.needs_reviewer() {
         // Named reviewers only (none named: no decision is possible).
         if !state.apps.reviewers.iter().any(|n| n == operator) {
             return Err(ApiError(ErrorCode::PolicyViolation));
@@ -169,6 +206,9 @@ pub async fn operator_decide(
         }
     }
     let txn = state.db.begin().await?;
+    if let Some(b) = bridge {
+        bridge_command::lock_version(&txn, b, Subject::App, app_id).await?;
+    }
     let row = load(&txn, app_id, true)
         .await?
         .ok_or(ApiError(ErrorCode::NotFound))?;
@@ -282,6 +322,17 @@ pub async fn operator_decide(
     // Platform Access first: a suspension withdraws every grant before it is reported.
     sync(state, &txn, &updated, &request.correlation_id).await?;
     let v = view(&txn, &updated).await?;
+    if let Some(b) = bridge {
+        bridge_command::record(
+            &txn,
+            b,
+            command.as_str(),
+            Subject::App,
+            app_id,
+            row.tenant_id,
+        )
+        .await?;
+    }
     txn.commit().await?;
     Ok(v)
 }

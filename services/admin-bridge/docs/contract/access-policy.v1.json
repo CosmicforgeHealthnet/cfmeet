@@ -1,6 +1,6 @@
 {
   "policy": "cfmeet-admin-bridge.access-policy-ceiling.v1",
-  "contract_version": "1.7.0",
+  "contract_version": "1.12.0",
   "rule": "The runtime access policy is signed by CF Meet (Ed25519) and pinned by revision; every grant it makes must be inside this ceiling, or the bridge refuses to load it. A permission is effective only when the staff assertion lists it AND one of the asserted roles is granted it with the request's purpose. A role is never inferred from list order.",
   "roles": {
     "cfmeet.viewer": {
@@ -85,6 +85,16 @@
         ],
         "bridge.datasets.read": [
           "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "communications.audit.read": [
           "abuse-review",
@@ -420,6 +430,16 @@
         ],
         "bridge.datasets.read": [
           "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "calling.abuse-report.resolve": [
           "abuse-review",
@@ -798,6 +818,16 @@
         "bridge.datasets.read": [
           "metrics-read"
         ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
         "verification.app-review.approve": [
           "verification-review"
         ],
@@ -874,6 +904,16 @@
         ],
         "bridge.datasets.read": [
           "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "identity.app-grants.read": [
           "ops-incident",
@@ -1232,6 +1272,16 @@
         "bridge.datasets.read": [
           "metrics-read"
         ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
         "pricing.activations.read": [
           "billing-review",
           "pricing-change"
@@ -1300,6 +1350,16 @@
         ],
         "bridge.datasets.read": [
           "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "pricing.activations.read": [
           "billing-review",
@@ -1389,6 +1449,16 @@
         "bridge.health.read": [
           "metrics-read",
           "ops-incident"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "calling.abuse-reports.read": [
           "abuse-review",
@@ -1869,6 +1939,16 @@
           "metrics-read",
           "ops-incident"
         ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
         "identity.app-grant.revoke": [
           "ops-incident",
           "support-review",
@@ -2024,6 +2104,16 @@
         "bridge.health.read": [
           "metrics-read",
           "ops-incident"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
         ],
         "operations.activation.request": [
           "release-request"

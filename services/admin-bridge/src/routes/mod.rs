@@ -1,12 +1,17 @@
 //! Routes: discovery, aggregate health, datasets and projection status (A1), and the
 //! owner reads by module (`organizations`, A2). Every other capability is refused before it gets here (`served == false`).
 
+pub mod calling;
+pub mod commands;
 pub mod communications;
 pub mod identity;
+pub mod meetings;
+pub mod messaging;
 pub mod notifications;
 pub mod organizations;
 pub mod partners;
 pub mod translate;
+pub mod verification;
 
 use std::collections::BTreeMap;
 
@@ -19,6 +24,14 @@ use crate::contract::model::{Kind, Owner, State};
 use crate::errors::ErrorCode;
 
 pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, ErrorCode> {
+    // Tests only: a capability routed through the generic command core.
+    if let Some((_, owner, path)) = bridge
+        .test_commands
+        .iter()
+        .find(|(id, _, _)| *id == auth.capability.id)
+    {
+        return commands::generic(bridge, auth, *owner, path).await;
+    }
     if let Some(answer) = organizations::dispatch(bridge, auth).await {
         return answer;
     }
@@ -31,13 +44,26 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
     if let Some(answer) = identity::dispatch(bridge, auth).await {
         return answer;
     }
+    if let Some(answer) = calling::dispatch(bridge, auth).await {
+        return answer;
+    }
     if let Some(answer) = communications::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = meetings::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = messaging::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = verification::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {
         "bridge.capabilities.read" => Ok(discovery(bridge)),
         "bridge.health.read" => Ok(health(bridge).await),
         "bridge.datasets.read" => datasets(bridge, auth).await,
+        "bridge.operations.read" => commands::readback(bridge, auth).await,
         "hq.projections.status" => projections(bridge, auth.now).await,
         _ => Err(ErrorCode::CapabilityDisabled),
     }

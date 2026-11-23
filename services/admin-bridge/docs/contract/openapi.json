@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.7.0",
+    "version": "1.12.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -747,6 +747,253 @@
         "x-cfmeet-query-shape": "SCOPED_WINDOW",
         "x-cfmeet-permission": "bridge.datasets.read",
         "x-cfmeet-risk": "R0",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "admin-bridge"
+      }
+    },
+    "/internal/cfmeet-admin/v1/hq/operations/{idempotency_key}": {
+      "get": {
+        "operationId": "bridge.operations.read",
+        "summary": "bridge.operations.read",
+        "tags": [
+          "bridge"
+        ],
+        "parameters": [
+          {
+            "name": "idempotency_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "verification-review",
+                "abuse-review",
+                "billing-review",
+                "pricing-change",
+                "ops-incident",
+                "release-request",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/OperationReadback"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "bridge.operations.read",
+        "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
@@ -1625,7 +1872,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserPage"
                     },
                     "error": {
                       "type": "null"
@@ -1751,7 +1998,7 @@
         "x-cfmeet-permission": "accounts.users.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service",
         "x-contact-search": true
       }
@@ -1868,7 +2115,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountUserDetail"
                     },
                     "error": {
                       "type": "null"
@@ -1994,7 +2241,7 @@
         "x-cfmeet-permission": "accounts.users.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -2912,7 +3159,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountSessionPage"
                     },
                     "error": {
                       "type": "null"
@@ -3038,7 +3285,7 @@
         "x-cfmeet-permission": "accounts.sessions.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -3434,7 +3681,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountDevicePage"
                     },
                     "error": {
                       "type": "null"
@@ -3560,7 +3807,7 @@
         "x-cfmeet-permission": "accounts.devices.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -3947,7 +4194,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountMfa"
                     },
                     "error": {
                       "type": "null"
@@ -4073,7 +4320,7 @@
         "x-cfmeet-permission": "accounts.mfa.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -4487,7 +4734,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AccountSecurityEventPage"
                     },
                     "error": {
                       "type": "null"
@@ -4613,7 +4860,7 @@
         "x-cfmeet-permission": "accounts.security-history.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -6034,7 +6281,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingSpacePage"
                     },
                     "error": {
                       "type": "null"
@@ -6160,7 +6407,7 @@
         "x-cfmeet-permission": "meetings.spaces.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -6297,7 +6544,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingConferencePage"
                     },
                     "error": {
                       "type": "null"
@@ -6423,7 +6670,7 @@
         "x-cfmeet-permission": "meetings.meetings.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -6541,7 +6788,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingConference"
                     },
                     "error": {
                       "type": "null"
@@ -6667,7 +6914,7 @@
         "x-cfmeet-permission": "meetings.meetings.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -6794,7 +7041,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingConferencePage"
                     },
                     "error": {
                       "type": "null"
@@ -6920,7 +7167,7 @@
         "x-cfmeet-permission": "meetings.live.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -7301,7 +7548,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingParticipantPage"
                     },
                     "error": {
                       "type": "null"
@@ -7427,7 +7674,7 @@
         "x-cfmeet-permission": "meetings.participants.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -9963,7 +10210,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MeetingAuditEventPage"
                     },
                     "error": {
                       "type": "null"
@@ -10089,7 +10336,7 @@
         "x-cfmeet-permission": "meetings.audit.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "meeting-service"
       }
     },
@@ -11976,7 +12223,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingReportPage"
                     },
                     "error": {
                       "type": "null"
@@ -12102,7 +12349,7 @@
         "x-cfmeet-permission": "messaging.reports.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -12219,7 +12466,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingReportDetail"
                     },
                     "error": {
                       "type": "null"
@@ -12345,7 +12592,7 @@
         "x-cfmeet-permission": "messaging.reports.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -14284,7 +14531,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingHoldPage"
                     },
                     "error": {
                       "type": "null"
@@ -14410,7 +14657,7 @@
         "x-cfmeet-permission": "messaging.holds.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       },
       "post": {
@@ -15048,7 +15295,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingExportPage"
                     },
                     "error": {
                       "type": "null"
@@ -15174,7 +15421,7 @@
         "x-cfmeet-permission": "messaging.exports.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       },
       "post": {
@@ -15549,7 +15796,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingDeletionRequestPage"
                     },
                     "error": {
                       "type": "null"
@@ -15675,7 +15922,7 @@
         "x-cfmeet-permission": "messaging.deletion-requests.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       },
       "post": {
@@ -16067,7 +16314,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingAuditPage"
                     },
                     "error": {
                       "type": "null"
@@ -16193,7 +16440,7 @@
         "x-cfmeet-permission": "messaging.audit.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -16319,7 +16566,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingSwitchPage"
                     },
                     "error": {
                       "type": "null"
@@ -16445,7 +16692,7 @@
         "x-cfmeet-permission": "messaging.switches.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -16849,7 +17096,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingIncidentPage"
                     },
                     "error": {
                       "type": "null"
@@ -16975,7 +17222,7 @@
         "x-cfmeet-permission": "messaging.incidents.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       },
       "post": {
@@ -17367,7 +17614,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingFailedMessagePage"
                     },
                     "error": {
                       "type": "null"
@@ -17493,7 +17740,7 @@
         "x-cfmeet-permission": "messaging.failed-messages.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -17860,7 +18107,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/MessagingKeyTransparency"
                     },
                     "error": {
                       "type": "null"
@@ -17986,7 +18233,7 @@
         "x-cfmeet-permission": "messaging.key-transparency.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "messaging"
       }
     },
@@ -18380,7 +18627,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingCallPage"
                     },
                     "error": {
                       "type": "null"
@@ -18506,7 +18753,7 @@
         "x-cfmeet-permission": "calling.calls.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -18623,7 +18870,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingCallDetail"
                     },
                     "error": {
                       "type": "null"
@@ -18749,7 +18996,7 @@
         "x-cfmeet-permission": "calling.calls.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -18875,7 +19122,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingCallPage"
                     },
                     "error": {
                       "type": "null"
@@ -19001,7 +19248,7 @@
         "x-cfmeet-permission": "calling.live.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -19127,7 +19374,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingAbuseReportPage"
                     },
                     "error": {
                       "type": "null"
@@ -19253,7 +19500,7 @@
         "x-cfmeet-permission": "calling.abuse-reports.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -19641,7 +19888,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingBlockRulePage"
                     },
                     "error": {
                       "type": "null"
@@ -19767,7 +20014,7 @@
         "x-cfmeet-permission": "calling.blocks.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -20136,7 +20383,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingLimits"
                     },
                     "error": {
                       "type": "null"
@@ -20262,7 +20509,7 @@
         "x-cfmeet-permission": "calling.limits.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -20619,7 +20866,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingRoutingPolicies"
                     },
                     "error": {
                       "type": "null"
@@ -20745,7 +20992,7 @@
         "x-cfmeet-permission": "calling.routing.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -21102,7 +21349,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingEnterprisePolicies"
                     },
                     "error": {
                       "type": "null"
@@ -21228,7 +21475,7 @@
         "x-cfmeet-permission": "calling.enterprise-features.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -21585,7 +21832,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingSpendPolicies"
                     },
                     "error": {
                       "type": "null"
@@ -21711,7 +21958,7 @@
         "x-cfmeet-permission": "calling.spend-limits.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -22104,7 +22351,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingRecordingPage"
                     },
                     "error": {
                       "type": "null"
@@ -22230,7 +22477,7 @@
         "x-cfmeet-permission": "calling.recordings.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -22374,7 +22621,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingVoicemailPage"
                     },
                     "error": {
                       "type": "null"
@@ -22500,7 +22747,7 @@
         "x-cfmeet-permission": "calling.voicemail.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -22888,7 +23135,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingRetentionHoldPage"
                     },
                     "error": {
                       "type": "null"
@@ -23014,7 +23261,7 @@
         "x-cfmeet-permission": "calling.retention-holds.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -23670,7 +23917,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingIncidentPage"
                     },
                     "error": {
                       "type": "null"
@@ -23796,7 +24043,7 @@
         "x-cfmeet-permission": "calling.incidents.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       },
       "post": {
@@ -24170,7 +24417,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingWebhookKeyPage"
                     },
                     "error": {
                       "type": "null"
@@ -24296,7 +24543,7 @@
         "x-cfmeet-permission": "calling.webhook-keys.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -24702,7 +24949,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CallingAuditEntryPage"
                     },
                     "error": {
                       "type": "null"
@@ -24828,7 +25075,7 @@
         "x-cfmeet-permission": "calling.audit.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "calling"
       }
     },
@@ -47493,7 +47740,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCasePage"
                     },
                     "error": {
                       "type": "null"
@@ -47619,7 +47866,7 @@
         "x-cfmeet-permission": "verification.cases.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "developer-platform"
       }
     },
@@ -47734,7 +47981,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCaseDetail"
                     },
                     "error": {
                       "type": "null"
@@ -47860,7 +48107,7 @@
         "x-cfmeet-permission": "verification.cases.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "developer-platform"
       }
     },
@@ -47994,7 +48241,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCaseHistory"
                     },
                     "error": {
                       "type": "null"
@@ -48120,7 +48367,7 @@
         "x-cfmeet-permission": "verification.case-history.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "developer-platform"
       }
     },
@@ -48244,7 +48491,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -48370,14 +48617,14 @@
         "x-cfmeet-permission": "verification.case.claim",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationClaimRequest"
               }
             }
           }
@@ -48504,7 +48751,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -48630,14 +48877,14 @@
         "x-cfmeet-permission": "verification.partner-go-live.approve",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerGoLiveApproveRequest"
               }
             }
           }
@@ -48764,7 +49011,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -48890,14 +49137,14 @@
         "x-cfmeet-permission": "verification.partner-go-live.reject",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationRejectRequest"
               }
             }
           }
@@ -49024,7 +49271,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -49150,14 +49397,14 @@
         "x-cfmeet-permission": "verification.partner-go-live.suspend",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationDecisionRequest"
               }
             }
           }
@@ -49284,7 +49531,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -49410,14 +49657,14 @@
         "x-cfmeet-permission": "verification.app-review.approve",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationDecisionRequest"
               }
             }
           }
@@ -49544,7 +49791,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -49670,14 +49917,14 @@
         "x-cfmeet-permission": "verification.app-review.reject",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationRejectRequest"
               }
             }
           }
@@ -49804,7 +50051,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/VerificationCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -49930,14 +50177,14 @@
         "x-cfmeet-permission": "verification.app-review.publish",
         "x-cfmeet-risk": "R4",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/VerificationDecisionRequest"
               }
             }
           }
@@ -63573,6 +63820,60 @@
           }
         }
       },
+      "OperationReadback": {
+        "description": "One command as the bridge's operations ledger holds it, keyed by the Idempotency-Key HQ sent (bridge.operations.read). SUCCEEDED and FAILED are settled and never change. UNKNOWN_OUTCOME and SENT are settled only from the owning service's own record of that key, never by resending: FAILED with source_status NOT_RECEIVED when the owner has no record after 600 s, NOT_SENT when the bridge never sent it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "capability_id",
+          "status",
+          "source_status",
+          "source_version",
+          "settled_at"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$",
+            "maxLength": 96
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "SENT",
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN_OUTCOME"
+            ]
+          },
+          "source_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+          },
+          "settled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "Dataset": {
         "description": "One certified HQ dataset over a UTC day window. Metric names are fixed per dataset (datasets.v1.json); a metric the bridge could not establish is null, never zero. coverage is COMPLETE only when every source reported every day of the window.",
         "type": "object",
@@ -67606,6 +67907,4005 @@
               "null"
             ],
             "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "AccountUser": {
+        "description": "One CF Meet account. Search matches on the email address but never returns it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "role",
+          "status",
+          "created_at",
+          "last_login_at"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_login_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "AccountUserPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AccountUser"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "AccountUserDetail": {
+        "description": "One account in detail (R1, every read audited). The email address only masked.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "role",
+          "status",
+          "created_at",
+          "last_login_at",
+          "email_masked",
+          "email_verified",
+          "auth_type",
+          "locale",
+          "timezone"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_login_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "email_masked": {
+            "type": "string",
+            "maxLength": 120,
+            "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+            "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Only a masked value can match; never the address."
+          },
+          "email_verified": {
+            "type": "boolean"
+          },
+          "auth_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 35
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "AccountSession": {
+        "description": "One account session: method, times and revocation. No client label, no token.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "auth_method",
+          "authenticated_at",
+          "created_at",
+          "last_refreshed_at",
+          "expires_at",
+          "revoked_at",
+          "revoke_reason"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "auth_method": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_refreshed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "AccountSessionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AccountSession"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "AccountDevice": {
+        "description": "One Account device: class, platform, trust, state and times. No label, key or digest.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "device_class",
+          "platform",
+          "trust",
+          "trusted_via",
+          "trusted_at",
+          "state",
+          "created_at",
+          "last_seen_at",
+          "revoked_at",
+          "revoke_reason"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_class": {
+            "enum": [
+              "WEB",
+              "MOBILE"
+            ]
+          },
+          "platform": {
+            "enum": [
+              "WEB",
+              "IOS",
+              "ANDROID"
+            ]
+          },
+          "trust": {
+            "enum": [
+              "UNTRUSTED",
+              "TRUSTED"
+            ]
+          },
+          "trusted_via": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "trusted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoke_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "AccountDevicePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AccountDevice"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "AccountMfa": {
+        "description": "MFA status: TOTP enrolment state and the count of unused recovery codes. Never a secret or a code.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user_id",
+          "totp_state",
+          "totp_enrolled_at",
+          "totp_confirmed_at",
+          "recovery_codes_remaining"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totp_state": {
+            "enum": [
+              "NOT_ENROLLED",
+              "PENDING_CONFIRMATION",
+              "ENABLED"
+            ]
+          },
+          "totp_enrolled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "totp_confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AccountSecurityEvent": {
+        "description": "One account security event (sign-ins and changes): type, outcome, actor kind and time. No detail, IP address or location.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "sequence",
+          "event_type",
+          "outcome",
+          "actor_kind",
+          "actor_user_id",
+          "session_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "outcome": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "DENIED"
+            ]
+          },
+          "actor_kind": {
+            "enum": [
+              "USER",
+              "ADMIN",
+              "SYSTEM",
+              "ANONYMOUS"
+            ]
+          },
+          "actor_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AccountSecurityEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AccountSecurityEvent"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingSpace": {
+        "description": "One meeting space. No description, passcode or policy documents.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "space_id",
+          "meeting_code",
+          "title",
+          "meeting_type",
+          "status",
+          "owner_user_id",
+          "organization_id",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "version"
+        ],
+        "properties": {
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meeting_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "meeting_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MeetingSpacePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingSpace"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingConference": {
+        "description": "One meeting (conference): state, times and participant counts. No room names or provider ids.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "meeting_id",
+          "space_id",
+          "title",
+          "kind",
+          "status",
+          "scheduled_start_at",
+          "scheduled_end_at",
+          "started_at",
+          "ended_at",
+          "termination_reason",
+          "locked",
+          "recording_state",
+          "transcription_state",
+          "participants_admitted",
+          "participants_total",
+          "created_at",
+          "version"
+        ],
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "scheduled_start_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scheduled_end_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "termination_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "recording_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "transcription_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "participants_admitted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "participants_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MeetingConferencePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingConference"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingParticipant": {
+        "description": "One participant. No guest identity, external reference, credential or denial note.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participant_id",
+          "identity_type",
+          "user_id",
+          "display_name",
+          "role",
+          "admission_state",
+          "requested_at",
+          "admitted_at",
+          "removed_at",
+          "banned_at"
+        ],
+        "properties": {
+          "participant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "admission_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "admitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "removed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "banned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MeetingParticipantPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingParticipant"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MeetingAuditEvent": {
+        "description": "One conference audit event. No actor or target reference, metadata or request id.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "space_id",
+          "meeting_id",
+          "actor_type",
+          "action",
+          "target_type",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "space_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meeting_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "actor_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "target_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MeetingAuditEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MeetingAuditEvent"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingReport": {
+        "description": "One chat report: ids, category, states and times. The evidence itself (a sealed reporter disclosure or a MANAGED message reference) is never relayed; evidence_kind only says which kind was given.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "report_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "security_profile",
+          "reporter_principal_id",
+          "reported_principal_id",
+          "message_ids",
+          "category",
+          "evidence_kind",
+          "status",
+          "resolution",
+          "resolved_at",
+          "created_at"
+        ],
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "security_profile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporter_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_ids": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidence_kind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingReport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingReportDetail": {
+        "description": "One chat report and its moderation actions (no evidence).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "report_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "security_profile",
+          "reporter_principal_id",
+          "reported_principal_id",
+          "message_ids",
+          "category",
+          "evidence_kind",
+          "status",
+          "resolution",
+          "resolved_at",
+          "created_at",
+          "actions"
+        ],
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "security_profile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporter_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_ids": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidence_kind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "description": "One moderation action taken on the report.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action_id",
+                "kind",
+                "reason",
+                "conversation_id",
+                "message_id",
+                "principal_id",
+                "effective_until",
+                "created_at"
+              ],
+              "properties": {
+                "action_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "enum": [
+                    "REMOVE_MESSAGE",
+                    "MUTE_MEMBER",
+                    "UNMUTE_MEMBER",
+                    "REMOVE_MEMBER",
+                    "RESTRICT_PRINCIPAL",
+                    "LIFT_RESTRICTION",
+                    "DISMISS_REPORT"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "message_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "principal_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "effective_until": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingHold": {
+        "description": "One legal hold. The case reference is not relayed: reason_category says why.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hold_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "scope_kind",
+          "conversation_id",
+          "principal_id",
+          "reason_category",
+          "status",
+          "created_at",
+          "expires_at",
+          "released_at",
+          "release_reason"
+        ],
+        "properties": {
+          "hold_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_kind": {
+            "enum": [
+              "CONVERSATION",
+              "PRINCIPAL",
+              "ENVIRONMENT"
+            ]
+          },
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason_category": {
+            "enum": [
+              "LITIGATION",
+              "REGULATORY",
+              "INVESTIGATION",
+              "INTERNAL_POLICY"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "RELEASED"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "release_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "MessagingHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingHold"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingExport": {
+        "description": "One MANAGED conversation export (encrypted chats are never exported). The object key and digest are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "export_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "status",
+          "size_bytes",
+          "message_count",
+          "failure",
+          "attempts",
+          "created_at",
+          "completed_at",
+          "expires_at"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED",
+              "EXPIRED"
+            ]
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingExportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingExport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingDeletionRequest": {
+        "description": "One principal erasure or conversation purge request and its counts.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "kind",
+          "principal_id",
+          "conversation_id",
+          "status",
+          "messages_purged",
+          "attachments_deleted",
+          "held_items",
+          "created_at",
+          "completed_at"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "PRINCIPAL_ERASURE",
+              "CONVERSATION_PURGE"
+            ]
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "COMPLETED",
+              "PARTIALLY_HELD"
+            ]
+          },
+          "messages_purged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attachments_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "held_items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingDeletionRequestPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingDeletionRequest"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingAuditEntry": {
+        "description": "One chat audit entry. Its detail object is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entry_id",
+          "occurred_at",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "credential_id",
+          "principal_id",
+          "action",
+          "target_kind",
+          "target_id",
+          "correlation_id"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credential_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,47}$"
+          },
+          "target_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,31}$"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+          }
+        }
+      },
+      "MessagingAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingAuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingSwitch": {
+        "description": "One emergency off-switch (global or per environment). A switch only stops a capability.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "switch_name",
+          "scope_key",
+          "engaged",
+          "reason",
+          "changed_by",
+          "changed_at",
+          "version"
+        ],
+        "properties": {
+          "switch_name": {
+            "enum": [
+              "MESSAGE_SEND",
+              "CONVERSATION_CREATE",
+              "E2EE_ONBOARDING",
+              "ATTACHMENT_UPLOAD",
+              "SMS_BRIDGE",
+              "WEBHOOK_RELAY"
+            ]
+          },
+          "scope_key": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "engaged": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changed_by": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MessagingSwitchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingSwitch"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingIncident": {
+        "description": "One operational incident. Its summary text is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incident_id",
+          "category",
+          "severity",
+          "status",
+          "occurrences",
+          "first_seen_at",
+          "last_seen_at",
+          "resolved_at",
+          "resolved_by"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "severity": {
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RESOLVED"
+            ]
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "MessagingIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingIncident"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingFailedMessage": {
+        "description": "One outbox event in DEAD_LETTER. Its payload and error string are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "sequence",
+          "event_type",
+          "aggregate_type",
+          "aggregate_id",
+          "tenant_id",
+          "environment_id",
+          "attempts",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^messaging(\\.[a-z][a-z0-9-]*){2,}$",
+            "maxLength": 80
+          },
+          "aggregate_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,39}$"
+          },
+          "aggregate_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingFailedMessagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingFailedMessage"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingKeyTransparency": {
+        "description": "Key-transparency status: the tree head (null before the first leaf) and each witness state. No key material.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "head",
+          "witnesses"
+        ],
+        "properties": {
+          "head": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "description": "The key-transparency tree head.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tree_size",
+                  "root_hash",
+                  "updated_at"
+                ],
+                "properties": {
+                  "tree_size": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "root_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "witnesses": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "description": "One witness's last verified state.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "witness_id",
+                "tree_size",
+                "root_hash",
+                "updated_at",
+                "last_cosigned_size"
+              ],
+              "properties": {
+                "witness_id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9.:-]{2,63}$"
+                },
+                "tree_size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "root_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "last_cosigned_size": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "CallingCall": {
+        "description": "One call of the tenant: ids, kind, state, origin, counts and times. Never a telephone number, SIP URI or display name.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call_id",
+          "application_id",
+          "environment_id",
+          "call_kind",
+          "state",
+          "origin",
+          "participant_count",
+          "terminal_reason",
+          "failure_category",
+          "requested_at",
+          "answered_at",
+          "connected_at",
+          "ended_at",
+          "created_at",
+          "version"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "origin": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "participant_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminal_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "failure_category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingCallPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingCall"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingCallParticipant": {
+        "description": "One participant: principal id, kind, role and times only.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principal_id",
+          "principal_kind",
+          "role",
+          "is_host",
+          "joined_at",
+          "left_at"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principal_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "is_host": {
+            "type": "boolean"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "left_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingCallDetail": {
+        "description": "One call with its participants (at most 500).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call_id",
+          "application_id",
+          "environment_id",
+          "call_kind",
+          "state",
+          "origin",
+          "participant_count",
+          "terminal_reason",
+          "failure_category",
+          "requested_at",
+          "answered_at",
+          "connected_at",
+          "ended_at",
+          "created_at",
+          "version",
+          "participants"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "origin": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "participant_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminal_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "failure_category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/CallingCallParticipant"
+            }
+          }
+        }
+      },
+      "CallingAbuseReport": {
+        "description": "One OPEN abuse report of the tenant: bounded codes and opaque ids, never free text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "abuse_report_id",
+          "application_id",
+          "environment_id",
+          "call_id",
+          "reporting_principal_id",
+          "reported_principal_id",
+          "category",
+          "comment_code",
+          "status",
+          "created_at",
+          "reviewed_at",
+          "version"
+        ],
+        "properties": {
+          "abuse_report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reporting_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "comment_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingAbuseReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingAbuseReport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingBlockRule": {
+        "description": "One block rule. A blocked contact is only reported as present, never named.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "block_rule_id",
+          "application_id",
+          "environment_id",
+          "blocker_kind",
+          "blocker_principal_id",
+          "blocked_kind",
+          "blocked_principal_id",
+          "has_contact_reference",
+          "reason_code",
+          "status",
+          "created_at",
+          "released_at",
+          "version"
+        ],
+        "properties": {
+          "block_rule_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocker_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "blocker_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "blocked_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "blocked_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "has_contact_reference": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingBlockRulePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingBlockRule"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingLimitPolicy": {
+        "description": "A limit policy; null fields are not configured.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requests_per_minute",
+          "max_concurrent_communications",
+          "telecom_spend_daily_limit_minor",
+          "telecom_spend_monthly_limit_minor",
+          "updated_at"
+        ],
+        "properties": {
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_communications": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingApplicationLimitPolicy": {
+        "description": "An application's limit policy.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "application_id",
+          "requests_per_minute",
+          "max_concurrent_communications",
+          "telecom_spend_daily_limit_minor",
+          "telecom_spend_monthly_limit_minor",
+          "updated_at"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_communications": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingLimits": {
+        "description": "The tenant's limit policies (at most 100 applications; truncated beyond). Spend limits are in minor units of the tenant's billing currency.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenant_id",
+          "currency",
+          "tenant",
+          "applications",
+          "truncated"
+        ],
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "tenant": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CallingLimitPolicy"
+              }
+            ]
+          },
+          "applications": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingApplicationLimitPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingRoutingPolicy": {
+        "description": "An environment's routing policy summary. Destination and duplicate-risk sub-policies are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment_id",
+          "application_id",
+          "revision",
+          "updated_at",
+          "allowed_route_classes",
+          "app_first",
+          "public_calling_enabled",
+          "callback_relay_enabled",
+          "require_verified_contacts",
+          "max_failover_attempts",
+          "compliance_required_countries"
+        ],
+        "properties": {
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "allowed_route_classes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            }
+          },
+          "app_first": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "public_calling_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "callback_relay_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "require_verified_contacts": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "max_failover_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "compliance_required_countries": {
+            "type": "array",
+            "maxItems": 300,
+            "items": {
+              "type": "string",
+              "pattern": "^([A-Z]{2}|\\*)$"
+            }
+          }
+        }
+      },
+      "CallingRoutingPolicies": {
+        "description": "The tenant's routing policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environments",
+          "truncated"
+        ],
+        "properties": {
+          "environments": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRoutingPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingEnterprisePolicy": {
+        "description": "An enterprise calling policy: feature switches and operator-granted administrative capabilities.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy_id",
+          "environment_id",
+          "application_id",
+          "name",
+          "is_default",
+          "status",
+          "internal_calling_enabled",
+          "external_public_calling_allowed",
+          "public_destination_countries",
+          "forwarding_allowed",
+          "public_forwarding_allowed",
+          "voicemail_allowed",
+          "transfer_allowed",
+          "admin_capabilities",
+          "version",
+          "updated_at",
+          "disabled_at"
+        ],
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "internal_calling_enabled": {
+            "type": "boolean"
+          },
+          "external_public_calling_allowed": {
+            "type": "boolean"
+          },
+          "public_destination_countries": {
+            "type": "array",
+            "maxItems": 300,
+            "items": {
+              "type": "string",
+              "pattern": "^([A-Z]{2}|\\*)$"
+            }
+          },
+          "forwarding_allowed": {
+            "type": "boolean"
+          },
+          "public_forwarding_allowed": {
+            "type": "boolean"
+          },
+          "voicemail_allowed": {
+            "type": "boolean"
+          },
+          "transfer_allowed": {
+            "type": "boolean"
+          },
+          "admin_capabilities": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingEnterprisePolicies": {
+        "description": "The tenant's enterprise calling policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policies",
+          "truncated"
+        ],
+        "properties": {
+          "policies": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingEnterprisePolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingSpendPolicy": {
+        "description": "A telecom spend / velocity policy; amounts in minor units of its own currency, never summed across currencies.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment_id",
+          "application_id",
+          "currency",
+          "enabled",
+          "leg_allowance_minor",
+          "max_leg_seconds",
+          "daily_limit_minor",
+          "monthly_limit_minor",
+          "max_concurrent_legs",
+          "max_originations_per_minute",
+          "revision",
+          "updated_at"
+        ],
+        "properties": {
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "leg_allowance_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_leg_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_legs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_originations_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingSpendPolicies": {
+        "description": "The tenant's spend policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environments",
+          "truncated"
+        ],
+        "properties": {
+          "environments": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingSpendPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingRecording": {
+        "description": "Recording metadata only: never an object key or media URL.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recording_id",
+          "call_id",
+          "environment_id",
+          "state",
+          "capture_source",
+          "duration_ms",
+          "size_bytes",
+          "retention_until",
+          "created_at",
+          "deleted_at"
+        ],
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "capture_source": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "retention_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingRecordingPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRecording"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingVoicemail": {
+        "description": "Voicemail metadata only: never an object key, media URL or caller identity.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message_id",
+          "call_id",
+          "mailbox_id",
+          "environment_id",
+          "state",
+          "read_state",
+          "duration_ms",
+          "size_bytes",
+          "retention_until",
+          "received_at",
+          "deleted_at"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "mailbox_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "read_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "retention_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingVoicemailPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingVoicemail"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingRetentionHold": {
+        "description": "A retention hold of the tenant or the platform. The placing operator is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hold_id",
+          "scope",
+          "data_class",
+          "resource_id",
+          "environment_id",
+          "reason_code",
+          "active",
+          "created_at",
+          "released_at"
+        ],
+        "properties": {
+          "hold_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "enum": [
+              "PLATFORM",
+              "TENANT"
+            ]
+          },
+          "data_class": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingRetentionHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRetentionHold"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingIncident": {
+        "description": "An operational incident of the tenant or the platform. Restricted evidence and dedupe keys are never relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incident_id",
+          "scope",
+          "category",
+          "severity",
+          "status",
+          "call_id",
+          "resource_type",
+          "resource_id",
+          "occurrences",
+          "first_seen_at",
+          "last_seen_at",
+          "resolved_at"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "enum": [
+              "PLATFORM",
+              "TENANT"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "severity": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "resource_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingIncident"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingWebhookKey": {
+        "description": "Webhook subscriptions per signing-secret sealing key id (counts only, never a secret or sealed value).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key_id",
+          "subscriptions",
+          "active_subscriptions",
+          "last_updated_at"
+        ],
+        "properties": {
+          "key_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "subscriptions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_subscriptions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingWebhookKeyPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingWebhookKey"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingAuditEntry": {
+        "description": "One operator audit entry of the tenant. The detail document is never relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "actor",
+          "action",
+          "target_kind",
+          "target_id",
+          "application_id",
+          "environment_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "target_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "target_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingAuditEntryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingAuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "VerificationCase": {
+        "description": "One verification case (HQ's shared shape). PARTNER_GO_LIVE: a production-access request (subject_ref: the project); APP_REVIEW: an app, published from the same case. OPEN, CLAIMED, then APPROVED / REJECTED (PUBLISHED, SUSPENDED); CANCELLED: withdrawn by the partner (never listed, still readable). version increases on every transition and is the commands' expected_version. evidence: hashes only.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "product",
+          "kind",
+          "subject_ref",
+          "state",
+          "version",
+          "assignee_ref",
+          "submitted_at",
+          "updated_at",
+          "evidence",
+          "approvals_required",
+          "partner_tenant_id"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "maxLength": 128
+          },
+          "product": {
+            "const": "cfmeet"
+          },
+          "kind": {
+            "enum": [
+              "PARTNER_GO_LIVE",
+              "APP_REVIEW"
+            ]
+          },
+          "subject_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "assignee_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$",
+            "maxLength": 132
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref",
+                "sha256"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "USE_CASE_SUMMARY",
+                    "APP_MANIFEST"
+                  ]
+                },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$",
+                  "maxLength": 53
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          },
+          "approvals_required": {
+            "const": 2
+          },
+          "partner_tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "VerificationCasePage": {
+        "description": "The verification queue, most recently changed first (CANCELLED cases are not listed).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/VerificationCase"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "VerificationCaseDetail": {
+        "description": "One verification case with its decision details (verification.cases.read only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "product",
+          "kind",
+          "subject_ref",
+          "state",
+          "version",
+          "assignee_ref",
+          "submitted_at",
+          "updated_at",
+          "evidence",
+          "approvals_required",
+          "partner_tenant_id",
+          "details"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "maxLength": 128
+          },
+          "product": {
+            "const": "cfmeet"
+          },
+          "kind": {
+            "enum": [
+              "PARTNER_GO_LIVE",
+              "APP_REVIEW"
+            ]
+          },
+          "subject_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "assignee_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$",
+            "maxLength": 132
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref",
+                "sha256"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "USE_CASE_SUMMARY",
+                    "APP_MANIFEST"
+                  ]
+                },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$",
+                  "maxLength": 53
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          },
+          "approvals_required": {
+            "const": 2
+          },
+          "partner_tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "description": "PARTNER_GO_LIVE: what is asked for and what was approved (product capability ids).",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requested_capabilities",
+                  "approved_capabilities"
+                ],
+                "properties": {
+                  "requested_capabilities": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                    }
+                  },
+                  "approved_capabilities": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                    }
+                  }
+                }
+              },
+              {
+                "description": "APP_REVIEW: the manifest version under review and the published one.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "app_version",
+                  "published_version"
+                ],
+                "properties": {
+                  "app_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "published_version": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "VerificationCaseHistory": {
+        "description": "A case's transitions, oldest first. STAFF actions name the staff member (hq:<sub>, or operator:<name> for the operator console); a partner's own actions carry no account id.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "maxLength": 128
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sequence",
+                "from_state",
+                "to_state",
+                "actor_kind",
+                "actor_ref",
+                "reason_code",
+                "occurred_at"
+              ],
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "from_state": {
+                  "enum": [
+                    "OPEN",
+                    "CLAIMED",
+                    "APPROVED",
+                    "REJECTED",
+                    "PUBLISHED",
+                    "SUSPENDED",
+                    "CANCELLED",
+                    null
+                  ]
+                },
+                "to_state": {
+                  "enum": [
+                    "OPEN",
+                    "CLAIMED",
+                    "APPROVED",
+                    "REJECTED",
+                    "PUBLISHED",
+                    "SUSPENDED",
+                    "CANCELLED",
+                    null
+                  ]
+                },
+                "actor_kind": {
+                  "enum": [
+                    "STAFF",
+                    "PARTNER",
+                    "SYSTEM"
+                  ]
+                },
+                "actor_ref": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$",
+                  "maxLength": 132
+                },
+                "reason_code": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "occurred_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "VerificationClaimRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The case version the command applies to (VERSION_CONFLICT otherwise)."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Claim a case for review (OPEN to CLAIMED). R2, no approval."
+      },
+      "PartnerGoLiveApproveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The case version the command applies to (VERSION_CONFLICT otherwise)."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "approved_capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            }
+          }
+        },
+        "description": "Approve a partner's go-live: approved_capabilities is a subset of the requested ones (default: all). Regulated capabilities need the case CLAIMED first. TWO_PERSON."
+      },
+      "VerificationRejectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "reason_code"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The case version the command applies to (VERSION_CONFLICT otherwise)."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Reject a case with a safe reason code. TWO_PERSON."
+      },
+      "VerificationDecisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The case version the command applies to (VERSION_CONFLICT otherwise)."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Approve or publish an app, or suspend a live partner (optional reason code). TWO_PERSON."
+      },
+      "VerificationCommandResult": {
+        "description": "A settled verification command: its operation (as bridge.operations.read shows it) and the case after the change.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/VerificationCaseDetail"
           }
         }
       },

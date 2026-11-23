@@ -1,0 +1,58 @@
+{
+  "description": "One account session: method, times and revocation. No client label, no token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "auth_method",
+    "authenticated_at",
+    "created_at",
+    "last_refreshed_at",
+    "expires_at",
+    "revoked_at",
+    "revoke_reason"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "auth_method": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "authenticated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_refreshed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoke_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    }
+  }
+}

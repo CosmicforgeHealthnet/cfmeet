@@ -126,7 +126,45 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "bridge.capabilities.read",
             "bridge.health.read",
             "bridge.datasets.read",
+            "bridge.operations.read",
             "hq.projections.status",
+            "accounts.users.search",
+            "accounts.users.read",
+            "accounts.sessions.list",
+            "accounts.devices.list",
+            "accounts.mfa.read",
+            "accounts.security-history.list",
+            "meetings.spaces.search",
+            "meetings.meetings.search",
+            "meetings.meetings.read",
+            "meetings.live.list",
+            "meetings.participants.list",
+            "meetings.audit.list",
+            "messaging.reports.list",
+            "messaging.reports.read",
+            "messaging.holds.list",
+            "messaging.exports.list",
+            "messaging.deletion-requests.list",
+            "messaging.audit.list",
+            "messaging.switches.list",
+            "messaging.incidents.list",
+            "messaging.failed-messages.list",
+            "messaging.key-transparency.read",
+            "calling.calls.list",
+            "calling.calls.read",
+            "calling.live.list",
+            "calling.abuse-reports.list",
+            "calling.blocks.list",
+            "calling.limits.read",
+            "calling.routing.read",
+            "calling.enterprise-features.read",
+            "calling.spend-limits.read",
+            "calling.recordings.list",
+            "calling.voicemail.list",
+            "calling.retention-holds.list",
+            "calling.incidents.list",
+            "calling.webhook-keys.list",
+            "calling.audit.list",
             "communications.profiles.read",
             "communications.reports.list",
             "communications.holds.list",
@@ -169,6 +207,16 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "apps.apps.read",
             "apps.versions.list",
             "apps.installs.list",
+            "verification.cases.list",
+            "verification.cases.read",
+            "verification.case-history.list",
+            "verification.case.claim",
+            "verification.partner-go-live.approve",
+            "verification.partner-go-live.reject",
+            "verification.partner-go-live.suspend",
+            "verification.app-review.approve",
+            "verification.app-review.reject",
+            "verification.app-review.publish",
             "notifications.deliveries.list",
             "notifications.failed-deliveries.list",
             "notifications.suppressions.list",
@@ -178,7 +226,12 @@ fn served_capabilities_are_exactly_the_ones_built() {
     );
     for c in catalog() {
         if c.served {
-            assert_eq!(c.state(), State::ReadOnly, "{}", c.id);
+            let expected = if c.kind == Kind::Command {
+                State::Available
+            } else {
+                State::ReadOnly
+            };
+            assert_eq!(c.state(), expected, "{}", c.id);
             assert!(c.blocker().is_none() && !c.tests.is_empty(), "{}", c.id);
         } else {
             assert!(

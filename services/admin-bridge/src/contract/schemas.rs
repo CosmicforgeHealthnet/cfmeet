@@ -102,6 +102,24 @@ pub fn components() -> Map<String, Value> {
         }),
     );
 
+    m.insert(
+        "OperationReadback".into(),
+        json!({
+            "description": "One command as the bridge's operations ledger holds it, keyed by the Idempotency-Key HQ sent (bridge.operations.read). SUCCEEDED and FAILED are settled and never change. UNKNOWN_OUTCOME and SENT are settled only from the owning service's own record of that key, never by resending: FAILED with source_status NOT_RECEIVED when the owner has no record after 600 s, NOT_SENT when the bridge never sent it.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["idempotency_key", "capability_id", "status", "source_status", "source_version", "settled_at"],
+            "properties": {
+                "idempotency_key": {"type": "string", "format": "uuid"},
+                "capability_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$", "maxLength": 96},
+                "status": {"enum": ["PENDING", "SENT", "SUCCEEDED", "FAILED", "UNKNOWN_OUTCOME"]},
+                "source_status": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+                "source_version": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._:-]{1,64}$"},
+                "settled_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+        }),
+    );
+
     let metric_names: Vec<&str> = {
         let mut v: Vec<&str> = DATASETS
             .iter()
@@ -518,6 +536,10 @@ pub fn components() -> Map<String, Value> {
     super::schemas_partners::insert(&mut m);
     super::schemas_identity::insert(&mut m);
     super::schemas_communications::insert(&mut m);
+    super::schemas_meetings::insert(&mut m);
+    super::schemas_messaging::insert(&mut m);
+    super::schemas_calling::insert(&mut m);
+    super::schemas_verification::insert(&mut m);
 
     m.insert(
         "Purpose".into(),

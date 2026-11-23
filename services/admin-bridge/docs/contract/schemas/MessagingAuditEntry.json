@@ -1,0 +1,70 @@
+{
+  "description": "One chat audit entry. Its detail object is not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entry_id",
+    "occurred_at",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "credential_id",
+    "principal_id",
+    "action",
+    "target_kind",
+    "target_id",
+    "correlation_id"
+  ],
+  "properties": {
+    "entry_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "credential_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "action": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]{2,47}$"
+    },
+    "target_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]{2,31}$"
+    },
+    "target_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$"
+    }
+  }
+}

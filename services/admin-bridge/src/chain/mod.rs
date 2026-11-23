@@ -94,6 +94,13 @@ pub struct Authorized {
     pub roles_used: Vec<Role>,
     pub correlation_id: Uuid,
     pub now: DateTime<Utc>,
+    /// Commands: HQ's `Idempotency-Key`.
+    pub idempotency_key: Option<Uuid>,
+    /// Commands: this staff member's earlier operation under the same key (a replay; its
+    /// approval was not consumed again).
+    pub existing: Option<crate::store::Operation>,
+    /// The request body (covered by the HMAC and the request digest).
+    pub body: Vec<u8>,
 }
 
 /// A route's result.
@@ -116,6 +123,9 @@ pub struct Bridge {
     pub owners: Arc<dyn crate::owners::OwnerPort>,
     /// False when no database is configured (disabled bridge): readiness says so.
     pub database_configured: bool,
+    /// Tests only ([`Bridge::with_test_commands`]): capability id → owner and owner path.
+    #[doc(hidden)]
+    pub test_commands: Vec<(&'static str, crate::contract::model::Owner, &'static str)>,
     hmac_cache: Mutex<HashMap<String, CachedKey>>,
 }
 
@@ -197,6 +207,7 @@ impl Bridge {
             health,
             owners: Arc::new(crate::owners::NoOwners),
             database_configured: true,
+            test_commands: Vec::new(),
             hmac_cache: Mutex::new(HashMap::new()),
         }
     }
@@ -205,6 +216,17 @@ impl Bridge {
     /// phase serves yet). Never used by the binary.
     pub fn with_owners(mut self, owners: Arc<dyn crate::owners::OwnerPort>) -> Self {
         self.owners = owners;
+        self
+    }
+
+    /// Routes served test commands through the generic command core (the security and
+    /// ledger tests of A3.0, before any family serves a command). Never used by the binary.
+    #[doc(hidden)]
+    pub fn with_test_commands(
+        mut self,
+        commands: Vec<(&'static str, crate::contract::model::Owner, &'static str)>,
+    ) -> Self {
+        self.test_commands = commands;
         self
     }
 
@@ -625,20 +647,6 @@ impl Bridge {
                 if expires <= now {
                     return Err(at(ErrorCode::ApprovalExpired, q));
                 }
-                let claim = [Claim {
-                    kind: ClaimKind::Approval,
-                    value: a.approval_id.clone(),
-                    keep_until: expires,
-                }];
-                match self
-                    .store
-                    .claim_once(&claim)
-                    .await
-                    .map_err(|e| at(store_down(e), q))?
-                {
-                    ClaimOutcome::Recorded => {}
-                    ClaimOutcome::Replay(_) => return Err(at(ErrorCode::ApprovalReused, q)),
-                }
             }
         }
         if !capability.served
@@ -647,10 +655,46 @@ impl Bridge {
         {
             return Err(at(ErrorCode::CapabilityDisabled, q));
         }
-        if capability.idempotency_required()
-            && !header(h, "idempotency-key").is_some_and(assertion::uuid_ok)
+        let idempotency_key = if capability.idempotency_required() {
+            Some(
+                header(h, "idempotency-key")
+                    .filter(|k| assertion::uuid_ok(k))
+                    .and_then(|k| Uuid::parse_str(k).ok())
+                    .ok_or_else(|| at(ErrorCode::IdempotencyKeyRequired, q))?,
+            )
+        } else {
+            None
+        };
+        // A replay of this staff member's earlier command returns its stored outcome
+        // (routes::commands); its approval was consumed by the first request.
+        let existing = match idempotency_key {
+            Some(key) => self
+                .store
+                .operation(&c.sub, key)
+                .await
+                .map_err(|e| at(store_down(e), q))?,
+            None => None,
+        };
+        // Single use: the approval is consumed only once the command can run at all.
+        if let (Approval::TwoPerson, Some(a), None) =
+            (capability.approval(), &c.approval, &existing)
         {
-            return Err(at(ErrorCode::IdempotencyKeyRequired, q));
+            let expires =
+                approval_time(&a.expires_at).ok_or_else(|| at(ErrorCode::ApprovalInvalid, q))?;
+            let claim = [Claim {
+                kind: ClaimKind::Approval,
+                value: a.approval_id.clone(),
+                keep_until: expires,
+            }];
+            match self
+                .store
+                .claim_once(&claim)
+                .await
+                .map_err(|e| at(store_down(e), q))?
+            {
+                ClaimOutcome::Recorded => {}
+                ClaimOutcome::Replay(_) => return Err(at(ErrorCode::ApprovalReused, q)),
+            }
         }
 
         // 10. Rate limit, per staff member, permission and scope.
@@ -689,6 +733,9 @@ impl Bridge {
             roles_used,
             correlation_id,
             now,
+            idempotency_key,
+            existing,
+            body: req.body.clone(),
         })
     }
 }

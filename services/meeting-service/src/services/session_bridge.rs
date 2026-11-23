@@ -141,6 +141,16 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
         }
     };
     let rid = ctx.request_id().as_str().to_string();
+    if crate::services::admin_operator::attribution_refused(
+        ctx.authenticated_service(),
+        request.headers(),
+    ) {
+        return error(
+            StatusCode::FORBIDDEN,
+            "INTERNAL_PERMISSION_DENIED",
+            Some(&rid),
+        );
+    }
     if ctx
         .require_permission(InternalPermission::UserSessionVerify)
         .is_err()

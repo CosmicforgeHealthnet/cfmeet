@@ -203,18 +203,36 @@ async fn decide_production_request(
         .and_then(|v| v.to_str().ok())
         .map(|v| Uuid::parse_str(v.trim()).map_err(|_| ApiError(ErrorCode::OperatorRequired)))
         .transpose()?;
-    Ok(Json(
-        crate::control::production::operator_decide(
-            &s,
-            &op,
-            user,
-            &ctx,
-            id,
-            command,
-            body.map(|Json(b)| b).unwrap_or_default(),
-        )
-        .await?,
-    ))
+    let decision = body.map(|Json(b)| b).unwrap_or_default();
+    let bridge = crate::control::bridge_command::BridgeCommand::of(
+        &caller,
+        &headers,
+        decision.expected_version,
+        command.two_person(),
+    )?;
+    let v = crate::control::production::operator_decide(
+        &s,
+        &op,
+        user,
+        &ctx,
+        id,
+        command,
+        decision,
+        bridge.as_ref(),
+    )
+    .await?;
+    // The admin bridge gets the case as HQ sees it (state and version included).
+    if bridge.is_some() {
+        use crate::control::verification;
+        return Ok(Json(
+            verification::read(
+                &s.db,
+                &verification::case_id(verification::PARTNER_GO_LIVE, id),
+            )
+            .await?,
+        ));
+    }
+    Ok(Json(v))
 }
 
 async fn usage_overview(

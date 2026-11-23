@@ -1,0 +1,115 @@
+{
+  "description": "One chat report: ids, category, states and times. The evidence itself (a sealed reporter disclosure or a MANAGED message reference) is never relayed; evidence_kind only says which kind was given.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "conversation_id",
+    "security_profile",
+    "reporter_principal_id",
+    "reported_principal_id",
+    "message_ids",
+    "category",
+    "evidence_kind",
+    "status",
+    "resolution",
+    "resolved_at",
+    "created_at"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "security_profile": {
+      "enum": [
+        "PRIVATE_E2EE",
+        "MANAGED"
+      ]
+    },
+    "reporter_principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reported_principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "message_ids": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "category": {
+      "enum": [
+        "SPAM",
+        "HARASSMENT",
+        "HATE",
+        "VIOLENCE",
+        "SEXUAL_CONTENT",
+        "CHILD_SAFETY",
+        "SELF_HARM",
+        "ILLEGAL_CONTENT",
+        "IMPERSONATION",
+        "OTHER"
+      ]
+    },
+    "evidence_kind": {
+      "enum": [
+        "NONE",
+        "MANAGED_REFERENCE",
+        "REPORTER_DISCLOSURE"
+      ]
+    },
+    "status": {
+      "enum": [
+        "OPEN",
+        "ACTIONED",
+        "DISMISSED"
+      ]
+    },
+    "resolution": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

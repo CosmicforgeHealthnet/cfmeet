@@ -1,0 +1,78 @@
+{
+  "description": "One OPEN abuse report of the tenant: bounded codes and opaque ids, never free text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "abuse_report_id",
+    "application_id",
+    "environment_id",
+    "call_id",
+    "reporting_principal_id",
+    "reported_principal_id",
+    "category",
+    "comment_code",
+    "status",
+    "created_at",
+    "reviewed_at",
+    "version"
+  ],
+  "properties": {
+    "abuse_report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "call_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reporting_principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reported_principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "category": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "comment_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reviewed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "description": "A case's transitions, oldest first. STAFF actions name the staff member (hq:<sub>, or operator:<name> for the operator console); a partner's own actions carry no account id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "maxLength": 128
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "from_state",
+          "to_state",
+          "actor_kind",
+          "actor_ref",
+          "reason_code",
+          "occurred_at"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "from_state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED",
+              null
+            ]
+          },
+          "to_state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED",
+              null
+            ]
+          },
+          "actor_kind": {
+            "enum": [
+              "STAFF",
+              "PARTNER",
+              "SYSTEM"
+            ]
+          },
+          "actor_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$",
+            "maxLength": 132
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+    }
+  }
+}

@@ -308,8 +308,8 @@ async fn the_gap_closure_migration_rolls_back_to_the_original_guards() {
         .unwrap()
         .is_empty());
     // Rolls back the later gap-closure migrations too (ADR 0062 platform build, ADR 0064
-    // apps).
-    GapClosureMigrator::down(conn, Some(3)).await.unwrap();
+    // apps, ADR 0068 admin operations).
+    GapClosureMigrator::down(conn, Some(4)).await.unwrap();
     assert_eq!(
         developer_platform_migration::pending_migrations(conn)
             .await
@@ -317,7 +317,8 @@ async fn the_gap_closure_migration_rolls_back_to_the_original_guards() {
         [
             "m20261206_000001_retention_purge",
             "m20261207_000002_platform_build",
-            "m20261208_000003_apps"
+            "m20261208_000003_apps",
+            "m20261209_000004_admin_operations"
         ]
     );
     // Back to the original guards: even the retention flag cannot delete.

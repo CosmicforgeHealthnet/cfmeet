@@ -1820,6 +1820,55 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
         ),
     ];
+    // ADR 0068: the admin bridge's operator reads (messaging-firstparty.administer,
+    // cfmeet.admin-bridge only, plus X-CF-Operator; no delegated scope). Their behaviour is
+    // proven in tests/bridge_operator_reads.rs; here each
+    // is refused to every other identity, and to the bridge without an operator, changing
+    // nothing.
+    let operator: Vec<(Method, String, Value)> = vec![
+        (
+            Method::GET,
+            "/internal/v1/operator/reports".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/reports/{rid}"),
+            json!({}),
+        ),
+        (Method::GET, "/internal/v1/operator/holds".into(), json!({})),
+        (
+            Method::GET,
+            "/internal/v1/operator/exports".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/deletion-requests".into(),
+            json!({}),
+        ),
+        (Method::GET, "/internal/v1/operator/audit".into(), json!({})),
+        (
+            Method::GET,
+            "/internal/v1/operator/switches".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/incidents".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/failed-messages".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/key-transparency".into(),
+            json!({}),
+        ),
+    ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
     for (path, item) in doc["paths"].as_object().unwrap() {
@@ -1831,7 +1880,9 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     }
     let covered: BTreeSet<(String, String)> = table
         .iter()
-        .map(|(m, p, _, _)| {
+        .map(|(m, p, _, _)| (m, p))
+        .chain(operator.iter().map(|(m, p, _)| (m, p)))
+        .map(|(m, p)| {
             let t = p
                 .replace(&cid.to_string(), "{conversationId}")
                 .replace(&pid.to_string(), "{principalId}")
@@ -1968,6 +2019,123 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "{path}: refused internal calls changed state"
         );
         println!("MATRIX-INTERNAL {method} {path} allowed={allowed} denials=[no-token,customer-credential,untrusted,rogue-key,wrong-peer,no-delegated,forged-delegated]");
+    }
+    // The admin bridge's operator routes: only cfmeet.admin-bridge with X-CF-Operator.
+    let key = Uuid::new_v4().to_string();
+    for (method, path, body) in &operator {
+        let before = fingerprint(&h).await;
+        let body = (*method == Method::POST).then(|| body.clone());
+        let r = h
+            .send(method.clone(), None, None, path, body.clone(), &[])
+            .await;
+        assert_eq!(
+            (r.status.as_u16(), r.code()),
+            (401, "INTERNAL_AUTHENTICATION_FAILED"),
+            "{path}: {}",
+            r.text
+        );
+        let r = h
+            .send(
+                method.clone(),
+                Some(&fp.token),
+                Some(owner),
+                path,
+                body.clone(),
+                &[],
+            )
+            .await;
+        assert_eq!(
+            r.status.as_u16(),
+            401,
+            "{path} customer credential: {}",
+            r.text
+        );
+        for signer in [&h.untrusted, &peers.rogue_meeting] {
+            let r = h
+                .call_internal(signer, method.clone(), path, body.clone(), None, &[])
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                (401, "INTERNAL_AUTHENTICATION_FAILED"),
+                "{path}: {}",
+                r.text
+            );
+        }
+        // Trusted peers without messaging-firstparty.administer (the settlement read
+        // answers 404 to anyone but the bridge, so it is not an oracle).
+        let denied: (u16, &str) = if path.contains("/operator/operations/") {
+            (404, "NOT_FOUND")
+        } else {
+            (403, "INTERNAL_PERMISSION_DENIED")
+        };
+        for (name, signer) in [
+            ("meeting", &peers.meeting),
+            ("privacy_relay", &peers.privacy_relay),
+            ("sms_gateway", &peers.sms_gateway),
+            ("communications", &peers.communications),
+            ("notifications", &peers.notifications),
+            ("gateway", &peers.gateway),
+        ] {
+            let r = h
+                .call_internal(
+                    signer,
+                    method.clone(),
+                    path,
+                    body.clone(),
+                    None,
+                    &[("idempotency-key", key.as_str())],
+                )
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                denied,
+                "{path} as {name}: {}",
+                r.text
+            );
+            // Operator attribution from anyone but the bridge is refused outright.
+            let r = h
+                .call_internal(
+                    signer,
+                    method.clone(),
+                    path,
+                    body.clone(),
+                    None,
+                    &[
+                        ("x-cf-operator", "hq:matrix"),
+                        ("idempotency-key", key.as_str()),
+                    ],
+                )
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                (403, "INTERNAL_PERMISSION_DENIED"),
+                "{path} as {name} with X-CF-Operator: {}",
+                r.text
+            );
+        }
+        // The bridge itself without a named operator.
+        let r = h
+            .call_internal(
+                &peers.admin_bridge,
+                method.clone(),
+                path,
+                body.clone(),
+                None,
+                &[("idempotency-key", key.as_str())],
+            )
+            .await;
+        assert_eq!(
+            (r.status.as_u16(), r.code()),
+            (403, "INTERNAL_PERMISSION_DENIED"),
+            "{path} bridge without operator: {}",
+            r.text
+        );
+        assert_eq!(
+            before,
+            fingerprint(&h).await,
+            "{path}: refused operator calls changed state"
+        );
+        println!("MATRIX-INTERNAL {method} {path} allowed=admin_bridge+operator denials=[no-token,customer-credential,untrusted,rogue-key,wrong-peer,foreign-attribution,no-operator]");
     }
     // The delegated customer surface: the acting header must match the signed initiator.
     let other = h.principal(&fp);

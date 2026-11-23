@@ -1,0 +1,90 @@
+{
+  "description": "One MANAGED conversation export (encrypted chats are never exported). The object key and digest are not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "conversation_id",
+    "status",
+    "size_bytes",
+    "message_count",
+    "failure",
+    "attempts",
+    "created_at",
+    "completed_at",
+    "expires_at"
+  ],
+  "properties": {
+    "export_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "PENDING",
+        "READY",
+        "FAILED",
+        "EXPIRED"
+      ]
+    },
+    "size_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "message_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "failure": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

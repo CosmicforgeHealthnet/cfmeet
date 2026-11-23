@@ -1,0 +1,41 @@
+{
+  "description": "One participant: principal id, kind, role and times only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "principal_id",
+    "principal_kind",
+    "role",
+    "is_host",
+    "joined_at",
+    "left_at"
+  ],
+  "properties": {
+    "principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "principal_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "is_host": {
+      "type": "boolean"
+    },
+    "joined_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "left_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.7.0",
+  "contract_version": "1.12.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "b0eae8da97ea551f876bf2e1a938792b18612ba6b323b7c18d423ae34cb4cdac",
-    "capability_matrix_sha256": "87be140f558498b080e88bdc6e45f974ac00c25262e21a3ac1b8e0294c775e13"
+    "openapi_sha256": "472ed7e0cc974c5e26ebe1aa241748cba5f06fc002c7073c1264abc386a52cb3",
+    "capability_matrix_sha256": "a2132d1e6cbcc55e43ce45e2700bc30148c76d3b962f148c1912249e39c2ae07"
   },
   "query_shapes": {
     "SCOPED": [
@@ -49,12 +49,12 @@
     ]
   },
   "totals": {
-    "capabilities": 246,
+    "capabilities": 247,
     "by_state": {
-      "READ_ONLY": 51,
-      "AVAILABLE": 0,
-      "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 81
+      "READ_ONLY": 92,
+      "AVAILABLE": 7,
+      "DISABLED": 107,
+      "BLOCKED_DEPENDENCY": 41
     }
   },
   "capabilities": [
@@ -230,6 +230,74 @@
       "source_tests": [
         "datasets_are_null_not_zero_until_sources_report",
         "worker_identity_reads_datasets_with_the_workload_acr"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "bridge.operations.read",
+      "version": "1.0",
+      "module": "bridge",
+      "kind": "READ",
+      "owner": "admin-bridge",
+      "owner_status": "LOCAL",
+      "phase": "A3",
+      "method": "GET",
+      "path": "/hq/operations/{idempotency_key}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "idempotency_key",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "verification-review",
+        "abuse-review",
+        "billing-review",
+        "pricing-change",
+        "ops-incident",
+        "release-request",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.support",
+        "cfmeet.trust_safety",
+        "cfmeet.verification.reviewer",
+        "cfmeet.partner_ops",
+        "cfmeet.pricing.editor",
+        "cfmeet.pricing.approver",
+        "cfmeet.platform_ops",
+        "cfmeet.security_admin",
+        "cfmeet.release_manager"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/OperationReadback"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "bridge.operations.read",
+      "risk": "R1",
+      "privacy": "INTERNAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; bridge-local, no owner call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "operations_readback_settles_from_the_owner_record_and_never_resends",
+        "operations_readback_is_private_to_the_staff_member_purpose_and_scope"
       ],
       "contact_search": false
     },
@@ -411,9 +479,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountUserPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.users.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -422,8 +490,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_user_search_never_returns_an_address"
+      ],
       "contact_search": true
     },
     {
@@ -465,9 +535,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountUserDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.users.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -476,8 +546,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_user_detail_masks_the_address"
+      ],
       "contact_search": false
     },
     {
@@ -683,9 +755,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountSessionPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.sessions.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -694,8 +766,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_account_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -793,9 +867,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountDevicePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.devices.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -804,8 +878,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_account_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -907,9 +983,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountMfa"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.mfa.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -918,8 +994,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_mfa_reports_state_only"
+      ],
       "contact_search": false
     },
     {
@@ -1017,9 +1095,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AccountSecurityEventPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "accounts.security-history.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -1028,8 +1106,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-      "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_security_history_maps_window_and_sequence_cursor"
+      ],
       "contact_search": false
     },
     {
@@ -1326,9 +1406,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingSpacePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.spaces.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -1337,8 +1417,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_space_and_meeting_search"
+      ],
       "contact_search": false
     },
     {
@@ -1377,9 +1459,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingConferencePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.meetings.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -1388,8 +1470,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_space_and_meeting_search"
+      ],
       "contact_search": false
     },
     {
@@ -1433,9 +1517,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingConference"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.meetings.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -1444,8 +1528,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_detail_and_participants"
+      ],
       "contact_search": false
     },
     {
@@ -1483,9 +1569,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingConferencePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.live.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -1494,8 +1580,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_live_list"
+      ],
       "contact_search": false
     },
     {
@@ -1595,9 +1683,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingParticipantPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.participants.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -1606,8 +1694,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: new meeting-service operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_detail_and_participants"
+      ],
       "contact_search": false
     },
     {
@@ -2144,9 +2234,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MeetingAuditEventPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "meetings.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -2155,8 +2245,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-      "blocker": "Phase A2: meeting-service keeps this in its database only; operator read API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "meetings_audit_maps_window_and_time_cursor"
+      ],
       "contact_search": false
     },
     {
@@ -2550,9 +2642,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -2561,8 +2653,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_reports_relay_no_evidence"
+      ],
       "contact_search": false
     },
     {
@@ -2604,9 +2698,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -2615,8 +2709,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_report_detail_carries_actions_not_evidence"
+      ],
       "contact_search": false
     },
     {
@@ -3034,9 +3130,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.holds.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3045,8 +3141,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3186,9 +3284,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingExportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.exports.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3197,8 +3295,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3283,9 +3383,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingDeletionRequestPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.deletion-requests.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3294,8 +3394,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3380,9 +3482,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingAuditPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3391,8 +3493,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3428,9 +3532,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingSwitchPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.switches.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -3439,8 +3543,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_switches_are_served"
+      ],
       "contact_search": false
     },
     {
@@ -3531,9 +3637,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingIncidentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.incidents.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3542,8 +3648,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3628,9 +3736,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingFailedMessagePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.failed-messages.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3639,8 +3747,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3729,9 +3839,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingKeyTransparency"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.key-transparency.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -3740,8 +3850,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_key_transparency_is_hashes_and_sizes_only"
+      ],
       "contact_search": false
     },
     {
@@ -3826,9 +3938,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingCallPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.calls.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -3837,8 +3949,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_calls_are_tenant_scoped_and_minimized"
+      ],
       "contact_search": false
     },
     {
@@ -3880,9 +3994,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingCallDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.calls.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -3891,8 +4005,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_call_detail_lists_participants_by_id_only"
+      ],
       "contact_search": false
     },
     {
@@ -3928,9 +4044,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingCallPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.live.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3939,8 +4055,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3976,9 +4094,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingAbuseReportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.abuse-reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -3987,8 +4105,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -4079,9 +4199,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingBlockRulePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.blocks.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -4090,8 +4210,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_blocks_never_name_a_contact"
+      ],
       "contact_search": false
     },
     {
@@ -4182,9 +4304,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingLimits"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.limits.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -4193,8 +4315,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_configuration_reads_are_bounded"
+      ],
       "contact_search": false
     },
     {
@@ -4279,9 +4403,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRoutingPolicies"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.routing.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -4290,8 +4414,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_configuration_reads_are_bounded"
+      ],
       "contact_search": false
     },
     {
@@ -4376,9 +4502,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingEnterprisePolicies"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.enterprise-features.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -4387,8 +4513,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_configuration_reads_are_bounded"
+      ],
       "contact_search": false
     },
     {
@@ -4473,9 +4601,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingSpendPolicies"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.spend-limits.read",
       "risk": "R1",
       "privacy": "FINANCIAL_SENSITIVE",
@@ -4484,8 +4612,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_configuration_reads_are_bounded"
+      ],
       "contact_search": false
     },
     {
@@ -4571,9 +4701,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRecordingPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.recordings.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -4582,8 +4712,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_media_reads_are_metadata_only"
+      ],
       "contact_search": false
     },
     {
@@ -4621,9 +4753,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingVoicemailPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.voicemail.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -4632,8 +4764,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: new calling operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_media_reads_are_metadata_only"
+      ],
       "contact_search": false
     },
     {
@@ -4724,9 +4858,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingRetentionHoldPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.retention-holds.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -4735,8 +4869,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -4878,9 +5014,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingIncidentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.incidents.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -4889,8 +5025,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -4973,9 +5111,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingWebhookKeyPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.webhook-keys.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -4984,8 +5122,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -5078,9 +5218,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CallingAuditEntryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "calling.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -5089,8 +5229,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-      "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "calling_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -9821,7 +9963,7 @@
       "phase": "A3",
       "method": "GET",
       "path": "/verification/cases",
-      "source_endpoint": null,
+      "source_endpoint": "GET /internal/v1/operator/verification/cases",
       "path_params": [],
       "query_shape": "SCOPED_PAGE",
       "query_required": [
@@ -9841,9 +9983,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCasePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "verification.cases.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9852,8 +9994,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-      "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_reads_are_strict_hq_case_shapes"
+      ],
       "contact_search": false
     },
     {
@@ -9866,7 +10010,7 @@
       "phase": "A3",
       "method": "GET",
       "path": "/verification/cases/{case_id}",
-      "source_endpoint": null,
+      "source_endpoint": "GET /internal/v1/operator/verification/cases/{caseId}",
       "path_params": [
         {
           "name": "case_id",
@@ -9892,9 +10036,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCaseDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "verification.cases.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -9903,8 +10047,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-      "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_reads_are_strict_hq_case_shapes"
+      ],
       "contact_search": false
     },
     {
@@ -9917,7 +10063,7 @@
       "phase": "A3",
       "method": "GET",
       "path": "/verification/cases/{case_id}/history",
-      "source_endpoint": null,
+      "source_endpoint": "GET /internal/v1/operator/verification/cases/{caseId}/history",
       "path_params": [
         {
           "name": "case_id",
@@ -9943,9 +10089,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCaseHistory"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "verification.case-history.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -9954,8 +10100,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-      "blocker": "Phase A3: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_reads_are_strict_hq_case_shapes"
+      ],
       "contact_search": false
     },
     {
@@ -9968,7 +10116,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/claim",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/{production-access-requests|apps}/{id}/review",
       "path_params": [
         {
           "name": "case_id",
@@ -9991,14 +10139,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationClaimRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.case.claim",
       "risk": "R2",
       "privacy": "INTERNAL",
@@ -10007,8 +10155,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10021,7 +10171,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/partner-go-live/approve",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/approve",
       "path_params": [
         {
           "name": "case_id",
@@ -10044,14 +10194,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerGoLiveApproveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.partner-go-live.approve",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10060,8 +10210,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10074,7 +10226,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/partner-go-live/reject",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/reject",
       "path_params": [
         {
           "name": "case_id",
@@ -10097,14 +10249,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationRejectRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.partner-go-live.reject",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10113,8 +10265,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10127,7 +10281,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/partner-go-live/suspend",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/suspend",
       "path_params": [
         {
           "name": "case_id",
@@ -10150,14 +10304,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationDecisionRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.partner-go-live.suspend",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10166,8 +10320,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10180,7 +10336,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/app-review/approve",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/apps/{appId}/approve",
       "path_params": [
         {
           "name": "case_id",
@@ -10203,14 +10359,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationDecisionRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.app-review.approve",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10219,8 +10375,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10233,7 +10391,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/app-review/reject",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/apps/{appId}/reject",
       "path_params": [
         {
           "name": "case_id",
@@ -10256,14 +10414,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationRejectRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.app-review.reject",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10272,8 +10430,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
@@ -10286,7 +10446,7 @@
       "phase": "A3",
       "method": "POST",
       "path": "/verification/cases/{case_id}/app-review/publish",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/apps/{appId}/publish",
       "path_params": [
         {
           "name": "case_id",
@@ -10309,14 +10469,14 @@
         "cfmeet.verification.reviewer"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationDecisionRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/VerificationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "verification.app-review.publish",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -10325,8 +10485,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "verification_commands_reach_the_right_owner_route_once"
+      ],
       "contact_search": false
     },
     {
