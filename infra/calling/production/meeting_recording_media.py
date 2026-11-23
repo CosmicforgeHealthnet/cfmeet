@@ -151,6 +151,7 @@ def ensure(cr, run_id):
             if (current['Image'] != old['Image']
                     or (current['Config'].get('Labels') or {}).get('cfmeet.media.udp-mux-run') != run_id):
                 raise RuntimeError('Unknown container occupies shared media name; protected rollback retained') from None
+            p.run('docker', 'stop', '--time', '30', NAME)
             p.run('docker', 'rm', '-f', NAME)
         media.CONFIG.write_text(original)
         p.run('docker', 'rename', previous, NAME)
