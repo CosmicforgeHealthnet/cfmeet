@@ -675,6 +675,8 @@ pub struct Harness {
     /// The Notification Service: `communications-restrictions.read` (X4) and
     /// `communications-preferences.export` (N10 copy + catch-up).
     pub notifications: Arc<ServiceTokenSigner>,
+    /// The admin bridge: `communications.administer` (ADR 0068 operator reads).
+    pub bridge: Arc<ServiceTokenSigner>,
     /// The Hub's own signing key (what a receiver's trust bundle grants).
     pub hub_key: PublicJwk,
     admin: DatabaseConnection,
@@ -745,6 +747,7 @@ impl Harness {
         let calling_signer = signer(ServiceId::calling(), key("calling-test"));
         let operator = signer(ServiceId::operator_console(), key("operator-test"));
         let notifications = signer(ServiceId::notifications(), key("notifications-test"));
+        let bridge = signer(ServiceId::admin_bridge(), key("admin-bridge-test"));
         let verifiers = vec![
             verifier(
                 ServiceId::platform_access(),
@@ -862,6 +865,12 @@ impl Harness {
                         "communications-preferences.export",
                     ],
                 ),
+                // ADR 0068: the admin bridge's operator reads.
+                (
+                    ServiceId::admin_bridge(),
+                    bridge.public_jwk(),
+                    vec!["communications.administer"],
+                ),
             ],
         );
         let state = State {
@@ -901,6 +910,7 @@ impl Harness {
             calling_signer,
             operator,
             notifications,
+            bridge,
             hub_key,
             admin,
             name,

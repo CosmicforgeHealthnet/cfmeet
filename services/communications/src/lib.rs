@@ -13,6 +13,7 @@ pub mod invites;
 pub mod meetings;
 pub mod model;
 pub mod notification_publications;
+pub mod operator;
 pub mod owners;
 pub mod policy;
 pub mod preference_authority;

@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.6.0",
+  "contract_version": "1.7.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "3a198a6682a9eb985b2fc3fdf70a8ffc9125293ae3486f0416f654a4d3fa908e",
-    "capability_matrix_sha256": "4271efa9ce60fc08cce51fb659a97c786ad9bd5b70b8886febc45f5283a9476d"
+    "openapi_sha256": "b0eae8da97ea551f876bf2e1a938792b18612ba6b323b7c18d423ae34cb4cdac",
+    "capability_matrix_sha256": "87be140f558498b080e88bdc6e45f974ac00c25262e21a3ac1b8e0294c775e13"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 46,
+      "READ_ONLY": 51,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 86
+      "BLOCKED_DEPENDENCY": 81
     }
   },
   "capabilities": [
@@ -5132,9 +5132,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CommunicationProfile"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "communications.profiles.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -5143,8 +5143,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-      "blocker": "Phase A2: new communications operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "communications_profile_never_relays_contact_fields"
+      ],
       "contact_search": false
     },
     {
@@ -5290,9 +5292,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CommunicationReportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "communications.reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -5301,8 +5303,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-      "blocker": "Phase A2: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "communications_reports_and_holds_page_by_time_cursor"
+      ],
       "contact_search": false
     },
     {
@@ -5393,9 +5397,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CommunicationHoldPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "communications.holds.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -5404,8 +5408,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-      "blocker": "Phase A2: new communications operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "communications_reports_and_holds_page_by_time_cursor"
+      ],
       "contact_search": false
     },
     {
@@ -5443,9 +5449,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/CommunicationAuditPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "communications.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -5454,8 +5460,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-      "blocker": "Phase A2: communications keeps this in its database only; operator read API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "communications_audit_maps_the_window_and_drops_details"
+      ],
       "contact_search": false
     },
     {
@@ -5491,9 +5499,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/Summary"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "communications.metrics.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -5502,8 +5510,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-      "blocker": "Phase A2: communications endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "communications_metrics_are_an_hq_summary"
+      ],
       "contact_search": false
     },
     {
