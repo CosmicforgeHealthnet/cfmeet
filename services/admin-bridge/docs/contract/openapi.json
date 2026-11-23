@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.17.0",
+    "version": "2.0.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [

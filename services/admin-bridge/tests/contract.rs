@@ -641,7 +641,7 @@ fn compat_gate_accepts_additive_and_refuses_breaking_changes() {
 
     // An announced major bump allows breaking changes.
     let mut major = removed.clone();
-    major["contract_version"] = json!("2.0.0");
+    major["contract_version"] = json!("3.0.0");
     assert!(breaking_changes(&caps, &schemas, &major, &schemas).is_empty());
 }
 

@@ -1,12 +1,12 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.17.0",
+  "contract_version": "2.0.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "4b9d36aa1513006feb66aad9d6b0989ba69b6d7e83cc250faf6dbfeecb44c810",
+    "openapi_sha256": "28c63e21a1f75f17056d37588783c456a67f477bc23a1922c60ec3023473e635",
     "capability_matrix_sha256": "57074a2bc57a2ab53a8f053bdebb219deb9d3724cc2d7e744f073c6cc71bd30b"
   },
   "query_shapes": {
