@@ -104,6 +104,10 @@ is required for this deployment. `activate-managed-kt-witness`, with
 `confirm=operator-managed`, starts the existing Rust witness program in an isolated
 container, preserves the current log signing identity, pins its public key, and retains
 monotonic state across restarts. The separate signing key has protected recovery material.
+The container uses an owned, non-internal bridge with only a loopback-published listener:
+Docker does not publish host ports from the internal core network. Its public-key
+response must match the pinned identity before Messaging is changed. Host nginx exposes
+only the signed-checkpoint POST route over HTTPS; the witness has no core-network access.
 Messaging is configured with quorum 1 only inside a rollback-protected activation which
 must observe a verified cosignature of the current head. Its witness ID is
 `cfmeet.operated`. This is an **operator-managed cosignature**, not independent oversight:
@@ -132,7 +136,8 @@ repository supplies `messaging-kt-witness`, built from
 
 They return their HTTPS `POST /witness/v1/add-checkpoint` endpoint and base64url Ed25519
 public key. Configure Messaging's read-only `MESSAGING_KT_WITNESSES_FILE` as
-`[{"witnessId":"<operator-id>","url":"https://<operator>/witness/v1/add-checkpoint","publicKey":"<key>"}]`
+`[{"witnessId":"<operator-id>","url":"https://<operator>","publicKey":"<key>"}]`
+The worker appends `/witness/v1/add-checkpoint` to this base URL.
 and set `MESSAGING_KT_WITNESS_QUORUM` to the agreed number of distinct operators. Preserve
 the pinned log identity and the web `NEXT_PUBLIC_MESSAGING_KT_LOG_ID` / `_LOG_KEY`.
 
@@ -159,16 +164,19 @@ Report the actual cosignature state and who controls the configured witness sepa
 
 ## Recording callback activation
 
-`activate-meeting-recording` with `enable-30-days` checks both existing provider identities
+`activate-meeting-recording` with `prepare` checks both existing provider identities
 against the shared SFU's configured keys. Self-hosted LiveKit has a global webhook signer;
 Meeting currently verifies callbacks with its own provider credentials. The activation
-therefore aligns Meeting's client credentials with that existing signer inside the same
-rollback boundary as capture and acceptance. It never rotates or removes an SFU key,
+therefore aligns Meeting's client credentials with that existing signer while capture
+remains disabled. It never rotates or removes an SFU key,
 so existing participant tokens remain valid. Unknown keys or callback layouts are refused.
 It extends only the known Calling callback configuration. The media server restarts only
 when both participant and active-capture counts are zero. A failed restart or route
-verification restores the exact previous configuration. Capture remains governed by the
-real synthetic recording acceptance and its existing flag rollback.
+verification restores the exact previous configuration. Preparation completes as a
+separate workflow run before `enable-30-days`; re-run preparation for an older storage-only
+setup. Enable refuses a remaining signer mismatch and changes only the capture flag.
+A failed capture acceptance then restores the prepared container, retaining the signer
+that verifies the already configured callbacks.
 
 Use `diagnose` to read the allowlisted controlled recording receipt, its own artifact's
 state/failure code, the boolean signer comparison and known public RTC host/port. No media,

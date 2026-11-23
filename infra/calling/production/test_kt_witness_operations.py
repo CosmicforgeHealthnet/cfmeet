@@ -11,6 +11,32 @@ import kt_witness_operations as w
 
 
 class ManagedWitness(unittest.TestCase):
+    def test_ingress_must_publish_loopback_on_an_owned_noninternal_bridge(self):
+        for network, valid in [
+                ({'Driver': 'bridge', 'Internal': False, 'Labels': {'cfmeet.kt.operator-managed': 'true'}}, True),
+                ({'Driver': 'bridge', 'Internal': True, 'Labels': {'cfmeet.kt.operator-managed': 'true'}}, False),
+                ({'Driver': 'bridge', 'Internal': False, 'Labels': {}}, False)]:
+            with patch.object(w.p, 'run', side_effect=[w.NETWORK, json.dumps([network])]):
+                if valid:
+                    w.ensure_network()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'Unknown witness ingress'):
+                        w.ensure_network()
+
+    def test_listener_identity_must_match_before_messaging_changes(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        for key in ('expected', 'wrong'):
+            response.read.return_value = json.dumps({'witnessId': w.WITNESS, 'publicKey': key,
+                                                     'signatureAlgorithm': 'Ed25519'}).encode()
+            with patch.object(w.urllib.request, 'urlopen', return_value=response):
+                if key == 'expected':
+                    w.ready('expected')
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'identity differs'):
+                        w.ready('expected')
+
     def test_only_explicit_managed_confirmation_can_mutate(self):
         self.assertRegex(w.WITNESS, re.compile(r'^[a-z0-9][a-z0-9.:-]{2,63}$'))
         cr = SimpleNamespace(require_release=Mock())
@@ -83,6 +109,7 @@ class ManagedWitness(unittest.TestCase):
                         patch.object(w.layout, 'SITE', site), patch.object(w, 'SNIPPET', snippet), \
                         patch.object(w, 'log_identity', return_value=('image', 'pinned-log', 'public-log-key')), \
                         patch.object(w, 'public_key', return_value='public-witness-key'), \
+                        patch.object(w, 'ensure_network'), patch.object(w, 'ready') as ready, \
                         patch.object(w.providers, 'root_file'), patch.object(w.p, 'reload_host_nginx'), \
                         patch.object(w.p, 'run', side_effect=command) as run:
                     if fail:
@@ -103,4 +130,6 @@ class ManagedWitness(unittest.TestCase):
                         docker = next(c.args for c in run.call_args_list if c.args[:3] == ('docker', 'run', '-d'))
                         self.assertIn('--read-only', docker)
                         self.assertIn('10001:10001', docker)
+                        self.assertEqual(docker[docker.index('--network') + 1], w.NETWORK)
+                        ready.assert_called_once_with('public-witness-key')
                         self.assertNotIn('DATABASE_URL', ' '.join(docker))

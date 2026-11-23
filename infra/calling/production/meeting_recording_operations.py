@@ -109,9 +109,11 @@ def activate(cr, sha, run_id, confirm):
         if cr.mem_available_mib() < 2048:
             raise RuntimeError('Recording acceptance needs 2 GiB available memory for media and the disposable client')
         overrides = recording_provider_overrides(cr)
+        if set(overrides) != {FLAG}:
+            raise RuntimeError('Prepare the Meeting provider callback signer before enabling capture')
+        ensure_callback(cr, run_id)
         import meeting_recording_acceptance
         def post():
-            ensure_callback(cr, run_id)
             report = meeting_recording_acceptance.run(cr, run_id)
             cr.emit('meetingRecordingAcceptance', report)
         cr.apply_activation(OPERATION, sha, run_id, [('meeting-service', overrides)], post=post)
@@ -120,6 +122,7 @@ def activate(cr, sha, run_id, confirm):
         raise RuntimeError('Meeting recording needs 12 GiB free for its 10 GiB bucket quota and reserve')
     if not p.inspect(storage.NAME)['State']['Running'] or p.inspect(storage.NAME)['HostConfig'].get('PortBindings'):
         raise RuntimeError('The encrypted object store must remain running and private')
+    provider_overrides = recording_provider_overrides(cr)
     relay.wait_for_relay()
     before = SITE.read_text()
     after = site_text(before)
@@ -134,7 +137,7 @@ def activate(cr, sha, run_id, confirm):
         if relay.anonymous_status(BUCKET) != 403:
             raise RuntimeError('Unsigned recording storage reads were not refused')
         relay.signed_round_trip(BUCKET, user, password, 'artifacts/probes', run_id)
-        overrides = {FLAG: 'false', 'MEETING_RECORDING_STORAGE_PREPARED': 'true',
+        overrides = {**provider_overrides, FLAG: 'false', 'MEETING_RECORDING_STORAGE_PREPARED': 'true',
                      'ARTIFACT_STORAGE_ENDPOINT': 'http://' + storage.NAME + ':9000',
                      'ARTIFACT_STORAGE_PUBLIC_ENDPOINT': 'https://api.cfmeet.com',
                      'ARTIFACT_STORAGE_BUCKET': BUCKET, 'ARTIFACT_STORAGE_REGION': 'us-east-1',
@@ -146,6 +149,7 @@ def activate(cr, sha, run_id, confirm):
             status = facts(cr)
             if status.get('recordingStorageConfigured') is not True or status.get('recordingEnabled') is not False:
                 raise RuntimeError('Prepared Meeting storage is not ready with capture disabled')
+            ensure_callback(cr, run_id)
         cr.apply_activation(OPERATION, sha, run_id,
                             [('meeting-service', overrides, {'mounts': list(zip(paths, (ACCESS, SECRET)))})], post=post)
     except Exception:
@@ -191,7 +195,8 @@ def recording_provider_overrides(cr):
     Self-hosted LiveKit has one global webhook signing key. Meeting's current adapter
     verifies callbacks with its provider credentials. Both identities must already be
     valid keys of this same SFU; unknown or incomplete configurations are preserved.
-    This change enters the same rollback boundary as recording and real acceptance.
+    Preparation applies this with capture disabled. A later failed recording test
+    restores that prepared container, keeping the callback verifier and SFU in agreement.
     """
     import yaml
     if media_webhook.CONFIG.is_symlink():

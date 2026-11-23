@@ -507,6 +507,7 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           RELEASE_SHA: ${{ inputs.release_sha }}
           CONFIRM: ${{ inputs.confirm }}
+          AUDIT_ACTIVATIONS: ${{ vars.CFMEET_AUDIT_ACTIVATIONS }}
         run: |
           set -euo pipefail
           ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40)
@@ -514,6 +515,11 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           # a-z, comma and hyphen; `service=<name>` (digits allowed) for activate-service-key-*.
           [[ "$CONFIRM" =~ ^[a-z0-9,=-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, 0-9, comma, equals and hyphen"; exit 1; }
+          [[ "$AUDIT_ACTIVATIONS" == '' || "$AUDIT_ACTIVATIONS" == disabled || "$AUDIT_ACTIVATIONS" == enabled ]] || {
+            echo '::error::CFMEET_AUDIT_ACTIVATIONS must be enabled, disabled, or unset'; exit 1;
+          }
+          campaign=disabled
+          [[ "$OPERATION" != release || "$AUDIT_ACTIVATIONS" != enabled ]] || campaign=enabled
           if [[ "$OPERATION" == release ]]; then
             latest=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
             [[ "$latest" == "$GITHUB_SHA" ]] || { echo "::error::Superseded main; refusing old production release"; exit 1; }
@@ -527,7 +533,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
           tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-            "cd '$remote' && python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
+            "cd '$remote' && CFMEET_AUDIT_ACTIVATIONS='$campaign' python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
 
       - name: Public API and gateway certification (read-only, unauthenticated)
         id: public
