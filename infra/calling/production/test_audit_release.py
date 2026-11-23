@@ -126,7 +126,7 @@ class Campaign(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root/'audit-activation-campaign.json').write_text(json.dumps(
-                {'completed': {}, 'running': {'stage': 'recording', 'version': 1}}))
+                {'completed': {}, 'running': {'stage': 'recording', 'version': ar.VERSIONS['recording']}}))
             cr = SimpleNamespace(require_release=Mock(), emit=Mock())
             with patch.object(ar.p, 'ROOT', root), patch.object(ar, 'ensure_witness') as witness:
                 ar.run(cr, 'a'*40, '123-1')
