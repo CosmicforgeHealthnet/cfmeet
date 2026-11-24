@@ -268,6 +268,29 @@ async function loadRecord(conversationId, sequence) {
   return JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), sealed)));
 }
 
+// Retry references use the existing encrypted pending store: no schema upgrade,
+// no unbounded metadata array, and no limit that blocks delivery after many failures.
+const retryPrefix = (conversationId) => `retry:${conversationId}:`;
+const retryKey = (conversationId, sequence) => `${retryPrefix(conversationId)}${String(sequence).padStart(16, "0")}`;
+const retryRange = (conversationId, after = 0) => IDBKeyRange.bound([ctx.account, retryKey(conversationId, after)], [ctx.account, retryPrefix(conversationId) + "\uffff"], true);
+async function firstRetry(conversationId, after = 0, ignore = new Set()) {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const r = d.transaction("pending").objectStore("pending").openKeyCursor(retryRange(conversationId, after));
+    r.onerror = () => reject(r.error);
+    r.onsuccess = () => {
+      const c = r.result;
+      if (!c) return resolve(null);
+      const n = Number(c.key[1].slice(retryPrefix(conversationId).length));
+      if (ignore.has(n)) c.continue(); else resolve(n);
+    };
+  });
+}
+async function retryPut(conversationId, sequence) {
+  const key = retryKey(conversationId, sequence);
+  return ["pending", [ctx.account, key], await seal(ctx.key, pendingAad(ctx.account, key), enc.encode("{}"))];
+}
+
 // ------------------------------------------------------------- operations
 
 const ops = {
@@ -336,7 +359,7 @@ const ops = {
 
   async status() {
     return ctx?.device
-      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors, processedCursors: ctx.meta.processed ?? {}, retryCounts: Object.fromEntries(Object.entries(ctx.meta.retry ?? {}).map(([id, entries]) => [id, entries.length])) }
+      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors, processedCursors: ctx.meta.processed ?? {} }
       : { status: ctx ? "NONE" : "CLOSED" };
   },
 
@@ -540,8 +563,9 @@ const ops = {
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
     const savedState = device.exportState();
     const savedMeta = structuredClone(ctx.meta);
-    ctx.meta.retry ??= {};
-    const retry = new Set(ctx.meta.retry[conversationId] ?? []);
+    const newlyFailed = new Set();
+    const resolved = new Set();
+    const pendingCommit = ctx.meta.pendingCommit?.[conversationId];
     let processed = ctx.meta.processed?.[conversationId] ?? cursor;
     const membership = ctx.meta.membership?.[b64u.enc(gid)];
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
@@ -556,20 +580,18 @@ const ops = {
     try {
     for (const m of sorted) {
       if (!Number.isSafeInteger(m.sequence) || m.sequence < 1) fail("BAD_SEQUENCE");
-      if (m.sequence <= last && !retry.has(m.sequence)) continue;
+      const reference = await req((await db()).transaction("pending").objectStore("pending").getKey([ctx.account, retryKey(conversationId, m.sequence)]));
+      if (m.sequence <= last && reference === undefined) continue;
       // The authoritative endpoint returns every visible row, including tombstones.
       // Initial visibility may begin after 1; thereafter never cross a hole/commit.
       if (last > 0 && m.sequence > last + 1) { blocked = "SYNC_GAP"; break; }
-      if (retry.size >= 256 && !retry.has(m.sequence)) { blocked = "RETRY_QUEUE_FULL"; break; }
-      for (const sequence of retry) {
-        if (sequence >= m.sequence) continue;
-        const pending = await loadRecord(conversationId, sequence);
-        if (pending?.kind === "MLS_COMMIT") { blocked = "COMMIT_PENDING"; break; }
-      }
-      if (blocked) break;
+      if (pendingCommit && pendingCommit < m.sequence && !resolved.has(pendingCommit)) { blocked = "COMMIT_PENDING"; break; }
       const existing = await loadRecord(conversationId, m.sequence);
       if (existing && ["DECRYPTED", "SENT", "REMOVED", "COMMIT"].includes(existing.status)) {
-        retry.delete(m.sequence); last = Math.max(last, m.sequence); continue;
+        resolved.add(m.sequence);
+        if (ctx.meta.pendingCommit?.[conversationId] === m.sequence) delete ctx.meta.pendingCommit[conversationId];
+        deletes.push(["pending", [ctx.account, retryKey(conversationId, m.sequence)]]);
+        last = Math.max(last, m.sequence); continue;
       }
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
@@ -626,19 +648,32 @@ const ops = {
         const code = e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message) ? e.message : "FAILED";
         record = { ...base, status: "FAILED", error: m.epoch < Number(device.epoch(gid)) ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
       }
-      if (record.status === "FAILED") retry.add(m.sequence);
-      else retry.delete(m.sequence);
+      if (record.status === "FAILED") {
+        newlyFailed.add(m.sequence);
+        puts.push(await retryPut(conversationId, m.sequence));
+      } else {
+        resolved.add(m.sequence);
+        deletes.push(["pending", [ctx.account, retryKey(conversationId, m.sequence)]]);
+        if (m.kind === "MLS_COMMIT" && ctx.meta.pendingCommit?.[conversationId] === m.sequence) delete ctx.meta.pendingCommit[conversationId];
+      }
       // A failed commit must be retried before processing the next epoch.
-      if (record.status === "FAILED" && m.kind === "MLS_COMMIT") blocked = "COMMIT_PENDING";
+      if (record.status === "FAILED" && m.kind === "MLS_COMMIT") {
+        ctx.meta.pendingCommit ??= {};
+        ctx.meta.pendingCommit[conversationId] = m.sequence;
+        blocked = "COMMIT_PENDING";
+      }
       last = Math.max(last, m.sequence);
       puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(record)))]);
       out.push(view(record));
       if (blocked) break;
     }
     ctx.meta.cursors[conversationId] = last;
-    ctx.meta.retry[conversationId] = [...retry].sort((a, b) => a - b);
     ctx.meta.processed ??= {};
-    processed = retry.size ? Math.min(last, ...retry) - 1 : last;
+    const earliest = await firstRetry(conversationId, 0, resolved);
+    const failures = [...newlyFailed, ...(earliest === null ? [] : [earliest])];
+    processed = failures.length ? Math.min(last, ...failures) - 1 : last;
+    // Until migration has scanned all legacy outcomes, never overclaim progress.
+    if (!ctx.meta.retryMigrated?.[conversationId]) processed = Math.min(processed, ctx.meta.processed[conversationId] ?? 0);
     ctx.meta.processed[conversationId] = processed;
     await persistDevice(puts, deletes);
     return { cursor: last, processedCursor: processed, records: out, joiner, blocked };
@@ -654,33 +689,41 @@ const ops = {
   async retryCursor({ conversationId }) {
     uuid(conversationId);
     if (!ctx) return null;
-    ctx.meta.retry ??= {};
-    if (!Object.hasOwn(ctx.meta.retry, conversationId)) {
-      // Upgrade old failure cursors without deleting local records or guessing membership.
+    const previous = structuredClone(ctx.meta);
+    try {
+    // Incrementally migrate old failures in bounded pages. References are stored
+    // atomically with scan progress; all legacy records remain intact.
+    ctx.meta.retryMigrated ??= {};
+    ctx.meta.retryScan ??= {};
+    if (!ctx.meta.retryMigrated[conversationId]) {
+      const after = ctx.meta.retryScan[conversationId] ?? 0;
       const d = await db();
-      const range = IDBKeyRange.bound([ctx.account, conversationId, 0], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER]);
-      const keys = await req(d.transaction("records").objectStore("records").getAllKeys(range));
-      const queued = [];
+      const range = IDBKeyRange.bound([ctx.account, conversationId, after], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER], true);
+      const keys = await req(d.transaction("records").objectStore("records").getAllKeys(range, 128));
+      const puts = [];
       for (const key of keys) {
         const r = await loadRecord(conversationId, key[2]);
-        if (r?.status === "FAILED" || (r?.status === "BEFORE_JOIN" && !r.beforeJoinVerified)) queued.push(key[2]);
-        if (queued.length === 256) break;
+        if (r?.status === "FAILED" || (r?.status === "BEFORE_JOIN" && !r.beforeJoinVerified)) {
+          puts.push(await retryPut(conversationId, key[2]));
+          if (r.kind === "MLS_COMMIT") {
+            ctx.meta.pendingCommit ??= {};
+            ctx.meta.pendingCommit[conversationId] = Math.min(ctx.meta.pendingCommit[conversationId] ?? key[2], key[2]);
+          }
+        }
       }
-      ctx.meta.retry[conversationId] = queued;
-      await persistDevice();
+      if (keys.length) ctx.meta.retryScan[conversationId] = keys[keys.length - 1][2];
+      if (keys.length < 128) ctx.meta.retryMigrated[conversationId] = true;
+      await persistDevice(puts);
     }
-    const queued = ctx.meta.retry[conversationId];
-    if (!queued.length) return null;
-    // Failed commits take priority; other failures rotate so an unavailable old
-    // epoch cannot starve a later repairable application message forever.
-    for (const sequence of queued) {
-      if ((await loadRecord(conversationId, sequence))?.kind === "MLS_COMMIT") return sequence - 1;
-    }
+    if (ctx.meta.pendingCommit?.[conversationId]) return ctx.meta.pendingCommit[conversationId] - 1;
     ctx.meta.retryTurn ??= {};
     const turn = ctx.meta.retryTurn[conversationId] ?? 0;
-    ctx.meta.retryTurn[conversationId] = (turn + 1) % queued.length;
+    const next = await firstRetry(conversationId, turn) ?? await firstRetry(conversationId);
+    if (next === null) return null;
+    ctx.meta.retryTurn[conversationId] = next;
     await persistDevice();
-    return queued[turn % queued.length] - 1;
+    return next - 1;
+    } catch (e) { ctx.meta = previous; throw e; }
   },
 
   async cursor({ conversationId }) {

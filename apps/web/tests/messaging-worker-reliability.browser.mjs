@@ -83,6 +83,18 @@ try {
  const batchA=encode(),batchB=encode();const batch=await process([batchB,batchA]);check('within-page reversed input sorted',batch.records.length===2&&batch.records.every(x=>x.status==='DECRYPTED'));
  // A newly generated device without the Welcome has no group; supplying it later works.
  const noWelcome=new core.WebDevice(id(25));check('missing Welcome has no group',!noWelcome.hasGroup(gid));
+ const manyFailures=Array.from({length:270},()=>encode());
+ const failedBatch=await process(manyFailures.map(m=>({...m,ciphertext:'AQID'})));
+ check('more than 256 failures remain durable',failedBatch.records.length===270&&failedBatch.records.every(r=>r.status==='FAILED'));
+ check('large failure backlog does not stop new delivery',(await process([encode()])).records[0].status==='DECRYPTED');
+ check('late failure beyond first 256 can recover',(await process([manyFailures[269]])).records[0].status==='DECRYPTED');
+ // Simulate the pre-remediation layout: sealed records/cursors exist, but there
+ // are no retry-reference keys. This changes no keys, ciphertext or MLS state.
+ await new Promise((resolve,reject)=>{const r=indexedDB.open('cfmeet-messaging');r.onsuccess=()=>{const d=r.result;const tx=d.transaction('pending','readwrite');tx.objectStore('pending').delete(IDBKeyRange.bound([account,'retry:'],[account,'retry;']));tx.oncomplete=()=>{d.close();resolve();};tx.onerror=()=>reject(tx.error);};r.onerror=()=>reject(r.error);});
+ for(let i=0;i<4;i++) await call('retryCursor',{conversationId:conv});
+ check('paginated migration enrolls legacy failures beyond 256',(await process([manyFailures[268]])).records[0].status==='DECRYPTED');
+
+
  // Generate more than 512 KiB of legitimately decrypted synthetic history.
  for(let i=0;i<40;i++){const m=encode(16000);checkSilent((await process([m])).records[0].status==='DECRYPTED');}
  function checkSilent(ok){if(!ok)throw Error('bulk decrypt');}
