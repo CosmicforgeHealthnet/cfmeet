@@ -251,6 +251,25 @@ fn page() -> String {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CF Meet Platform API reference</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui.css" integrity="{css}" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    html {{ color-scheme: dark; background: #111827; }}
+    body {{ margin: 0; background: #111827; color: #e5e7eb; }}
+    select, input, textarea {{ background: #1f2937; color: #f9fafb; border: 1px solid #6b7280; }}
+    .swagger-ui, .swagger-ui .info .title, .swagger-ui .info p, .swagger-ui .info li,
+    .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-description,
+    .swagger-ui .opblock .opblock-summary-path, .swagger-ui .opblock .opblock-summary-operation-id,
+    .swagger-ui .parameter__name, .swagger-ui .parameter__type, .swagger-ui .response-col_status,
+    .swagger-ui .response-col_description, .swagger-ui table thead tr td,
+    .swagger-ui table thead tr th, .swagger-ui .markdown p, .swagger-ui .renderedMarkdown p,
+    .swagger-ui section.models h4, .swagger-ui .model-title, .swagger-ui .model,
+    .swagger-ui .tab li, .swagger-ui .response-col_links {{ color: #e5e7eb; }}
+    .swagger-ui .scheme-container, .swagger-ui .opblock .opblock-section-header,
+    .swagger-ui section.models, .swagger-ui .model-box, .swagger-ui .highlight-code {{ background: #1f2937; }}
+    .swagger-ui .opblock .opblock-summary, .swagger-ui .opblock-tag {{ border-color: #4b5563; }}
+    .swagger-ui .btn {{ color: #f9fafb; border-color: #9ca3af; }}
+    .swagger-ui svg {{ fill: #e5e7eb; }}
+    .swagger-ui .info a, .swagger-ui a.nostyle, .swagger-ui .link {{ color: #93c5fd; }}
+  </style>
 </head>
 <body>
   <div style="padding:12px 20px;font:14px sans-serif"><label for="api-family">API: </label><select id="api-family">{options}</select></div>

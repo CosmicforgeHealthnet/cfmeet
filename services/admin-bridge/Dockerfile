@@ -37,4 +37,7 @@ USER admin-bridge
 ENV ADMIN_BRIDGE_HQ_BIND_ADDRESS=0.0.0.0:8443 \
     LOG_FORMAT=json
 EXPOSE 8443
+# Ops listener (/health, /ready, /metrics): bound to 127.0.0.1 inside the container (enforced by
+# configuration); declared for the release tool's in-namespace readiness probe, never published.
+EXPOSE 8190
 CMD ["./admin-bridge"]

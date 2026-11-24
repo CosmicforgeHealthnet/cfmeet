@@ -52,6 +52,8 @@ READINESS_PROVES_DB = {
     'communications': True, 'numbering': True, 'privacy-relay': True, 'sms-gateway': True,
     'telephony': True, 'meeting-service': False, 'developer-platform': True,
     'developer-platform-worker': False, 'api-gateway': False,
+    # Dark admin bridge: /ready proves the database only once enabled (disabled: no database).
+    'admin-bridge': False,
 }
 
 # One credential-free GET per service that its authentication layer must reject before any
@@ -79,6 +81,8 @@ AUTH_PROBES = {
     'meeting-service': '/api/v1/users/me',
     'developer-platform': None,
     'api-gateway': '/v1/calls',
+    # The loopback ops listener must never serve the HQ API (it exists only behind mTLS).
+    'admin-bridge': '/internal/cfmeet-admin/v1/capabilities',
 }
 
 # External integrations and the switch that governs each. A value in `off` means the
@@ -115,6 +119,8 @@ INTEGRATIONS = (
     ('notifications', 'NOTIFICATIONS_EMAIL_PROVIDER', 'Notification Service email provider', (None, '', 'none')),
     ('notifications', 'NOTIFICATIONS_PUSH_PROVIDER', 'Notification Service push provider', (None, '', 'none')),
     ('organizations', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'Automatic organization service bindings', (None, 'false')),
+    ('admin-bridge', 'ADMIN_BRIDGE_ENABLED', 'HQ admin bridge', (None, 'false')),
+    ('admin-bridge', 'ADMIN_BRIDGE_WRITES_ENABLED', 'HQ admin bridge commands', (None, 'false')),
 )
 
 UPSTREAM_URL = re.compile(r'^CF_[A-Z_]+_BASE_URL$')
@@ -201,6 +207,8 @@ def authentication(name, container):
     expected = (401,)
     if name == 'api-gateway' and p.env_of(p.inspect(container)).get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true':
         expected = (404,)  # deny-all table while public routing is off
+    if name == 'admin-bridge':
+        expected = (404,)  # ops listener: /health, /ready, /metrics only; the HQ API is mTLS-only
     return dict(probe='GET ' + path, status=status, errorCode=code.group(1) if code else None,
                 expected=list(expected), result='PASS' if status in expected else 'FAIL')
 
@@ -285,10 +293,13 @@ def upstreams(name, container, env):
         if not owner:
             checks.append(dict(variable=var, result='WARN', reason='not a private service route'))
             continue
-        path = cr.SERVICES[owner]['health']
+        # Through the private TLS route: the route's own probe (the admin bridge's route
+        # serves only its owner events listener, whose GET answers 405); direct: health.
+        s = cr.SERVICES[owner]
+        path, expected = s['probe'] if url.port == s['tls'] else (s['health'], 200)
         status, _ = http_probe(container, '%s://%s:%d%s' % (url.scheme, url.hostname, url.port or 80, path))
         checks.append(dict(variable=var, upstream=owner, path=path, status=status, tls=url.scheme == 'https',
-                           result='PASS' if status == 200 else 'FAIL'))
+                           result='PASS' if status == expected else 'FAIL'))
     failed = [c for c in checks if c['result'] == 'FAIL']
     return dict(result='N/A' if not checks else ('FAIL' if failed else 'PASS'), checks=checks)
 

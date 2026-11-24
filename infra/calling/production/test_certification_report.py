@@ -59,7 +59,7 @@ class PublicSurface(unittest.TestCase):
     def test_certify_reports_failures(self):
         # D1: the Meeting Service's documentation is not public in production (404).
         answers = {'/health': (200, {}, '{"status":"healthy"}'), '/api-docs/swagger-config.json': (404, {}, ''),
-                   '/api-docs/openapi.json': (404, {}, ''), '/swagger-ui/': (404, {}, ''),
+                   '/api-docs/openapi.json': (404, {}, ''), '/swagger-ui/': (200, {}, ''),
                    '/api/v2/me/profile': (401, {}, '')}
 
         def fake(path, method='GET', headers=None, attempts=4, limit=400):
