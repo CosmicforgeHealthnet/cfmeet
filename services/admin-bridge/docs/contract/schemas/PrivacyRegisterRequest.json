@@ -1,0 +1,41 @@
+{
+  "description": "Register a request (expected_version 0: a new resource; its request_id is the operation_id). Every service starts PENDING. TWO_PERSON.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_version",
+    "kind",
+    "subject_ref"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expected_version": {
+      "const": 0
+    },
+    "kind": {
+      "enum": [
+        "ACCESS",
+        "ERASURE",
+        "CORRECTION",
+        "RESTRICTION"
+      ]
+    },
+    "subject_ref": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

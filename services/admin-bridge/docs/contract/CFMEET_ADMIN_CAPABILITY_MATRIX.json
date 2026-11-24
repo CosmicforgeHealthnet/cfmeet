@@ -4576,7 +4576,7 @@
     "method": "GET",
     "bridge_endpoint": "/privacy/requests",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "privacy.requests.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4585,8 +4585,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
-    "blocker": "Phase A7: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "privacy_requests_complete_only_when_every_service_reports"
+    ]
   },
   {
     "id": "privacy.requests.read",
@@ -4595,7 +4597,7 @@
     "method": "GET",
     "bridge_endpoint": "/privacy/requests/{request_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "privacy.requests.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4604,8 +4606,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
-    "blocker": "Phase A7: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "privacy_requests_complete_only_when_every_service_reports"
+    ]
   },
   {
     "id": "privacy.request.register",
@@ -4614,7 +4618,7 @@
     "method": "POST",
     "bridge_endpoint": "/privacy/requests",
     "source_endpoint": null,
-    "state": "DISABLED",
+    "state": "AVAILABLE",
     "permission": "privacy.request.register",
     "risk": "R3",
     "privacy": "PERSONAL",
@@ -4623,8 +4627,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "privacy_requests_complete_only_when_every_service_reports"
+    ]
   },
   {
     "id": "privacy.request.complete-service",
@@ -4633,7 +4639,7 @@
     "method": "POST",
     "bridge_endpoint": "/privacy/requests/{request_id}/services/{service}/complete",
     "source_endpoint": null,
-    "state": "DISABLED",
+    "state": "AVAILABLE",
     "permission": "privacy.request.complete-service",
     "risk": "R4",
     "privacy": "PERSONAL",
@@ -4642,8 +4648,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "privacy_requests_complete_only_when_every_service_reports"
+    ]
   },
   {
     "id": "operations.health.read",
@@ -4652,7 +4660,7 @@
     "method": "GET",
     "bridge_endpoint": "/operations/health",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "operations.health.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4661,8 +4669,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-    "blocker": "Phase A2: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "operations_health_is_the_aggregate_health"
+    ]
   },
   {
     "id": "operations.incidents.list",
@@ -4804,7 +4814,7 @@
     "method": "GET",
     "bridge_endpoint": "/audit/entries",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "audit.entries.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4813,8 +4823,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_AUDIT",
-    "blocker": "Phase A2: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "audit_entries_page_the_hash_chained_audit"
+    ]
   },
   {
     "id": "telecom.numbers.summary",

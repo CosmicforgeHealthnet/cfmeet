@@ -281,6 +281,74 @@ pub enum BeginOutcome {
     VersionTaken,
 }
 
+/// The services one privacy request is tracked across (design §6.14).
+pub const PRIVACY_SERVICES: [&str; 7] = [
+    "meeting-service",
+    "messaging",
+    "calling",
+    "communications",
+    "organizations",
+    "developer-platform",
+    "notifications",
+];
+
+/// One service's reported outcome on a privacy request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivacyService {
+    pub service: String,
+    /// PENDING, DONE, NOT_HELD or LEGAL_HOLD.
+    pub outcome: String,
+    pub recorded_by: Option<String>,
+    pub recorded_at: Option<DateTime<Utc>>,
+}
+
+/// One privacy request (`admin_privacy_requests` and its services).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivacyRequest {
+    pub request_id: uuid::Uuid,
+    /// ACCESS, ERASURE, CORRECTION or RESTRICTION.
+    pub kind: String,
+    pub subject_ref: uuid::Uuid,
+    /// OPEN, then COMPLETE once every service has an outcome.
+    pub state: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub version: i64,
+    pub services: Vec<PrivacyService>,
+}
+
+/// A change to the bridge's own data, applied with its operation in ONE transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalChange {
+    /// A new request (id = the HQ operation id), every service PENDING.
+    PrivacyRegister {
+        kind: String,
+        subject_ref: uuid::Uuid,
+    },
+    /// One service's outcome, at the request's expected version.
+    PrivacyRecord {
+        request_id: uuid::Uuid,
+        service: String,
+        outcome: String,
+        expected_version: i64,
+    },
+}
+
+/// What became of a local command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalOutcome {
+    /// Applied and recorded SUCCEEDED.
+    Applied { status: String, version: i64 },
+    /// Refused and recorded FAILED with this bridge error code (nothing changed).
+    Refused(&'static str),
+    /// The key is already used by this staff member.
+    Existing(Box<Operation>),
+    /// Another non-failed operation holds the target's expected version.
+    VersionTaken,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CleanupStats {
     pub claims: u64,
@@ -343,6 +411,32 @@ pub trait Store: Send + Sync + 'static {
     ) -> StoreResult<bool>;
 
     async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>>;
+
+    /// Audit rows with `start <= occurred_at < end` and `sequence > after`, oldest first.
+    async fn audit_window(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<(AuditDraft, AuditReceipt)>>;
+
+    /// Records `op` and applies `change` in one transaction: SUCCEEDED with the change, or
+    /// FAILED with nothing changed. Never an unknown outcome.
+    async fn local_command(
+        &self,
+        op: &Operation,
+        change: &LocalChange,
+    ) -> StoreResult<LocalOutcome>;
+
+    /// Privacy requests, oldest first, after `(created_at, request_id)`.
+    async fn privacy_requests(
+        &self,
+        after: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<PrivacyRequest>>;
+
+    async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>>;
 
     /// Unsettled operations created before `before`, oldest first.
     async fn open_operations(

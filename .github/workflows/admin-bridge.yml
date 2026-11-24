@@ -173,6 +173,10 @@ jobs:
           must_fail "UPDATE admin_operations SET status = 'FAILED'"
           must_fail "DELETE FROM admin_operations"
           must_fail "TRUNCATE admin_operations"
+          # Privacy requests: insert and update only.
+          rt "INSERT INTO admin_privacy_requests (request_id, kind, subject_ref, state, created_by, created_at, updated_at, version) VALUES ('6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'ERASURE', gen_random_uuid(), 'OPEN', 'hq:x', now(), now(), 1)"
+          must_fail "DELETE FROM admin_privacy_requests"
+          must_fail "TRUNCATE admin_privacy_request_services"
           echo "runtime role is least-privilege"
 
 
