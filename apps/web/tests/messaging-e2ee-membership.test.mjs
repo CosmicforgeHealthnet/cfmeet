@@ -82,7 +82,7 @@ test("a message sent before this browser joined never waits forever", () => {
   assert.equal(sentBeforeJoin("2026-11-19T09:00:00Z", null), false);
   assert.equal(sentBeforeJoin(null, joinedAt), false);
   const summary = { lifecycle: "ACTIVE", previewText: null, attachmentCount: 0, createdAt: "2026-11-19T09:00:00Z" };
-  assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: true, latest: undefined, summary, joinedAt }), BEFORE_JOIN_PREVIEW);
+  assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: true, latest: undefined, summary, joinedAt }), WAITING_PREVIEW);
   // Sent after this browser joined: it can still arrive.
   assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: true, latest: undefined, summary: { ...summary, createdAt: "2026-11-19T11:00:00Z" }, joinedAt }), WAITING_PREVIEW);
 });

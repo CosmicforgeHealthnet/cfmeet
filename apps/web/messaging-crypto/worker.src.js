@@ -306,6 +306,7 @@ const ops = {
     if (ctx.persistent) fail("DEVICE_EXISTS");
     ctx.device?.free?.();
     ctx.device = new core.WebDevice(uuid(deviceId));
+    ctx.meta.provenanceVersion = 1;
     ctx.deviceId = deviceId;
     return { deviceId, signaturePublicKey: ctx.device.signaturePublicKey };
   },
@@ -335,7 +336,7 @@ const ops = {
 
   async status() {
     return ctx?.device
-      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors }
+      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors, processedCursors: ctx.meta.processed ?? {}, retryCounts: Object.fromEntries(Object.entries(ctx.meta.retry ?? {}).map(([id, entries]) => [id, entries.length])) }
       : { status: ctx ? "NONE" : "CLOSED" };
   },
 
@@ -353,7 +354,11 @@ const ops = {
   async createGroup({ groupId }) {
     const device = requireDevice();
     ctx.snapshot ??= device.exportState();
-    return Number(device.createGroup(bytes(groupId)));
+    ctx.membershipSnapshot ??= structuredClone(ctx.meta.membership ?? {});
+    const epoch = Number(device.createGroup(bytes(groupId)));
+    ctx.meta.membership ??= {};
+    ctx.meta.membership[b64u.enc(groupId)] = { epoch, firstJoinKnown: ctx.meta.provenanceVersion === 1, method: "CREATE" };
+    return epoch;
   },
   async addDevices({ groupId, keyPackages }) {
     const device = requireDevice();
@@ -393,13 +398,17 @@ const ops = {
   async externalJoin({ groupId, groupInfo }) {
     const device = requireDevice();
     ctx.snapshot ??= device.exportState();
+    ctx.membershipSnapshot ??= structuredClone(ctx.meta.membership ?? {});
     const r = device.externalJoin(bytes(groupId), bytes(groupInfo));
+    ctx.meta.membership ??= {};
+    ctx.meta.membership[b64u.enc(groupId)] = { epoch: Number(device.epoch(groupId)), firstJoinKnown: ctx.meta.provenanceVersion === 1, method: "EXTERNAL" };
     return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   /** The Delivery Service accepted the change: make it durable. */
   async confirm() {
     ctx.snapshot?.fill(0);
     ctx.snapshot = null;
+    ctx.membershipSnapshot = null;
     await persistDevice();
     return true;
   },
@@ -410,11 +419,15 @@ const ops = {
     ctx.device = core.WebDevice.fromState(ctx.deviceId, ctx.snapshot);
     ctx.snapshot.fill(0);
     ctx.snapshot = null;
+    if (ctx.membershipSnapshot) ctx.meta.membership = ctx.membershipSnapshot;
+    ctx.membershipSnapshot = null;
     return true;
   },
 
   async join({ groupId, welcome }) {
     const epoch = Number(requireDevice().join(bytes(groupId), bytes(welcome)));
+    ctx.meta.membership ??= {};
+    ctx.meta.membership[b64u.enc(groupId)] ??= { epoch, firstJoinKnown: ctx.meta.provenanceVersion === 1, method: "WELCOME" };
     await persistDevice();
     return epoch;
   },
@@ -525,6 +538,12 @@ const ops = {
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
+    const savedState = device.exportState();
+    const savedMeta = structuredClone(ctx.meta);
+    ctx.meta.retry ??= {};
+    const retry = new Set(ctx.meta.retry[conversationId] ?? []);
+    let processed = ctx.meta.processed?.[conversationId] ?? cursor;
+    const membership = ctx.meta.membership?.[b64u.enc(gid)];
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
     const allowed = Array.isArray(allowedJoiners) ? allowedJoiners.filter((a) => typeof a === "string") : [];
     const rejected = new Set(Array.isArray(rejectedJoiners) ? rejectedJoiners : []);
@@ -533,8 +552,25 @@ const ops = {
     const deletes = [];
     let last = cursor;
     let joiner = null;
+    let blocked = null;
+    try {
     for (const m of sorted) {
-      if (!Number.isSafeInteger(m.sequence) || m.sequence <= last) continue;
+      if (!Number.isSafeInteger(m.sequence) || m.sequence < 1) fail("BAD_SEQUENCE");
+      if (m.sequence <= last && !retry.has(m.sequence)) continue;
+      // The authoritative endpoint returns every visible row, including tombstones.
+      // Initial visibility may begin after 1; thereafter never cross a hole/commit.
+      if (last > 0 && m.sequence > last + 1) { blocked = "SYNC_GAP"; break; }
+      if (retry.size >= 256 && !retry.has(m.sequence)) { blocked = "RETRY_QUEUE_FULL"; break; }
+      for (const sequence of retry) {
+        if (sequence >= m.sequence) continue;
+        const pending = await loadRecord(conversationId, sequence);
+        if (pending?.kind === "MLS_COMMIT") { blocked = "COMMIT_PENDING"; break; }
+      }
+      if (blocked) break;
+      const existing = await loadRecord(conversationId, m.sequence);
+      if (existing && ["DECRYPTED", "SENT", "REMOVED", "COMMIT"].includes(existing.status)) {
+        retry.delete(m.sequence); last = Math.max(last, m.sequence); continue;
+      }
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
       try {
@@ -571,8 +607,8 @@ const ops = {
           } else {
             record = { ...base, status: "SENT_ELSEWHERE" };
           }
-        } else if (m.epoch < Number(device.epoch(gid))) {
-          record = { ...base, status: "BEFORE_JOIN" };
+        } else if (membership?.firstJoinKnown && m.epoch < membership.epoch) {
+          record = { ...base, status: "BEFORE_JOIN", beforeJoinVerified: true };
         } else {
           const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)), []);
           if (r.kind !== "APPLICATION") fail("UNEXPECTED_MESSAGE");
@@ -587,15 +623,64 @@ const ops = {
           }
         }
       } catch (e) {
-        record = { ...base, status: "FAILED", error: e instanceof Error ? String(e.message).slice(0, 64) : "FAILED" };
+        const code = e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message) ? e.message : "FAILED";
+        record = { ...base, status: "FAILED", error: m.epoch < Number(device.epoch(gid)) ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
       }
-      last = m.sequence;
+      if (record.status === "FAILED") retry.add(m.sequence);
+      else retry.delete(m.sequence);
+      // A failed commit must be retried before processing the next epoch.
+      if (record.status === "FAILED" && m.kind === "MLS_COMMIT") blocked = "COMMIT_PENDING";
+      last = Math.max(last, m.sequence);
       puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(record)))]);
       out.push(view(record));
+      if (blocked) break;
     }
     ctx.meta.cursors[conversationId] = last;
+    ctx.meta.retry[conversationId] = [...retry].sort((a, b) => a - b);
+    ctx.meta.processed ??= {};
+    processed = retry.size ? Math.min(last, ...retry) - 1 : last;
+    ctx.meta.processed[conversationId] = processed;
     await persistDevice(puts, deletes);
-    return { cursor: last, records: out, joiner };
+    return { cursor: last, processedCursor: processed, records: out, joiner, blocked };
+    } catch (e) {
+      // IndexedDB aborts must not leave in-memory ratchets ahead of durable state.
+      ctx.device.free();
+      ctx.device = core.WebDevice.fromState(ctx.deviceId, savedState);
+      ctx.meta = savedMeta;
+      throw e;
+    } finally { savedState.fill(0); }
+  },
+
+  async retryCursor({ conversationId }) {
+    uuid(conversationId);
+    if (!ctx) return null;
+    ctx.meta.retry ??= {};
+    if (!Object.hasOwn(ctx.meta.retry, conversationId)) {
+      // Upgrade old failure cursors without deleting local records or guessing membership.
+      const d = await db();
+      const range = IDBKeyRange.bound([ctx.account, conversationId, 0], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER]);
+      const keys = await req(d.transaction("records").objectStore("records").getAllKeys(range));
+      const queued = [];
+      for (const key of keys) {
+        const r = await loadRecord(conversationId, key[2]);
+        if (r?.status === "FAILED" || (r?.status === "BEFORE_JOIN" && !r.beforeJoinVerified)) queued.push(key[2]);
+        if (queued.length === 256) break;
+      }
+      ctx.meta.retry[conversationId] = queued;
+      await persistDevice();
+    }
+    const queued = ctx.meta.retry[conversationId];
+    if (!queued.length) return null;
+    // Failed commits take priority; other failures rotate so an unavailable old
+    // epoch cannot starve a later repairable application message forever.
+    for (const sequence of queued) {
+      if ((await loadRecord(conversationId, sequence))?.kind === "MLS_COMMIT") return sequence - 1;
+    }
+    ctx.meta.retryTurn ??= {};
+    const turn = ctx.meta.retryTurn[conversationId] ?? 0;
+    ctx.meta.retryTurn[conversationId] = (turn + 1) % queued.length;
+    await persistDevice();
+    return queued[turn % queued.length] - 1;
   },
 
   async cursor({ conversationId }) {
@@ -695,10 +780,11 @@ const ops = {
       const r = JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conv, seq), values[i])));
       if (!["DECRYPTED", "SENT"].includes(r.status)) continue;
       const line = JSON.stringify(r);
-      if (size + line.length > MAX_ARCHIVE_BYTES) break;
-      size += line.length;
+      if (size + enc.encode(line).length > MAX_ARCHIVE_BYTES) fail("HISTORY_REQUIRES_PAGINATION");
+      size += enc.encode(line).length;
       (conversations[conv] ??= []).push(r);
     }
+    if (!Object.keys(conversations).length) fail("HISTORY_SOURCE_EMPTY");
     const archive = enc.encode(JSON.stringify({ v: 1, conversations }));
     const sealed = device.sealHistory(context.map((c) => uuid(c)), bytes(transferKey), archive);
     archive.fill(0);
@@ -798,7 +884,9 @@ const ops = {
   },
 };
 
-self.onmessage = async ({ data }) => {
+let operations = Promise.resolve();
+self.onmessage = ({ data }) => {
+  operations = operations.then(async () => {
   const { id, op, args } = data ?? {};
   try {
     if (typeof op !== "string" || !Object.hasOwn(ops, op)) fail("UNKNOWN_OP");
@@ -810,4 +898,5 @@ self.onmessage = async ({ data }) => {
     const code = e instanceof CodedError || (e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message)) ? e.message : "CRYPTO_ERROR";
     self.postMessage({ id, ok: false, error: code });
   }
+  });
 };

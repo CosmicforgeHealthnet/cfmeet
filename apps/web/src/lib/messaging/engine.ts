@@ -1776,7 +1776,8 @@ export class MessagingEngine {
           await this.withMlsLock(() => c.call("join", { groupId: gid, welcome: b64u.dec(w.welcome) }));
           joined++;
         } catch {
-          // A Welcome this device cannot use (e.g. superseded): it is still consumed.
+          // A transient failure must not consume the only Welcome.
+          continue;
         }
       }
       await relay("POST", `v1/messaging/devices/${deviceId}/welcomes/${w.welcomeId}/consume`, {});
@@ -1834,12 +1835,14 @@ export class MessagingEngine {
       // after their device is verified; one that fails verification is refused.
       const allowedJoiners: string[] = [];
       const rejectedJoiners: string[] = [];
+      const retryAfter = await c.call<number | null>("retryCursor", { conversationId });
+      let retrying = retryAfter !== null;
       for (let round = 0; round < 200; round++) {
-        const after = await c.call<number>("cursor", { conversationId });
+        const after = retrying ? retryAfter! : await c.call<number>("cursor", { conversationId });
         const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
         if (!page.messages.length) break;
         this.noteMeta(conversationId, page.messages);
-        const processed = await this.withMlsLock(() => c.call<{ records: StoredRecord[]; joiner?: PendingJoiner | null }>("processMessages", {
+        const processed = await this.withMlsLock(() => c.call<{ records: StoredRecord[]; joiner?: PendingJoiner | null; blocked?: string | null }>("processMessages", {
           conversationId,
           groupId: gid,
           allowedJoiners,
@@ -1864,6 +1867,8 @@ export class MessagingEngine {
           else rejectedJoiners.push(processed.joiner.deviceId);
           continue;
         }
+        if (processed.blocked) { await this.renderE2ee(conversationId); return; }
+        if (retrying) { retrying = false; continue; }
         // Another device's commit may have used one of this device's KeyPackages: keep the stock up.
         if (processed.records.some((r) => r.status === "COMMIT" && r.senderDeviceId !== this.snapshot.deviceId)) void this.ensureKeyPackageStock(true).catch(() => {});
         if (page.messages.length < PAGE) break;
@@ -1900,12 +1905,10 @@ export class MessagingEngine {
     const meta = this.metaFor(conversationId);
     // Older history comes from another device of this account (history transfer), if any.
     let olderNote = beforeJoinNote(false);
-    // A message sent before this browser's messaging device existed can never reach it:
-    // it is shown as "sent before this browser joined", never as an endless wait.
-    const joinedAt = this.snapshot.deviceRegisteredAt ? Date.parse(this.snapshot.deviceRegisteredAt) : NaN;
+    // Registration time is not MLS membership evidence. Only verified worker
+    // provenance may classify a message as predating device membership.
     const waitingHere = this.waiting.get(conversationId) ?? [];
-    const sentBeforeJoin = (createdAt: string | null | undefined) => !!createdAt && Number.isFinite(joinedAt) && Date.parse(createdAt) < joinedAt;
-    if (records.some((r) => r.status === "BEFORE_JOIN" || (r.status === "FAILED" && sentBeforeJoin(r.createdAt))) || waitingHere.some((m) => m.lifecycle === "ACTIVE" && sentBeforeJoin(m.createdAt))) {
+    if (records.some((r) => (r.status === "BEFORE_JOIN" && r.beforeJoinVerified))) {
       const own = await this.ownDeviceIds().catch(() => new Set<string>());
       olderNote = beforeJoinNote([...own].some((d) => d !== this.snapshot.deviceId));
     }
@@ -1982,16 +1985,12 @@ export class MessagingEngine {
       } else if (r.status === "SENT_ELSEWHERE") {
         base.state = "system";
         base.note = "Sent from another of your devices";
-      } else if (r.status === "BEFORE_JOIN") {
+      } else if (r.status === "BEFORE_JOIN" && r.beforeJoinVerified) {
         base.state = "before-join";
         base.note = olderNote;
       } else if (r.status === "REMOVED") {
         base.state = "removed";
         base.note = "Message removed";
-      } else if (sentBeforeJoin(r.createdAt)) {
-        // Encrypted before this browser joined: it can never be read here.
-        base.state = "before-join";
-        base.note = olderNote;
       } else {
         base.state = "unreadable";
         base.note = `This message could not be decrypted on this device (${r.error ?? "FAILED"})`;
@@ -2003,7 +2002,6 @@ export class MessagingEngine {
     for (const m of waitingHere) {
       if (local.has(m.sequence)) continue;
       const removed = m.lifecycle !== "ACTIVE";
-      const early = !removed && sentBeforeJoin(m.createdAt);
       views.push({
         key: `s${m.sequence}`,
         sequence: m.sequence,
@@ -2011,10 +2009,10 @@ export class MessagingEngine {
         mine: m.senderPrincipalId === me,
         createdAt: m.createdAt,
         profile: "PRIVATE_E2EE",
-        state: removed ? "removed" : early ? "before-join" : "unreadable",
+        state: removed ? "removed" : "unreadable",
         text: null,
         file: null,
-        note: removed ? "Message deleted" : early ? olderNote : WAITING_NOTE,
+        note: removed ? "Message deleted" : WAITING_NOTE,
         transferred: false,
         messageId: m.messageId,
         reactions: [],

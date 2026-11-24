@@ -110,7 +110,7 @@ export type PreviewInput = {
  * brief placeholder bar). A private message this device cannot read (yet) is shown as
  * WAITING_PREVIEW, never as an empty or endless placeholder.
  */
-export function chatPreview({ e2ee, groupReady, loaded, latest, summary, joinedAt }: PreviewInput): string | null {
+export function chatPreview({ e2ee, groupReady, loaded, latest, summary }: PreviewInput): string | null {
   if (latest) {
     if (latest.text) return latest.text;
     if (latest.file) return `📎 ${latest.file.name}`;
@@ -122,7 +122,7 @@ export function chatPreview({ e2ee, groupReady, loaded, latest, summary, joinedA
   if (summary.lifecycle !== "ACTIVE") return "Message deleted";
   if (!e2ee) return summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : "");
   if (groupReady && !loaded) return null;
-  return sentBeforeJoin(summary.createdAt, joinedAt) ? BEFORE_JOIN_PREVIEW : WAITING_PREVIEW;
+  return WAITING_PREVIEW;
 }
 
 /** Whether a message was sent before this browser's messaging device existed (it can never arrive). */

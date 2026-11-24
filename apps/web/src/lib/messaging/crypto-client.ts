@@ -19,6 +19,7 @@ export type StoredRecord = {
   status: "DECRYPTED" | "SENT" | "SENT_ELSEWHERE" | "COMMIT" | "BEFORE_JOIN" | "REMOVED" | "FAILED";
   error?: string;
   transferred?: boolean;
+  beforeJoinVerified?: boolean;
   payload?:
     | { t: "text"; text: string; preview?: LinkPreview }
     | { t: "file"; caption: string | null; attachmentId: string | null; name: string | null; mediaType: string | null }

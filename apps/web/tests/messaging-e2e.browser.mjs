@@ -276,6 +276,33 @@ async function journey() {
   await shown(alice.page, reply);
   step("encrypted send / receive", { messages: 2 });
 
+  // Fault injection at the untrusted delivery boundary. Services and ciphertext in
+  // the database remain real and unchanged; only one browser response is corrupted.
+  let damagedOnce = false;
+  const deliveryRoute = /\/api\/v2\/messaging\/relay\/v1\/conversations\/[^/]+\/messages\?/;
+  const damage = async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    if (response.status() !== 200) return route.fulfill({ response });
+    const body = await response.json();
+    const application = body.messages?.find((m) => m.kind === "APPLICATION" && m.e2ee?.ciphertext);
+    if (!damagedOnce && application) {
+      damagedOnce = true;
+      application.e2ee.ciphertext = "AQID";
+      return route.fulfill({ response, json: body });
+    }
+    return route.fulfill({ response });
+  };
+  await bob.page.route(deliveryRoute, damage);
+  const retried = `${SECRET} recovered after a failed delivery`;
+  await send(alice.page, retried);
+  await shown(bob.page, retried);
+  assert.equal(damagedOnce, true, "the integration test must exercise failed decryption");
+  assert.equal(await bob.page.locator("[data-testid=message-text]").filter({ hasText: retried }).count(), 1, "recovery does not duplicate the message");
+  await bob.page.unroute(deliveryRoute, damage);
+  step("failed encrypted delivery recovered by authoritative retry", {});
+
+
   // ---- 4. Hostile content is shown as text and never executes.
   const payloads = ['<img src=x onerror="window.__xss=1">', "<script>window.__xss=2</script>", "javascript:window.__xss=3", '"><svg onload=window.__xss=4>'];
   for (const p of payloads) await send(alice.page, p);
