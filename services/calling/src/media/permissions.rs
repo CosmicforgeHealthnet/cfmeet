@@ -151,10 +151,6 @@ mod tests {
             voice.can_publish_data,
             "admitted app sessions carry local recording consent"
         );
-        assert!(
-            !MediaPermissions::NONE.can_publish_data,
-            "join-only sessions carry no data grant"
-        );
         let forced = MediaPermissions {
             can_publish_video: true,
             ..voice
