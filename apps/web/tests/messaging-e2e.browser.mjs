@@ -385,6 +385,7 @@ async function journey() {
   // ---- 8. Encrypted attachment: encrypted before upload, decrypted on the device.
   const fileBody = Buffer.from(`${SECRET} attachment body ${"x".repeat(5000)}`);
   await alice.page.setInputFiles("[data-testid=file-input]", { name: "plan.txt", mimeType: "text/plain", buffer: fileBody });
+  await alice.page.click("[data-testid=attachment-send]");
   const att = bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" });
   await att.waitFor({ timeout: T });
   const [download] = await Promise.all([bob.page.waitForEvent("download", { timeout: T }), att.click()]);

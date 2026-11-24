@@ -31,15 +31,16 @@ export function LinkifiedText({ text, mine }: { text: string; mine: boolean }) {
 }
 
 /** A photo in the chat: a fixed-size placeholder while it loads, tap to open full screen. */
-export function ChatImage({ load, name, onDownload }: { load: () => Promise<string | null>; name: string; onDownload: () => void }) {
-  const [url, setUrl] = useState<string | null>(null);
+export function ChatImage({ load, name, onDownload, initial = null }: { load: () => Promise<string | null>; name: string; onDownload: () => void; initial?: string | null }) {
+  const [url, setUrl] = useState<string | null>(initial);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    if (initial) return;
     let active = true;
     load().then((u) => { if (active) { if (u) setUrl(u); else setFailed(true); } }, () => { if (active) setFailed(true); });
     return () => { active = false; };
-  }, [load]);
+  }, [load, initial]);
 
   if (failed) {
     return (
