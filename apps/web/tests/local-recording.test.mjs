@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { chromium } from "playwright";
 import { receiveRecordingConsent } from "../src/lib/local-recording.ts";
@@ -20,8 +20,10 @@ test("device recording produces playable audio/video and preserves the session t
   const browser = await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required"] });
   try {
     const page = await browser.newPage();
+    const uploads = [];
+    page.on("request", request => { if (/^https?:/.test(request.url())) uploads.push(request.url()); });
     const source = stripTypeScriptTypes(readFileSync(new URL("../src/lib/local-recording.ts", import.meta.url), "utf8"));
-    await page.addScriptTag({ type: "module", content: source.replace("export async function startLocalCapture", "window.startLocalCapture = async function startLocalCapture").replace("export function recordingFilename", "window.recordingFilename = function recordingFilename") });
+    await page.addScriptTag({ type: "module", content: source.replace("export async function startLocalCapture", "window.startLocalCapture = async function startLocalCapture").replace("export function recordingFilename", "window.recordingFilename = function recordingFilename").replace("export function offerRecordingAfterLeaving", "window.offerRecordingAfterLeaving = function offerRecordingAfterLeaving") });
     const result = await page.evaluate(async () => {
       const audio = new AudioContext(); await audio.resume();
       const destination = audio.createMediaStreamDestination();
@@ -49,8 +51,8 @@ test("device recording produces playable audio/video and preserves the session t
       const samples = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(samples);
       const energy = samples.some(v => Math.abs(v - 128) > 3);
       const result = { bytes: blob.size, type: blob.type, width: video.videoWidth, height: video.videoHeight, energy,
-        sourceVideo: videoTrack.readyState, sourceAudio: audioTrack.readyState, name: window.recordingFilename(blob.type, "meeting") };
-      video.pause(); video.src = ""; URL.revokeObjectURL(url);
+        sourceVideo: videoTrack.readyState, sourceAudio: audioTrack.readyState, url, name: window.recordingFilename(blob.type, "meeting") };
+      video.pause(); video.src = "";
       clearInterval(timer); stream.getTracks().forEach(t => t.stop()); oscillator.stop(); await audio.close();
       return result;
     });
@@ -61,6 +63,12 @@ test("device recording produces playable audio/video and preserves the session t
     assert.equal(result.sourceVideo, "live", "saving must not end the camera");
     assert.equal(result.sourceAudio, "live", "saving must not end the microphone");
     assert.match(result.name, /^cfmeet-meeting-.*\.(webm|mp4)$/);
+    await page.evaluate(({ url, name }) => window.offerRecordingAfterLeaving(url, name), result);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Save recording", exact: true }).click()]);
+    assert.equal(download.suggestedFilename(), result.name);
+    assert.equal(statSync(await download.path()).size, result.bytes);
+    assert.deepEqual(uploads, [], "recording and saving must send no HTTP requests");
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await page.close();
   } finally { await browser.close(); }
 });

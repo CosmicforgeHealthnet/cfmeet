@@ -100,3 +100,15 @@ export async function startLocalCapture(getTracks: () => RecordingTrack[], onLim
 export function recordingFilename(type: string, label: string) {
   return `cfmeet-${label}-${new Date().toISOString().replace(/[:.]/g, "-")}.${type.includes("mp4") ? "mp4" : "webm"}`;
 }
+
+/** Keep a manual save action after leaving the room, if automatic downloads are blocked. */
+export function offerRecordingAfterLeaving(url: string, name: string) {
+  const card = document.createElement("section");
+  card.setAttribute("aria-label", "Save device recording");
+  card.className = "fixed bottom-4 left-4 right-4 z-[100] flex flex-wrap items-center gap-4 rounded-xl border bg-white p-4 text-sm text-black shadow-xl sm:right-auto";
+  const message = document.createElement("span"); message.textContent = "Your device recording is ready. Save it before closing this page.";
+  const link = document.createElement("a"); link.href = url; link.download = name; link.textContent = "Save recording"; link.className = "underline";
+  const dismiss = document.createElement("button"); dismiss.type = "button"; dismiss.textContent = "Dismiss";
+  dismiss.onclick = () => { card.remove(); URL.revokeObjectURL(url); };
+  card.append(message, link, dismiss); document.body.appendChild(card);
+}

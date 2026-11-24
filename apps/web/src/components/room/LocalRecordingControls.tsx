@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { ConnectionState, RoomEvent, type RemoteParticipant } from "livekit-client";
-import { receiveRecordingConsent, recordingFilename, startLocalCapture, type ConsentRequest, type LocalCapture } from "@/lib/local-recording";
+import { offerRecordingAfterLeaving, receiveRecordingConsent, recordingFilename, startLocalCapture, type ConsentRequest, type LocalCapture } from "@/lib/local-recording";
 
 const TOPIC = "cfmeet.local-recording.v1";
 type Notice = { id: string; name: string; recording: boolean; allowed: boolean };
@@ -57,8 +57,7 @@ export default function LocalRecordingControls({ label, canStart = true }: { lab
         const link = document.createElement("a"); link.href = url; link.download = name;
         document.body.appendChild(link); link.click(); link.remove();
         if (mounted.current) setFile(previous => { if (previous) URL.revokeObjectURL(previous.url); return { url, name }; });
-        // Also allow an automatic end-of-call download to finish after unmount.
-        else setTimeout(() => URL.revokeObjectURL(url), 120_000);
+        else offerRecordingAfterLeaving(url, name);
       }).catch(e => { if (mounted.current) setError(e instanceof Error ? e.message : "Recording could not be saved."); }).finally(() => {
         if (pending.current === request) stop();
       });
