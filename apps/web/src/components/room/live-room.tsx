@@ -45,6 +45,7 @@ import { Maximize, Minimize, UserPlus, UserMinus, MicOff, Mic } from "lucide-rea
 import { storageStore } from "@/store";
 import { conferencesService } from "@/services/v2/conferences.service";
 import ConferenceControls from "./conference-controls";
+import LocalRecordingControls from "./LocalRecordingControls";
 import { useQueryClient } from "@tanstack/react-query";
 import RealtimeRoomSync from "./RealtimeRoomSync";
 import { participantKeys } from "@/hooks/v2/useParticipants";
@@ -363,6 +364,8 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
               ))}
             </div>
           </main>
+
+          <LocalRecordingControls label="meeting" canStart={space.data?.recordingPolicy !== "DISABLED" && meetingAllows(role, "recording.start", space.data?.rolePolicy)} />
 
           {/* Custom Footer Controls */}
           <FooterControls

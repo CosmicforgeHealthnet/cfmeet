@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, PhoneOff, Play, RefreshCw, UserPlus, Users, Video } from "lucide-react";
+import { Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, PhoneOff, Play, RefreshCw, UserPlus, Users, Video } from "lucide-react";
 import { useCalling } from "@/context/CallingContext";
 import { callingKeys, useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
 import { callsService } from "@/services/calling/calls.service";
@@ -30,8 +30,6 @@ import { mediaStatusLabel } from "@/lib/calling/media-reconnect";
 import { cn } from "@/lib/utils";
 import { rememberedCallName } from "@/lib/calling/call-names";
 import { Popover } from "radix-ui";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import CallRecordingControls from "./CallRecordingControls";
 import AbuseReportDialog from "./AbuseReportDialog";
 import AddPeopleDialog from "./AddPeopleDialog";
 import CallMedia, { closePreviewCamera, openPreviewCamera, CallButton, CallUpgradeButton, CallCameraButton, CallFlipButton, CallMicButton, CallMicToggle, CallScreenShareButton, CallSpeakerButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
@@ -150,7 +148,6 @@ export default function ActiveCallDock() {
   const names = usePrincipalNames(others.map((p) => p.principalId));
   const [full, setFull] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [adding, setAdding] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -266,7 +263,6 @@ export default function ActiveCallDock() {
         <Popover.Portal>
           <Popover.Content side="top" sideOffset={10} collisionPadding={12} className="dark z-[80] w-60 rounded-2xl bg-[#2D2E31] p-1.5 text-white shadow-2xl ring-1 ring-white/10">
             {controls.invite ? <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setAdding(true)}><UserPlus className="size-4 text-white/60" />Add people</button></Popover.Close> : null}
-            {me && connectedNow && call.data?.canViewRecordings ? <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setRecording(true)}><Circle className="size-4 text-red-400" />Record call</button></Popover.Close> : null}
             <Popover.Close asChild><Link href={`/calling?call=${encodeURIComponent(media.callId)}`} onClick={() => setFull(false)} className={moreItem}><Info className="size-4 text-white/60" />Call details</Link></Popover.Close>
             <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setReporting(true)}><Flag className="size-4 text-white/60" />Report a problem</button></Popover.Close>
           </Popover.Content>
@@ -329,12 +325,7 @@ export default function ActiveCallDock() {
           {full ? stage : strip}
         </CallMedia>
       ) : full ? stage : strip}
-      <Dialog open={recording} onOpenChange={setRecording}>
-        <DialogContent className="z-[90] sm:max-w-md">
-          <DialogHeader><DialogTitle>Record this call</DialogTitle><DialogDescription>Everyone on the call is asked to agree before recording starts.</DialogDescription></DialogHeader>
-          {me ? <CallRecordingControls callId={media.callId} participantId={me.participantId} endpointId={calling.device.endpoint?.endpointId ?? null} live /> : null}
-        </DialogContent>
-      </Dialog>
+
       <AbuseReportDialog callId={media.callId} open={reporting} onOpenChange={setReporting} />
       {call.data && controls.invite ? (
         <AddPeopleDialog callId={media.callId} version={call.data.version} principalId={calling.principalId} inviterParticipantId={me?.participantId ?? null}

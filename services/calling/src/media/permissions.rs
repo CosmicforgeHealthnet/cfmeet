@@ -5,8 +5,9 @@
 //! (`call_participant_media_permissions`), the Call's kind and the Call's state. A client
 //! can never ask for a permission: there is no input type carrying one.
 //!
-//! * Defaults (policy `APP_MEDIA_V1`): VOICE — publish audio, subscribe; VIDEO — publish
-//!   audio and video, subscribe. Data publishing is off by default (least privilege).
+//! * Defaults (policy `APP_MEDIA_V2`): VOICE — publish audio, subscribe; VIDEO — publish
+//!   audio and video, subscribe. Admitted app participants may publish data for local
+//!   recording consent and notices. Join-only credentials and public bridges still cannot.
 //! * A VOICE Call never grants video publishing, whatever is persisted (clamped here and
 //!   refused by a database CHECK).
 //! * HOLD (§62, ADR 0008): while the Call is HELD — or TRANSFERRING out of a held Call —
@@ -25,7 +26,7 @@ use serde::Serialize;
 use crate::calls::{kinds::CallKind, state::CallState};
 
 /// Version of the application media permission policy.
-pub const MEDIA_POLICY_VERSION: &str = "APP_MEDIA_V1";
+pub const MEDIA_POLICY_VERSION: &str = "APP_MEDIA_V2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,14 +57,14 @@ impl MediaPermissions {
             CallKind::Voice => MediaPermissions {
                 can_publish_audio: true,
                 can_publish_video: false,
-                can_publish_data: false,
+                can_publish_data: true,
                 can_subscribe: true,
                 can_share_screen: false,
             },
             CallKind::Video => MediaPermissions {
                 can_publish_audio: true,
                 can_publish_video: true,
-                can_publish_data: false,
+                can_publish_data: true,
                 can_subscribe: true,
                 can_share_screen: false,
             },
@@ -146,6 +147,14 @@ mod tests {
     fn voice_never_publishes_video() {
         let voice = MediaPermissions::default_for(CallKind::Voice);
         assert!(voice.can_publish_audio && voice.can_subscribe && !voice.can_publish_video);
+        assert!(
+            voice.can_publish_data,
+            "admitted app sessions carry local recording consent"
+        );
+        assert!(
+            !MediaPermissions::NONE.can_publish_data,
+            "join-only sessions carry no data grant"
+        );
         let forced = MediaPermissions {
             can_publish_video: true,
             ..voice
