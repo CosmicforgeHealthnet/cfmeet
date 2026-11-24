@@ -1042,7 +1042,7 @@ async fn exercise_app_calling(a: &common::app::AppWorld) {
         .signed_event("participant_joined", &room, Some(&intruder));
     assert_eq!(a.callback(&auth, body).await.status, StatusCode::OK);
     let mut drift = bob_p.permissions;
-    drift.can_publish_data = true;
+    drift.can_publish_data = !drift.can_publish_data;
     a.media().force_permissions(&room, &bob_p.identity, drift);
     a.h().clock.advance(chrono::Duration::seconds(30));
     a.h().state.app.reconcile_due(100).await.unwrap();

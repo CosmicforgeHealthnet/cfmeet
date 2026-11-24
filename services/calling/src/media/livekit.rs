@@ -1742,9 +1742,11 @@ mod tests {
         ));
         assert_eq!(voice["can_publish_sources"], json!(["MICROPHONE"]));
         assert_eq!(voice["can_publish"], true);
+        assert_eq!(voice["can_publish_data"], true);
         let none = permission_body(MediaPermissions::NONE);
         assert_eq!(none["can_publish"], false);
         assert_eq!(none["can_subscribe"], false);
+        assert_eq!(none["can_publish_data"], false);
         let held = permission_body(
             MediaPermissions::default_for(crate::calls::kinds::CallKind::Video).held(),
         );
@@ -1762,7 +1764,7 @@ mod tests {
         );
         let parsed = participant(&json!({
             "identity": "cfmid_x", "state": "ACTIVE",
-            "permission": { "canPublish": true, "canSubscribe": true,
+            "permission": { "canPublish": true, "canSubscribe": true, "canPublishData": true,
                             "canPublishSources": [2, 3, 4] },
         }))
         .unwrap();

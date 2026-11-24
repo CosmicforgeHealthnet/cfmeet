@@ -24,6 +24,28 @@ ANCHOR = 'include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
 ACCESS = '/run/secrets/meeting-artifact-access-key'
 SECRET = '/run/secrets/meeting-artifact-secret-key'
 FLAG = 'FEATURE_RECORDING_V2_ENABLED'
+DEVICE_OPERATION = 'activate-device-local-recording'
+
+
+def activate_device_local(cr, sha, run_id, confirm):
+    """The browser owns new recordings; fence both server capture entry points."""
+    if confirm != 'device-only':
+        raise RuntimeError('confirm must be device-only')
+    cr.require_release(sha)
+    checks = [('calling', "SELECT count(*) FROM call_recordings WHERE state IN ('STARTING','RECORDING','STOPPING');"),
+              ('meeting-service', "SELECT count(*) FROM meeting_artifacts WHERE artifact_type='RECORDING' "
+               "AND status IN ('REQUESTED','RECORDING','STOPPING','PROCESSING');")]
+    for name, sql in checks:
+        if int(cr.release.db_sql(cr.SERVICES[name]['db'], sql)):
+            raise RuntimeError('Active server recording must finish before device-only cutover')
+    changes = [('calling', {'CALL_RECORDING_ENABLED': 'false'}),
+               ('meeting-service', {FLAG: 'false'})]
+    def post():
+        if any(cr.env_of(name).get(key, 'false') != value
+               for name, overrides in changes for key, value in overrides.items()):
+            raise RuntimeError('Server recording flags did not switch off')
+        cr.emit('deviceLocalRecording', dict(serverCaptureEnabled=False, recordingBytesUploaded=False))
+    cr.apply_activation(DEVICE_OPERATION, sha, run_id, changes, post=post)
 
 
 def route_text():
