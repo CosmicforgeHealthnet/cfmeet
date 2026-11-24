@@ -365,7 +365,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
             </div>
           </main>
 
-          <LocalRecordingControls label="meeting" canStart={space.data?.recordingPolicy !== "DISABLED" && meetingAllows(role, "recording.start", space.data?.rolePolicy)} />
+          <LocalRecordingControls label="meeting" canStart={!!space.data && space.data.recordingPolicy !== "DISABLED" && meetingAllows(role, "recording.start", space.data.rolePolicy)} />
 
           {/* Custom Footer Controls */}
           <FooterControls

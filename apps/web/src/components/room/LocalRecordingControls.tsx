@@ -112,6 +112,7 @@ export default function LocalRecordingControls({ label, canStart = true }: { lab
     };
   }, [room, begin, stop, updateNotices]);
   useEffect(() => () => { if (file) URL.revokeObjectURL(file.url); }, [file]);
+  useEffect(() => { if (!canStart) stop(); }, [canStart, stop]);
 
   const request = () => {
     if (pending.current || !canStart) return;
