@@ -2999,6 +2999,8 @@ ACTIVATIONS = {
         send_policy_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
     meeting_recording_operations.OPERATION: ((), lambda sha, run_id, confirm:
         meeting_recording_operations.activate(sys.modules[__name__], sha, run_id, confirm)),
+    meeting_recording_operations.DEVICE_OPERATION: ((), lambda sha, run_id, confirm:
+        meeting_recording_operations.activate_device_local(sys.modules[__name__], sha, run_id, confirm)),
     audit_operations.LOGS_OPERATION: ((), _platform(audit_operations.activate_service_logs)),
     provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
     provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),
