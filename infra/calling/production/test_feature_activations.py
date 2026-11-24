@@ -117,6 +117,7 @@ class GatewayDocs(unittest.TestCase):
             self.assertIn('location = %s {' % path, with_docs)
             self.assertNotIn('location = %s {' % path, without)
         self.assertIn('location ^~ /openapi/ {', with_docs)
+        self.assertIn('location = /swagger-ui/ { return 308 /docs; }', with_docs)
         docs_part = with_docs[len(without):]
         self.assertEqual(docs_part.count('limit_except GET OPTIONS { deny all; }'), 4)
         self.assertNotIn('/ready', with_docs)
