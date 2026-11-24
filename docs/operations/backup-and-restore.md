@@ -23,6 +23,7 @@ The short version:
 | developer-platform | `developer_platform_seaql_migrations` | — | `cfmeet_developer_platform`; production deployment REQUIRES_VALIDATION |
 | numbering, privacy-relay, telephony, sms-gateway | `<service>_seaql_migrations` | — | `cfmeet_<service>`; production deployment REQUIRES_VALIDATION |
 | organizations | `organizations_seaql_migrations` | — | active since Blueprint Sections 3–5; must be backed up and restore-drilled before the Organizations cutover |
+| admin-bridge | `admin_bridge_seaql_migrations` | — | `cfmeet_admin_bridge` on `cfmeet-core-db` (ADR 0068); HQ enrolment, signed access policies and the hash-chained audit; deployed dark |
 
 `cfmeet-core-db` is `postgres:16-alpine` on the internal network `cfmeet-core-private`. It publishes no host port, so the tooling reaches it through a throwaway client container (`--pg-wrapper`, below).
 
