@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           for s in meeting-service communications developer-platform platform-access calling \
-                   messaging numbering privacy-relay telephony sms-gateway organizations notifications; do
+                   messaging numbering privacy-relay telephony sms-gateway organizations notifications admin-bridge; do
             echo "::group::$s"
             cargo build --locked --manifest-path "services/$s/migration/Cargo.toml" --bins
             echo "::endgroup::"
