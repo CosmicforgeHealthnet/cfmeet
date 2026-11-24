@@ -191,6 +191,9 @@ async fn template(admin: &str) -> String {
             migration::AccountPhoneMigrator::up(&tmpl, None)
                 .await
                 .expect("account-phone migrations apply");
+            migration::MessagingInstallationsMigrator::up(&tmpl, None)
+                .await
+                .expect("protected Messaging installation migrations apply");
             migration::AdminOperationsMigrator::up(&tmpl, None)
                 .await
                 .expect("admin-operations migrations apply");

@@ -872,6 +872,7 @@ pub async fn list(
     }
     Ok(json!({
         "messages": items,
+        "visibleFromSequence": member.visible_from_sequence,
         "nextAfterSequence": if more && !backwards { page.last().map(|r| r.sequence) } else { None },
         "nextBeforeSequence": if more && backwards { page.last().map(|r| r.sequence) } else { None },
     }))

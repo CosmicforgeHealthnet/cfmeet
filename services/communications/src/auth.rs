@@ -51,6 +51,7 @@ pub async fn middleware(
             InternalPermission::CommunicationsPolicyCheck
         }
         "/internal/v1/communications/account-events"
+        | "/internal/v1/communications/devices/protect-installation"
         | "/internal/v1/communications/account-erasure"
         | "/internal/v1/communications/account-export" => {
             InternalPermission::CommunicationsAccountApply

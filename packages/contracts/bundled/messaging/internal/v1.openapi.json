@@ -6043,7 +6043,7 @@
                 },
                 "requestsRequireAcceptance": {
                   "type": "boolean",
-                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             }
@@ -6288,7 +6288,7 @@
         }
       },
       "messaging.common.v1.ContextAuthorityUpdate": {
-        "description": "Part V H §103: the current authority of a peer-owned communication context (opaque reference only; never a telephone number or contact value). Version-fenced; REVOKED / SUSPENDED apply even to a suspended tenant, ACTIVE needs full authority.",
+        "description": "Part V H Â§103: the current authority of a peer-owned communication context (opaque reference only; never a telephone number or contact value). Version-fenced; REVOKED / SUSPENDED apply even to a suspended tenant, ACTIVE needs full authority.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -6604,7 +6604,7 @@
                 "type": "null"
               }
             ],
-            "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
+            "description": "Appendix K: false â€” no read receipts in this conversation; null â€” the environment policy decides."
           },
           "title": {
             "oneOf": [
@@ -6720,7 +6720,7 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and â€” B3, 1.34.0 â€” PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
           },
           "archived": {
             "type": "boolean",
@@ -6928,7 +6928,7 @@
                 },
                 "requestsRequireAcceptance": {
                   "type": "boolean",
-                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             },
@@ -7318,7 +7318,7 @@
         ]
       },
       "messaging.common.v1.InboundSms": {
-        "description": "An inbound SMS of a bridged party (SMS Gateway → Messaging, messaging-sms-bridge.deliver).",
+        "description": "An inbound SMS of a bridged party (SMS Gateway â†’ Messaging, messaging-sms-bridge.deliver).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7666,7 +7666,7 @@
           "READ_ONLY",
           "BOT_SERVICE"
         ],
-        "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
+        "description": "Â§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
       },
       "messaging.common.v1.MessageLifecycle": {
         "type": "string",

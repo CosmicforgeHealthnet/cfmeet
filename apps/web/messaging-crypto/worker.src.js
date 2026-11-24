@@ -1,4 +1,4 @@
-// CF Meet Messaging device worker — shipped source of public/messaging-crypto/crypto-worker.*.js
+// CF Meet Messaging device worker â€” shipped source of public/messaging-crypto/crypto-worker.*.js
 // (packaged by scripts/package-messaging-crypto.mjs; do not load this file directly).
 //
 // ONE Messaging device of ONE signed-in account lives in this dedicated worker:
@@ -13,7 +13,7 @@
 //   running in this origin while the user is signed in, or against a compromised browser
 //   profile (docs/architecture/web-messaging-client-threat-model.md).
 // * The WebAssembly module is fetched, its SHA-384 compared with the value pinned below
-//   (the build pins it), and only then compiled — under this worker's own CSP, the only
+//   (the build pins it), and only then compiled â€” under this worker's own CSP, the only
 //   place where 'wasm-unsafe-eval' is granted.
 // * A device is held by one tab at a time (Web Locks): two tabs advancing one MLS state
 //   would fork it.
@@ -116,6 +116,64 @@ const pendingAad = (account, cmid) => `cfmeet-msg-pending:v1:${account}:${cmid}`
 const draftAad = (account, conv, cmid) => `cfmeet-msg-draft:v1:${account}:${conv}:${cmid}`;
 /** Drafts live in the `pending` store under the account (wipe() erases them with it). */
 const draftKey = (account, conv, cmid) => [account, `draft:${conv}:${cmid}`];
+
+// A protected entry replaces the legacy directly usable CryptoKey only after every
+// encrypted value has been migrated in one atomic final transaction. Staging contains
+// only ciphertext addressed by its original AAD; an abort leaves all originals intact.
+const LOCAL_KEY_KIND = "LOCAL_AUTHENTICATOR_V1";
+const LOCAL_STAGE_PREFIX = "local-protection:";
+function localDescriptor(value, account, scope) {
+  if (value?.v !== 1 || value.method !== "WEBAUTHN_PRF" || value.account !== account || value.origin !== self.location.origin) fail("LOCAL_BINDING_MISMATCH");
+  for (const field of ["accountDeviceId", "messagingDeviceId"]) uuid(value[field], "LOCAL_BINDING_MISMATCH");
+  if (typeof value.installationId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(value.installationId)) fail("LOCAL_BINDING_MISMATCH");
+  for (const field of ["tenantId", "applicationId", "environmentId"]) if (uuid(value.scope?.[field]) !== scope[field]) fail("LOCAL_BINDING_MISMATCH");
+  if (typeof value.credentialId !== "string" || value.credentialId.length > 2048 || b64u.dec(value.credentialId).length < 1 || b64u.dec(value.prfSalt).length !== 32) fail("LOCAL_BINDING_MISMATCH");
+  return { v: 1, method: "WEBAUTHN_PRF", account, credentialId: value.credentialId, prfSalt: value.prfSalt, origin: value.origin,
+    installationId: value.installationId, accountDeviceId: value.accountDeviceId, messagingDeviceId: value.messagingDeviceId,
+    scope: { tenantId: scope.tenantId, applicationId: scope.applicationId, environmentId: scope.environmentId } };
+}
+const localAad = (descriptor) => `cfmeet-msg-local-lock:v1:${JSON.stringify(descriptor)}`;
+async function localWrappingKey(descriptor, secret) {
+  if (bytes(secret).length !== 32) fail("LOCAL_UNLOCK_REFUSED");
+  const material = await crypto.subtle.importKey("raw", secret, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: b64u.dec(descriptor.prfSalt), info: enc.encode(localAad(descriptor)) }, material,
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function restoreDevice() {
+  const sealed = await req((await db()).transaction("devices").objectStore("devices").get(ctx.account));
+  if (!sealed) return { status: "NONE" };
+  const plain = await unseal(ctx.key, deviceAad(ctx.account), sealed);
+  let envelope;
+  try { envelope = JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+  const state = b64u.dec(envelope.state);
+  try {
+    if (ctx.localProtection && ctx.localProtection.descriptor.messagingDeviceId !== envelope.deviceId) fail("LOCAL_BINDING_MISMATCH");
+    ctx.device = core.WebDevice.fromState(uuid(envelope.deviceId), state);
+  } finally { state.fill(0); }
+  ctx.deviceId = envelope.deviceId;
+  ctx.meta = { cursors: {}, kt: null, ...envelope.meta };
+  ctx.persistent = true;
+  return { status: "READY", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey,
+    ...(ctx.localProtection ? { localProtection: ctx.localProtection.descriptor } : {}) };
+}
+async function storagePage(storeName, account, after = null, limit = 128) {
+  const d = await db();
+  const store = d.transaction(storeName).objectStore(storeName);
+  const range = IDBKeyRange.bound(after ?? [account], [account, []], after !== null);
+  const keys = req(store.getAllKeys(range, limit));
+  const values = req(store.getAll(range, limit));
+  return { keys: await keys, values: await values };
+}
+function pendingValueAad(account, key) {
+  const match = /^draft:([0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(key);
+  return match ? draftAad(account, match[1], match[2]) : pendingAad(account, key);
+}
+async function discardLocalStages(account) {
+  const d = await db();
+  const tx = d.transaction("pending", "readwrite");
+  tx.objectStore("pending").delete(IDBKeyRange.bound([account, LOCAL_STAGE_PREFIX], [account, LOCAL_STAGE_PREFIX + "\uffff"]));
+  await done(tx);
+}
 
 // ----------------------------------------------------------------- state
 
@@ -291,6 +349,84 @@ async function retryPut(conversationId, sequence) {
   return ["pending", [ctx.account, key], await seal(ctx.key, pendingAad(ctx.account, key), enc.encode("{}"))];
 }
 
+// V2 history copies contain application records, never MLS state or epoch secrets.
+// Every snapshot/chunk/checkpoint remains encrypted under the local account key.
+const HISTORY_CHUNK_BYTES = 256 * 1024;
+const HISTORY_MAX_CHUNKS = 4096;
+const HISTORY_MAX_BYTES = 1024 * 1024 * 1024;
+const HISTORY_MANIFEST_INDEX = 0xffffffff;
+const historyStateKey = (id, role) => `history-v2:${uuid(id)}:${role}`;
+const historyObjectKey = (id, index) => `history-v2:${uuid(id)}:object:${String(index).padStart(10, "0")}`;
+async function pendingJson(key) {
+  requireDevice();
+  const value = await req((await db()).transaction("pending").objectStore("pending").get([ctx.account, key]));
+  if (!value) return null;
+  const plain = await unseal(ctx.key, pendingAad(ctx.account, key), value);
+  try { return JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+}
+async function jsonPut(key, value) {
+  const plain = enc.encode(JSON.stringify(value));
+  try { return ["pending", [ctx.account, key], await seal(ctx.key, pendingAad(ctx.account, key), plain)]; } finally { plain.fill(0); }
+}
+function historyContext(value, role) {
+  if (!Array.isArray(value) || value.length !== 7) fail("TRANSFER_CONTEXT_INVALID");
+  value.forEach((part) => uuid(part, "TRANSFER_CONTEXT_INVALID"));
+  const s = ctx.scope;
+  if (value[1] !== s.tenantId || value[2] !== s.applicationId || value[3] !== s.environmentId || value[4] !== ctx.account || value[role === "source" ? 5 : 6] !== ctx.deviceId || value[5] === value[6]) fail("TRANSFER_CONTEXT_INVALID");
+  return [...value];
+}
+function historyExpiry(value) {
+  if (!Number.isSafeInteger(value) || value <= Math.floor(Date.now() / 1000)) fail("TRANSFER_EXPIRED");
+  return value;
+}
+function historyDescriptor(value) {
+  uuid(value?.snapshotId, "ARCHIVE_INVALID"); historyExpiry(value.expiresAt);
+  if (!Number.isSafeInteger(value.chunkCount) || value.chunkCount < 1 || value.chunkCount > HISTORY_MAX_CHUNKS ||
+    !Number.isSafeInteger(value.totalPlaintextBytes) || value.totalPlaintextBytes < 1 || value.totalPlaintextBytes > HISTORY_MAX_BYTES || b64u.dec(value.manifestDigest).length !== 32) fail("ARCHIVE_INVALID");
+  return { snapshotId: value.snapshotId, expiresAt: value.expiresAt, manifestDigest: value.manifestDigest, chunkCount: value.chunkCount, totalPlaintextBytes: value.totalPlaintextBytes };
+}
+const historyObjectArgs = (state, index) => [state.context, state.descriptor.snapshotId, BigInt(state.descriptor.expiresAt), b64u.dec(state.descriptor.manifestDigest), state.descriptor.chunkCount, BigInt(state.descriptor.totalPlaintextBytes), index];
+function visibilityMap(values) {
+  if (!Array.isArray(values) || values.length > 10000) fail("HISTORY_VISIBILITY_REQUIRED");
+  const out = new Map();
+  for (const value of values) {
+    uuid(value?.conversationId, "HISTORY_VISIBILITY_REQUIRED");
+    if (!Number.isSafeInteger(value.firstSequence) || value.firstSequence < 1 || !Number.isSafeInteger(value.lastSequence) || value.lastSequence < 0 || value.lastSequence < value.firstSequence - 1) fail("HISTORY_VISIBILITY_REQUIRED");
+    out.set(value.conversationId, value);
+  }
+  return out;
+}
+function eligibleRecord(conversationId, record, visibility) {
+  const window = visibility.get(conversationId);
+  return window && record.sequence >= window.firstSequence && record.sequence <= window.lastSequence;
+}
+function historyRecord(record) {
+  if (!record || !Number.isSafeInteger(record.sequence) || record.sequence < 1 || !["SENT", "DECRYPTED", "REMOVED"].includes(record.status)) fail("ARCHIVE_INVALID");
+  const out = { sequence: record.sequence, messageId: uuid(record.messageId, "ARCHIVE_INVALID"),
+    senderPrincipalId: uuid(record.senderPrincipalId, "ARCHIVE_INVALID"), senderDeviceId: uuid(record.senderDeviceId, "ARCHIVE_INVALID"),
+    kind: str(record.kind, 40, 1), createdAt: typeof record.createdAt === "string" ? str(record.createdAt, 80) : null, status: record.status, transferred: true };
+  if (record.status === "REMOVED") {
+    out.lifecycle = str(record.lifecycle, 40, 1);
+    if (out.lifecycle === "ACTIVE") fail("ARCHIVE_INVALID");
+    return out;
+  }
+  out.payload = parsePayload(enc.encode(JSON.stringify({ v: 1, ...record.payload })));
+  if (record.clientMessageId) out.clientMessageId = uuid(record.clientMessageId, "ARCHIVE_INVALID");
+  if (out.payload.t === "file") {
+    out.attachmentId = uuid(record.attachmentId, "ARCHIVE_INVALID");
+    const info = core.descriptor_info(b64u.dec(out.payload.d));
+    try { Object.assign(out, { fileName: info.fileName, mediaType: info.mediaType, size: Number(info.size) }); } finally { info.free(); }
+  }
+  return out;
+}
+async function restoreTransfer(state) {
+  const secret = b64u.dec(state.secret);
+  try { requireDevice().importTransferSecret(secret); } finally { secret.fill(0); }
+}
+async function historyCheckpoint(state) {
+  return requireDevice().signHistoryCheckpoint(state.context, state.descriptor.snapshotId, BigInt(state.descriptor.expiresAt), b64u.dec(state.descriptor.manifestDigest), state.descriptor.chunkCount, BigInt(state.descriptor.totalPlaintextBytes), state.nextIndex);
+}
+
 // ------------------------------------------------------------- operations
 
 const ops = {
@@ -309,18 +445,116 @@ const ops = {
       tx.objectStore("keys").put(key, account);
       await done(tx);
     }
-    if (key.extractable) fail("WRAPPING_KEY_EXTRACTABLE");
+    if (key?.kind === LOCAL_KEY_KIND) {
+      const descriptor = localDescriptor(key.descriptor, account, scope);
+      ctx = { account, scope: { ...scope }, key: null, localProtection: { ...key, descriptor }, device: null, deviceId: null, persistent: false, meta: { cursors: {}, kt: null }, snapshot: null };
+      return { status: "AUTHENTICATOR_REQUIRED", descriptor };
+    }
+    if (!(key instanceof CryptoKey) || key.extractable) fail("WRAPPING_KEY_EXTRACTABLE");
     ctx = { account, scope: { ...scope }, key, device: null, deviceId: null, persistent: false, meta: { cursors: {}, kt: null }, snapshot: null };
-    const sealed = await req(d.transaction("devices").objectStore("devices").get(account));
-    if (!sealed) return { status: "NONE" };
-    const envelope = JSON.parse(dec.decode(await unseal(key, deviceAad(account), sealed)));
-    const state = b64u.dec(envelope.state);
-    ctx.device = core.WebDevice.fromState(uuid(envelope.deviceId), state);
-    state.fill(0);
-    ctx.deviceId = envelope.deviceId;
-    ctx.meta = { cursors: {}, kt: null, ...envelope.meta };
-    ctx.persistent = true;
-    return { status: "READY", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey };
+    return restoreDevice();
+  },
+
+  async unlock({ prfSecret }) {
+    bytes(prfSecret);
+    try {
+      if (!ctx?.localProtection || ctx.key || ctx.device) fail("LOCAL_UNLOCK_REFUSED");
+      const descriptor = localDescriptor(ctx.localProtection.descriptor, ctx.account, ctx.scope);
+      const wrapping = await localWrappingKey(descriptor, prfSecret);
+      const raw = await unseal(wrapping, localAad(descriptor), ctx.localProtection.wrappedKey);
+      try {
+        if (raw.length !== 32) fail("LOCAL_UNLOCK_REFUSED");
+        ctx.key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+      } finally { raw.fill(0); }
+      try { return await restoreDevice(); } catch (error) { ctx.key = null; throw error; }
+    } finally { prfSecret.fill(0); }
+  },
+
+  /** A cancelled/failed migration leaves the original key and records usable. */
+  async protectLocal({ descriptor: proposed, prfSecret }) {
+    bytes(prfSecret);
+    try {
+      requireDevice();
+      if (!ctx.persistent || !ctx.key) fail("DEVICE_NOT_ADOPTED");
+      const descriptor = localDescriptor(proposed, ctx.account, ctx.scope);
+      if (descriptor.messagingDeviceId !== ctx.deviceId) fail("LOCAL_BINDING_MISMATCH");
+      if (ctx.localProtection) fail("LOCAL_ALREADY_PROTECTED");
+      if (ctx.snapshot) fail("LOCAL_MIGRATION_BUSY");
+      // Checkpoint the current ratchet before making the ciphertext-only snapshot.
+      await persistDevice();
+      await discardLocalStages(ctx.account);
+      const wrapping = await localWrappingKey(descriptor, prfSecret);
+      const raw = crypto.getRandomValues(new Uint8Array(32));
+      let newKey, wrappedKey;
+      try {
+        newKey = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+        wrappedKey = await seal(wrapping, localAad(descriptor), raw);
+      } finally { raw.fill(0); }
+      const localProtection = { kind: LOCAL_KEY_KIND, descriptor, wrappedKey };
+      const prefix = `${LOCAL_STAGE_PREFIX}${crypto.randomUUID()}:`;
+      let ordinal = 0;
+      const stage = async (entries) => {
+        const tx = (await db()).transaction("pending", "readwrite");
+        for (const entry of entries) tx.objectStore("pending").put(entry, [ctx.account, prefix + String(ordinal++).padStart(16, "0")]);
+        await done(tx);
+      };
+      try {
+        for (const storeName of ["records", "pending"]) {
+          let after = null;
+          for (;;) {
+            const { keys, values } = await storagePage(storeName, ctx.account, after);
+            if (!keys.length) break;
+            const staged = [];
+            for (let i = 0; i < keys.length; i++) {
+              const key = keys[i];
+              if (storeName === "pending" && key[1].startsWith(LOCAL_STAGE_PREFIX)) continue;
+              const aad = storeName === "records" ? recordAad(ctx.account, key[1], key[2]) : pendingValueAad(ctx.account, key[1]);
+              const plain = await unseal(ctx.key, aad, values[i]);
+              try { staged.push({ store: storeName, key, value: await seal(newKey, aad, plain) }); } finally { plain.fill(0); }
+            }
+            if (staged.length) await stage(staged);
+            after = keys[keys.length - 1];
+          }
+        }
+        const d = await db();
+        const sealedDevice = await req(d.transaction("devices").objectStore("devices").get(ctx.account));
+        const plainDevice = await unseal(ctx.key, deviceAad(ctx.account), sealedDevice);
+        let newDevice;
+        try { newDevice = await seal(newKey, deviceAad(ctx.account), plainDevice); } finally { plainDevice.fill(0); }
+        // No asynchronous crypto inside the committing transaction. The cursor copies
+        // already sealed pages; replacement of every value and removal of the usable
+        // legacy key either all commit, or all abort, including quota failures.
+        const tx = d.transaction(["keys", "devices", "records", "pending"], "readwrite");
+        const completion = done(tx);
+        const cursor = tx.objectStore("pending").openCursor(IDBKeyRange.bound([ctx.account, prefix], [ctx.account, prefix + "\uffff"]));
+        cursor.onsuccess = () => {
+          const entry = cursor.result;
+          if (!entry) return;
+          const staged = entry.value;
+          tx.objectStore(staged.store).put(staged.value, staged.key);
+          entry.delete();
+          entry.continue();
+        };
+        tx.objectStore("devices").put(newDevice, ctx.account);
+        tx.objectStore("keys").put(localProtection, ctx.account);
+        await completion;
+        ctx.key = newKey;
+        ctx.localProtection = localProtection;
+        return { localProtection: descriptor };
+      } catch (error) {
+        await discardLocalStages(ctx.account).catch(() => {});
+        throw error;
+      }
+    } finally { prfSecret.fill(0); }
+  },
+
+  /** The page also terminates this worker to discard its WebAssembly heap. */
+  async lock() {
+    ctx?.snapshot?.fill(0);
+    ctx?.device?.free?.();
+    if (ctx) { ctx.device = null; ctx.key = null; ctx.meta = { cursors: {}, kt: null }; ctx.snapshot = null; }
+    handles.clear();
+    return true;
   },
 
   /** New device keys for the server-assigned device id (not stored until `adopt`). */
@@ -335,7 +569,9 @@ const ops = {
   },
 
   async registrationKeyPackage({ challengeId, nonce }) {
-    return requireDevice().registrationKeyPackage(uuid(challengeId), bytes(nonce));
+    const keyPackage = requireDevice().registrationKeyPackage(uuid(challengeId), bytes(nonce));
+    await persistDevice();
+    return keyPackage;
   },
 
   /** The server accepted the registration: the device becomes durable. */
@@ -359,7 +595,7 @@ const ops = {
 
   async status() {
     return ctx?.device
-      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors, processedCursors: ctx.meta.processed ?? {} }
+      ? { status: ctx.persistent ? "READY" : "PENDING", deviceId: ctx.deviceId, signaturePublicKey: ctx.device.signaturePublicKey, cursors: ctx.meta.cursors, processedCursors: ctx.meta.processed ?? {}, ...(ctx.localProtection ? { localProtection: ctx.localProtection.descriptor } : {}) }
       : { status: ctx ? "NONE" : "CLOSED" };
   },
 
@@ -556,16 +792,18 @@ const ops = {
    * messages decrypted under the CF Meet AAD of their envelope. Every outcome, the new
    * group state and the cursor are stored in ONE IndexedDB transaction.
    */
-  async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [] }) {
+  async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [], visibleFromSequence }) {
     let device = requireDevice();
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
-    const savedState = device.exportState();
-    const savedMeta = structuredClone(ctx.meta);
     const newlyFailed = new Set();
     const resolved = new Set();
-    const pendingCommit = ctx.meta.pendingCommit?.[conversationId];
+    const visibleFrom = visibleFromSequence ?? ctx.meta.visibleFrom?.[conversationId] ?? 1;
+    if (!Number.isSafeInteger(visibleFrom) || visibleFrom < 1) fail("HISTORY_VISIBILITY_REQUIRED");
+    const savedState = device.exportState();
+    const savedMeta = structuredClone(ctx.meta);
+    const pendingCommit = ctx.meta.pendingCommit?.[conversationId] >= visibleFrom ? ctx.meta.pendingCommit[conversationId] : null;
     let processed = ctx.meta.processed?.[conversationId] ?? cursor;
     const membership = ctx.meta.membership?.[b64u.enc(gid)];
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
@@ -574,12 +812,19 @@ const ops = {
     const out = [];
     const puts = [];
     const deletes = [];
-    let last = cursor;
+    let last = Math.max(cursor, visibleFrom - 1);
     let joiner = null;
     let blocked = null;
     try {
+    ctx.meta.visibleFrom ??= {};
+    ctx.meta.visibleFrom[conversationId] = visibleFrom;
+    if (ctx.meta.pendingCommit?.[conversationId] < visibleFrom) delete ctx.meta.pendingCommit[conversationId];
+    if (visibleFrom > 1) {
+      deletes.push(["pending", IDBKeyRange.bound([ctx.account, retryKey(conversationId, 0)], [ctx.account, retryKey(conversationId, visibleFrom)], false, true)]);
+    }
     for (const m of sorted) {
       if (!Number.isSafeInteger(m.sequence) || m.sequence < 1) fail("BAD_SEQUENCE");
+      if (m.sequence < visibleFrom) fail("HISTORY_VISIBILITY_CHANGED");
       const reference = await req((await db()).transaction("pending").objectStore("pending").getKey([ctx.account, retryKey(conversationId, m.sequence)]));
       if (m.sequence <= last && reference === undefined) continue;
       // The authoritative endpoint returns every visible row, including tombstones.
@@ -640,8 +885,8 @@ const ops = {
         } else {
           const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)), []);
           if (r.kind !== "APPLICATION") fail("UNEXPECTED_MESSAGE");
-          const payload = parsePayload(r.plaintext);
-          r.plaintext.fill(0);
+          let payload;
+          try { payload = parsePayload(r.plaintext); } finally { r.plaintext.fill(0); }
           record = { ...base, status: "DECRYPTED", payload, attachmentId: (m.attachmentIds ?? [])[0] ?? null };
           if (payload.t === "file") {
             // Presentation metadata comes from the descriptor (protected), never the server.
@@ -656,7 +901,7 @@ const ops = {
         ctx.device = core.WebDevice.fromState(ctx.deviceId, beforeMessage);
         device = ctx.device;
         const code = e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message) ? e.message : "FAILED";
-        record = { ...base, status: "FAILED", error: historical ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
+        record = { ...base, status: "FAILED", error: historical && code === "MESSAGE_REFUSED" ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
       } finally { beforeMessage.fill(0); }
       if (record.status === "FAILED") {
         newlyFailed.add(m.sequence);
@@ -679,7 +924,7 @@ const ops = {
     }
     ctx.meta.cursors[conversationId] = last;
     ctx.meta.processed ??= {};
-    const earliest = await firstRetry(conversationId, 0, resolved);
+    const earliest = await firstRetry(conversationId, visibleFrom - 1, resolved);
     const failures = [...newlyFailed, ...(earliest === null ? [] : [earliest])];
     processed = failures.length ? Math.min(last, ...failures) - 1 : last;
     // Until migration has scanned all legacy outcomes, never overclaim progress.
@@ -706,7 +951,7 @@ const ops = {
     ctx.meta.retryMigrated ??= {};
     ctx.meta.retryScan ??= {};
     if (!ctx.meta.retryMigrated[conversationId]) {
-      const after = ctx.meta.retryScan[conversationId] ?? 0;
+      const after = Math.max(ctx.meta.retryScan[conversationId] ?? 0, (ctx.meta.visibleFrom?.[conversationId] ?? 1) - 1);
       const d = await db();
       const range = IDBKeyRange.bound([ctx.account, conversationId, after], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER], true);
       const keys = await req(d.transaction("records").objectStore("records").getAllKeys(range, 128));
@@ -725,10 +970,11 @@ const ops = {
       if (keys.length < 128) ctx.meta.retryMigrated[conversationId] = true;
       await persistDevice(puts);
     }
-    if (ctx.meta.pendingCommit?.[conversationId]) return ctx.meta.pendingCommit[conversationId] - 1;
+    const firstVisible = ctx.meta.visibleFrom?.[conversationId] ?? 1;
+    if (ctx.meta.pendingCommit?.[conversationId] >= firstVisible) return ctx.meta.pendingCommit[conversationId] - 1;
     ctx.meta.retryTurn ??= {};
-    const turn = ctx.meta.retryTurn[conversationId] ?? 0;
-    const next = await firstRetry(conversationId, turn) ?? await firstRetry(conversationId);
+    const turn = Math.max(ctx.meta.retryTurn[conversationId] ?? 0, firstVisible - 1);
+    const next = await firstRetry(conversationId, turn) ?? await firstRetry(conversationId, firstVisible - 1);
     if (next === null) return null;
     ctx.meta.retryTurn[conversationId] = next;
     await persistDevice();
@@ -745,8 +991,9 @@ const ops = {
     // Read-only: no device registration, key creation, MLS state export or network call.
     uuid(account);
     const d = await db();
-    const key = await req(d.transaction("keys").objectStore("keys").get(account));
-    if (!key) return { records: [], next: null };
+    const storedKey = await req(d.transaction("keys").objectStore("keys").get(account));
+    if (!storedKey) return { records: [], next: null };
+    const key = storedKey?.kind === LOCAL_KEY_KIND ? (ctx?.account === account && ctx?.device && ctx.key ? ctx.key : fail("LOCAL_UNLOCK_REQUIRED")) : storedKey;
     let lower = [account, "", 0];
     if (after) {
       uuid(after.conversationId);
@@ -761,6 +1008,7 @@ const ops = {
     const records = [];
     for (let i = 0; i < Math.min(values.length, 100); i++) {
       const [, conversationId, sequence] = keys[i];
+      if (ctx?.account === account && sequence < (ctx.meta.visibleFrom?.[conversationId] ?? 1)) continue;
       const record = JSON.parse(dec.decode(await unseal(key, recordAad(account, conversationId, sequence), values[i])));
       records.push(exportRecord(conversationId, record));
     }
@@ -770,10 +1018,10 @@ const ops = {
 
   /** Stored history of a conversation, newest last (at most `limit`). */
   async history({ conversationId, limit = 200 }) {
-    if (!ctx) fail("NOT_OPEN");
+    requireDevice();
     uuid(conversationId);
     const d = await db();
-    const range = IDBKeyRange.bound([ctx.account, conversationId, 0], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER]);
+    const range = IDBKeyRange.bound([ctx.account, conversationId, ctx.meta.visibleFrom?.[conversationId] ?? 1], [ctx.account, conversationId, Number.MAX_SAFE_INTEGER]);
     const store = d.transaction("records").objectStore("records");
     const keys = await req(store.getAllKeys(range));
     const values = await req(store.getAll(range));
@@ -798,6 +1046,7 @@ const ops = {
   /** Decrypts a downloaded attachment of a stored message (its key never left here). */
   async decryptAttachment({ conversationId, sequence, ciphertext }) {
     requireDevice();
+    if (sequence < (ctx.meta.visibleFrom?.[conversationId] ?? 1)) fail("HISTORY_VISIBILITY_CHANGED");
     const r = await loadRecord(uuid(conversationId), sequence);
     if (!r || r.payload?.t !== "file" || !r.attachmentId) fail("NO_SUCH_ATTACHMENT");
     const f = core.decrypt_file(b64u.dec(r.payload.d), r.attachmentId, bytes(ciphertext));
@@ -805,6 +1054,233 @@ const ops = {
   },
 
   // --------------------------------------------------- history transfer (AD-07)
+
+  async beginTransferV2({ context, expiresAt }) {
+    const device = requireDevice();
+    context = historyContext(context, "target"); historyExpiry(expiresAt);
+    const key = historyStateKey(context[0], "target");
+    const existing = await pendingJson(key);
+    if (existing) {
+      if (JSON.stringify(existing.context) !== JSON.stringify(context) || existing.expiresAt !== expiresAt) fail("TRANSFER_CONTEXT_INVALID");
+      return b64u.dec(existing.publicKey);
+    }
+    const publicKey = device.beginTransfer();
+    const secret = device.exportTransferSecret();
+    try {
+      const state = { v: 2, role: "target", context, expiresAt, publicKey: b64u.enc(publicKey), secret: b64u.enc(secret), nextIndex: 0, records: 0, imported: 0 };
+      await persistDevice([await jsonPut(key, state)]);
+      return publicKey;
+    } finally { secret.fill(0); device.finishTransfer(); }
+  },
+  async signTransferRequestV2({ context, expiresAt }) {
+    context = historyContext(context, "target"); historyExpiry(expiresAt);
+    const state = await pendingJson(historyStateKey(context[0], "target"));
+    if (!state || state.expiresAt !== expiresAt || JSON.stringify(state.context) !== JSON.stringify(context)) fail("NO_TRANSFER");
+    await restoreTransfer(state);
+    try { return requireDevice().signTransferRequestV2(context, BigInt(expiresAt)); } finally { requireDevice().finishTransfer(); }
+  },
+  verifyTransferRequestV2({ targetKey, context, transferKey, expiresAt, signature }) {
+    context = historyContext(context, "source"); historyExpiry(expiresAt);
+    return core.verifyTransferRequestV2(bytes(targetKey), context, bytes(transferKey), BigInt(expiresAt), bytes(signature));
+  },
+
+  /** Freeze bounded encrypted pages before publishing an immutable manifest. */
+  async prepareHistoryV2({ context, transferKey, expiresAt, eligibleConversations }) {
+    requireDevice();
+    context = historyContext(context, "source"); historyExpiry(expiresAt);
+    if (bytes(transferKey).length !== 32) fail("TRANSFER_CONTEXT_INVALID");
+    const visibility = visibilityMap(eligibleConversations);
+    const key = historyStateKey(context[0], "source");
+    const existing = await pendingJson(key);
+    if (existing) {
+      if (JSON.stringify(existing.context) !== JSON.stringify(context) || existing.transferKey !== b64u.enc(transferKey) || existing.descriptor.expiresAt !== expiresAt) fail("TRANSFER_CONTEXT_INVALID");
+      return { descriptor: existing.descriptor, coverage: existing.coverage, records: existing.records };
+    }
+    const snapshotId = crypto.randomUUID();
+    const chunks = [], coverage = new Map();
+    let chunkRecords = [], chunkSize = enc.encode('{"v":2,"records":[]}').length, total = 0, recordCount = 0, readableCount = 0;
+    const flush = async () => {
+      if (!chunkRecords.length) return;
+      if (chunks.length >= HISTORY_MAX_CHUNKS) fail("HISTORY_QUOTA_EXCEEDED");
+      const plain = enc.encode(JSON.stringify({ v: 2, records: chunkRecords }));
+      try {
+        if (plain.length > HISTORY_CHUNK_BYTES || total + plain.length > HISTORY_MAX_BYTES) fail("HISTORY_QUOTA_EXCEEDED");
+        chunks.push({ digest: b64u.enc(new Uint8Array(await crypto.subtle.digest("SHA-256", plain))), bytes: plain.length, records: chunkRecords.length });
+        total += plain.length;
+        await persistDevice([await jsonPut(historyObjectKey(context[0], chunks.length - 1), { snapshotId, plaintext: b64u.enc(plain) })]);
+      } finally { plain.fill(0); }
+      chunkRecords = []; chunkSize = enc.encode('{"v":2,"records":[]}').length;
+    };
+    let after = null;
+    for (;;) {
+      const { keys, values } = await storagePage("records", ctx.account, after);
+      if (!keys.length) break;
+      for (let i = 0; i < keys.length; i++) {
+        const [, conversationId, sequence] = keys[i];
+        const window = visibility.get(conversationId);
+        if (!window || sequence < window.firstSequence || sequence > window.lastSequence) continue;
+        const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), values[i]);
+        let record;
+        try { record = JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+        const c = coverage.get(conversationId) ?? { conversationId, firstSequence: window.firstSequence, lastSequence: window.lastSequence, availableRecords: 0, unreadableRecords: 0, missingRecords: 0, observedThrough: window.firstSequence - 1 };
+        if (sequence > c.observedThrough + 1) c.missingRecords += sequence - c.observedThrough - 1;
+        c.observedThrough = Math.max(c.observedThrough, sequence);
+        coverage.set(conversationId, c);
+        if (!["SENT", "DECRYPTED", "REMOVED"].includes(record.status)) {
+          if (!["COMMIT"].includes(record.status)) c.unreadableRecords++;
+          continue;
+        }
+        const entry = { conversationId, record: historyRecord(record) };
+        const size = enc.encode(JSON.stringify(entry)).length + (chunkRecords.length ? 1 : 0);
+        if (chunkSize + size > HISTORY_CHUNK_BYTES) await flush();
+        chunkRecords.push(entry); chunkSize += size; recordCount++; c.availableRecords++;
+        if (record.status !== "REMOVED") readableCount++;
+      }
+      after = keys[keys.length - 1];
+    }
+    await flush();
+    if (!readableCount) fail("HISTORY_SOURCE_EMPTY");
+    for (const window of visibility.values()) if (!coverage.has(window.conversationId)) coverage.set(window.conversationId, { ...window, availableRecords: 0, unreadableRecords: 0, missingRecords: Math.max(0, window.lastSequence - window.firstSequence + 1), observedThrough: window.firstSequence - 1 });
+    const summaries = [...coverage.values()].map((c) => ({ ...c, completeThroughSnapshot: c.unreadableRecords === 0 && c.missingRecords === 0 && c.observedThrough >= c.lastSequence }));
+    const manifest = { v: 2, snapshotId, context, expiresAt, chunks, totalPlaintextBytes: total, records: recordCount,
+      coverage: summaries, sourceCoverage: summaries.every((c) => c.completeThroughSnapshot) ? "SOURCE_AVAILABLE" : "PARTIAL" };
+    const plainManifest = enc.encode(JSON.stringify(manifest));
+    try {
+      if (plainManifest.length > HISTORY_CHUNK_BYTES) fail("HISTORY_QUOTA_EXCEEDED");
+      const descriptor = { snapshotId, expiresAt, manifestDigest: b64u.enc(new Uint8Array(await crypto.subtle.digest("SHA-256", plainManifest))), chunkCount: chunks.length, totalPlaintextBytes: total };
+      const state = { v: 2, role: "source", context, descriptor, transferKey: b64u.enc(transferKey), coverage: manifest.sourceCoverage, records: recordCount };
+      await persistDevice([await jsonPut(key, state), await jsonPut(historyObjectKey(context[0], HISTORY_MANIFEST_INDEX), { snapshotId, plaintext: b64u.enc(plainManifest) })]);
+      return { descriptor, coverage: state.coverage, records: recordCount };
+    } finally { plainManifest.fill(0); }
+  },
+
+  /** Ciphertext is cached before upload, making repeated PUTs byte-identical. */
+  async historyObjectV2({ transferId, index }) {
+    const state = await pendingJson(historyStateKey(transferId, "source"));
+    if (!state) fail("NO_TRANSFER");
+    historyContext(state.context, "source"); historyDescriptor(state.descriptor);
+    if (!Number.isInteger(index) || (index !== HISTORY_MANIFEST_INDEX && (index < 0 || index >= state.descriptor.chunkCount))) fail("ARCHIVE_INVALID");
+    const key = historyObjectKey(transferId, index);
+    const object = await pendingJson(key);
+    if (!object || object.snapshotId !== state.descriptor.snapshotId) fail("HISTORY_SNAPSHOT_UNAVAILABLE");
+    if (object.sealed) return b64u.dec(object.sealed);
+    const plain = b64u.dec(object.plaintext);
+    try {
+      const sealed = requireDevice().sealHistoryObject(...historyObjectArgs(state, index), b64u.dec(state.transferKey), plain);
+      await persistDevice([await jsonPut(key, { snapshotId: object.snapshotId, sealed: b64u.enc(sealed) })]);
+      return sealed;
+    } finally { plain.fill(0); }
+  },
+
+  async acceptHistoryManifestV2({ context, descriptor: proposed, sourceKey, sealed }) {
+    context = historyContext(context, "target");
+    const descriptor = historyDescriptor(proposed);
+    const key = historyStateKey(context[0], "target");
+    const state = await pendingJson(key);
+    if (!state || JSON.stringify(state.context) !== JSON.stringify(context) || state.expiresAt !== descriptor.expiresAt) fail("TRANSFER_CONTEXT_INVALID");
+    if (state.descriptor && JSON.stringify(state.descriptor) !== JSON.stringify(descriptor)) fail("TRANSFER_MANIFEST_CHANGED");
+    const attempt = { ...state, descriptor };
+    await restoreTransfer(state);
+    let plain;
+    try { plain = requireDevice().openHistoryObject(...historyObjectArgs(attempt, HISTORY_MANIFEST_INDEX), bytes(sourceKey), bytes(sealed)); }
+    finally { requireDevice().finishTransfer(); }
+    try {
+      if (plain.length > HISTORY_CHUNK_BYTES || b64u.enc(new Uint8Array(await crypto.subtle.digest("SHA-256", plain))) !== descriptor.manifestDigest) fail("TRANSFER_MANIFEST_CHANGED");
+      const manifest = JSON.parse(dec.decode(plain));
+      if (manifest?.v !== 2 || manifest.snapshotId !== descriptor.snapshotId || manifest.expiresAt !== descriptor.expiresAt || JSON.stringify(manifest.context) !== JSON.stringify(context) ||
+        manifest.totalPlaintextBytes !== descriptor.totalPlaintextBytes || !Array.isArray(manifest.chunks) || manifest.chunks.length !== descriptor.chunkCount ||
+        !Number.isSafeInteger(manifest.records) || manifest.records < 1 || !Array.isArray(manifest.coverage) || !["SOURCE_AVAILABLE", "PARTIAL"].includes(manifest.sourceCoverage)) fail("ARCHIVE_INVALID");
+      let total = 0, records = 0;
+      for (const chunk of manifest.chunks) {
+        if (b64u.dec(chunk.digest).length !== 32 || !Number.isSafeInteger(chunk.bytes) || chunk.bytes < 1 || chunk.bytes > HISTORY_CHUNK_BYTES || !Number.isSafeInteger(chunk.records) || chunk.records < 1) fail("ARCHIVE_INVALID");
+        total += chunk.bytes; records += chunk.records;
+      }
+      if (total !== descriptor.totalPlaintextBytes || records !== manifest.records) fail("ARCHIVE_INVALID");
+      if (!state.manifest) {
+        attempt.manifest = manifest; attempt.sourceKey = b64u.enc(sourceKey);
+        await persistDevice([await jsonPut(key, attempt)]);
+      } else if (state.sourceKey !== b64u.enc(sourceKey)) fail("TRANSFER_CONTEXT_INVALID");
+      return { nextIndex: state.nextIndex, records: state.records, coverage: manifest.sourceCoverage, descriptor };
+    } finally { plain.fill(0); }
+  },
+
+  /** Import and checkpoint are durable together, independent of network receipts. */
+  async importHistoryChunkV2({ transferId, index, sealed, eligibleConversations }) {
+    const key = historyStateKey(transferId, "target");
+    const state = await pendingJson(key);
+    if (!state?.manifest) fail("NO_TRANSFER");
+    historyContext(state.context, "target"); historyDescriptor(state.descriptor);
+    if (!Number.isInteger(index) || index < 0 || index >= state.descriptor.chunkCount) fail("ARCHIVE_INVALID");
+    if (index > state.nextIndex) fail("HISTORY_CHUNK_GAP");
+    if (index < state.nextIndex) return { nextIndex: state.nextIndex, records: state.records, imported: state.imported, signature: await historyCheckpoint(state), coverage: state.manifest.sourceCoverage };
+    const visibility = visibilityMap(eligibleConversations);
+    await restoreTransfer(state);
+    let plain;
+    try { plain = requireDevice().openHistoryObject(...historyObjectArgs(state, index), b64u.dec(state.sourceKey), bytes(sealed)); }
+    finally { requireDevice().finishTransfer(); }
+    try {
+      const expected = state.manifest.chunks[index];
+      if (plain.length !== expected.bytes || b64u.enc(new Uint8Array(await crypto.subtle.digest("SHA-256", plain))) !== expected.digest) fail("HISTORY_CHUNK_DIGEST_MISMATCH");
+      const chunk = JSON.parse(dec.decode(plain));
+      if (chunk?.v !== 2 || !Array.isArray(chunk.records) || chunk.records.length !== expected.records) fail("ARCHIVE_INVALID");
+      const puts = [], deletes = [], seen = new Set();
+      let lastRecord = state.lastRecord ?? null;
+      let imported = 0;
+      for (const entry of chunk.records) {
+        const conversationId = uuid(entry?.conversationId, "ARCHIVE_INVALID");
+        const record = historyRecord(entry.record);
+        if (!eligibleRecord(conversationId, record, visibility)) fail("HISTORY_VISIBILITY_CHANGED");
+        const identity = `${conversationId}:${record.sequence}`;
+        if (seen.has(identity)) fail("ARCHIVE_INVALID"); seen.add(identity);
+        if (lastRecord && (conversationId < lastRecord.conversationId || (conversationId === lastRecord.conversationId && record.sequence <= lastRecord.sequence))) fail("ARCHIVE_INVALID");
+        lastRecord = { conversationId, sequence: record.sequence };
+        const existing = await loadRecord(conversationId, record.sequence);
+        if (existing?.messageId && existing.messageId !== record.messageId) fail("HISTORY_RECORD_CONFLICT");
+        if (!existing || (!["SENT", "DECRYPTED", "REMOVED"].includes(existing.status)) || (record.status === "REMOVED" && existing.status !== "REMOVED")) {
+          const value = enc.encode(JSON.stringify(record));
+          try { puts.push(["records", [ctx.account, conversationId, record.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, record.sequence), value)]); } finally { value.fill(0); }
+          deletes.push(["pending", [ctx.account, retryKey(conversationId, record.sequence)]]); imported++;
+        }
+      }
+      const updated = { ...state, nextIndex: index + 1, records: state.records + chunk.records.length, imported: state.imported + imported, lastRecord };
+      puts.push(await jsonPut(key, updated));
+      await persistDevice(puts, deletes);
+      return { nextIndex: updated.nextIndex, records: updated.records, imported: updated.imported, signature: await historyCheckpoint(updated), coverage: state.manifest.sourceCoverage };
+    } finally { plain.fill(0); }
+  },
+
+  async historyProgressV2({ transferId }) {
+    const state = await pendingJson(historyStateKey(transferId, "target"));
+    if (!state) fail("NO_TRANSFER");
+    historyContext(state.context, "target"); historyExpiry(state.expiresAt);
+    return { context: state.context, expiresAt: state.expiresAt, nextIndex: state.nextIndex, records: state.records, imported: state.imported, descriptor: state.descriptor ?? null,
+      coverage: state.manifest?.sourceCoverage ?? null, signature: state.descriptor ? await historyCheckpoint(state) : null };
+  },
+  async listHistoryTransfersV2() {
+    requireDevice();
+    const out = [];
+    let after = null;
+    for (;;) {
+      const { keys } = await storagePage("pending", ctx.account, after);
+      if (!keys.length) break;
+      for (const [, key] of keys) if (/^history-v2:[0-9a-f-]{36}:(source|target)$/.test(key)) {
+        const state = await pendingJson(key);
+        const expiry = state.expiresAt ?? state.descriptor?.expiresAt;
+        if (expiry > Math.floor(Date.now() / 1000)) out.push({ transferId: state.context[0], context: state.context, role: state.role, expiresAt: expiry, nextIndex: state.nextIndex ?? 0 });
+      }
+      after = keys[keys.length - 1];
+    }
+    return out;
+  },
+  async forgetHistoryTransferV2({ transferId }) {
+    requireDevice();
+    const prefix = `history-v2:${uuid(transferId)}:`;
+    const tx = (await db()).transaction("pending", "readwrite");
+    tx.objectStore("pending").delete(IDBKeyRange.bound([ctx.account, prefix], [ctx.account, prefix + "\uffff"]));
+    await done(tx);
+    requireDevice().finishTransfer();
+    return true;
+  },
 
   async beginTransfer() {
     return requireDevice().beginTransfer();
@@ -822,7 +1298,7 @@ const ops = {
   async sealHistory({ context, transferKey }) {
     const device = requireDevice();
     const d = await db();
-    const range = IDBKeyRange.bound([ctx.account, "", 0], [ctx.account, "￿", Number.MAX_SAFE_INTEGER]);
+    const range = IDBKeyRange.bound([ctx.account, "", 0], [ctx.account, "ï¿¿", Number.MAX_SAFE_INTEGER]);
     const store = d.transaction("records").objectStore("records");
     const keys = await req(store.getAllKeys(range));
     const values = await req(store.getAll(range));

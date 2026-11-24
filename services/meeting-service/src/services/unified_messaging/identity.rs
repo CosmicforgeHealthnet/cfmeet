@@ -354,7 +354,7 @@ impl UnifiedMessaging {
     /// Due revocation jobs (row-locked; several instances never double-process one).
     pub async fn process_revocations(&self, limit: u64) -> ApiResult<u32> {
         use sea_orm::TransactionTrait;
-        let mut done = 0;
+        let mut done = self.process_installation_revocations(limit).await?;
         for _ in 0..limit {
             let txn = self.db.begin().await?;
             let Some(r) = one(

@@ -14,6 +14,7 @@
 
 pub mod devices;
 pub mod error;
+pub mod history_transfer_v2;
 pub mod middleware;
 
 use axum::{
@@ -40,6 +41,7 @@ pub const MAX_BODY_BYTES: usize = 512 * 1024;
 /// Customer routes nested under `/v1/messaging`.
 pub fn customer_routes() -> Router<AppState> {
     devices::routes()
+        .merge(history_transfer_v2::routes())
         .merge(crate::conversations::http::policy_routes())
         .merge(crate::mls::http::device_routes())
         .merge(crate::safety::http::routes())

@@ -194,7 +194,10 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Shipped worker retry and persistence regressions (real Chromium and MLS)
-        run: node apps/web/tests/messaging-worker-reliability.browser.mjs . apps/web "$RUNNER_TEMP/worker-reliability.json"
+        run: |
+          node apps/web/tests/messaging-worker-reliability.browser.mjs . apps/web "$RUNNER_TEMP/worker-reliability.json"
+          node apps/web/tests/local-authenticator.browser.mjs
+          node apps/web/tests/messaging-history-v2.browser.mjs . "$RUNNER_TEMP/history-v2.json"
 
       - name: Journey (shipped web client, real services)
         working-directory: services/meeting-service

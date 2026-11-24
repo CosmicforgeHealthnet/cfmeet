@@ -477,6 +477,15 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::unified_messaging::publish_key_packages),
         )
         .route(
+            "/messaging/devices/:id/installation-challenges",
+            post(crate::handlers::v2::unified_messaging::installation_challenge),
+        )
+        .route(
+            "/messaging/devices/:id/installation",
+            post(crate::handlers::v2::unified_messaging::bind_installation)
+                .get(crate::handlers::v2::unified_messaging::installation_status),
+        )
+        .route(
             "/messaging/devices/:id/revoke",
             post(crate::handlers::v2::unified_messaging::revoke_device),
         )

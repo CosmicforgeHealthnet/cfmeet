@@ -51,6 +51,28 @@ mod m20261118_000007_platform_user_participants;
 mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
 mod m20261121_000001_account_phones;
+mod m20261124_000001_messaging_installations;
+
+/// Independent additive history; earlier images ignore it on rollback.
+pub struct MessagingInstallationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MessagingInstallationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261124_000001_messaging_installations::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_messaging_installation_migrations").into_iden()
+    }
+}
+pub async fn messaging_installations_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, DbErr> {
+    Ok(pending_migrations::<MessagingInstallationsMigrator, _>(db)
+        .await?
+        .is_empty())
+}
 
 /// Independent, additive phone-account history: old images ignore it after rollback.
 pub struct AccountPhoneMigrator;

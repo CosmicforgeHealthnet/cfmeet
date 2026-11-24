@@ -20,6 +20,9 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
         if let Err(e) = crate::devices::history_transfer::expire_due(&state).await {
             tracing::warn!(error = %e, "history-transfer expiry pass failed");
         }
+        if let Err(e) = crate::devices::history_transfer_v2::expire_due(&state).await {
+            tracing::warn!(error = %e, "history-transfer v2 expiry pass failed");
+        }
         if let Err(e) = crate::devices::key_package_maintenance(&state).await {
             tracing::warn!(error = %e, "device stock maintenance pass failed");
         }

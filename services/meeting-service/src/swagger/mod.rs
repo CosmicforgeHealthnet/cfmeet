@@ -213,6 +213,9 @@ use utoipa::OpenApi;
         crate::handlers::v2::compat::run_backfill,
         crate::handlers::v2::unified_messaging::registration_challenge,
         crate::handlers::v2::unified_messaging::register_device,
+        crate::handlers::v2::unified_messaging::installation_challenge,
+        crate::handlers::v2::unified_messaging::bind_installation,
+        crate::handlers::v2::unified_messaging::installation_status,
         crate::handlers::v2::unified_messaging::publish_key_packages,
         crate::handlers::v2::unified_messaging::revoke_device,
         crate::handlers::v2::unified_messaging::client_token,
@@ -373,6 +376,9 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::services::unified_messaging::installations::InstallationChallenge,
+            crate::services::unified_messaging::installations::InstallationProof,
+            crate::services::unified_messaging::installations::InstallationBinding,
             crate::services::account_phone::PhoneView,
             crate::services::account_phone::PhoneRequest,
             crate::services::account_phone::PhoneConfirm,

@@ -170,6 +170,108 @@ pub async fn register_device(
     relay_enrollment(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
 }
 
+#[utoipa::path(
+    post,path="/api/v2/messaging/devices/{deviceId}/installation-challenges",tag="Messaging (v2)",operation_id="v2_messaging_installation_challenge",
+    params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
+    request_body=Object,
+    responses((status=201,description="Fresh proof bound to this trusted Account installation and sign-in",body=crate::services::unified_messaging::installations::InstallationChallenge),(status=403,description="DEVICE_PROOF_INVALID / DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    security(("bearer_auth"=[]))
+)]
+pub async fn installation_challenge(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(device): V2Path<Uuid>,
+    V2Json(body): V2Json<Value>,
+) -> ApiResult<(
+    StatusCode,
+    Json<crate::services::unified_messaging::installations::InstallationChallenge>,
+)> {
+    let user = verified_user(&state, &actor)?;
+    require_trusted_device_for_e2ee(&state, &actor).await?;
+    if body != serde_json::json!({}) {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "An empty object is required",
+        ));
+    }
+    let session = actor
+        .registered()
+        .and_then(|r| r.account_session_id)
+        .ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::DeviceNotTrusted,
+                "Declare this installation first",
+            )
+        })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            integration(&state)?
+                .installation_challenge(user, session, device)
+                .await?,
+        ),
+    ))
+}
+
+#[utoipa::path(
+    post,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_bind_installation",
+    params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
+    request_body=crate::services::unified_messaging::installations::InstallationProof,
+    responses((status=200,description="Identity is bound to the proved protected installation",body=crate::services::unified_messaging::installations::InstallationBinding),(status=403,description="DEVICE_PROOF_INVALID / DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    security(("bearer_auth"=[]))
+)]
+pub async fn bind_installation(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(device): V2Path<Uuid>,
+    V2Json(proof): V2Json<crate::services::unified_messaging::installations::InstallationProof>,
+) -> ApiResult<Json<crate::services::unified_messaging::installations::InstallationBinding>> {
+    let user = verified_user(&state, &actor)?;
+    require_trusted_device_for_e2ee(&state, &actor).await?;
+    let session = actor
+        .registered()
+        .and_then(|r| r.account_session_id)
+        .ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::DeviceNotTrusted,
+                "Declare this installation first",
+            )
+        })?;
+    Ok(Json(
+        integration(&state)?
+            .bind_installation(&state, user, session, device, proof)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    get,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_installation_status",
+    params(("deviceId"=Uuid,Path,description="Existing Messaging identity")),
+    responses((status=200,description="Persistent identity is true only for this proved current installation/sign-in",body=Object),(status=403,description="DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    security(("bearer_auth"=[]))
+)]
+pub async fn installation_status(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(device): V2Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let user = verified_user(&state, &actor)?;
+    let session = actor
+        .registered()
+        .and_then(|r| r.account_session_id)
+        .ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::DeviceNotTrusted,
+                "Declare this installation first",
+            )
+        })?;
+    Ok(Json(
+        integration(&state)?
+            .installation_status(user, session, device)
+            .await?,
+    ))
+}
+
 /// Publish one-time KeyPackages of the caller's device.
 ///
 /// Uploads one-time KeyPackages for the given device of the signed-in user, so the device can be
@@ -250,6 +352,14 @@ pub async fn client_token(
     // this browser ends it while the account's other sign-ins keep theirs. The binding
     // is the relay's; whatever a client sends under that name is discarded.
     let session = actor.registered().and_then(|r| r.account_session_id);
+    if let Some(device) = body
+        .get("deviceId")
+        .and_then(Value::as_str)
+        .and_then(|v| Uuid::parse_str(v).ok())
+    {
+        um.require_installation_session(&state.db, user, session.unwrap_or(Uuid::nil()), device)
+            .await?;
+    }
     if let Some(map) = body.as_object_mut() {
         map.remove("accountSessionRef");
     }
@@ -418,6 +528,10 @@ pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
     let mut me = um.me(user).await?;
+    if migration::messaging_installations_ready(&state.db).await? {
+        me["deviceLifecycle"] =
+            serde_json::json!({"protocolVersion":1,"persistentInstallationBinding":true});
+    }
     // The caller's own name, so a calling client can name itself on the calls it starts
     // (initiatorDisplayName), as the callee's incoming-call screen shows it.
     if let Some(registered) = actor.registered() {

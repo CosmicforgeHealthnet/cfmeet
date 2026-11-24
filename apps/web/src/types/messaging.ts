@@ -4,6 +4,8 @@ export interface MessagingIdentity {
   tenantId: string;
   applicationId: string;
   environmentId: string;
+  /** Newer servers support session-independent, proof-bound persistent installations. */
+  deviceLifecycle?: { protocolVersion: 1; persistentInstallationBinding: boolean };
 }
 
 export interface Colleague {

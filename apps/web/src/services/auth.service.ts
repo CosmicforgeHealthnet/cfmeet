@@ -136,7 +136,7 @@ export const authService = {
    * (`POST /api/v2/me/sessions/revoke-all`), then this browser's state.
    */
   logoutEverywhere: async () => {
-    await Promise.all([signOutCalling(), signOutMessaging()]);
+    await Promise.all([signOutCalling(), signOutMessaging(5000, true)]);
     // A failure keeps this browser signed in (nothing was revoked); the caller shows it.
     const result = (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-all")).data;
     await authService.forgetLocalSession();

@@ -101,6 +101,7 @@ const noSubscribe = () => () => {};
 function composerBlockedReason(s: { phase: string; detail: string | null; identity: unknown }): string {
   if (!s.identity || s.phase === "loading") return "Loading…";
   if (s.phase === "locked") return "Messages are open in another tab of this browser";
+  if (s.phase === "needs-unlock") return "Unlock this browser's private history with your device authenticator";
   if (s.phase === "unavailable") return "Private messaging isn't turned on for CF Meet yet";
   if (s.phase === "needs-signin") return "Sign in again to send private messages";
   if (s.phase === "error") return "Private messaging couldn't start. Reload the page to try again";
@@ -1345,13 +1346,13 @@ function PersonalMessages() {
   });
   const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["STATUS", "Status"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
 
-  if (s.phase === "locked") {
+  if (s.phase === "locked" || s.phase === "needs-unlock") {
     return (
       <div className="flex h-full min-h-[32rem] flex-col items-center justify-center bg-background px-6 text-center" data-testid="messages-page">
         <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"><MessageSquarePlus className="size-7" /></span>
-        <h1 className="mt-5 text-xl font-semibold">Messages is open in another tab</h1>
-        <p className="mt-2 max-w-sm text-sm text-muted-foreground">To keep your private chats safe, Messages runs in one tab at a time. Close the other tab, then use it here.</p>
-        <button type="button" onClick={() => window.location.reload()} className="mt-6 h-11 rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Use here</button>
+        <h1 className="mt-5 text-xl font-semibold">{s.phase === "needs-unlock" ? "Unlock your private history" : "Messages is open in another tab"}</h1>
+        <p className="mt-2 max-w-sm text-sm text-muted-foreground">{s.phase === "needs-unlock" ? s.detail : "To keep your private chats safe, Messages runs in one tab at a time. Close the other tab, then use it here."}</p>
+        <button type="button" onClick={() => window.location.reload()} className="mt-6 h-11 rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90">{s.phase === "needs-unlock" ? "Unlock" : "Use here"}</button>
       </div>
     );
   }

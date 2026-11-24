@@ -15,6 +15,107 @@ use uuid::Uuid;
 
 pub const MAX_DEVICES: i64 = 20;
 
+/// Account alone attests that a trusted installation proved possession of this
+/// Messaging identity after local protection completed. No client can assert this
+/// through the public device-link body. Missing support fails closed at Account.
+pub async fn protect_installation(
+    axum::extract::State(s): axum::extract::State<State>,
+    axum::Extension(caller): axum::Extension<cf_service_auth::InternalServiceContext>,
+    axum::Json(input): axum::Json<ProtectInstallation>,
+) -> Result<axum::Json<Value>> {
+    use crate::{auth, store};
+    use cf_communications_policy::Scope;
+    use cf_service_auth::{DelegatedPrincipalKind, ServiceId};
+    if caller.authenticated_service() != &ServiceId::meeting_service()
+        || !cf_communications_policy::valid_account_session_ref(&input.installation_ref)
+        || input.account_reference.len() > 80
+    {
+        return Err(Error::Forbidden);
+    }
+    let scope = auth::delegated(&caller)?;
+    auth::validate_scope(&s, &scope).await?;
+    let initiating = scope.initiating_principal().ok_or(Error::Forbidden)?;
+    if initiating.principal_id != input.principal_id
+        || initiating.principal_kind != DelegatedPrincipalKind::NativeCfUser
+    {
+        return Err(Error::Forbidden);
+    }
+    let status = auth::account_status(&s, &scope, &input.account_reference).await?;
+    if status["active"] != true || status["principalId"] != input.principal_id.to_string() {
+        return Err(Error::Forbidden);
+    }
+    let owned = s
+        .messaging(&scope)?
+        .call(
+            "/internal/v1/communications/devices/verify",
+            &json!({"principalId":input.principal_id,"deviceId":input.chat_device_id}),
+        )
+        .await?;
+    if owned["owned"] != true || owned["status"] != "ACTIVE" {
+        return Err(Error::NotFound);
+    }
+    let txn = s.store.begin().await?;
+    let mut args = store::scoped(Scope::of(&scope));
+    args.extend([input.principal_id.into(), input.chat_device_id.into()]);
+    let linked: Option<Value> = one(&txn,
+        "SELECT to_jsonb(d) doc FROM communication_devices d JOIN communication_profiles p ON p.id=d.profile_id WHERE p.tenant_id=$1 AND p.application_id=$2 AND p.environment_id=$3 AND p.principal_id=$4 AND d.chat_device_ref=$5 FOR UPDATE OF d",
+        args.clone()).await?;
+    if linked
+        .as_ref()
+        .is_some_and(|d| d["state"] != "ACTIVE" || !d["call_endpoint_ref"].is_null())
+    {
+        // Combined legacy Calling/Messaging links need an explicit split migration;
+        // retaining Calling endpoint authority on sign-out is not this protocol.
+        return Err(Error::ActionNotAllowed);
+    }
+    let mut values = store::scoped(Scope::of(&scope));
+    values.extend([
+        input.principal_id.into(),
+        input.chat_device_id.into(),
+        input.installation_ref.clone().into(),
+        linked
+            .as_ref()
+            .and_then(|d| d["account_session_ref"].as_str())
+            .map(str::to_owned)
+            .into(),
+    ]);
+    store::execute(&txn,
+        "INSERT INTO communication_messaging_installations(tenant_id,application_id,environment_id,principal_id,chat_device_id,installation_ref,original_account_session_ref) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
+        values).await?;
+    let existing: Value = one(&txn,
+        "SELECT jsonb_build_object('principal',principal_id,'installation',installation_ref) doc FROM communication_messaging_installations WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 AND chat_device_id=$5",args).await?.ok_or(Error::Forbidden)?;
+    if existing["installation"] != input.installation_ref {
+        return Err(Error::Forbidden);
+    }
+    if let Some(d) = linked {
+        let id = uuid_field(&d, "id")?;
+        store::execute(&txn,"UPDATE communication_devices SET account_session_ref=NULL,version=version+1,updated_at=now() WHERE id=$1 AND account_session_ref IS NOT NULL",vec![id.into()]).await?;
+        // Preserve the previous link and its creation in the append-only audit trail.
+        s.store
+            .audit_system(
+                &txn,
+                Scope::of(&scope),
+                "DEVICE_INSTALLATION_PROTECTED",
+                Some(id),
+                json!({"chatDeviceId":input.chat_device_id}),
+            )
+            .await?;
+    }
+    txn.commit().await?;
+    Ok(axum::Json(
+        json!({"schemaVersion":1,"persistentIdentity":true,"deviceId":input.chat_device_id}),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProtectInstallation {
+    pub account_reference: String,
+    pub principal_id: Uuid,
+    pub chat_device_id: Uuid,
+    pub installation_ref: String,
+}
+
 fn device_view(d: &Value) -> Value {
     json!({"deviceId":d["id"],"platform":d["platform"],"label":d["label"],"state":d["state"],
         "chatDeviceId":d["chat_device_ref"],"callEndpointId":d["call_endpoint_ref"],
@@ -292,6 +393,19 @@ impl State {
         if count["n"].as_i64().unwrap_or(MAX_DEVICES) >= MAX_DEVICES {
             return Err(Error::PolicyValidation);
         }
+        // A proved protected Messaging installation is independent of sign-in. The
+        // Account-only promotion endpoint also handles an existing legacy link.
+        let protected: Option<Value> = if let Some(chat) = input.chat_device_id {
+            let mut values = crate::store::scoped(p.scope());
+            values.extend([p.principal_id.into(), chat.into()]);
+            one(&txn,"SELECT jsonb_build_object('protected',true) doc FROM communication_messaging_installations WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 AND chat_device_id=$5",values).await?
+        } else {
+            None
+        };
+        if protected.is_some() && input.call_endpoint_id.is_some() {
+            return Err(Error::ActionNotAllowed);
+        }
+        let session = if protected.is_some() { None } else { session };
         let id = Uuid::new_v4();
         // Section 14 (ACC-008): the sign-in that linked the device. Ending that Account
         // session ends the device, and revoking the device ends the session.

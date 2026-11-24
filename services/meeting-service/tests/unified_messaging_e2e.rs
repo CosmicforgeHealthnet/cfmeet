@@ -584,6 +584,309 @@ async fn transition(
     .await
 }
 
+fn installation_account_proof(
+    key: &ed25519_dalek::SigningKey,
+    purpose: backend::services::account_devices::ProofPurpose,
+    context: &str,
+) -> Value {
+    use ed25519_dalek::Signer as _;
+    use rand::RngCore as _;
+    let mut nonce = [0u8; 24];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(nonce);
+    let issued = chrono::Utc::now().timestamp();
+    let thumb = backend::services::account_devices::thumbprint(&key.verifying_key().to_bytes());
+    let statement = backend::services::account_devices::proof_statement(
+        purpose, &thumb, context, issued, &nonce,
+    );
+    json!({"issuedAt":issued,"nonce":nonce,"signature":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.sign(statement.as_bytes()).to_bytes())})
+}
+
+async fn installation_sign_in(
+    app: &TestApp,
+    email: &str,
+    key: &ed25519_dalek::SigningKey,
+    installation: &str,
+) -> (String, Uuid) {
+    app.seed_sign_in_code(email, common::TEST_SIGN_IN_CODE)
+        .await;
+    let (status, login) = app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({"email":email,"code":common::TEST_SIGN_IN_CODE}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let token = login["access_token"].as_str().unwrap().to_owned();
+    let session = app
+        .state
+        .jwt_service
+        .verify_token(&token)
+        .unwrap()
+        .session_id()
+        .unwrap();
+    let proof = installation_account_proof(
+        key,
+        backend::services::account_devices::ProofPurpose::Declare,
+        &session.to_string(),
+    );
+    let (status,declared)=app.post("/api/v2/me/devices/current",Auth::Bearer(&token),json!({"installationId":installation,"deviceClass":"WEB","platform":"WEB","label":"Protected history test","publicKey":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes()),"proof":proof})).await;
+    assert_eq!(status, StatusCode::OK, "{declared}");
+    (token, uuid(&declared["device"]["deviceId"]))
+}
+
+/// Real Account sign-ins and device-key proofs, real RFC 9420 validation, real owner
+/// services. Local WebAuthn wrapping is covered separately in the actual browser.
+#[tokio::test]
+async fn protected_installation_rebinds_without_reviving_a_revoked_identity_across_real_services() {
+    let Some(world) = setup().await else { return };
+    let app = meeting_app(&world).await;
+    let integration = um(&app);
+    let owner = app.user("protected-installation").await;
+    let key = ed25519_dalek::SigningKey::from_bytes(&[41u8; 32]);
+    let installation = Uuid::new_v4().to_string();
+    let (token, account_device) =
+        installation_sign_in(&app, &owner.email, &key, &installation).await;
+    let base = "/api/v2/messaging";
+    let (status, me) = app.get(format!("{base}/me"), Auth::Bearer(&token)).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["deviceLifecycle"]["persistentInstallationBinding"], true);
+    let (status, ch) = app
+        .post(
+            format!("{base}/devices/registration-challenges"),
+            Auth::Bearer(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{ch}");
+    let device = cf_messaging_crypto::device::Device::generate(uuid(&ch["deviceId"])).unwrap();
+    let nonce: [u8; 32] = hex::decode(ch["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let package = device
+        .registration_key_package(uuid(&ch["challengeId"]), &nonce)
+        .unwrap();
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let (status, registered) = app
+        .post(
+            format!("{base}/devices"),
+            Auth::Bearer(&token),
+            json!({"challengeId":ch["challengeId"],"keyPackage":b64(&package)}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{registered}");
+    let endpoint = format!("{base}/devices/{}/installation", device.device_id());
+    let (status, ch) = app
+        .post(
+            format!("{endpoint}-challenges"),
+            Auth::Bearer(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{ch}");
+    let nonce: [u8; 32] = hex::decode(ch["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let impostor = cf_messaging_crypto::device::Device::generate(device.device_id()).unwrap();
+    let forged = impostor
+        .registration_key_package(uuid(&ch["challengeId"]), &nonce)
+        .unwrap();
+    assert_eq!(
+        app.post(
+            &endpoint,
+            Auth::Bearer(&token),
+            json!({"challengeId":ch["challengeId"],"keyPackage":b64(&forged)})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN,
+        "same UUID without the existing key is insufficient"
+    );
+    let package = device
+        .registration_key_package(uuid(&ch["challengeId"]), &nonce)
+        .unwrap();
+    let proof = json!({"challengeId":ch["challengeId"],"keyPackage":b64(&package)});
+    let (status, bound) = app
+        .post(&endpoint, Auth::Bearer(&token), proof.clone())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{bound}");
+    assert_eq!(bound["persistentIdentity"], true);
+    assert_eq!(bound["accountDeviceId"], account_device.to_string());
+    assert_eq!(
+        app.post(&endpoint, Auth::Bearer(&token), proof.clone())
+            .await
+            .0,
+        StatusCode::OK,
+        "same-session retry is idempotent"
+    );
+    let (status, issued) = app
+        .post(
+            format!("{base}/client-tokens"),
+            Auth::Bearer(&token),
+            json!({"deviceId":device.device_id()}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let (status, logout) = app
+        .post("/api/v1/auth/logout", Auth::Bearer(&token), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{logout}");
+    assert_eq!(
+        world
+            .m_scalar("SELECT count(*) FROM messaging_client_sessions WHERE status='ACTIVE'")
+            .await,
+        0,
+        "sign-out terminates network credentials"
+    );
+    assert_eq!(
+        world
+            .m_scalar("SELECT count(*) FROM messaging_devices WHERE status='ACTIVE'")
+            .await,
+        1,
+        "persistent cryptographic identity survives"
+    );
+    let (next_token, next_account_device) =
+        installation_sign_in(&app, &owner.email, &key, &installation).await;
+    assert_eq!(
+        next_account_device, account_device,
+        "DECLARE uses the same installation proof, never a new identity"
+    );
+    let (status, state) = app.get(&endpoint, Auth::Bearer(&next_token)).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(
+        state["persistentIdentity"], true,
+        "read-only logout policy does not require unlocking the MLS key"
+    );
+    assert_eq!(
+        app.post(
+            format!("{base}/client-tokens"),
+            Auth::Bearer(&next_token),
+            json!({"deviceId":device.device_id()})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN,
+        "fresh sign-in alone cannot use a retained Messaging identity"
+    );
+    assert_eq!(
+        app.post(&endpoint, Auth::Bearer(&next_token), proof)
+            .await
+            .0,
+        StatusCode::FORBIDDEN,
+        "old-session proof cannot rebind"
+    );
+    let (status, ch) = app
+        .post(
+            format!("{endpoint}-challenges"),
+            Auth::Bearer(&next_token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{ch}");
+    let nonce: [u8; 32] = hex::decode(ch["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let package = device
+        .registration_key_package(uuid(&ch["challengeId"]), &nonce)
+        .unwrap();
+    let (status, bound) = app
+        .post(
+            &endpoint,
+            Auth::Bearer(&next_token),
+            json!({"challengeId":ch["challengeId"],"keyPackage":b64(&package)}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{bound}");
+    assert_eq!(
+        app.post(
+            format!("{base}/client-tokens"),
+            Auth::Bearer(&next_token),
+            json!({"deviceId":device.device_id()})
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.post("/api/v1/auth/logout", Auth::Bearer(&next_token), json!({}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // Revoke the now-offline installation from another trusted Account installation.
+    let other_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+    let (other_token, _) =
+        installation_sign_in(&app, &owner.email, &other_key, &Uuid::new_v4().to_string()).await;
+    assert_eq!(
+        app.post(
+            format!("{endpoint}-challenges"),
+            Auth::Bearer(&other_token),
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN,
+        "same Account cannot move an identity between installations"
+    );
+    let revoke_proof = installation_account_proof(
+        &other_key,
+        backend::services::account_devices::ProofPurpose::Revoke,
+        &account_device.to_string(),
+    );
+    let (status, removed) = app
+        .post(
+            format!("/api/v2/me/devices/{account_device}/revoke"),
+            Auth::Bearer(&other_token),
+            json!({"proof":revoke_proof}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM account_messaging_installation_revocations WHERE done_at IS NULL"
+        )
+        .await,
+        1,
+        "terminal revocation is queued even without a live session"
+    );
+    assert_eq!(
+        integration
+            .process_installation_revocations(10)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        world
+            .m_scalar("SELECT count(*) FROM messaging_devices WHERE status='ACTIVE'")
+            .await,
+        0,
+        "owner revocation is terminal"
+    );
+    assert_eq!(
+        integration
+            .process_installation_revocations(10)
+            .await
+            .unwrap(),
+        0,
+        "retry does not resurrect identities"
+    );
+    assert_eq!(
+        app.post(
+            format!("{endpoint}-challenges"),
+            Auth::Bearer(&other_token),
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
 #[tokio::test]
 async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     let Some(mut world) = setup().await else {

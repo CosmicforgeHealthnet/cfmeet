@@ -10,6 +10,47 @@
 
 pub use sea_orm_migration::prelude::*;
 
+mod history_transfer_v2;
+pub struct HistoryTransferV2Migrator;
+#[async_trait::async_trait]
+impl MigratorTrait for HistoryTransferV2Migrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(history_transfer_v2::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("messaging_history_transfer_v2_migrations").into_iden()
+    }
+}
+
+pub async fn history_transfer_v2_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let row = db.query_one(Statement::from_string(DbBackend::Postgres,
+        "SELECT to_regclass('public.messaging_history_transfer_v2_migrations') IS NOT NULL AS present".to_owned())).await?;
+    if !row
+        .ok_or_else(|| DbErr::Custom("history capability readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM messaging_history_transfer_v2_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = HistoryTransferV2Migrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
 mod m20261101_000001_messaging_foundation;
 mod m20261102_000002_conversations;
 mod m20261105_000003_membership_messages;

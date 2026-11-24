@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 69,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 568,
+    "PUBLIC_CUSTOMER": 579,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -6435,6 +6435,23 @@
       "requiredScope": "messaging.export"
     },
     {
+      "id": "messaging.getHistoryTransferCapabilities",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/history-transfer-capabilities",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfer-capabilities",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
       "id": "messaging.listHistoryTransfers",
       "domain": "messaging",
       "method": "GET",
@@ -6459,6 +6476,176 @@
       "protocol": "REST",
       "upstream": "cfmeet.messaging",
       "upstreamPath": "/v1/messaging/history-transfers",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.listHistoryTransfersV2",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/history-transfers-v2",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.createHistoryTransferV2",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/messaging/history-transfers-v2",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.getHistoryTransferV2",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.cancelHistoryTransferV2",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/cancel",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/cancel",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.checkpointHistoryTransferV2",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/checkpoint",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/checkpoint",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.getHistoryChunkV2",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.putHistoryChunkV2",
+      "domain": "messaging",
+      "method": "PUT",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.completeHistoryTransferV2",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/complete",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/complete",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.getHistoryManifestV2",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.putHistoryManifestV2",
+      "domain": "messaging",
+      "method": "PUT",
+      "pattern": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
       "auth": [
         "PLATFORM_CREDENTIAL",
         "CLIENT_TOKEN"
@@ -15703,6 +15890,14 @@
     {
       "domain": "messaging",
       "contract": "cfmeet.messaging.http-api",
+      "operationId": "getHistoryTransferCapabilities",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfer-capabilities",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
       "operationId": "listHistoryTransfers",
       "method": "GET",
       "path": "/v1/messaging/history-transfers",
@@ -15714,6 +15909,86 @@
       "operationId": "createHistoryTransfer",
       "method": "POST",
       "path": "/v1/messaging/history-transfers",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "listHistoryTransfersV2",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers-v2",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "createHistoryTransferV2",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers-v2",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "getHistoryTransferV2",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "cancelHistoryTransferV2",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "checkpointHistoryTransferV2",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/checkpoint",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "getHistoryChunkV2",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "putHistoryChunkV2",
+      "method": "PUT",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "completeHistoryTransferV2",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/complete",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "getHistoryManifestV2",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "putHistoryManifestV2",
+      "method": "PUT",
+      "path": "/v1/messaging/history-transfers-v2/{transferId}/manifest",
       "class": "PUBLIC_CUSTOMER"
     },
     {

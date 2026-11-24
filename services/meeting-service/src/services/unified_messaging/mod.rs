@@ -18,6 +18,7 @@
 pub mod config;
 pub mod gateway;
 pub mod identity;
+pub mod installations;
 pub mod migration;
 pub mod mirror;
 pub mod relay;

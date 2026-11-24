@@ -9,6 +9,9 @@ default-run = "backend"
 
 [dependencies]
 cf-communications-policy = { path = "../../packages/communications-policy" }
+# Public RFC 9420 KeyPackage verification for installation proof; no client/private-key
+# feature in the production dependency graph. Tests separately enable their client core.
+cf-messaging-crypto = { path = "../../packages/messaging-crypto" }
 
 migration = { path = "migration" }
 tokio = { version = "1.42.0", features = ["full"] }

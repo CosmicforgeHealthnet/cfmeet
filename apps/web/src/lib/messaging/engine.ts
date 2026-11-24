@@ -31,7 +31,8 @@ import { accountDevice } from "@/lib/auth/account-device";
 import type { LinkView } from "@/lib/auth/account-device-core";
 import { accountSession } from "@/lib/auth/session";
 import type { Colleague, MessagingIdentity } from "@/types/messaging";
-import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
+import { CryptoClient, CryptoWorkerError, terminateMessagingWorkers, type StoredRecord } from "./crypto-client";
+import { cancelLocalAuthenticatorPrompts, createLocalProtection, LocalAuthenticatorError, unlockLocalProtection, type LocalProtectionBinding, type LocalProtectionDescriptor } from "./local-authenticator";
 import { ManagedConversationState, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
 import { MessageOutbox, browserOutboxStorage, flushOutbox, type OutboxItem } from "./outbox";
 import { reactionSegment } from "./routes";
@@ -42,10 +43,11 @@ import { inboxFlags, type InboxFlags } from "./chat-list";
 import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 import { statusPostId } from "./private-shares";
+import { allMemberPages } from "./member-pages";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
-export type Phase = "loading" | "needs-device" | "registering" | "needs-signin" | "ready" | "locked" | "revoked" | "unavailable" | "error";
+export type Phase = "loading" | "needs-device" | "registering" | "needs-signin" | "needs-unlock" | "ready" | "locked" | "revoked" | "unavailable" | "error";
 export type Connection = "connected" | "connecting" | "disconnected" | "auth-required" | "offline";
 /** How live updates arrive: an E2EE device token, a MANAGED-only session device, or polling. */
 export type RealtimeMode = "device" | "session" | "none";
@@ -236,8 +238,6 @@ const TYPING_THROTTLE_MS = 3000;
 const JOIN_RETRY_MS = 10_000;
 /** A member device re-publishes a missing GroupInfo at most this often per chat. */
 const GROUP_INFO_RETRY_MS = 60_000;
-/** Before sending, the sender adds members' new devices; checked at most this often per chat. */
-const SEND_DEVICE_CHECK_MS = 10_000;
 /** A device that had no KeyPackage to claim is not claimed again before this. */
 const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
 
@@ -274,6 +274,34 @@ export function isPlayableAudio(mediaType: string | null | undefined): boolean {
  * engine so leaving the chat and coming back doesn't download and decrypt them again.
  */
 const mediaUrls = new Map<string, string>();
+
+/** Plaintext Blob URLs must not survive an Account session, even off the Messages page. */
+function clearMediaUrls(): void {
+  for (const url of mediaUrls.values()) URL.revokeObjectURL(url);
+  mediaUrls.clear();
+}
+
+accountSession.subscribe((signedIn) => {
+  if (signedIn) return;
+  cancelLocalAuthenticatorPrompts();
+  terminateMessagingWorkers();
+  clearMediaUrls();
+  MessagingEngine.active?.endLocalSession();
+});
+
+const lockChannel = typeof window !== "undefined" && typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("cfmeet-messaging-local-lock") : null;
+if (lockChannel) lockChannel.onmessage = (event: MessageEvent) => {
+  if (event.data !== "lock") return;
+  cancelLocalAuthenticatorPrompts();
+  terminateMessagingWorkers();
+  clearMediaUrls();
+  MessagingEngine.active?.endLocalSession();
+};
+
+/** Close other tabs' workers before ending the shared browser session or erasing a legacy key. */
+export function lockOtherMessagingTabs(): void {
+  lockChannel?.postMessage("lock");
+}
 
 /** Remembers a file this device just sent, so its own photo shows without downloading it back. */
 function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
@@ -410,10 +438,17 @@ export class MessagingEngine {
   private sendQueues = new Map<string, Promise<void>>();
   /** PRIVATE_E2EE group names read from (or sent into) each encrypted group on this device. */
   private groupTitles = new Map<string, string>();
+  private persistentInstallation = false;
+  private protectedLocalIdentity = false;
 
   private enqueue(conversationId: string, job: () => Promise<void>): Promise<void> {
     const previous = this.sendQueues.get(conversationId) ?? Promise.resolve();
-    const next = previous.then(job, job);
+    const generation = this.generation;
+    const run = () => {
+      if (this.stopped || generation !== this.generation) return;
+      return job();
+    };
+    const next = previous.then(run, run);
     this.sendQueues.set(conversationId, next.catch(() => {}));
     return next;
   }
@@ -426,6 +461,7 @@ export class MessagingEngine {
   };
   getSnapshot = (): EngineSnapshot => this.snapshot;
   private set(patch: Partial<EngineSnapshot>): void {
+    if (this.stopped) return;
     this.snapshot = { ...this.snapshot, ...patch };
     // Setup stopped for a reason the user must act on: messages written meanwhile are "Not sent".
     if (this.beforeReady.length && this.snapshot.phase !== "ready" && !MessagingEngine.settingUp(this.snapshot)) {
@@ -487,13 +523,14 @@ export class MessagingEngine {
         account: identity.principalId,
         scope: { tenantId: identity.tenantId, applicationId: identity.applicationId, environmentId: identity.environmentId },
       };
-      let opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+      type Opened = { status: string; deviceId?: string; descriptor?: LocalProtectionDescriptor; localProtection?: LocalProtectionDescriptor };
+      let opened = await this.crypto.call<Opened>("open", openArgs);
       // The previous page instance in THIS tab (navigating back, or React's dev double-mount)
       // releases the lock only when its worker has fully shut down: wait briefly before
       // concluding that another tab really holds it.
       for (let attempt = 0; opened.status === "LOCKED" && attempt < 6 && !stale(); attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-        opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+        opened = await this.crypto.call<Opened>("open", openArgs);
       }
       if (stale()) {
         // This start was overtaken by stop() / a newer start(): always release its own worker (and lock).
@@ -505,7 +542,30 @@ export class MessagingEngine {
         this.set({ phase: "locked", detail: "Messaging is open in another tab of this browser." });
         return;
       }
+      if (opened.status === "AUTHENTICATOR_REQUIRED" && opened.descriptor) {
+        this.protectedLocalIdentity = true;
+        if (!identity.deviceLifecycle?.persistentInstallationBinding) {
+          this.set({ phase: "needs-unlock", detail: "This server must support protected device history before this browser can unlock it." });
+          return;
+        }
+        if (!(await this.ensureTrustedAccountDevice(browserDeviceLabel(navigator.userAgent)))) return;
+        const binding = await this.localProtectionBinding(opened.descriptor.messagingDeviceId);
+        if (!(await this.deviceIsActive(opened.descriptor.messagingDeviceId))) {
+          await crypto.call("wipe", { account: identity.principalId });
+          this.set({ phase: "revoked", detail: "This browser's messaging device was removed. Its local keys and history were erased." });
+          return;
+        }
+        this.set({ phase: "needs-unlock", detail: "Unlock this browser's private history with your device authenticator." });
+        const prfSecret = await unlockLocalProtection(opened.descriptor, binding);
+        try {
+          if (stale()) return;
+          opened = await crypto.callWithTransfer<Opened>("unlock", { prfSecret }, [prfSecret.buffer]);
+        } finally { if (prfSecret.byteLength) prfSecret.fill(0); }
+        if (stale()) return;
+        await this.bindProtectedInstallation(opened.localProtection ?? opened.descriptor!);
+      }
       if (opened.status === "READY" && opened.deviceId) {
+        this.protectedLocalIdentity = Boolean(opened.localProtection);
         const active = await this.deviceIsActive(opened.deviceId);
         if (!active) {
           await this.crypto.call("wipe", { account: identity.principalId });
@@ -518,7 +578,9 @@ export class MessagingEngine {
           void this.autoEnroll();
           return;
         }
-        this.set({ phase: "ready", deviceId: opened.deviceId });
+        this.set({ phase: "ready", deviceId: opened.deviceId, detail: null });
+        await this.prepareLocalProtection();
+        if (stale()) return;
         await this.ensureKeyPackageStock(true).catch(() => {});
         this.connect();
       } else {
@@ -556,7 +618,74 @@ export class MessagingEngine {
     this.crypto = null;
   }
 
+  /** Ends display/cached plaintext immediately on expiry or a sign-out from another tab. */
+  endLocalSession(): void {
+    this.stop();
+    this.persistentInstallation = false;
+    this.protectedLocalIdentity = false;
+    this.receipts.clear();
+    this.server.clear();
+    this.managed.clear();
+    this.loadedManaged.clear();
+    this.reactions.clear();
+    this.e2eeMeta.clear();
+    this.attachmentMeta.clear();
+    this.pendingSends.clear();
+    this.beforeReady = [];
+    this.failedFiles.clear();
+    this.groupTitles.clear();
+    this.waiting.clear();
+    clearMediaUrls();
+    this.snapshot = { ...this.snapshot, phase: "locked", detail: "Sign in to unlock your messages.", identity: null, deviceId: null, messages: {}, conversations: [], names: {}, incomingTransfers: [], incomingLinks: [], typing: {}, pins: {}, connection: "auth-required" };
+    for (const listener of this.listeners) listener();
+  }
+
+  private async localProtectionBinding(deviceId: string): Promise<LocalProtectionBinding> {
+    const identity = this.snapshot.identity!;
+    const accountBinding = await accountDevice.binding();
+    if (!accountBinding) throw new LocalAuthenticatorError("LOCAL_UNLOCK_INSTALLATION_REQUIRED");
+    return { account: identity.principalId, messagingDeviceId: deviceId, accountDeviceId: accountBinding.accountDeviceId, installationId: accountBinding.installationId,
+      scope: { tenantId: identity.tenantId, applicationId: identity.applicationId, environmentId: identity.environmentId } };
+  }
+
+  private async bindProtectedInstallation(descriptor: LocalProtectionDescriptor): Promise<void> {
+    const challenge = await identityApi.installationChallenge(descriptor.messagingDeviceId);
+    if (challenge.deviceId !== descriptor.messagingDeviceId || challenge.accountDeviceId !== descriptor.accountDeviceId || challenge.installationId !== descriptor.installationId
+      || !Number.isFinite(Date.parse(challenge.expiresAt)) || Date.parse(challenge.expiresAt) <= Date.now()) throw new LocalAuthenticatorError("LOCAL_UNLOCK_BINDING_MISMATCH");
+    const keyPackage = await this.crypto!.call<Uint8Array>("registrationKeyPackage", { challengeId: challenge.challengeId, nonce: fromHex(challenge.nonce) });
+    const bound = await identityApi.bindInstallation(descriptor.messagingDeviceId, challenge.challengeId, b64u.enc(keyPackage));
+    if (bound.persistentIdentity !== true || bound.deviceId !== descriptor.messagingDeviceId || bound.accountDeviceId !== descriptor.accountDeviceId) throw new LocalAuthenticatorError("LOCAL_UNLOCK_BINDING_MISMATCH");
+    this.persistentInstallation = true;
+  }
+
+  /** Server capability negotiation prevents new local retention on older lifecycle contracts. */
+  private async prepareLocalProtection(): Promise<void> {
+    if (this.persistentInstallation || !this.crypto || !this.snapshot.deviceId || !this.snapshot.identity?.deviceLifecycle?.persistentInstallationBinding) return;
+    if (!(await this.ensureTrustedAccountDevice(browserDeviceLabel(navigator.userAgent)))) return;
+    const crypto = this.crypto;
+    const state = await crypto.call<{ localProtection?: LocalProtectionDescriptor }>("status");
+    try {
+      let descriptor = state.localProtection;
+      if (!descriptor) {
+        const protection = await createLocalProtection(await this.localProtectionBinding(this.snapshot.deviceId));
+        descriptor = protection.descriptor;
+        try {
+          if (this.stopped || this.crypto !== crypto) return;
+          await this.withMlsLock(() => crypto.callWithTransfer("protectLocal", { descriptor, prfSecret: protection.prfSecret }, [protection.prfSecret.buffer]));
+          this.protectedLocalIdentity = true;
+        } finally { if (protection.prfSecret.byteLength) protection.prfSecret.fill(0); }
+      }
+      if (!this.stopped && this.crypto === crypto) await this.bindProtectedInstallation(descriptor);
+    } catch (error) {
+      // Unsupported/cancelled authenticators do not silently enable decryptable retention.
+      // Existing session behaviour remains available; protected sign-out is not claimed.
+      this.persistentInstallation = false;
+      if (!(error instanceof LocalAuthenticatorError) && !(error instanceof MessagingApiError)) throw error;
+    }
+  }
+
   private async reopenCrypto(): Promise<void> {
+    if (this.stopped || !this.snapshot.identity) return;
     const identity = this.snapshot.identity!;
     this.crypto?.terminate();
     this.crypto = new CryptoClient();
@@ -567,9 +696,11 @@ export class MessagingEngine {
   }
 
   private fail(e: unknown): void {
-    const code = e instanceof MessagingApiError || e instanceof CryptoWorkerError ? e.code : "UNEXPECTED_ERROR";
+    const code = e instanceof MessagingApiError || e instanceof CryptoWorkerError || e instanceof LocalAuthenticatorError ? e.code : "UNEXPECTED_ERROR";
     if (code === "FEATURE_DISABLED") {
       this.set({ phase: "unavailable", detail: "Messaging is not enabled for this CF Meet deployment." });
+    } else if (code === "LOCAL_UNLOCK_CANCELLED" || code === "LOCAL_AUTHENTICATOR_UNAVAILABLE" || code === "LOCAL_AUTHENTICATOR_PRF_UNAVAILABLE") {
+      this.set({ phase: "needs-unlock", detail: "Your history is locked. Use this browser's device authenticator to unlock it." });
     } else {
       this.set({ phase: "error", detail: code });
     }
@@ -645,6 +776,7 @@ export class MessagingEngine {
       this.set({ deviceId: device.deviceId, deviceRegisteredAt: device.registeredAt ?? null });
       await this.topUpKeyPackages(KEY_PACKAGE_TARGET).catch(() => {});
       this.set({ phase: "ready", deviceId: device.deviceId, detail: null });
+      await this.prepareLocalProtection();
       this.flushBeforeReady();
       this.enrollBackoff = 15_000;
       this.connect();
@@ -768,6 +900,10 @@ export class MessagingEngine {
     return r.devices;
   }
 
+  private conversationMembers(conversationId: string): Promise<{ principalId: string; role?: string; state?: string }[]> {
+    return allMemberPages((cursor) => relay("GET", `v1/conversations/${conversationId}/members?limit=${PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`));
+  }
+
   /**
    * Joins a chat's encryption group BY ITSELF (MLS external commit from the GroupInfo the
    * members published): this device never waits for anyone else to come online. A Welcome
@@ -830,8 +966,8 @@ export class MessagingEngine {
    * Throws when it cannot be decided now (network): the commit is retried later.
    */
   private async verifyJoiner(conv: ServerConversation, joiner: PendingJoiner): Promise<string | null> {
-    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
-    if (!members.members.some((m) => m.principalId === joiner.senderPrincipalId && (!m.state || m.state === "ACTIVE"))) return null;
+    const members = await this.conversationMembers(conv.conversationId);
+    if (!members.some((m) => m.principalId === joiner.senderPrincipalId && (!m.state || m.state === "ACTIVE"))) return null;
     let devices: ServerDevice[];
     try {
       devices = await this.principalDevices(joiner.senderPrincipalId, 0);
@@ -882,6 +1018,9 @@ export class MessagingEngine {
   private async onDeviceRevoked(detail = "This browser's messaging device was revoked. Its local keys and history were erased."): Promise<void> {
     if (this.stopped) return;
     this.detachTransport();
+    this.persistentInstallation = false;
+    this.protectedLocalIdentity = false;
+    clearMediaUrls();
     await this.crypto?.call("wipe", { account: this.snapshot.identity!.principalId });
     // A sign-out in progress erases everything itself: never reopen (a reopened worker
     // would create a fresh wrapping key after the sign-out's wipe).
@@ -895,21 +1034,27 @@ export class MessagingEngine {
     this.connect();
   }
 
-  /** Logout: the local device and its history are erased and the device revoked. */
-  async signOut(): Promise<void> {
+  /** Ordinary sign-out locks a protected installation; explicit security removal stays terminal. */
+  async signOut(terminal = false): Promise<void> {
     // Background work stops first: the revocation below must not be "detected" by a poll
     // that would wipe and reopen the device store in parallel.
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.detachTransport();
+    lockOtherMessagingTabs();
+    // A transient bind/read failure cannot justify destroying already sealed history.
+    // Retaining ciphertext grants no network authority; the next sign-in must still prove
+    // the active server installation before it can open the protected identity.
+    const retain = !terminal && this.protectedLocalIdentity;
+    cancelLocalAuthenticatorPrompts();
     try {
-      if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
+      if (!retain && this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
       // The Meeting Service also revokes every Messaging session of the account at logout.
     }
-    if (this.snapshot.identity) await this.crypto?.call("wipe", { account: this.snapshot.identity.principalId }).catch(() => {});
-    this.stop();
+    if (!retain && this.snapshot.identity) await this.crypto?.call("wipe", { account: this.snapshot.identity.principalId }).catch(() => {});
+    this.endLocalSession();
   }
 
   // -------------------------------------------------------------- realtime
@@ -1180,8 +1325,8 @@ export class MessagingEngine {
     // The list carries at most two members; groups are read in full.
     for (const c of out) {
       if (c.contextClass !== "DIRECT") {
-        const m = await relay<{ members: { principalId: string; role?: string; state?: string }[] }>("GET", `v1/conversations/${c.conversationId}/members?limit=${PAGE}`).catch(() => null);
-        if (m) c.members = m.members.filter((x) => !x.state || x.state === "ACTIVE").map((x) => ({ principalId: x.principalId, role: x.role, state: x.state }));
+        const members = await this.conversationMembers(c.conversationId);
+        c.members = members.filter((x) => !x.state || x.state === "ACTIVE");
       }
     }
     const fresh = out.filter((c) => !this.server.has(c.conversationId));
@@ -1351,9 +1496,9 @@ export class MessagingEngine {
       for (const p of people) await relay("POST", `v1/conversations/${conv.conversationId}/members`, { principalId: p });
       for (const cfMeetId of contacts) await relay("POST", `v1/conversations/${conv.conversationId}/members`, { cfMeetId });
       if (contacts.length && profile === "PRIVATE_E2EE") {
-        const m = await relay<{ members: { principalId: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
+        const members = await this.conversationMembers(conv.conversationId);
         const me = this.snapshot.identity?.principalId;
-        principals = m.members.map((x) => x.principalId).filter((x) => x !== me);
+        principals = members.map((x) => x.principalId).filter((x) => x !== me);
       }
     } else if (contacts.length && profile === "PRIVATE_E2EE") {
       const me = this.snapshot.identity?.principalId;
@@ -1674,18 +1819,25 @@ export class MessagingEngine {
   private async addMissingDevices(conv: ServerConversation, urgent = false): Promise<void> {
     const id = conv.conversationId;
     const checks = urgent ? this.sendDeviceChecks : this.deviceChecks;
-    if (Date.now() - (checks.get(id) ?? 0) < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
+    if ((!urgent && Date.now() - (checks.get(id) ?? 0) < DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
     checks.set(id, Date.now());
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return;
     const inTree = new Set(await this.crypto.call<string[]>("members", { groupId: gid }));
-    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${id}/members?limit=${PAGE}`);
-    const active = (members.members ?? []).filter((m) => !m.state || m.state === "ACTIVE");
+    const active = (await this.conversationMembers(id)).filter((m) => !m.state || m.state === "ACTIVE");
+    let unavailable = false;
     const lookups = new Map(
-      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, urgent ? SEND_DEVICE_CHECK_MS : 0).catch(() => [] as ServerDevice[])] as const)),
+      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, 0).catch(() => {
+        unavailable = true;
+        return [] as ServerDevice[];
+      })] as const)),
     );
     const { principals: missing, deviceIds, activeInTree } = missingDevices(active, (p) => lookups.get(p) ?? [], inTree, this.snapshot.deviceId);
     const listed = [...lookups.values()].flat();
+    if (unavailable) {
+      checks.delete(id);
+      this.set({ detail: "Some devices are waiting for synchronization. Device discovery will retry." });
+    }
     // A device without published KeyPackages (e.g. a browser whose storage was cleared) is
     // not claimed again for a while; if it is alive it joins by itself.
     const newDevices = deviceIds
@@ -1718,9 +1870,9 @@ export class MessagingEngine {
     } catch (e) {
       // The group moved on (another commit won the epoch): catch up once and add again.
       // (Only before a send: during a sync the next sync catches up.)
-      if (!urgent || !(e instanceof MessagingApiError && e.status === 409)) return;
+      if (!urgent || !(e instanceof MessagingApiError && e.status === 409)) throw e;
       await this.sync(id);
-      added = await this.addDevicesOf(conv, missing, verified).catch(() => false);
+      added = await this.addDevicesOf(conv, missing, verified);
     }
     // A private group's name travels inside the group: new devices get it again.
     if (added) this.reshareGroupTitle(id);
@@ -1850,12 +2002,16 @@ export class MessagingEngine {
       let retrying = retryAfter !== null;
       for (let round = 0; round < 200; round++) {
         const after = retrying ? retryAfter! : await c.call<number>("cursor", { conversationId });
-        const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
-        if (!page.messages.length) break;
+        const page = await relay<{ messages: ServerMessage[]; visibleFromSequence?: number }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
+        if (!page.messages.length) {
+          if (page.visibleFromSequence !== undefined) await this.withMlsLock(() => c.call("processMessages", { conversationId, groupId: gid, visibleFromSequence: page.visibleFromSequence, messages: [] }));
+          break;
+        }
         this.noteMeta(conversationId, page.messages);
         const processed = await this.withMlsLock(() => c.call<{ records: StoredRecord[]; joiner?: PendingJoiner | null; blocked?: string | null }>("processMessages", {
           conversationId,
           groupId: gid,
+          visibleFromSequence: page.visibleFromSequence,
           allowedJoiners,
           rejectedJoiners,
           messages: page.messages.map((m) => ({
@@ -2534,7 +2690,10 @@ export class MessagingEngine {
     if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
     // The sender adds the others' newly registered devices before it encrypts, so the
     // message reaches every device they have (from the KeyPackages they published).
-    if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {});
+    if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {
+      this.sendDeviceChecks.delete(conversationId);
+      this.set({ detail: "Some devices are waiting for synchronization. Device enrollment will retry." });
+    });
     // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
     // hold it sealed on this device and send it automatically once it can (WhatsApp).
     if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {

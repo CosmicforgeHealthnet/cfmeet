@@ -495,6 +495,19 @@ export class WebDevice {
         return v1;
     }
     /**
+     * Secret checkpoint: the worker must encrypt this in a transfer-bound envelope.
+     * @returns {Uint8Array}
+     */
+    exportTransferSecret() {
+        const ret = wasm.webdevice_exportTransferSecret(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Joins the group by itself from its GroupInfo (an MLS external commit) and merges it
      * locally; refuses a GroupInfo of another group than `group_id`. Submit the commit;
      * if the Delivery Service refuses it, the worker restores its snapshot.
@@ -512,6 +525,9 @@ export class WebDevice {
             throw takeFromExternrefTable0(ret[1]);
         }
         return CommitResult.__wrap(ret[0]);
+    }
+    finishTransfer() {
+        wasm.webdevice_finishTransfer(this.__wbg_ptr);
     }
     /**
      * Restores a device from [`WebDevice::export_state`] (decrypted by the worker).
@@ -555,6 +571,17 @@ export class WebDevice {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.webdevice_hasGroup(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
+    }
+    /**
+     * @param {Uint8Array} bytes
+     */
+    importTransferSecret(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_importTransferSecret(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * Joins from a Welcome; refuses a Welcome of another group than `group_id`.
@@ -615,6 +642,37 @@ export class WebDevice {
         this.__wbg_ptr = ret[0];
         WebDeviceFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * @param {string[]} ctx
+     * @param {string} snapshot_id
+     * @param {bigint} expires_at
+     * @param {Uint8Array} manifest_digest
+     * @param {number} chunk_count
+     * @param {bigint} total_plaintext_bytes
+     * @param {number} object_index
+     * @param {Uint8Array} source_key
+     * @param {Uint8Array} sealed
+     * @returns {Uint8Array}
+     */
+    openHistoryObject(ctx, snapshot_id, expires_at, manifest_digest, chunk_count, total_plaintext_bytes, object_index, source_key, sealed) {
+        const ptr0 = passArrayJsValueToWasm0(ctx, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(snapshot_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(manifest_digest, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArray8ToWasm0(source_key, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArray8ToWasm0(sealed, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_openHistoryObject(this.__wbg_ptr, ptr0, len0, ptr1, len1, expires_at, ptr2, len2, chunk_count, total_plaintext_bytes, object_index, ptr3, len3, ptr4, len4);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v6;
     }
     /**
      * TARGET: verifies the source device signature and opens the archive. The transfer
@@ -705,6 +763,37 @@ export class WebDevice {
         return CommitResult.__wrap(ret[0]);
     }
     /**
+     * @param {string[]} ctx
+     * @param {string} snapshot_id
+     * @param {bigint} expires_at
+     * @param {Uint8Array} manifest_digest
+     * @param {number} chunk_count
+     * @param {bigint} total_plaintext_bytes
+     * @param {number} object_index
+     * @param {Uint8Array} transfer_key
+     * @param {Uint8Array} plaintext
+     * @returns {Uint8Array}
+     */
+    sealHistoryObject(ctx, snapshot_id, expires_at, manifest_digest, chunk_count, total_plaintext_bytes, object_index, transfer_key, plaintext) {
+        const ptr0 = passArrayJsValueToWasm0(ctx, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(snapshot_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(manifest_digest, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArray8ToWasm0(transfer_key, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_sealHistoryObject(this.__wbg_ptr, ptr0, len0, ptr1, len1, expires_at, ptr2, len2, chunk_count, total_plaintext_bytes, object_index, ptr3, len3, ptr4, len4);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v6;
+    }
+    /**
      * SOURCE: seals the history archive to the target's transfer key and signs it.
      * @param {string[]} ctx
      * @param {Uint8Array} transfer_key
@@ -725,6 +814,47 @@ export class WebDevice {
         var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v4;
+    }
+    /**
+     * @param {string[]} ctx
+     * @param {string} snapshot_id
+     * @param {bigint} expires_at
+     * @param {Uint8Array} manifest_digest
+     * @param {number} chunk_count
+     * @param {bigint} total_plaintext_bytes
+     * @param {number} next_index
+     * @returns {Uint8Array}
+     */
+    signHistoryCheckpoint(ctx, snapshot_id, expires_at, manifest_digest, chunk_count, total_plaintext_bytes, next_index) {
+        const ptr0 = passArrayJsValueToWasm0(ctx, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(snapshot_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(manifest_digest, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_signHistoryCheckpoint(this.__wbg_ptr, ptr0, len0, ptr1, len1, expires_at, ptr2, len2, chunk_count, total_plaintext_bytes, next_index);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v4;
+    }
+    /**
+     * @param {string[]} ctx
+     * @param {bigint} expires_at
+     * @returns {Uint8Array}
+     */
+    signTransferRequestV2(ctx, expires_at) {
+        const ptr0 = passArrayJsValueToWasm0(ctx, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_signTransferRequestV2(this.__wbg_ptr, ptr0, len0, expires_at);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * TARGET: signs the transfer request with the device key.
@@ -919,6 +1049,30 @@ export function message_aad(tenant, application, environment, conversation, clie
     var v7 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v7;
+}
+
+/**
+ * @param {Uint8Array} target_key
+ * @param {string[]} ctx
+ * @param {Uint8Array} transfer_key
+ * @param {bigint} expires_at
+ * @param {Uint8Array} signature
+ * @returns {boolean}
+ */
+export function verifyTransferRequestV2(target_key, ctx, transfer_key, expires_at, signature) {
+    const ptr0 = passArray8ToWasm0(target_key, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayJsValueToWasm0(ctx, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(transfer_key, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(signature, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.verifyTransferRequestV2(ptr0, len0, ptr1, len1, ptr2, len2, expires_at, ptr3, len3);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
 }
 
 /**

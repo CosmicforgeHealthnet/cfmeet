@@ -569,7 +569,40 @@ pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Resu
     ShortIdsMigrator::up(db, None).await?;
     ContactsAuditMigrator::up(db, None).await?;
     AdminOperationsMigrator::up(db, None).await?;
-    AdminBridgeEventsMigrator::up(db, None).await
+    AdminBridgeEventsMigrator::up(db, None).await?;
+    MessagingInstallationsMigrator::up(db, None).await
+}
+
+/// Opt-in installation bindings use their own history, preserving old-image readiness.
+pub struct MessagingInstallationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MessagingInstallationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(MessagingInstallations)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_messaging_installation_migrations").into_iden()
+    }
+}
+struct MessagingInstallations;
+impl MigrationName for MessagingInstallations {
+    fn name(&self) -> &str {
+        "m20261124_000001_messaging_installations"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for MessagingInstallations {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/013_messaging_installations.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Messaging installation bindings are forward-only".into(),
+        ))
+    }
 }
 /// Everything this image needs: every earlier history and the N10 preference-authority
 /// one.

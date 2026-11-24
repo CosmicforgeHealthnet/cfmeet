@@ -17903,7 +17903,7 @@
           }
         ],
         "x-cfmeet-required-scope": "conversations.manage",
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER â†” ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -18912,7 +18912,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
+        "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (Â§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -19996,7 +19996,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY — search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
+        "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY â€” search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -32325,7 +32325,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size â‰¤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -33419,7 +33419,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Publishes 1–20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
+        "description": "Scope messages.send. Publishes 1â€“20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -34093,6 +34093,78 @@
         ]
       }
     },
+    "/v1/messaging/history-transfer-capabilities": {
+      "get": {
+        "operationId": "getHistoryTransferCapabilities",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Discover deployed history-transfer versions and finite bounds",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Discover deployed history-transfer versions and finite bounds.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferCapabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.getHistoryTransferCapabilities",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
     "/v1/messaging/history-transfers": {
       "post": {
         "operationId": "createHistoryTransfer",
@@ -34238,6 +34310,852 @@
         },
         "x-cfmeet-service": "messaging",
         "x-cfmeet-route-id": "messaging.listHistoryTransfers",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2": {
+      "post": {
+        "operationId": "createHistoryTransferV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Request an approved resumable transfer",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Request an approved resumable transfer.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferRequestV2"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.createHistoryTransferV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      },
+      "get": {
+        "operationId": "listHistoryTransfersV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "List recent device transfers",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. List recent device transfers.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2List"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.listHistoryTransfersV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}": {
+      "get": {
+        "operationId": "getHistoryTransferV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Read transfer progress",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Read transfer progress.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.getHistoryTransferV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}/cancel": {
+      "post": {
+        "operationId": "cancelHistoryTransferV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Cancel and delete relay objects",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Cancel and delete relay objects.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.cancelHistoryTransferV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}/checkpoint": {
+      "post": {
+        "operationId": "checkpointHistoryTransferV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Record signed durable target progress",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Record signed durable target progress.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryCheckpointV2"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.checkpointHistoryTransferV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}": {
+      "put": {
+        "operationId": "putHistoryChunkV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Upload an immutable bounded chunk idempotently",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Upload an immutable bounded chunk idempotently.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "chunkIndex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4095
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryChunkUploadV2"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.putHistoryChunkV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      },
+      "get": {
+        "operationId": "getHistoryChunkV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Fetch an indexed ciphertext chunk",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Fetch an indexed ciphertext chunk.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "chunkIndex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4095
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryObjectV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.getHistoryChunkV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}/complete": {
+      "post": {
+        "operationId": "completeHistoryTransferV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Complete only after all chunks are durably acknowledged and delete relay objects",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Complete only after all chunks are durably acknowledged and delete relay objects.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.completeHistoryTransferV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/history-transfers-v2/{transferId}/manifest": {
+      "put": {
+        "operationId": "putHistoryManifestV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Publish an immutable source-authenticated encrypted manifest",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Publish an immutable source-authenticated encrypted manifest.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryManifestUploadV2"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.putHistoryManifestV2",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      },
+      "get": {
+        "operationId": "getHistoryManifestV2",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Fetch the sealed manifest",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Negotiated v2 history relay. Both source and target must remain active devices of the acting principal; expiry, revocation and tenant/application/environment boundaries are enforced. Server stores ciphertext only; no recovery keys or MLS secrets. Fetch the sealed manifest.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryObjectV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.getHistoryManifestV2",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
@@ -35909,7 +36827,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H §106).",
+        "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H Â§106).",
         "responses": {
           "200": {
             "description": "OK.",
@@ -36033,7 +36951,7 @@
             "messaging.userToken": []
           }
         ],
-        "description": "ADR 0063 (§6 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (§6 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
+        "description": "ADR 0063 (Â§6 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (Â§6 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
         "parameters": [
           {
             "name": "installationId",
@@ -36099,7 +37017,7 @@
             "messaging.userToken": []
           }
         ],
-        "description": "ADR 0063 (§6 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
+        "description": "ADR 0063 (Â§6 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
         "parameters": [
           {
             "name": "installationId",
@@ -36159,7 +37077,7 @@
             "messaging.userToken": []
           }
         ],
-        "description": "ADR 0062 (build contract §4): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
+        "description": "ADR 0062 (build contract Â§4): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
         "parameters": [],
         "responses": {
           "201": {
@@ -69287,7 +70205,7 @@
           },
           "invite": {
             "type": "boolean",
-            "description": "§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit."
+            "description": "Â§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit."
           },
           "cfMeetId": {
             "type": "string",
@@ -69385,7 +70303,7 @@
                 },
                 "requestsRequireAcceptance": {
                   "type": "boolean",
-                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             }
@@ -71199,7 +72117,7 @@
                 "type": "null"
               }
             ],
-            "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
+            "description": "Appendix K: false â€” no read receipts in this conversation; null â€” the environment policy decides."
           },
           "title": {
             "oneOf": [
@@ -71334,7 +72252,7 @@
           "applicationId",
           "environmentId"
         ],
-        "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117)."
+        "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (Â§117)."
       },
       "messaging.messaging.common.v1.ConversationInbox": {
         "type": "object",
@@ -71370,7 +72288,7 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and â€” B3, 1.34.0 â€” PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
           },
           "archived": {
             "type": "boolean",
@@ -71560,13 +72478,13 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 2592000,
-            "description": "§38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED."
+            "description": "Â§38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED."
           },
           "retentionSeconds": {
             "type": "integer",
             "minimum": 60,
             "maximum": 3153600000,
-            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited."
+            "description": "Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited."
           },
           "predecessorConversationId": {
             "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid",
@@ -72116,7 +73034,7 @@
                 },
                 "requestsRequireAcceptance": {
                   "type": "boolean",
-                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             },
@@ -72715,6 +73633,220 @@
           }
         }
       },
+      "messaging.messaging.common.v1.HistoryCheckpointV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nextIndex",
+          "signature"
+        ],
+        "properties": {
+          "nextIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          }
+        },
+        "description": "Target signs history_transfer::paged::sign_checkpoint only after records and local progress for every index below nextIndex are durably committed. The relay verifies the signature and refuses missing indexes; progress is monotonic."
+      },
+      "messaging.messaging.common.v1.HistoryChunkUploadV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sealedChunk"
+        ],
+        "properties": {
+          "sealedChunk": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 349688,
+            "description": "Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing."
+          }
+        },
+        "description": "Immutable indexed object, authenticated to the transfer/scope/snapshot/expiry/manifest/count/total/index. Identical PUT retries succeed; a changed ciphertext conflicts."
+      },
+      "messaging.messaging.common.v1.HistoryManifestUploadV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId",
+          "manifestDigest",
+          "chunkCount",
+          "totalPlaintextBytes",
+          "sealedManifest"
+        ],
+        "properties": {
+          "snapshotId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "manifestDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "chunkCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "totalPlaintextBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1073741824
+          },
+          "sealedManifest": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 349688,
+            "description": "Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing."
+          }
+        },
+        "description": "Immutable source descriptor and sealed manifest. Digest is SHA-256 of exact manifest plaintext, repeated in HPKE AAD and signatures for all chunks. totalPlaintextBytes is the sum of chunk plaintext bytes excluding the manifest. Each chunk is at most 256 KiB; manifests must state source coverage, gaps, ordered plaintext digests and record identity/visibility schema. Never export private MLS state."
+      },
+      "messaging.messaging.common.v1.HistoryObjectV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "principalId",
+          "sourceDeviceId",
+          "targetDeviceId",
+          "transferPublicKey",
+          "requestSignature",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "endedAt",
+          "endReason",
+          "protocolVersion",
+          "snapshotId",
+          "manifestDigest",
+          "chunkCount",
+          "totalPlaintextBytes",
+          "storedBytes",
+          "nextIndex",
+          "objectIndex",
+          "sealedObject",
+          "sealedSha256"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "targetDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "transferPublicKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "requestSignature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          },
+          "status": {
+            "enum": [
+              "REQUESTED",
+              "SEALED",
+              "COMPLETED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "protocolVersion": {
+            "enum": [
+              2
+            ]
+          },
+          "snapshotId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "manifestDigest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "chunkCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "totalPlaintextBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824
+          },
+          "storedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1074500000
+          },
+          "nextIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          },
+          "objectIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "sealedObject": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 349688,
+            "description": "Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing."
+          },
+          "sealedSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "description": "An immutable sealed manifest (index 4294967295) or chunk. The client must verify source signature, bindings, manifest plaintext digest and each ordered chunk plaintext digest before durable import. The public ciphertext digest alone is not authenticity."
+      },
       "messaging.messaging.common.v1.HistoryTransfer": {
         "type": "object",
         "additionalProperties": false,
@@ -72820,6 +73952,58 @@
           }
         }
       },
+      "messaging.messaging.common.v1.HistoryTransferCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "historyTransferVersions",
+          "maxChunkPlaintextBytes",
+          "maxChunks",
+          "maxTotalPlaintextBytes",
+          "maxTtlSeconds",
+          "sourceApprovalRequired"
+        ],
+        "properties": {
+          "historyTransferVersions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                1,
+                2
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          },
+          "maxChunkPlaintextBytes": {
+            "enum": [
+              262144
+            ]
+          },
+          "maxChunks": {
+            "enum": [
+              4096
+            ]
+          },
+          "maxTotalPlaintextBytes": {
+            "enum": [
+              1073741824
+            ]
+          },
+          "maxTtlSeconds": {
+            "enum": [
+              3600
+            ]
+          },
+          "sourceApprovalRequired": {
+            "enum": [
+              true
+            ]
+          }
+        },
+        "description": "Capabilities of this deployment; v2 is absent until its independent additive migration is ready. A version does not waive source/device approval."
+      },
       "messaging.messaging.common.v1.HistoryTransferList": {
         "type": "object",
         "additionalProperties": false,
@@ -72874,6 +74058,185 @@
           }
         },
         "description": "A new device's request for the history its existing device holds (ADR 0052 AD-07)."
+      },
+      "messaging.messaging.common.v1.HistoryTransferRequestV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "sourceDeviceId",
+          "targetDeviceId",
+          "transferPublicKey",
+          "expiresAt",
+          "requestSignature"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "targetDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "transferPublicKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url X25519 HPKE public key (32 bytes) generated by the TARGET device for this transfer only."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "At most one hour from now (whole seconds are signed)."
+          },
+          "requestSignature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "description": "Target Ed25519 signature over history_transfer::paged::request_signing_input (v2 domain; cannot be downgraded to v1)."
+          }
+        },
+        "description": "Negotiated v2 request; source approval/comparison remains required before disclosing history."
+      },
+      "messaging.messaging.common.v1.HistoryTransferV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "principalId",
+          "sourceDeviceId",
+          "targetDeviceId",
+          "transferPublicKey",
+          "requestSignature",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "endedAt",
+          "endReason",
+          "protocolVersion",
+          "snapshotId",
+          "manifestDigest",
+          "chunkCount",
+          "totalPlaintextBytes",
+          "storedBytes",
+          "nextIndex"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "targetDeviceId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "transferPublicKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "requestSignature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          },
+          "status": {
+            "enum": [
+              "REQUESTED",
+              "SEALED",
+              "COMPLETED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "protocolVersion": {
+            "enum": [
+              2
+            ]
+          },
+          "snapshotId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "manifestDigest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "chunkCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "totalPlaintextBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824
+          },
+          "storedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1074500000
+          },
+          "nextIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          }
+        },
+        "description": "Resumable ciphertext relay. SEALED means an immutable manifest is published; chunks may still be uploading. Completion requires signed durable target checkpoints covering every chunk. COMPLETE/PARTIAL/EMPTY archive coverage remains inside the authenticated encrypted manifest; this state never proves complete account history."
+      },
+      "messaging.messaging.common.v1.HistoryTransferV2List": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transfers"
+        ],
+        "properties": {
+          "transfers": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/messaging.messaging.common.v1.HistoryTransferV2"
+            }
+          }
+        },
+        "description": "Most recent transfers of an active device."
       },
       "messaging.messaging.common.v1.InvitationList": {
         "type": "object",
@@ -73639,7 +75002,7 @@
           "READ_ONLY",
           "BOT_SERVICE"
         ],
-        "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
+        "description": "Â§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
       },
       "messaging.messaging.common.v1.Message": {
         "type": "object",
@@ -73991,6 +75354,11 @@
                 "type": "null"
               }
             ]
+          },
+          "visibleFromSequence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Authoritative lower sequence boundary of this principal membership window. MLS sync may advance over earlier rows only when this boundary proves they are not visible. Absent on older servers."
           }
         },
         "required": [
@@ -74406,7 +75774,7 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time",
-            "description": "§49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it."
+            "description": "Â§49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it."
           }
         },
         "description": "Optional body of PUT /v1/conversations/{conversationId}/pins/{messageId}; an empty body pins without expiry."
@@ -75783,7 +77151,7 @@
             "items": {
               "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
             },
-            "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+            "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too â€” only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
           },
           "frankingCommitment": {
             "type": "string",
@@ -75888,7 +77256,7 @@
         }
       },
       "messaging.messaging.common.v1.SmsBridgeDisclosure": {
-        "description": "Part V H §106: the disclosure a bridge creator must acknowledge (version-pinned).",
+        "description": "Part V H Â§106: the disclosure a bridge creator must acknowledge (version-pinned).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -75941,7 +77309,7 @@
         }
       },
       "messaging.messaging.common.v1.SmsTransport": {
-        "description": "Carrier state of one bridged message — separate from in-app delivery and read state (§110).",
+        "description": "Carrier state of one bridged message â€” separate from in-app delivery and read state (Â§110).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -76078,7 +77446,7 @@
             "description": "Replies from others after the caller's read cursor."
           }
         },
-        "description": "§47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden)."
+        "description": "Â§47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden)."
       },
       "messaging.messaging.common.v1.ThumbnailGrant": {
         "type": "object",
@@ -76297,7 +77665,7 @@
           "signature": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{86}$",
-            "description": "base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) — packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5)."
+            "description": "base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) â€” packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5)."
           },
           "witnessStatus": {
             "enum": [
@@ -76413,7 +77781,7 @@
                 "type": "null"
               }
             ],
-            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit — by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
+            "description": "Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit â€” by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
           },
           "title": {
             "oneOf": [
@@ -76526,7 +77894,7 @@
           "totals",
           "pricing"
         ],
-        "description": "Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost."
+        "description": "Usage facts of the caller's application environment (Part V I Â§129): quantities only, no price, rate or cost."
       },
       "messaging.messaging.common.v1.UserPushRegistration": {
         "type": "object",
@@ -76712,7 +78080,7 @@
           "signature": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{86}$",
-            "description": "base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) — packages/messaging-crypto transparency::witness_cosignature_input."
+            "description": "base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) â€” packages/messaging-crypto transparency::witness_cosignature_input."
           }
         },
         "description": "One witness's cosignature of a tree head."
@@ -83733,7 +85101,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct, §105). Accepted by POST /v1/realtime/tickets and, as an alternative to customerCredential, by the member operations that list it: the token's session (device ACTIVE, session ACTIVE and unexpired, principal ACTIVE) is the caller, acting only for its own principal and own device (CF-Acting-Principal may only repeat it). Every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED."
+        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct, Â§105). Accepted by POST /v1/realtime/tickets and, as an alternative to customerCredential, by the member operations that list it: the token's session (device ACTIVE, session ACTIVE and unexpired, principal ACTIVE) is the caller, acting only for its own principal and own device (CF-Acting-Principal may only repeat it). Every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED."
       },
       "messaging.customerCredential": {
         "type": "http",
@@ -83744,7 +85112,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "cfoa | cfob",
-        "description": "A CF Meet App's OAuth access token (`cfoa_…`, acting for the granting CF Meet user) or bot token (`cfob_…`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) — ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
+        "description": "A CF Meet App's OAuth access token (`cfoa_â€¦`, acting for the granting CF Meet user) or bot token (`cfob_â€¦`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) â€” ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
       },
       "messaging.realtimeTicket": {
         "type": "apiKey",

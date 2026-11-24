@@ -6541,7 +6541,7 @@ export namespace Messaging {
     principalId?: Uuid;
     /** BOT_SERVICE only for BOT_OR_SERVICE principals (BOT_SERVICE_REQUIRES_BOT_PRINCIPAL); bots are never ADMIN / MODERATOR (BOT_CANNOT_ADMINISTER). */
     role?: "MEMBER" | "ADMIN" | "MODERATOR" | "READ_ONLY" | "BOT_SERVICE";
-    /** §35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit. */
+    /** Â§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit. */
     invite?: boolean;
     /** Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged. */
     cfMeetId?: string;
@@ -6565,7 +6565,7 @@ export namespace Messaging {
         retentionDays?: number;
         /** Requires MANAGED among allowedProfiles; SMS is never end-to-end encrypted. */
         smsBridgeEligible?: boolean;
-        /** Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED). */
+        /** Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED). */
         requestsRequireAcceptance?: boolean;
       } };
     sendingEnabled?: boolean;
@@ -6923,7 +6923,7 @@ export namespace Messaging {
     retentionSeconds: number | null;
     predecessorConversationId: Uuid | null;
     successorConversationId: Uuid | null;
-    /** Appendix K: false — no read receipts in this conversation; null — the environment policy decides. */
+    /** Appendix K: false â€” no read receipts in this conversation; null â€” the environment policy decides. */
     readReceipts: boolean | null;
     /** Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group). */
     title?: string | null;
@@ -6933,7 +6933,7 @@ export namespace Messaging {
     /** S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows. */
     announcementOnly?: boolean;
   };
-  /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
+  /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (Â§117). */
   export type ConversationEvent = {
     eventId: string;
     type: string;
@@ -6954,7 +6954,7 @@ export namespace Messaging {
     lastMessage: ConversationLastMessage | null;
     /** Active application messages from others after the member's read cursor, inside its history window, not hidden for it. */
     unreadCount: number;
-    /** Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext). */
+    /** Unread messages that mention the member (the sender's declared mention ids: MANAGED and â€” B3, 1.34.0 â€” PRIVATE_E2EE, whose mention text stays inside the ciphertext). */
     mentionCount: number;
     /** F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members. */
     archived?: boolean;
@@ -7003,9 +7003,9 @@ export namespace Messaging {
     expectedPolicyVersion?: number;
     /** Regulated contexts: creating a MANAGED conversation requires acknowledging that the server can read its content (refused otherwise with MANAGED_DISCLOSURE_REQUIRED). */
     managedDisclosureAcknowledged?: boolean;
-    /** §38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED. */
+    /** Â§38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED. */
     expiryGraceSeconds?: number;
-    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. */
+    /** Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. */
     retentionSeconds?: number;
     /** Appendix G: create a deliberate SUCCESSOR of this conversation (the only way to move to another security profile). The caller must be an ACTIVE OWNER / ADMIN of it; same context class (DIRECT: the same two principals); never a context-bound conversation (SUCCESSOR_CONTEXT_BOUND); one successor each (SUCCESSOR_EXISTS). No content and no members are copied. */
     predecessorConversationId?: Uuid;
@@ -7109,7 +7109,7 @@ export namespace Messaging {
         exportsEnabled: boolean;
         attachmentsEnabled: boolean | null;
         retentionDays: number | null;
-        /** Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED). */
+        /** Appendix K (DIRECT only): a new direct conversation is a message request â€” the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED). */
         requestsRequireAcceptance: boolean;
       } };
     sendingEnabled: boolean;
@@ -7219,6 +7219,50 @@ export namespace Messaging {
     targetConversationId: Uuid;
     clientMessageId: Uuid;
   };
+  /** Target signs history_transfer::paged::sign_checkpoint only after records and local progress for every index below nextIndex are durably committed. The relay verifies the signature and refuses missing indexes; progress is monotonic. */
+  export type HistoryCheckpointV2 = {
+    nextIndex: number;
+    signature: string;
+  };
+  /** Immutable indexed object, authenticated to the transfer/scope/snapshot/expiry/manifest/count/total/index. Identical PUT retries succeed; a changed ciphertext conflicts. */
+  export type HistoryChunkUploadV2 = {
+    /** Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing. */
+    sealedChunk: string;
+  };
+  /** Immutable source descriptor and sealed manifest. Digest is SHA-256 of exact manifest plaintext, repeated in HPKE AAD and signatures for all chunks. totalPlaintextBytes is the sum of chunk plaintext bytes excluding the manifest. Each chunk is at most 256 KiB; manifests must state source coverage, gaps, ordered plaintext digests and record identity/visibility schema. Never export private MLS state. */
+  export type HistoryManifestUploadV2 = {
+    snapshotId: Uuid;
+    manifestDigest: string;
+    chunkCount: number;
+    totalPlaintextBytes: number;
+    /** Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing. */
+    sealedManifest: string;
+  };
+  /** An immutable sealed manifest (index 4294967295) or chunk. The client must verify source signature, bindings, manifest plaintext digest and each ordered chunk plaintext digest before durable import. The public ciphertext digest alone is not authenticity. */
+  export type HistoryObjectV2 = {
+    transferId: Uuid;
+    principalId: Uuid;
+    sourceDeviceId: Uuid;
+    targetDeviceId: Uuid;
+    transferPublicKey: string;
+    requestSignature: string;
+    status: "REQUESTED" | "SEALED" | "COMPLETED" | "CANCELLED" | "EXPIRED";
+    expiresAt: string;
+    createdAt: string;
+    endedAt: string | null;
+    endReason: string | null;
+    protocolVersion: 2;
+    snapshotId: string | null;
+    manifestDigest: string | null;
+    chunkCount: number | null;
+    totalPlaintextBytes: number | null;
+    storedBytes: number;
+    nextIndex: number;
+    objectIndex: number;
+    /** Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing. */
+    sealedObject: string;
+    sealedSha256: string;
+  };
   /** A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry. */
   export type HistoryTransfer = {
     transferId: Uuid;
@@ -7239,6 +7283,15 @@ export namespace Messaging {
   export type HistoryTransferCancel = {
     reason?: string;
   };
+  /** Capabilities of this deployment; v2 is absent until its independent additive migration is ready. A version does not waive source/device approval. */
+  export type HistoryTransferCapabilities = {
+    historyTransferVersions: Array<1 | 2>;
+    maxChunkPlaintextBytes: 262144;
+    maxChunks: 4096;
+    maxTotalPlaintextBytes: 1073741824;
+    maxTtlSeconds: 3600;
+    sourceApprovalRequired: true;
+  };
   export type HistoryTransferList = {
     transfers: Array<HistoryTransfer>;
   };
@@ -7253,6 +7306,43 @@ export namespace Messaging {
     expiresAt: string;
     /** Ed25519 signature by the TARGET device key over packages/messaging-crypto history_transfer::request_signing_input. */
     requestSignature: string;
+  };
+  /** Negotiated v2 request; source approval/comparison remains required before disclosing history. */
+  export type HistoryTransferRequestV2 = {
+    transferId: Uuid;
+    sourceDeviceId: Uuid;
+    targetDeviceId: Uuid;
+    /** base64url X25519 HPKE public key (32 bytes) generated by the TARGET device for this transfer only. */
+    transferPublicKey: string;
+    /** At most one hour from now (whole seconds are signed). */
+    expiresAt: string;
+    /** Target Ed25519 signature over history_transfer::paged::request_signing_input (v2 domain; cannot be downgraded to v1). */
+    requestSignature: string;
+  };
+  /** Resumable ciphertext relay. SEALED means an immutable manifest is published; chunks may still be uploading. Completion requires signed durable target checkpoints covering every chunk. COMPLETE/PARTIAL/EMPTY archive coverage remains inside the authenticated encrypted manifest; this state never proves complete account history. */
+  export type HistoryTransferV2 = {
+    transferId: Uuid;
+    principalId: Uuid;
+    sourceDeviceId: Uuid;
+    targetDeviceId: Uuid;
+    transferPublicKey: string;
+    requestSignature: string;
+    status: "REQUESTED" | "SEALED" | "COMPLETED" | "CANCELLED" | "EXPIRED";
+    expiresAt: string;
+    createdAt: string;
+    endedAt: string | null;
+    endReason: string | null;
+    protocolVersion: 2;
+    snapshotId: string | null;
+    manifestDigest: string | null;
+    chunkCount: number | null;
+    totalPlaintextBytes: number | null;
+    storedBytes: number;
+    nextIndex: number;
+  };
+  /** Most recent transfers of an active device. */
+  export type HistoryTransferV2List = {
+    transfers: Array<HistoryTransferV2>;
   };
   /** The acting principal's open (unexpired) invitations to ACTIVE conversations, newest first. */
   export type InvitationList = {
@@ -7385,7 +7475,7 @@ export namespace Messaging {
     /** PRIVATE_E2EE: the server-side removal is authorization only; a member's MLS commit removing the devices completes the cryptographic exclusion. */
     cryptographicRemoval: "PENDING_MEMBER_COMMIT" | "NOT_APPLICABLE";
   };
-  /** §30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only). */
+  /** Â§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only). */
   export type MemberRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "READ_ONLY" | "BOT_SERVICE";
   /** A message. Content (ciphertext or MANAGED text) only while ACTIVE. e2ee for PRIVATE_E2EE rows, managed for MANAGED rows; the acceptance digest binds the server sequence and id to the ciphertext (cfmeet-messaging-acceptance:v2). */
   export type Message = {
@@ -7452,6 +7542,8 @@ export namespace Messaging {
     messages: Array<Message>;
     nextAfterSequence: number | null;
     nextBeforeSequence?: number | null;
+    /** Authoritative lower sequence boundary of this principal membership window. MLS sync may advance over earlier rows only when this boundary proves they are not visible. Absent on older servers. */
+    visibleFromSequence?: number;
   };
   /** The kept prior versions of a MANAGED message, oldest first (revision n = the text after n edits). Visible to members only when editing.revisionHistoryVisible; empty for a deleted message. */
   export type MessageRevisionPage = {
@@ -7529,7 +7621,7 @@ export namespace Messaging {
   };
   /** Optional body of PUT /v1/conversations/{conversationId}/pins/{messageId}; an empty body pins without expiry. */
   export type PinRequest = {
-    /** §49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it. */
+    /** Â§49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it. */
     expiresAt?: string;
   };
   export type PolicyUpdateRequest = {
@@ -7798,7 +7890,7 @@ export namespace Messaging {
     /** MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext). */
     managedPresentation?: "STANDARD" | "ANNOUNCEMENT";
     replyToMessageId?: Uuid;
-    /** Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must … */
+    /** Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too â€” only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must … */
     mentionedPrincipalIds?: Array<Uuid>;
     /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
     frankingCommitment?: string;
@@ -7822,7 +7914,7 @@ export namespace Messaging {
     createdAt: string;
     closedAt: string | null;
   };
-  /** Part V H §106: the disclosure a bridge creator must acknowledge (version-pinned). */
+  /** Part V H Â§106: the disclosure a bridge creator must acknowledge (version-pinned). */
   export type SmsBridgeDisclosure = {
     version: string;
     text: string;
@@ -7835,7 +7927,7 @@ export namespace Messaging {
   export type SmsBridgeList = {
     bridges: Array<SmsBridge>;
   };
-  /** Carrier state of one bridged message — separate from in-app delivery and read state (§110). */
+  /** Carrier state of one bridged message â€” separate from in-app delivery and read state (Â§110). */
   export type SmsTransport = {
     messageId: Uuid;
     bridgeId: Uuid;
@@ -7848,7 +7940,7 @@ export namespace Messaging {
     updatedAt: string;
     inAppStateIndependent: true;
   };
-  /** §47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden). */
+  /** Â§47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden). */
   export type ThreadSummary = {
     conversationId: Uuid;
     rootMessageId: Uuid;
@@ -7904,7 +7996,7 @@ export namespace Messaging {
     signatureAlgorithm: "Ed25519";
     /** First 8 bytes (hex) of SHA-256 of the log's Ed25519 public key, which clients pin out of band. */
     keyId: string;
-    /** base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) — packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5). */
+    /** base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) â€” packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5). */
     signature: string;
     /** WITNESSED only when at least witnessQuorum distinct configured witnesses cosigned exactly this head (verify with packages/messaging-crypto transparency::verify_witnessed_tree_head against witness keys you pin). UNWITNESSED: verifiable but not, by itself, anti-equivocation. */
     witnessStatus: "UNWITNESSED" | "WITNESSED";
@@ -7931,7 +8023,7 @@ export namespace Messaging {
     lifecycleState?: "ACTIVE" | "LOCKED" | "CLOSED" | "ARCHIVED" | "DELETED";
     reason?: string;
     expiresAt?: string;
-    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that … */
+    /** Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that … */
     retentionSeconds?: number | null;
     /** Section 13: a new display title; null clears it (MANAGED only, owner). */
     title?: string | null;
@@ -7940,7 +8032,7 @@ export namespace Messaging {
     /** S13 (owner): announcement-only on / off; GROUP and CHANNEL only. */
     announcementOnly?: boolean;
   };
-  /** Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost. */
+  /** Usage facts of the caller's application environment (Part V I Â§129): quantities only, no price, rate or cost. */
   export type UsageSummary = {
     from: string;
     to: string;
@@ -8001,7 +8093,7 @@ export namespace Messaging {
     witnessId: string;
     /** When the witness cosigned (Unix microseconds); signed. */
     cosignedAtMicros: number;
-    /** base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) — packages/messaging-crypto transparency::witness_cosignature_input. */
+    /** base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) â€” packages/messaging-crypto transparency::witness_cosignature_input. */
     signature: string;
   };
 
@@ -8037,10 +8129,20 @@ export namespace Messaging {
       params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: HistoryTransferCancel };
       response: HistoryTransfer;
     };
+    /** POST /v1/messaging/history-transfers-v2/{transferId}/cancel — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    cancelHistoryTransferV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryTransferV2;
+    };
     /** PATCH /v1/conversations/{conversationId}/members/{principalId} — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     changeMemberRole: {
       params: { path: { conversationId: Uuid; principalId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: RoleChangeRequest };
       response: RoleChange;
+    };
+    /** POST /v1/messaging/history-transfers-v2/{transferId}/checkpoint — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    checkpointHistoryTransferV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: HistoryCheckpointV2 };
+      response: HistoryTransferV2;
     };
     /** POST /v1/conversations/{conversationId}/mls/key-package-claims — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
     claimKeyPackages: {
@@ -8056,6 +8158,11 @@ export namespace Messaging {
     completeHistoryTransfer: {
       params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: HistoryTransfer;
+    };
+    /** POST /v1/messaging/history-transfers-v2/{transferId}/complete — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    completeHistoryTransferV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryTransferV2;
     };
     /** POST /v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
     consumeWelcome: {
@@ -8096,6 +8203,11 @@ export namespace Messaging {
     createHistoryTransfer: {
       params: { headers: { "cf-acting-principal": Uuid }; body: HistoryTransferRequest };
       response: HistoryTransfer;
+    };
+    /** POST /v1/messaging/history-transfers-v2 — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    createHistoryTransferV2: {
+      params: { headers: { "cf-acting-principal": Uuid }; body: HistoryTransferRequestV2 };
+      response: HistoryTransferV2;
     };
     /** POST /v1/conversations/{conversationId}/invite-links — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createInviteLink: {
@@ -8182,10 +8294,30 @@ export namespace Messaging {
       params: { path: { exportId: Uuid } };
       response: Export;
     };
+    /** GET /v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex} — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
+    getHistoryChunkV2: {
+      params: { path: { transferId: Uuid; chunkIndex: number }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryObjectV2;
+    };
+    /** GET /v1/messaging/history-transfers-v2/{transferId}/manifest — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
+    getHistoryManifestV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryObjectV2;
+    };
     /** GET /v1/messaging/history-transfers/{transferId} — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     getHistoryTransfer: {
       params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: HistoryTransfer;
+    };
+    /** GET /v1/messaging/history-transfer-capabilities — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
+    getHistoryTransferCapabilities: {
+      params: { headers: { "cf-acting-principal": Uuid } };
+      response: HistoryTransferCapabilities;
+    };
+    /** GET /v1/messaging/history-transfers-v2/{transferId} — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
+    getHistoryTransferV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryTransferV2;
     };
     /** GET /v1/messaging/key-transparency/proofs — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     getKeyTransparencyProofs: {
@@ -8308,6 +8440,11 @@ export namespace Messaging {
       params: { query: { deviceId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: HistoryTransferList;
     };
+    /** GET /v1/messaging/history-transfers-v2 — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
+    listHistoryTransfersV2: {
+      params: { query: { deviceId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: HistoryTransferV2List;
+    };
     /** GET /v1/messaging/invitations — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     listInvitations: {
       params: { headers: { "cf-acting-principal": Uuid } };
@@ -8383,6 +8520,16 @@ export namespace Messaging {
     publishKeyPackages: {
       params: { path: { deviceId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: PublishKeyPackagesRequest };
       response: PublishKeyPackagesResponse;
+    };
+    /** PUT /v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex} — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry IDEMPOTENT */
+    putHistoryChunkV2: {
+      params: { path: { transferId: Uuid; chunkIndex: number }; headers: { "cf-acting-principal": Uuid }; body: HistoryChunkUploadV2 };
+      response: HistoryTransferV2;
+    };
+    /** PUT /v1/messaging/history-transfers-v2/{transferId}/manifest — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry IDEMPOTENT */
+    putHistoryManifestV2: {
+      params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: HistoryManifestUploadV2 };
+      response: HistoryTransferV2;
     };
     /** PUT /v1/messaging/presence/settings — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry IDEMPOTENT */
     putPresenceSettings: {

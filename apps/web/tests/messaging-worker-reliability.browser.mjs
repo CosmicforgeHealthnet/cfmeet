@@ -22,15 +22,17 @@ const role=r=>Object.entries(manifest.files).find(([,v])=>v.role===r)[0];
 const server=createServer(async(req,res)=>{try{const name=new URL(req.url,'http://local').pathname.slice(1); if(!name){res.end('<html></html>');return;} if(name==='test-fault-worker.js') {
  res.setHeader('Content-Type','text/javascript');
  res.end(`import '/${role('worker')}';
- let armed=false;
+ let armed=false,protectionAbort=false;
  const transaction=IDBDatabase.prototype.transaction;
  IDBDatabase.prototype.transaction=function(stores,mode,...rest){
    const tx=transaction.call(this,stores,mode,...rest);
-   if(armed&&mode==='readwrite'&&Array.from(typeof stores==='string'?[stores]:stores).includes('devices')){armed=false;queueMicrotask(()=>tx.abort());}
+   const names=Array.from(typeof stores==='string'?[stores]:stores);
+   if(armed&&mode==='readwrite'&&names.includes('devices')){armed=false;queueMicrotask(()=>tx.abort());}
+   if(protectionAbort&&mode==='readwrite'&&names.includes('devices')&&names.includes('keys')){protectionAbort=false;queueMicrotask(()=>tx.abort());}
    return tx;
  };
  const handler=self.onmessage;
- self.onmessage=e=>{if(e.data?.op==='_abortNextWrite'){armed=true;self.postMessage({id:e.data.id,ok:true,result:true});}else handler(e);};`);return;
+ self.onmessage=e=>{if(e.data?.op==='_abortNextWrite'){armed=true;self.postMessage({id:e.data.id,ok:true,result:true});}else if(e.data?.op==='_abortProtectionCommit'){protectionAbort=true;self.postMessage({id:e.data.id,ok:true,result:true});}else handler(e);};`);return;
  } if(!assets.has(name)) throw Error();res.setHeader('Content-Type',extname(name)==='.wasm'?'application/wasm':'text/javascript');res.end(assets.get(name));}catch{res.writeHead(404).end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const profile=await mkdtemp(join(tmpdir(),'cfmeet-crypto-repro-'));
@@ -81,6 +83,7 @@ try {
  check('storage abort is surfaced',aborted);
  check('retry after storage abort decrypts with rolled-back ratchet',(await process([atomic])).records[0].status==='DECRYPTED');
 
+ const concurrent=encode();const concurrentResults=await Promise.all([process([concurrent]),process([concurrent])]);check('concurrent duplicate RPCs preserve one decrypted record',concurrentResults.reduce((n,r)=>n+r.records.filter(x=>x.status==='DECRYPTED').length,0)===1&&(await call('history',{conversationId:conv})).find(r=>r.sequence===concurrent.sequence)?.status==='DECRYPTED');
  const aadRetry=encode();
  const aadFailure=await process([{...aadRetry,clientMessageId:id(9000)}]);
  check('AAD mismatch is classified',aadFailure.records[0].error==='AAD_MISMATCH');
@@ -108,6 +111,23 @@ try {
  const target=new core.WebDevice(id(30));const transferKey=target.beginTransfer();const transferContext=[id(31),scope.tenantId,scope.applicationId,scope.environmentId,account,receiverId,id(30)];
  let overflow=null;try{await call('sealHistory',{context:transferContext,transferKey});}catch(e){overflow=e.message;}
  check('legacy archive never silently truncates',overflow==='HISTORY_REQUIRES_PAGINATION');
+ // Exercise actual AES-GCM/HKDF migration with a synthetic 32-byte authenticator
+ // output. The separate WebAuthn journey must establish real PRF/UV behavior.
+ await call('holdDraft',{conversationId:conv,clientMessageId:id(7000),text:'protected draft'});
+ const descriptor={v:1,method:'WEBAUTHN_PRF',account,credentialId:b64(new Uint8Array([1,2,3])),prfSalt:b64(new Uint8Array(32).fill(8)),origin:location.origin,installationId:'web-synthetic-installation',accountDeviceId:id(7001),messagingDeviceId:receiverId,scope};
+ const prfSecret=new Uint8Array(32).fill(19);
+ await call('_abortProtectionCommit');let migrationAborted=false;
+ try{await call('protectLocal',{descriptor,prfSecret});}catch{migrationAborted=true;}
+ check('aborted protection commit preserves original readable history',migrationAborted&&(await call('history',{conversationId:conv,limit:200})).length===all.length&&(await call('drafts',{conversationId:conv}))[0].text==='protected draft');
+ check('legacy migration commits protected descriptor',(await call('protectLocal',{descriptor,prfSecret})).localProtection.messagingDeviceId===receiverId);
+ const keyKind=await new Promise((resolve,reject)=>{const r=indexedDB.open('cfmeet-messaging');r.onsuccess=()=>{const d=r.result;const q=d.transaction('keys').objectStore('keys').get(account);q.onsuccess=()=>{resolve(q.result instanceof CryptoKey?'DIRECT_KEY':q.result.kind);d.close();};q.onerror=()=>reject(q.error);};r.onerror=()=>reject(r.error);});
+ check('protected storage retains no directly usable wrapping key',keyKind==='LOCAL_AUTHENTICATOR_V1');
+ await call('lock');let lockedRead=false;try{await call('history',{conversationId:conv});}catch{lockedRead=true;}check('locked worker refuses decrypted history',lockedRead);
+ w.terminate();await new Promise(r=>setTimeout(r,100));start();
+ check('restart requires authenticator output',(await call('open',{account,scope})).status==='AUTHENTICATOR_REQUIRED');
+ let wrongSecret=false;try{await call('unlock',{prfSecret:new Uint8Array(32).fill(20)});}catch{wrongSecret=true;}check('wrong authenticator output cannot unlock',wrongSecret);
+ check('correct authenticator output restores same identity',(await call('unlock',{prfSecret})).deviceId===receiverId);
+ check('migration preserves all history and encrypted drafts',(await call('history',{conversationId:conv,limit:200})).length===all.length&&(await call('drafts',{conversationId:conv}))[0].text==='protected draft');
  await call('wipe',{account});w.terminate();await new Promise(r=>setTimeout(r,100));start();check('logout wipe removes identity',(await call('open',{account,scope})).status==='NONE');
  await call('generate',{deviceId:id(40)});await call('adopt');check('reenrollment has empty history',(await call('history',{conversationId:conv})).length===0);
  const emptyKey=target.beginTransfer();const emptyCtx=[id(32),scope.tenantId,scope.applicationId,scope.environmentId,account,id(40),id(30)];

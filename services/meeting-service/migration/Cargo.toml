@@ -10,6 +10,10 @@ name = "migration"
 path = "src/lib.rs"
 
 [[bin]]
+name = "messaging-installations-migration"
+path = "src/messaging-installations-main.rs"
+
+[[bin]]
 name = "migration"
 path = "src/main.rs"
 

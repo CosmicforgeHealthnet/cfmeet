@@ -21,6 +21,86 @@ async fn user(h: &Harness) -> User {
     let profile = h.profile(&account).await;
     User { account, profile }
 }
+
+/// Promotion is private Account authority, not a client supplied flag. The old session
+/// pointer is cleared only after proof, so even an older Hub cannot revoke this
+/// Messaging identity on ordinary logout. Explicit canonical revocation stays terminal.
+#[tokio::test]
+async fn protected_messaging_installation_survives_ordinary_session_end() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let scope = h.delegated(&a.account);
+    let chat = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat, (a.profile.principal_id, "ACTIVE".into()));
+    let session = "3a".repeat(32);
+    let linked = h
+        .state
+        .link_device(
+            &scope,
+            &a.profile,
+            json!({"platform":"WEB","chatDeviceId":chat}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(linked["device"]["accountSession"]["bound"], true);
+    let path = "/internal/v1/communications/devices/protect-installation";
+    let body = json!({"accountReference":a.account.account_reference,"principalId":a.profile.principal_id,"chatDeviceId":chat,"installationRef":"5b".repeat(32)});
+    let (status, answer) = h
+        .http(&h.account_signer, path, body.clone(), scope.clone())
+        .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["persistentIdentity"], true);
+    let (status, answer) = h
+        .http(&h.account_signer, path, body.clone(), scope.clone())
+        .await;
+    assert_eq!(status, 200, "idempotent: {answer}");
+    let mut moved = body.clone();
+    moved["installationRef"] = json!("7c".repeat(32));
+    assert_eq!(
+        h.http(&h.account_signer, path, moved, scope.clone())
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        h.http(&h.calling_signer, path, body.clone(), scope.clone())
+            .await
+            .0,
+        403,
+        "only Account can attest installation proof"
+    );
+    let (status,answer)=h.http(&h.account_signer,"/internal/v1/communications/account-events",json!({"eventId":Uuid::new_v4(),"accountReference":a.account.account_reference,"sourceVersion":1,"kind":"ACCOUNT_SESSION_ENDED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now(),"accountSessionRef":session}),h.scope.clone()).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["devicesRevoked"], 0);
+    assert!(!h.world.read().unwrap().revoked_devices.contains(&chat));
+    let id = Uuid::parse_str(linked["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let revoked = h
+        .state
+        .revoke_device(
+            &scope,
+            &a.profile,
+            id,
+            json!({"reason":"COMPROMISED"}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(revoked["device"]["state"], "REVOKED");
+    assert!(h.world.read().unwrap().revoked_devices.contains(&chat));
+    assert_eq!(
+        h.http(&h.account_signer, path, body, scope).await.0,
+        404,
+        "terminal identity cannot be re-promoted"
+    );
+    h.close().await;
+}
 async fn contact_id(h: &Harness, owner: &Profile, other: &Profile) -> Uuid {
     let v: Value = one(&h.state.store.db,
         "SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.owner_profile_id=$1 AND (c.left_profile_id=$2 OR c.right_profile_id=$2)",

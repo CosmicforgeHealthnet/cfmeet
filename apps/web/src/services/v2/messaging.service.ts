@@ -16,6 +16,15 @@ export const messagingService = {
   registrationChallenge: () => call<RegistrationChallenge>("POST", "/messaging/devices/registration-challenges", {}),
   registerDevice: (challengeId: string, keyPackage: string, displayLabel: string) =>
     call<MessagingDevice>("POST", "/messaging/devices", { challengeId, keyPackage, displayLabel }),
+  installationChallenge: (deviceId: string) => call<{
+    challengeId: string; nonce: string; deviceId: string; expiresAt: string; installationId: string; accountDeviceId: string;
+  }>("POST", `/messaging/devices/${encodeURIComponent(deviceId)}/installation-challenges`, {}),
+  bindInstallation: (deviceId: string, challengeId: string, keyPackage: string) => call<{
+    persistentIdentity: boolean; deviceId: string; accountDeviceId: string;
+  }>("POST", `/messaging/devices/${encodeURIComponent(deviceId)}/installation`, { challengeId, keyPackage }),
+  installationStatus: (deviceId: string) => call<{
+    persistentIdentity: boolean; deviceId: string; accountDeviceId: string; installationId: string;
+  }>("GET", `/messaging/devices/${encodeURIComponent(deviceId)}/installation`),
   publishKeyPackages: (deviceId: string, keyPackages: string[]) =>
     call<PublishedKeyPackages>("POST", `/messaging/devices/${encodeURIComponent(deviceId)}/key-packages`, { keyPackages }),
   revokeDevice: (deviceId: string, reason: DeviceRevocationReason = "USER_REQUESTED") =>

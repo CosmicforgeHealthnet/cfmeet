@@ -973,7 +973,7 @@ class Conversation {
 
   Uuid? get predecessorConversationId => json['predecessorConversationId'] as String?;
 
-  /// Appendix K: false — no read receipts in this conversation; null — the environment policy decides.
+  /// Appendix K: false â€” no read receipts in this conversation; null â€” the environment policy decides.
   bool? get readReceipts => json['readReceipts'] as bool?;
 
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
@@ -994,7 +994,7 @@ class Conversation {
   Map<String, Object?> toJson() => json;
 }
 
-/// A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117).
+/// A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (Â§117).
 class ConversationEvent {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ConversationEvent.fromJson(this.json);
@@ -1069,7 +1069,7 @@ class ConversationInbox {
 
   ConversationLastMessage? get lastMessage => json['lastMessage'] == null ? null : ConversationLastMessage.fromJson(json['lastMessage']! as Map<String, Object?>);
 
-  /// Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext).
+  /// Unread messages that mention the member (the sender's declared mention ids: MANAGED and â€” B3, 1.34.0 â€” PRIVATE_E2EE, whose mention text stays inside the ciphertext).
   int get mentionCount => (json['mentionCount']! as num).toInt();
 
   /// F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first).
@@ -1242,7 +1242,7 @@ class CreateConversationRequest {
 
   String? get expiresAt => json['expiresAt'] as String?;
 
-  /// §38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED.
+  /// Â§38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED.
   int? get expiryGraceSeconds => (json['expiryGraceSeconds'] as num?)?.toInt();
 
   /// Regulated contexts: creating a MANAGED conversation requires acknowledging that the server can read its content (refused otherwise with MANAGED_DISCLOSURE_REQUIRED).
@@ -1257,7 +1257,7 @@ class CreateConversationRequest {
   /// Appendix K: false turns read receipts off for this conversation (never on where the environment policy has them off).
   bool? get readReceipts => json['readReceipts'] as bool?;
 
-  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited.
+  /// Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited.
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
 
   SecurityProfile? get securityProfile => json['securityProfile'] as String?;
@@ -1738,6 +1738,160 @@ class ForwardMessageRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Target signs history_transfer::paged::sign_checkpoint only after records and local progress for every index below nextIndex are durably committed. The relay verifies the signature and refuses missing indexes; progress is monotonic.
+class HistoryCheckpointV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryCheckpointV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryCheckpointV2.create({required int nextIndex, required String signature}) =>
+      HistoryCheckpointV2.fromJson(<String, Object?>{
+        'nextIndex': nextIndex,
+        'signature': signature,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int get nextIndex => (json['nextIndex']! as num).toInt();
+
+  String get signature => json['signature']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Immutable indexed object, authenticated to the transfer/scope/snapshot/expiry/manifest/count/total/index. Identical PUT retries succeed; a changed ciphertext conflicts.
+class HistoryChunkUploadV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryChunkUploadV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryChunkUploadV2.create({required String sealedChunk}) =>
+      HistoryChunkUploadV2.fromJson(<String, Object?>{
+        'sealedChunk': sealedChunk,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing.
+  String get sealedChunk => json['sealedChunk']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Immutable source descriptor and sealed manifest. Digest is SHA-256 of exact manifest plaintext, repeated in HPKE AAD and signatures for all chunks. totalPlaintextBytes is the sum of chunk plaintext bytes excluding the manifest. Each chunk is at most 256 KiB; manifests must state source coverage, gaps, ordered plaintext digests and record identity/visibility schema. Never export private MLS state.
+class HistoryManifestUploadV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryManifestUploadV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryManifestUploadV2.create({required int chunkCount, required String manifestDigest, required String sealedManifest, required Uuid snapshotId, required int totalPlaintextBytes}) =>
+      HistoryManifestUploadV2.fromJson(<String, Object?>{
+        'chunkCount': chunkCount,
+        'manifestDigest': manifestDigest,
+        'sealedManifest': sealedManifest,
+        'snapshotId': snapshotId,
+        'totalPlaintextBytes': totalPlaintextBytes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int get chunkCount => (json['chunkCount']! as num).toInt();
+
+  String get manifestDigest => json['manifestDigest']! as String;
+
+  /// Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing.
+  String get sealedManifest => json['sealedManifest']! as String;
+
+  Uuid get snapshotId => json['snapshotId']! as String;
+
+  int get totalPlaintextBytes => (json['totalPlaintextBytes']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// An immutable sealed manifest (index 4294967295) or chunk. The client must verify source signature, bindings, manifest plaintext digest and each ordered chunk plaintext digest before durable import. The public ciphertext digest alone is not authenticity.
+class HistoryObjectV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryObjectV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryObjectV2.create({required int? chunkCount, required String createdAt, required String? endReason, required String? endedAt, required String expiresAt, required String? manifestDigest, required int nextIndex, required int objectIndex, required Uuid principalId, required int protocolVersion, required String requestSignature, required String sealedObject, required String sealedSha256, required String? snapshotId, required Uuid sourceDeviceId, required String status, required int storedBytes, required Uuid targetDeviceId, required int? totalPlaintextBytes, required Uuid transferId, required String transferPublicKey}) =>
+      HistoryObjectV2.fromJson(<String, Object?>{
+        'chunkCount': chunkCount,
+        'createdAt': createdAt,
+        'endReason': endReason,
+        'endedAt': endedAt,
+        'expiresAt': expiresAt,
+        'manifestDigest': manifestDigest,
+        'nextIndex': nextIndex,
+        'objectIndex': objectIndex,
+        'principalId': principalId,
+        'protocolVersion': protocolVersion,
+        'requestSignature': requestSignature,
+        'sealedObject': sealedObject,
+        'sealedSha256': sealedSha256,
+        'snapshotId': snapshotId,
+        'sourceDeviceId': sourceDeviceId,
+        'status': status,
+        'storedBytes': storedBytes,
+        'targetDeviceId': targetDeviceId,
+        'totalPlaintextBytes': totalPlaintextBytes,
+        'transferId': transferId,
+        'transferPublicKey': transferPublicKey,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int? get chunkCount => (json['chunkCount'] as num?)?.toInt();
+
+  String get createdAt => json['createdAt']! as String;
+
+  String? get endReason => json['endReason'] as String?;
+
+  String? get endedAt => json['endedAt'] as String?;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  String? get manifestDigest => json['manifestDigest'] as String?;
+
+  int get nextIndex => (json['nextIndex']! as num).toInt();
+
+  int get objectIndex => (json['objectIndex']! as num).toInt();
+
+  Uuid get principalId => json['principalId']! as String;
+
+  int get protocolVersion => (json['protocolVersion']! as num).toInt();
+
+  String get requestSignature => json['requestSignature']! as String;
+
+  /// Opaque v2 HPKE object signed by the source device; maximum 256 KiB plaintext plus framing.
+  String get sealedObject => json['sealedObject']! as String;
+
+  String get sealedSha256 => json['sealedSha256']! as String;
+
+  String? get snapshotId => json['snapshotId'] as String?;
+
+  Uuid get sourceDeviceId => json['sourceDeviceId']! as String;
+
+  String get status => json['status']! as String;
+
+  int get storedBytes => (json['storedBytes']! as num).toInt();
+
+  Uuid get targetDeviceId => json['targetDeviceId']! as String;
+
+  int? get totalPlaintextBytes => (json['totalPlaintextBytes'] as num?)?.toInt();
+
+  Uuid get transferId => json['transferId']! as String;
+
+  String get transferPublicKey => json['transferPublicKey']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry.
 class HistoryTransfer {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -1814,6 +1968,40 @@ class HistoryTransferCancel {
   Map<String, Object?> toJson() => json;
 }
 
+/// Capabilities of this deployment; v2 is absent until its independent additive migration is ready. A version does not waive source/device approval.
+class HistoryTransferCapabilities {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryTransferCapabilities.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryTransferCapabilities.create({required List<int> historyTransferVersions, required int maxChunkPlaintextBytes, required int maxChunks, required int maxTotalPlaintextBytes, required int maxTtlSeconds, required bool sourceApprovalRequired}) =>
+      HistoryTransferCapabilities.fromJson(<String, Object?>{
+        'historyTransferVersions': historyTransferVersions,
+        'maxChunkPlaintextBytes': maxChunkPlaintextBytes,
+        'maxChunks': maxChunks,
+        'maxTotalPlaintextBytes': maxTotalPlaintextBytes,
+        'maxTtlSeconds': maxTtlSeconds,
+        'sourceApprovalRequired': sourceApprovalRequired,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<int> get historyTransferVersions => (json['historyTransferVersions']! as List<Object?>).map((e) => (e! as num).toInt()).toList();
+
+  int get maxChunkPlaintextBytes => (json['maxChunkPlaintextBytes']! as num).toInt();
+
+  int get maxChunks => (json['maxChunks']! as num).toInt();
+
+  int get maxTotalPlaintextBytes => (json['maxTotalPlaintextBytes']! as num).toInt();
+
+  int get maxTtlSeconds => (json['maxTtlSeconds']! as num).toInt();
+
+  bool get sourceApprovalRequired => json['sourceApprovalRequired']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class HistoryTransferList {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const HistoryTransferList.fromJson(this.json);
@@ -1865,6 +2053,132 @@ class HistoryTransferRequest {
 
   /// base64url X25519 HPKE public key (32 bytes) generated by the TARGET device for this transfer only.
   String get transferPublicKey => json['transferPublicKey']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Negotiated v2 request; source approval/comparison remains required before disclosing history.
+class HistoryTransferRequestV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryTransferRequestV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryTransferRequestV2.create({required String expiresAt, required String requestSignature, required Uuid sourceDeviceId, required Uuid targetDeviceId, required Uuid transferId, required String transferPublicKey}) =>
+      HistoryTransferRequestV2.fromJson(<String, Object?>{
+        'expiresAt': expiresAt,
+        'requestSignature': requestSignature,
+        'sourceDeviceId': sourceDeviceId,
+        'targetDeviceId': targetDeviceId,
+        'transferId': transferId,
+        'transferPublicKey': transferPublicKey,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// At most one hour from now (whole seconds are signed).
+  String get expiresAt => json['expiresAt']! as String;
+
+  /// Target Ed25519 signature over history_transfer::paged::request_signing_input (v2 domain; cannot be downgraded to v1).
+  String get requestSignature => json['requestSignature']! as String;
+
+  Uuid get sourceDeviceId => json['sourceDeviceId']! as String;
+
+  Uuid get targetDeviceId => json['targetDeviceId']! as String;
+
+  Uuid get transferId => json['transferId']! as String;
+
+  /// base64url X25519 HPKE public key (32 bytes) generated by the TARGET device for this transfer only.
+  String get transferPublicKey => json['transferPublicKey']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Resumable ciphertext relay. SEALED means an immutable manifest is published; chunks may still be uploading. Completion requires signed durable target checkpoints covering every chunk. COMPLETE/PARTIAL/EMPTY archive coverage remains inside the authenticated encrypted manifest; this state never proves complete account history.
+class HistoryTransferV2 {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryTransferV2.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryTransferV2.create({required int? chunkCount, required String createdAt, required String? endReason, required String? endedAt, required String expiresAt, required String? manifestDigest, required int nextIndex, required Uuid principalId, required int protocolVersion, required String requestSignature, required String? snapshotId, required Uuid sourceDeviceId, required String status, required int storedBytes, required Uuid targetDeviceId, required int? totalPlaintextBytes, required Uuid transferId, required String transferPublicKey}) =>
+      HistoryTransferV2.fromJson(<String, Object?>{
+        'chunkCount': chunkCount,
+        'createdAt': createdAt,
+        'endReason': endReason,
+        'endedAt': endedAt,
+        'expiresAt': expiresAt,
+        'manifestDigest': manifestDigest,
+        'nextIndex': nextIndex,
+        'principalId': principalId,
+        'protocolVersion': protocolVersion,
+        'requestSignature': requestSignature,
+        'snapshotId': snapshotId,
+        'sourceDeviceId': sourceDeviceId,
+        'status': status,
+        'storedBytes': storedBytes,
+        'targetDeviceId': targetDeviceId,
+        'totalPlaintextBytes': totalPlaintextBytes,
+        'transferId': transferId,
+        'transferPublicKey': transferPublicKey,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int? get chunkCount => (json['chunkCount'] as num?)?.toInt();
+
+  String get createdAt => json['createdAt']! as String;
+
+  String? get endReason => json['endReason'] as String?;
+
+  String? get endedAt => json['endedAt'] as String?;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  String? get manifestDigest => json['manifestDigest'] as String?;
+
+  int get nextIndex => (json['nextIndex']! as num).toInt();
+
+  Uuid get principalId => json['principalId']! as String;
+
+  int get protocolVersion => (json['protocolVersion']! as num).toInt();
+
+  String get requestSignature => json['requestSignature']! as String;
+
+  String? get snapshotId => json['snapshotId'] as String?;
+
+  Uuid get sourceDeviceId => json['sourceDeviceId']! as String;
+
+  String get status => json['status']! as String;
+
+  int get storedBytes => (json['storedBytes']! as num).toInt();
+
+  Uuid get targetDeviceId => json['targetDeviceId']! as String;
+
+  int? get totalPlaintextBytes => (json['totalPlaintextBytes'] as num?)?.toInt();
+
+  Uuid get transferId => json['transferId']! as String;
+
+  String get transferPublicKey => json['transferPublicKey']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Most recent transfers of an active device.
+class HistoryTransferV2List {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HistoryTransferV2List.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HistoryTransferV2List.create({required List<HistoryTransferV2> transfers}) =>
+      HistoryTransferV2List.fromJson(<String, Object?>{
+        'transfers': transfers.map((e) => e.toJson()).toList(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<HistoryTransferV2> get transfers => (json['transfers']! as List<Object?>).map((e) => HistoryTransferV2.fromJson(e! as Map<String, Object?>)).toList();
 
   Map<String, Object?> toJson() => json;
 }
@@ -2325,7 +2639,7 @@ class MemberRemoval {
   Map<String, Object?> toJson() => json;
 }
 
-/// §30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only).
+/// Â§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only).
 ///
 /// One of: OWNER, ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE.
 typedef MemberRole = String;
@@ -2469,11 +2783,12 @@ class MessagePage {
   const MessagePage.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MessagePage.create({required List<Message> messages, required int? nextAfterSequence, int? nextBeforeSequence}) =>
+  factory MessagePage.create({required List<Message> messages, required int? nextAfterSequence, int? nextBeforeSequence, int? visibleFromSequence}) =>
       MessagePage.fromJson(<String, Object?>{
         'messages': messages.map((e) => e.toJson()).toList(),
         'nextAfterSequence': nextAfterSequence,
         if (nextBeforeSequence != null) 'nextBeforeSequence': nextBeforeSequence,
+        if (visibleFromSequence != null) 'visibleFromSequence': visibleFromSequence,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -2484,6 +2799,9 @@ class MessagePage {
   int? get nextAfterSequence => (json['nextAfterSequence'] as num?)?.toInt();
 
   int? get nextBeforeSequence => (json['nextBeforeSequence'] as num?)?.toInt();
+
+  /// Authoritative lower sequence boundary of this principal membership window. MLS sync may advance over earlier rows only when this boundary proves they are not visible. Absent on older servers.
+  int? get visibleFromSequence => (json['visibleFromSequence'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -2739,7 +3057,7 @@ class PinRequest {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  /// §49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it.
+  /// Â§49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it.
   String? get expiresAt => json['expiresAt'] as String?;
 
   Map<String, Object?> toJson() => json;
@@ -3571,7 +3889,7 @@ class SendMessageRequest {
   /// MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext).
   String? get managedPresentation => json['managedPresentation'] as String?;
 
-  /// Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must …
+  /// Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too â€” only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must …
   List<Uuid>? get mentionedPrincipalIds => json['mentionedPrincipalIds'] == null ? null : (json['mentionedPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
 
   /// false: no push notification jobs (mirrored / migrated writes). Default true.
@@ -3638,7 +3956,7 @@ class SmsBridge {
   Map<String, Object?> toJson() => json;
 }
 
-/// Part V H §106: the disclosure a bridge creator must acknowledge (version-pinned).
+/// Part V H Â§106: the disclosure a bridge creator must acknowledge (version-pinned).
 class SmsBridgeDisclosure {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const SmsBridgeDisclosure.fromJson(this.json);
@@ -3684,7 +4002,7 @@ class SmsBridgeList {
   Map<String, Object?> toJson() => json;
 }
 
-/// Carrier state of one bridged message — separate from in-app delivery and read state (§110).
+/// Carrier state of one bridged message â€” separate from in-app delivery and read state (Â§110).
 class SmsTransport {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const SmsTransport.fromJson(this.json);
@@ -3730,7 +4048,7 @@ class SmsTransport {
   Map<String, Object?> toJson() => json;
 }
 
-/// §47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden).
+/// Â§47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden).
 class ThreadSummary {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ThreadSummary.fromJson(this.json);
@@ -3880,7 +4198,7 @@ class TreeHead {
   /// base64url SHA-256 (32 bytes)
   String get rootHash => json['rootHash']! as String;
 
-  /// base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) — packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5).
+  /// base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) â€” packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5).
   String get signature => json['signature']! as String;
 
   String get signatureAlgorithm => json['signatureAlgorithm']! as String;
@@ -3991,7 +4309,7 @@ class UpdateConversationRequest {
 
   String? get reason => json['reason'] as String?;
 
-  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that …
+  /// Â§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that …
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
 
   /// Section 13: a new display title; null clears it (MANAGED only, owner).
@@ -4000,7 +4318,7 @@ class UpdateConversationRequest {
   Map<String, Object?> toJson() => json;
 }
 
-/// Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost.
+/// Usage facts of the caller's application environment (Part V I Â§129): quantities only, no price, rate or cost.
 class UsageSummary {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const UsageSummary.fromJson(this.json);
@@ -4193,7 +4511,7 @@ class WitnessCosignature {
   /// When the witness cosigned (Unix microseconds); signed.
   int get cosignedAtMicros => (json['cosignedAtMicros']! as num).toInt();
 
-  /// base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) — packages/messaging-crypto transparency::witness_cosignature_input.
+  /// base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) â€” packages/messaging-crypto transparency::witness_cosignature_input.
   String get signature => json['signature']! as String;
 
   String get witnessId => json['witnessId']! as String;

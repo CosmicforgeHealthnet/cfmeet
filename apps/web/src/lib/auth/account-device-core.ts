@@ -166,6 +166,14 @@ export function createAccountDevice(deps: AccountDeviceDeps) {
   return {
     thumbprint,
 
+    /** Non-secret installation binding, after a successful declaration for this sign-in. */
+    async binding(): Promise<{ installationId: string; accountDeviceId: string; sessionId: string } | null> {
+      const device = await current();
+      return device?.deviceId && device.sessionId
+        ? { installationId: device.installationId, accountDeviceId: device.deviceId, sessionId: device.sessionId }
+        : null;
+    },
+
     /** Proof for the next refresh of this browser's sign-in, when it is device-bound. */
     async refreshProof(): Promise<DeviceProof | null> {
       const device = await current();

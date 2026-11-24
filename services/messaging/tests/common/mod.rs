@@ -134,6 +134,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::Migrator::up(&tmpl, None)
                 .await
                 .expect("migrations apply");
+            messaging_migration::HistoryTransferV2Migrator::up(&tmpl, None)
+                .await
+                .expect("history transfer v2 migrations apply");
             // The independently versioned routing fence history (Document 4 §9): every
             // test runs with its legacy guard trigger installed, in LEGACY_ONLY (a no-op).
             messaging_migration::NotificationFenceMigrator::up(&tmpl, None)

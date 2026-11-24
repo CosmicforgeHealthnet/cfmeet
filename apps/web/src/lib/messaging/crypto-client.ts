@@ -48,6 +48,12 @@ type TrustedTypesLike = {
 };
 
 let scriptPolicy: { createScriptURL(u: string): unknown } | null = null;
+const clients = new Set<CryptoClient>();
+
+/** Ends all in-memory cryptographic access in this tab when its Account session ends. */
+export function terminateMessagingWorkers(): void {
+  for (const client of clients) client.terminate();
+}
 
 /** The worker's URL as a TrustedScriptURL where Trusted Types are enforced. */
 function workerUrl(): string | URL {
@@ -71,6 +77,7 @@ export class CryptoClient {
 
   constructor(factory?: () => Worker) {
     this.worker = factory ? factory() : new Worker(workerUrl(), { type: "module", name: "cfmeet-messaging-device" });
+    clients.add(this);
     this.worker.onmessage = ({ data }: MessageEvent<{ id: number; ok: boolean; result?: unknown; error?: string }>) => {
       const p = this.pending.get(data.id);
       if (!p) return;
@@ -87,15 +94,26 @@ export class CryptoClient {
   }
 
   call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
+    return this.callWithTransfer(op, args, []);
+  }
+
+  /** Moves transient authenticator output into the worker without leaving a page copy. */
+  callWithTransfer<T>(op: string, args: Record<string, unknown>, transfer: Transferable[]): Promise<T> {
     if (this.failed) return Promise.reject(new CryptoWorkerError(this.failed));
     const id = ++this.seq;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      this.worker.postMessage({ id, op, args });
+      try {
+        this.worker.postMessage({ id, op, args }, transfer);
+      } catch (error) {
+        this.pending.delete(id);
+        reject(error instanceof Error ? error : new CryptoWorkerError("CRYPTO_WORKER_UNAVAILABLE"));
+      }
     });
   }
 
   terminate(): void {
+    clients.delete(this);
     this.worker.terminate();
     for (const p of this.pending.values()) p.reject(new CryptoWorkerError("CRYPTO_WORKER_CLOSED"));
     this.pending.clear();

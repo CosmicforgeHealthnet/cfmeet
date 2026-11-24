@@ -17,6 +17,206 @@ use common::{flows::*, *};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+/// Real router + PostgreSQL + HPKE, without placing any history keys on the service.
+/// A committed checkpoint and a protected local key checkpoint survive interruption.
+#[tokio::test]
+async fn paged_history_above_512k_is_immutable_resumable_and_revocation_cancels_it() {
+    use cf_messaging_crypto::history_transfer::paged;
+    use sha2::{Digest, Sha256};
+    let Some(h) = Harness::build(|_| {}).await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let alice = h.principal(&c);
+    let other = h.principal(&c);
+    let source = h.active_device(&c, alice).await;
+    let target = h.active_device(&c, alice).await;
+    let mut req = request(&h, &c, alice, &source, &target, &target);
+    let expires = chrono::DateTime::parse_from_rfc3339(req.body["expiresAt"].as_str().unwrap())
+        .unwrap()
+        .timestamp();
+    req.body["requestSignature"] =
+        json!(B64.encode(paged::sign_request(&target, &req.tc, &req.keys, expires).unwrap()));
+    let base = "/v1/messaging/history-transfers-v2";
+    let caps = h
+        .get(
+            &c,
+            Some(alice),
+            "/v1/messaging/history-transfer-capabilities",
+        )
+        .await;
+    assert_eq!(caps.status, StatusCode::OK, "{}", caps.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/HistoryTransferCapabilities",
+        &caps.json,
+    );
+    assert_eq!(caps.json["historyTransferVersions"], json!([1, 2]));
+    let create = h.post(&c, Some(alice), base, req.body.clone()).await;
+    assert_eq!(create.status, StatusCode::CREATED, "{}", create.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/HistoryTransferV2",
+        &create.json,
+    );
+    let id = req.tc.transfer_id;
+    let path = format!("{base}/{id}");
+    assert_eq!(
+        h.get(&c, Some(other), &path).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let chunks: Vec<Vec<u8>> = (0..3).map(|i| vec![b'a' + i; 256 * 1024]).collect();
+    let manifest=serde_json::to_vec(&json!({"version":2,"coverage":"COMPLETE_SOURCE_COPY","chunkDigests":chunks.iter().map(|p|hex::encode(Sha256::digest(p))).collect::<Vec<_>>()})).unwrap();
+    let mut object = paged::ObjectContext {
+        transfer: req.tc,
+        snapshot_id: Uuid::new_v4(),
+        expires_at_unix: expires,
+        manifest_digest: Sha256::digest(&manifest).into(),
+        chunk_count: 3,
+        total_plaintext_bytes: chunks.iter().map(|c| c.len() as u64).sum(),
+        object_index: paged::MANIFEST_INDEX,
+    };
+    let sealed_manifest =
+        paged::seal_object(&source, &object, req.keys.public_key(), &manifest).unwrap();
+    let upload = json!({"snapshotId":object.snapshot_id,"manifestDigest":hex::encode(object.manifest_digest),"chunkCount":3,"totalPlaintextBytes":object.total_plaintext_bytes,"sealedManifest":B64.encode(&sealed_manifest)});
+    let r = h
+        .put(&c, Some(alice), &format!("{path}/manifest"), upload.clone())
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        h.put(&c, Some(alice), &format!("{path}/manifest"), upload)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let descriptor = h.get(&c, Some(alice), &format!("{path}/manifest")).await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/HistoryObjectV2",
+        &descriptor.json,
+    );
+    assert_eq!(
+        paged::open_object(
+            &req.keys,
+            &source.signature_public_key(),
+            &object,
+            &B64.decode(descriptor.json["sealedObject"].as_str().unwrap())
+                .unwrap()
+        )
+        .unwrap(),
+        manifest
+    );
+    assert_eq!(
+        h.post(&c, Some(alice), &format!("{path}/complete"), json!({}))
+            .await
+            .reason(),
+        "TRANSFER_INCOMPLETE"
+    );
+    // A signed receipt cannot skip a missing relay chunk.
+    let early = paged::sign_checkpoint(&target, &object, 1).unwrap();
+    assert_eq!(
+        h.post(
+            &c,
+            Some(alice),
+            &format!("{path}/checkpoint"),
+            json!({"nextIndex":1,"signature":B64.encode(early)})
+        )
+        .await
+        .reason(),
+        "TRANSFER_INCOMPLETE"
+    );
+    let secret = req.keys.export_secret();
+    drop(req.keys);
+    let keys = TransferKeys::import_secret(&secret).unwrap();
+    let mut imported = 0;
+    for (index, plaintext) in chunks.iter().enumerate() {
+        object.object_index = index as u32;
+        let sealed = paged::seal_object(&source, &object, keys.public_key(), plaintext).unwrap();
+        let chunk_path = format!("{path}/chunks/{index}");
+        let body = json!({"sealedChunk":B64.encode(&sealed)});
+        let r = h.put(&c, Some(alice), &chunk_path, body.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(
+            h.put(&c, Some(alice), &chunk_path, body).await.status,
+            StatusCode::OK
+        );
+        let changed = paged::seal_object(&source, &object, keys.public_key(), plaintext).unwrap();
+        assert_eq!(
+            h.put(
+                &c,
+                Some(alice),
+                &chunk_path,
+                json!({"sealedChunk":B64.encode(changed)})
+            )
+            .await
+            .reason(),
+            "TRANSFER_OBJECT_IMMUTABLE"
+        );
+        let got = h.get(&c, Some(alice), &chunk_path).await;
+        assert_eq!(got.status, StatusCode::OK, "{}", got.text);
+        let opened = paged::open_object(
+            &keys,
+            &source.signature_public_key(),
+            &object,
+            &B64.decode(got.json["sealedObject"].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(&opened, plaintext);
+        imported += opened.len();
+        let signature = paged::sign_checkpoint(&target, &object, index as u32 + 1).unwrap();
+        let checkpoint = h
+            .post(
+                &c,
+                Some(alice),
+                &format!("{path}/checkpoint"),
+                json!({"nextIndex":index+1,"signature":B64.encode(signature)}),
+            )
+            .await;
+        assert_eq!(checkpoint.status, StatusCode::OK, "{}", checkpoint.text);
+        assert_eq!(
+            h.get(&c, Some(alice), &path).await.json["nextIndex"],
+            json!(index + 1),
+            "fresh HTTP read resumes committed progress"
+        );
+    }
+    assert!(imported > 512 * 1024);
+    let finished = h
+        .post(&c, Some(alice), &format!("{path}/complete"), json!({}))
+        .await;
+    assert_eq!(finished.status, StatusCode::OK, "{}", finished.text);
+    assert_eq!(finished.json["status"], "COMPLETED");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_history_transfer_chunks_v2 WHERE transfer_id='{id}'"
+        ))
+        .await,
+        0
+    );
+    // A second transfer is destroyed atomically by terminal source revocation.
+    let mut next = request(&h, &c, alice, &source, &target, &target);
+    let expires = chrono::DateTime::parse_from_rfc3339(next.body["expiresAt"].as_str().unwrap())
+        .unwrap()
+        .timestamp();
+    next.body["requestSignature"] =
+        json!(B64.encode(paged::sign_request(&target, &next.tc, &next.keys, expires).unwrap()));
+    let r = h.post(&c, Some(alice), base, next.body).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let revoked = h
+        .post(
+            &c,
+            Some(alice),
+            &format!("/v1/messaging/devices/{}/revoke", source.device_id()),
+            json!({"reason":"USER_REQUESTED"}),
+        )
+        .await;
+    assert_eq!(revoked.status, StatusCode::OK, "{}", revoked.text);
+    assert_eq!(
+        h.get(&c, Some(alice), &format!("{base}/{}", next.tc.transfer_id))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(h.scalar(&format!("SELECT count(*) FROM messaging_history_transfers_v2 WHERE id='{}' AND status='CANCELLED' AND sealed_manifest IS NULL",next.tc.transfer_id)).await,1);
+}
+
 fn ctx(c: &Customer, principal: Uuid, id: Uuid, source: Uuid, target: Uuid) -> TransferContext {
     TransferContext {
         transfer_id: id,

@@ -24,6 +24,7 @@
 //! Nothing here sees a private key: there is none on the server.
 
 pub mod history_transfer;
+pub mod history_transfer_v2;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use cf_messaging_crypto::{
@@ -926,6 +927,7 @@ pub async fn revoke(
                 crate::realtime::sessions::revoke_device_sessions(txn, device.id, now).await?;
                 crate::realtime::push::disable_device(txn, device.id, now).await?;
                 history_transfer::cancel_for_device(txn, device.id, now).await?;
+                history_transfer_v2::cancel_for_device(txn, device.id, now).await?;
                 crate::metrics::inc("messaging_devices_revoked_total", &[]);
                 load_device(txn, &ctx, device.id, false)
                     .await?
