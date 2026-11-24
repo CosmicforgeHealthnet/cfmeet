@@ -91,7 +91,7 @@ export function LandingEverywhere() {
 export function LandingCta() {
   return (
     <section aria-labelledby="cta-heading" className="px-4 pb-14 sm:px-6 sm:pb-20 lg:px-8">
-      <Reveal className="relative mx-auto max-w-7xl overflow-hidden rounded-[28px] bg-primary px-6 py-12 dark:bg-[#0B57D0] text-center sm:px-12 sm:py-16">
+      <Reveal className="relative mx-auto max-w-7xl overflow-hidden rounded-[28px] bg-primary px-6 py-12 text-center dark:bg-[#0B57D0] sm:px-12 sm:py-16">
         {/* Depth from light, plus faint rings spreading out like a call connecting. */}
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-linear-to-br from-white/10 via-transparent to-black/25" />
         <div aria-hidden className="pointer-events-none absolute -right-40 -top-40 sm:-right-24 sm:-top-48">
