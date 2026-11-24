@@ -89,8 +89,11 @@ async function signIn(ctx, who) {
   assert.equal(session.status(), 200, `session cookie for ${who}: ${await session.text()}`);
 }
 
-async function open(who, { route } = {}) {
-  const ctx = await browser.newContext({ acceptDownloads: true });
+async function open(who, { route, mobile = false } = {}) {
+  const ctx = await browser.newContext({ acceptDownloads: true, ...(mobile ? {
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    userAgent: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+  } : {}) });
   await signIn(ctx, who);
   // What the login flow stores for a signed-in account (the dashboard requires it).
   await ctx.addInitScript((u) => {
@@ -238,6 +241,14 @@ async function journey() {
   pages.bob = bob.page;
   await register(alice.page);
   await register(bob.page);
+  // Five independent profiles and account sign-ins; no storage/token sharing.
+  const alicePhone = await open("alice", { mobile: true });
+  const aliceOther = await open("alice");
+  const bobPhone = await open("bob", { mobile: true });
+  const otherDevices = [["alice", alicePhone], ["alice", aliceOther], ["bob", bobPhone]];
+  Object.assign(pages, { alicePhone: alicePhone.page, aliceOther: aliceOther.page, bobPhone: bobPhone.page });
+  for (const [, device] of otherDevices) await register(device.page);
+
   const pageCsp = (await alice.page.request.get(`${BASE}/dashboard/messages`)).headers()["content-security-policy"];
   assert.ok(pageCsp && !pageCsp.includes("wasm-unsafe-eval") && !pageCsp.includes("'unsafe-eval'"), pageCsp);
   step("device registration", { devices: 2, pageCspWithoutWasmEval: true });
@@ -267,10 +278,17 @@ async function journey() {
   await openConversation(bob.page, "PRIVATE_E2EE");
   await shown(bob.page, hello);
   assert.equal(await bob.page.locator("[data-testid=e2ee-unavailable]").count(), 0, "readable without anyone else online");
-  step("recipient offline at creation reads with nobody online", {});
+  for (const [, device] of otherDevices) {
+    await openConversation(device.page, "PRIVATE_E2EE");
+    await shown(device.page, hello);
+  }
+  step("three Account A devices and two Account B devices receive desktop message", { accountADevices: 3, accountBDevices: 2, mobileBrowserContexts: 2 });
+  step("recipient offline at creation reads without the original sending device", {});
   const reply = `${SECRET} hi alice`;
-  await send(bob.page, reply);
-  await bob.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: reply }).waitFor({ timeout: T });
+  await send(bobPhone.page, reply);
+  await bobPhone.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: reply }).waitFor({ timeout: T });
+  await shown(bob.page, reply);
+  for (const [, device] of otherDevices) await shown(device.page, reply);
   await reopen("alice", alice);
   await openConversation(alice.page, "PRIVATE_E2EE");
   await shown(alice.page, reply);
@@ -387,6 +405,7 @@ async function journey() {
 
   // ---- 10. Bob's second device: added to the group by a member device, then his history
   //          is recovered device-to-device after both devices show the same code.
+  for (const [, device] of otherDevices) await device.page.close();
   const bob2 = await open("bob");
   pages.bob2 = bob2.page;
   // ADR 0067: signing in is enough. The second browser is never asked to verify itself and
@@ -419,6 +438,15 @@ async function journey() {
   const after = `${SECRET} after the new device joined`;
   await send(alice.page, after);
   await shown(bob2.page, after);
+  for (const [who, device] of otherDevices) {
+    await reopen(who, device);
+    await openConversation(device.page, "PRIVATE_E2EE");
+    await shown(device.page, hello);
+    await shown(device.page, fromNew);
+    await shown(device.page, after);
+  }
+  step("offline registered devices recover across another device joining and epoch changes", { resumedDevices: otherDevices.length });
+
   // Device controls live behind the "Device & security settings" toggle, as for a user.
   const settings = bob2.page.locator("[data-testid=device-settings-toggle]");
   await settings.click();
@@ -519,7 +547,7 @@ async function journey() {
   assert.equal(afterLogout.values, 0, `nothing of the account remains: ${JSON.stringify(afterLogout)}`);
   step("logout erased the device", { remainingValues: afterLogout.values });
 
-  for (const s of [alice, bob, bob2]) {
+  for (const s of [alice, bob, bob2, ...otherDevices.map(([, device]) => device)]) {
     assert.deepEqual(s.errors.filter((e) => !/ResizeObserver/.test(e)), [], "no page errors");
     await s.ctx.close();
   }

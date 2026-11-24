@@ -557,7 +557,7 @@ const ops = {
    * group state and the cursor are stored in ONE IndexedDB transaction.
    */
   async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [] }) {
-    const device = requireDevice();
+    let device = requireDevice();
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
@@ -595,6 +595,9 @@ const ops = {
       }
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
+      // MLS can consume a sender generation before application-level AAD/payload
+      // validation rejects it. A failed attempt must leave that generation retryable.
+      const beforeMessage = device.exportState();
       try {
         if (m.lifecycle && m.lifecycle !== "ACTIVE") {
           record = { ...base, status: "REMOVED", lifecycle: m.lifecycle };
@@ -613,6 +616,9 @@ const ops = {
               if (!rejected.has(r.joiner) && r.joiner === sender) {
                 // Stop before it: the page verifies the joiner and processes it again.
                 joiner = { deviceId: r.joiner, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId };
+                ctx.device.free();
+                ctx.device = core.WebDevice.fromState(ctx.deviceId, beforeMessage);
+                device = ctx.device;
                 break;
               }
               fail("JOINER_REJECTED");
@@ -645,9 +651,13 @@ const ops = {
           }
         }
       } catch (e) {
+        const historical = m.epoch < Number(device.epoch(gid));
+        ctx.device.free();
+        ctx.device = core.WebDevice.fromState(ctx.deviceId, beforeMessage);
+        device = ctx.device;
         const code = e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message) ? e.message : "FAILED";
-        record = { ...base, status: "FAILED", error: m.epoch < Number(device.epoch(gid)) ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
-      }
+        record = { ...base, status: "FAILED", error: historical ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
+      } finally { beforeMessage.fill(0); }
       if (record.status === "FAILED") {
         newlyFailed.add(m.sequence);
         puts.push(await retryPut(conversationId, m.sequence));

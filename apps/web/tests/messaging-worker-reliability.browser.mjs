@@ -79,6 +79,10 @@ try {
  check('storage abort is surfaced',aborted);
  check('retry after storage abort decrypts with rolled-back ratchet',(await process([atomic])).records[0].status==='DECRYPTED');
 
+ const aadRetry=encode();
+ const aadFailure=await process([{...aadRetry,clientMessageId:id(9000)}]);
+ check('AAD mismatch is classified',aadFailure.records[0].error==='AAD_MISMATCH');
+ check('correct metadata can retry without consumed ratchet',(await process([aadRetry])).records[0].status==='DECRYPTED');
  const earlier=encode();const later=encode();const gap=await process([later]);check('gap blocks advancement',gap.blocked==='SYNC_GAP'&&gap.records.length===0);check('missing lower sequence is recovered',(await process([earlier])).records[0].status==='DECRYPTED');check('later message succeeds after gap closes',(await process([later])).records[0].status==='DECRYPTED');
  const batchA=encode(),batchB=encode();const batch=await process([batchB,batchA]);check('within-page reversed input sorted',batch.records.length===2&&batch.records.every(x=>x.status==='DECRYPTED'));
  // A newly generated device without the Welcome has no group; supplying it later works.

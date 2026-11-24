@@ -248,3 +248,44 @@ Still required before claiming the requested remediation complete:
 5. Validate large historic failure-set behavior under real-service load and add explicit full-service MANAGED organization and physical native acceptance cases. Keep release blocked until those gates and security review pass.
 
 Relevant ADRs 0057/0060/0066/0067 now include a Phase 3 clarification that distinguishes corrected reliability behavior from the still-operational destructive logout. No new lifecycle is documented as already deployed. No root cause of the original production incident is asserted from these synthetic reproductions.
+
+# Mandatory multi-device architecture correction
+
+## Additional production report
+
+**NOT VERIFIED independently (owner-reported evidence):** after receiving messages on desktop web, the owner opened the same account in mobile web and saw `This message could not be decrypted on this device (MESSAGE_REFUSED)` on sent and received messages, including recent messages. No affected account/IDs, incident timestamps, device-state snapshot or underlying typed MLS error was supplied. Track this as a separate incident symptom from BEFORE_JOIN; no shared root cause is assumed. Original incident trigger and recoverability remain unconfirmed.
+
+## Newly reproduced ratchet-consumption failure
+
+**CONFIRMED with real shipped WASM/worker:** a valid current-epoch message processed with the wrong `clientMessageId` metadata first produces `AAD_MISMATCH`; retrying exactly the valid original envelope then fails to recover because the receive generation was consumed before the expected-AAD check. The pre-fix new regression failed on the corrected-metadata retry. After restoring a per-message state snapshot on failed application validation, the same regression passes. This demonstrates one path from an initial metadata error to a subsequent generic crypto refusal. It does **not** prove that production mobile received incorrect metadata.
+
+Responsible layers: `packages/messaging-crypto/src/group.rs::Device::process_with_joiners` calls OpenMLS `process_message` before checking authenticated sender binding; `packages/messaging-crypto/wasm/src/lib.rs::WebDevice::process` checks the expected AAD only after core processing and collapses core errors to `MESSAGE_REFUSED`; the former worker caught the exception and persisted the already-advanced device state. The worker now restores per-message state on failure as well as restoring an entire batch on aborted persistence. Temporary snapshot buffers are cleared; this does not enable long-term retention of historical epochs. High-volume/large-device-state performance remains an acceptance concern.
+
+**CONFIRMED source audit:** the existing missing-device helper includes all ACTIVE devices of ACTIVE principals, including the sender's other devices, except the acting device itself. However, principal/member enumeration is currently one page, directory lookup errors can become empty lists, pre-send checks are cached, and enrollment/add failures can be swallowed before sending. These behaviors do not establish complete device coverage. Initial group creation claims the other principals' devices; sender siblings depend on the subsequent coverage check. The new test must prove actual sibling delivery, not just point at this helper.
+
+## Multi-device Messaging certification
+
+**Verdict: NOT CERTIFIED. `CFMEET_MULTI_DEVICE_MESSAGING_CERTIFIED` is not issued.** Unified account history and automatic encrypted recovery are mandatory product requirements. PR #175 remains a draft reliability component, not the completed architecture or a release candidate.
+
+The integration journey is being extended to use three independently signed-in/registered Account A browser profiles and two Account B profiles, including Android-sized mobile browser contexts. No storage, tokens or crypto state is shared between profiles. Tests will require A desktop sends to appear on all five, B mobile replies on all five, and offline registered devices to resume after another device joins and advances the epoch. These are Chromium mobile-web emulations, not physical Android/iOS devices.
+
+| Required scenario | Current evidence/status |
+|---|---|
+| 1. A desktop sends | **CONFIRMED** on earlier real-service direct-chat journey; new five-profile run pending. |
+| 2. Every eligible A device receives | **NOT VERIFIED** until new three-A-device test passes. |
+| 3. Every eligible B device receives | **NOT VERIFIED** until new two-B-device test passes. |
+| 4. B replies from mobile | **NOT VERIFIED** until new mobile-web context test passes. |
+| 5. Reply appears everywhere | **NOT VERIFIED** until five-profile run passes. |
+| 6–7. Offline during messages/epoch changes, then catch-up | Earlier single-device offline path **CONFIRMED**; expanded five-profile epoch-change case **NOT VERIFIED**. |
+| 8. New authorized browser joins after exchange | **CONFIRMED** in earlier real-service external-join journey. |
+| 9. New browser securely imports available history | Manual bounded transfer **CONFIRMED**; mandatory automatic/resumable/large-history recovery **NOT VERIFIED / not implemented**. |
+| 10. Normal logout/login restores protected history | **NOT VERIFIED / not implemented**; owner selected local WebAuthn/OS unlock. Existing logout remains destructive. |
+| 11. Explicit revocation | Earlier real-service device removal **CONFIRMED**; full five-profile future exclusion and new lifecycle semantics **NOT VERIFIED**. |
+| 12. >512 KiB completes | **NOT VERIFIED / not implemented**; v1 now explicitly refuses overflow. |
+| 13. Interrupted history sync resumes | **NOT VERIFIED / not implemented**. |
+| 14. Receipts, edits, deletions, reactions everywhere | Component/service tests are not five-profile acceptance; **NOT VERIFIED**. |
+| 15. Failed decrypt remains recoverable | **CONFIRMED** for corrected HTTP delivery in real-service test and local storage/AAD-failure retries; expanded five-profile run pending. |
+| 16. Prior unreadable messages recover from valid source | Manual small archive case **CONFIRMED**; mandatory automatic complete recovery **NOT VERIFIED / not implemented**. |
+| 17. Unauthorized devices cannot retrieve/decrypt history | Earlier access-control/crypto tamper tests **CONFIRMED** within their scope; new v2/automatic/backup authorization **NOT VERIFIED**. |
+
+Remaining engineering must include source authorization/coverage, historical member visibility, attachment key/descriptor transport, reply/edit/reaction/deletion/receipt and conversation metadata reconciliation, full pagination, resumable encrypted imports, and client-controlled encrypted backup restoration when an approved backup and recovery secret exist. No new device may receive unauthorized past MLS secrets. Server storage/relay must remain ciphertext only. Losing every eligible source and recovery secret remains unrecoverable. Backup scheduling/activation remains security-review gated. The architecture proposal is a plan, not implemented functionality or evidence of recovery.
