@@ -66,3 +66,10 @@ Production E2EE was refused unconditionally pending an independent cryptographic
   * passkeys are not implemented; the email step-up is the web-only recovery path;
   * the key-transparency log is unwitnessed;
   * web code delivery trust (R1 of the web threat model).
+
+
+## Phase 3 history reliability clarification (2026-11-24)
+
+The real shipped-worker investigation disproved current-epoch and device-registration-time tests as conclusive evidence of historical non-membership. The remediation branch records authenticated local group join provenance for new devices; legacy provenance stays unknown. Delivery position is distinct from successful processing and failed applications remain retryable. See [the Phase 3 design](../audits/messaging/PHASE3_SECURITY_AND_RECOVERY_DESIGN.md) for implementation boundaries and pending protocol work.
+
+The owner selected local WebAuthn/OS unlock and permits an authenticator prompt for retained local history. Ordinary session termination must eventually lock protected history separately from terminal device removal; existing destructive logout is still operational until cryptographic envelope migration, cross-tab locking and persistent installation/device lifecycle contracts are implemented and accepted. Terminal identities must never be revived. This note does not activate a retention or backup protocol or claim lifecycle decoupling complete.

@@ -19,7 +19,19 @@ for(const [file,metadata] of Object.entries(manifest.files)) {
  assets.set(file,bytes);
 }
 const role=r=>Object.entries(manifest.files).find(([,v])=>v.role===r)[0];
-const server=createServer(async(req,res)=>{try{const name=new URL(req.url,'http://local').pathname.slice(1); if(!name){res.end('<html></html>');return;} if(!assets.has(name)) throw Error();res.setHeader('Content-Type',extname(name)==='.wasm'?'application/wasm':'text/javascript');res.end(assets.get(name));}catch{res.writeHead(404).end();}});
+const server=createServer(async(req,res)=>{try{const name=new URL(req.url,'http://local').pathname.slice(1); if(!name){res.end('<html></html>');return;} if(name==='test-fault-worker.js') {
+ res.setHeader('Content-Type','text/javascript');
+ res.end(`import '/${role('worker')}';
+ let armed=false;
+ const transaction=IDBDatabase.prototype.transaction;
+ IDBDatabase.prototype.transaction=function(stores,mode,...rest){
+   const tx=transaction.call(this,stores,mode,...rest);
+   if(armed&&mode==='readwrite'&&Array.from(typeof stores==='string'?[stores]:stores).includes('devices')){armed=false;queueMicrotask(()=>tx.abort());}
+   return tx;
+ };
+ const handler=self.onmessage;
+ self.onmessage=e=>{if(e.data?.op==='_abortNextWrite'){armed=true;self.postMessage({id:e.data.id,ok:true,result:true});}else handler(e);};`);return;
+ } if(!assets.has(name)) throw Error();res.setHeader('Content-Type',extname(name)==='.wasm'?'application/wasm':'text/javascript');res.end(assets.get(name));}catch{res.writeHead(404).end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const profile=await mkdtemp(join(tmpdir(),'cfmeet-crypto-repro-'));
 let browser=await chromium.launchPersistentContext(profile);
@@ -30,7 +42,7 @@ try {
  const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
  const scope={tenantId:id(1),applicationId:id(2),environmentId:id(3)};const account=id(4),receiverId=id(5),senderId=id(6),conv=id(7),gid=new Uint8Array(32).fill(9);
  let w;let serial=0;const calls=new Map();
- function start(){w=new Worker('/'+worker,{type:'module'});w.onmessage=({data})=>{const c=calls.get(data.id);calls.delete(data.id);data.ok?c.resolve(data.result):c.reject(Error(data.error));};}
+ function start(){w=new Worker('/test-fault-worker.js',{type:'module'});w.onmessage=({data})=>{const c=calls.get(data.id);calls.delete(data.id);data.ok?c.resolve(data.result):c.reject(Error(data.error));};}
  function call(op,args={}){return new Promise((resolve,reject)=>{const n=++serial;calls.set(n,{resolve,reject});w.postMessage({id:n,op,args});setTimeout(()=>{if(calls.delete(n))reject(Error('TIMEOUT'));},15000);});}
  const events=[];const check=(name,ok,detail={})=>{if(!ok)throw Error(name);events.push({name,result:'CONFIRMED',...detail});};
  const b64=b=>btoa(String.fromCharCode(...b)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
@@ -62,6 +74,11 @@ try {
  const classified=await process([oldLate]);check('prior membership is not labelled BEFORE_JOIN',classified.records[0].status==='FAILED'&&classified.records[0].error==='HISTORICAL_EPOCH_UNAVAILABLE',{joinedEpoch,currentEpoch:stateEpoch,messageEpoch:old.epoch});
  const lateRetry=await process([oldLate]);check('old-epoch failure remains retryable',lateRetry.records.length===1,{cursor:lateRetry.cursor});
  const bad=encode();const valid={...bad};bad.ciphertext=b64(new Uint8Array([1,2,3]));const failed=await process([bad]);check('invalid ciphertext persists FAILED',failed.records[0].status==='FAILED');w.terminate();await new Promise(r=>setTimeout(r,100));start();await call('open',{account,scope});check('corrected ciphertext recovers at same sequence',(await process([valid])).records[0].status==='DECRYPTED');check('successful delivery is idempotent',(await process([valid])).records.length===0);
+ const atomic=encode();await call('_abortNextWrite');let aborted=false;
+ try{await process([atomic]);}catch{aborted=true;}
+ check('storage abort is surfaced',aborted);
+ check('retry after storage abort decrypts with rolled-back ratchet',(await process([atomic])).records[0].status==='DECRYPTED');
+
  const earlier=encode();const later=encode();const gap=await process([later]);check('gap blocks advancement',gap.blocked==='SYNC_GAP'&&gap.records.length===0);check('missing lower sequence is recovered',(await process([earlier])).records[0].status==='DECRYPTED');check('later message succeeds after gap closes',(await process([later])).records[0].status==='DECRYPTED');
  const batchA=encode(),batchB=encode();const batch=await process([batchB,batchA]);check('within-page reversed input sorted',batch.records.length===2&&batch.records.every(x=>x.status==='DECRYPTED'));
  // A newly generated device without the Welcome has no group; supplying it later works.

@@ -63,3 +63,10 @@ The binding is the same opaque, domain-separated reference ADR 0049 A1 uses (`SH
 * Devices linked before this amendment, or by an older Account image, are unbound (`accountSession.bound: false`); they keep the previous behaviour (revoking them does not end a sign-in). Re-linking does not bind an existing reference.
 * Deploy order: Platform Access and Communications before Meeting (an older Hub refuses `ACCOUNT_SESSION_ENDED` and the session reference; an older Platform Access answers 404 to the mirror, treated as "nothing to mirror"). Hub migration `m20261108_000001_device_session_binding` (third Hub history) before the Hub image.
 * Remaining window: a Calling signaling credential issued before the epoch advance stays valid until the receiving process applies the event (seconds; bounded by its 600 s lifetime), as before.
+
+
+## Phase 3 history reliability clarification (2026-11-24)
+
+The real shipped-worker investigation disproved current-epoch and device-registration-time tests as conclusive evidence of historical non-membership. The remediation branch records authenticated local group join provenance for new devices; legacy provenance stays unknown. Delivery position is distinct from successful processing and failed applications remain retryable. See [the Phase 3 design](../audits/messaging/PHASE3_SECURITY_AND_RECOVERY_DESIGN.md) for implementation boundaries and pending protocol work.
+
+The owner selected local WebAuthn/OS unlock and permits an authenticator prompt for retained local history. Ordinary session termination must eventually lock protected history separately from terminal device removal; existing destructive logout is still operational until cryptographic envelope migration, cross-tab locking and persistent installation/device lifecycle contracts are implemented and accepted. Terminal identities must never be revived. This note does not activate a retention or backup protocol or claim lifecycle decoupling complete.

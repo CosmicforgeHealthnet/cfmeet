@@ -279,12 +279,19 @@ async function journey() {
   // Fault injection at the untrusted delivery boundary. Services and ciphertext in
   // the database remain real and unchanged; only one browser response is corrupted.
   let damagedOnce = false;
+  let orderedPages = 0;
   const deliveryRoute = /\/api\/v2\/messaging\/relay\/v1\/conversations\/[^/]+\/messages\?/;
   const damage = async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
     const body = await response.json();
+    if (body.messages?.length) {
+      orderedPages++;
+      for (let i = 1; i < body.messages.length; i++) {
+        assert.equal(body.messages[i].sequence, body.messages[i - 1].sequence + 1, "authoritative pages must be contiguous, including tombstones");
+      }
+    }
     const application = body.messages?.find((m) => m.kind === "APPLICATION" && m.e2ee?.ciphertext);
     if (!damagedOnce && application) {
       damagedOnce = true;
@@ -298,6 +305,7 @@ async function journey() {
   await send(alice.page, retried);
   await shown(bob.page, retried);
   assert.equal(damagedOnce, true, "the integration test must exercise failed decryption");
+  assert.ok(orderedPages >= 2, "the failed page is refetched from the authoritative endpoint");
   assert.equal(await bob.page.locator("[data-testid=message-text]").filter({ hasText: retried }).count(), 1, "recovery does not duplicate the message");
   await bob.page.unroute(deliveryRoute, damage);
   step("failed encrypted delivery recovered by authoritative retry", {});
@@ -478,6 +486,29 @@ async function journey() {
   await ep.waitForURL(/\/login/, { timeout: T });
   await expired.close();
   step("expired session", {});
+
+  // Private GROUP path: a registered recipient is offline at creation and catches
+  // up through the same authoritative/MLS worker path as the direct conversation.
+  await bob.page.close();
+  await alice.page.click("[data-testid=new-conversation]");
+  await alice.page.click("[data-testid=new-group]");
+  await pick(alice.page, USERS.bob.name);
+  await alice.page.click("[data-testid=group-next]");
+  const groupName = "Reliability private group";
+  await alice.page.getByLabel("Group name", { exact: true }).fill(groupName);
+  await alice.page.click("[data-testid=create-conversation]");
+  await alice.page.locator("[data-testid=conversation-title]", { hasText: groupName }).waitFor({ timeout: T });
+  const groupHello = `${SECRET} offline private group`;
+  await send(alice.page, groupHello);
+  await reopen("bob", bob);
+  const groupRow = bob.page.locator("[data-testid=conversation-item]").filter({ hasText: groupName });
+  await groupRow.waitFor({ timeout: T });
+  await groupRow.click();
+  await shown(bob.page, groupHello);
+  const groupReply = `${SECRET} group reply`;
+  await send(bob.page, groupReply);
+  await shown(alice.page, groupReply);
+  step("private group offline catch-up and bidirectional delivery", {});
 
   // ---- 15. Logout revokes this browser's device and erases its messaging data.
   await alice.page.locator("[data-testid=profile-menu-toggle]:visible").first().click();
