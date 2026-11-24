@@ -63,7 +63,7 @@ try {
  const rawAdd=rawSender.addDevices(gid,rawPacked);rawReceiver.join(gid,rawAdd.welcome);
  const rawAad=new Uint8Array([1]),rawOld=rawSender.encrypt(gid,rawAad,new Uint8Array([42]));const rawUpdate=rawSender.updateKeys(gid);rawReceiver.process(gid,rawUpdate.commit,undefined,[]);
  let retained=false,retentionError=null;try{retained=rawReceiver.process(gid,rawOld,rawAad,[]).kind==='APPLICATION';}catch(e){retentionError=/^[A-Z_]{3,64}$/.test(e.message)?e.message:'CORE_REJECTED';}
- events.push({name:'core old-epoch retention after commit',result:'CONFIRMED',oldEpochDecryptable:retained,error:retentionError});
+ check('core retains a bounded delayed epoch',retained,{oldEpochDecryptable:retained,error:retentionError});
  const old=encode();
  // Delay the already-member receiver's backlog, advance its own epoch through the real
  // worker commit/confirm API, then deliver the original unmodified old message.
@@ -71,8 +71,10 @@ try {
  const change=await call('updateKeys',{groupId:gid});await call('confirm');sender.process(gid,change.commit,undefined,[]);
  const stateEpoch=await call('epoch',{groupId:gid});
  const oldLate=old;
- const classified=await process([oldLate]);check('prior membership is not labelled BEFORE_JOIN',classified.records[0].status==='FAILED'&&classified.records[0].error==='HISTORICAL_EPOCH_UNAVAILABLE',{joinedEpoch,currentEpoch:stateEpoch,messageEpoch:old.epoch});
- const lateRetry=await process([oldLate]);check('old-epoch failure remains retryable',lateRetry.records.length===1,{cursor:lateRetry.cursor});
+ const classified=await process([oldLate]);check('delayed prior-member traffic decrypts',classified.records[0].status==='DECRYPTED',{joinedEpoch,currentEpoch:stateEpoch,messageEpoch:old.epoch});
+ const lateRetry=await process([oldLate]);check('delayed delivery remains idempotent',lateRetry.records.length===0,{cursor:lateRetry.cursor});
+ const outsideWindow=encode();for(let i=0;i<3;i++){const change=await call('updateKeys',{groupId:gid});await call('confirm');sender.process(gid,change.commit,undefined,[]);}
+ const unavailable=await process([outsideWindow]);check('expired historical state is not historical non-membership',unavailable.records[0].status==='FAILED'&&unavailable.records[0].error==='HISTORICAL_EPOCH_UNAVAILABLE');
  const bad=encode();const valid={...bad};bad.ciphertext=b64(new Uint8Array([1,2,3]));const failed=await process([bad]);check('invalid ciphertext persists FAILED',failed.records[0].status==='FAILED');w.terminate();await new Promise(r=>setTimeout(r,100));start();await call('open',{account,scope});check('corrected ciphertext recovers at same sequence',(await process([valid])).records[0].status==='DECRYPTED');check('successful delivery is idempotent',(await process([valid])).records.length===0);
  const atomic=encode();await call('_abortNextWrite');let aborted=false;
  try{await process([atomic]);}catch{aborted=true;}

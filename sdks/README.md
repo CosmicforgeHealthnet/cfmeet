@@ -443,3 +443,26 @@ npm tarball and the Dart archive and uploads them; publication runs only when th
 environment approves, and the manifests are made publishable (both are private today;
 the Dart package also needs a LICENSE — a licensing decision pending before any public
 release). Local generation never needs registry credentials.
+
+
+### Local MLS runtime diagnostics and in-flight history window
+
+Message processing failures now expose allowlisted categories such as
+`HISTORICAL_EPOCH_UNAVAILABLE`, `EPOCH_MISMATCH`, `RATCHET_STATE_UNAVAILABLE`,
+`RATCHET_GENERATION_UNAVAILABLE`, `REPLAY_REJECTED`, `GROUP_ID_MISMATCH`,
+`MEMBERSHIP_UNKNOWN`, `GROUP_STATE_REFUSED`, `COMMIT_REFUSED`,
+`MESSAGE_AUTHENTICATION_FAILED`, `MALFORMED_MLS_MESSAGE`, `CRYPTO_STORAGE_ERROR`,
+and `AAD_MISMATCH`. Generic `MESSAGE_REFUSED` remains a fallback. These are local
+crypto errors, not new HTTP/OpenAPI responses. Unknown codes must remain safe
+refusals; do not log raw cryptographic errors or infer device non-membership from a
+lower epoch. Native/wasm processing restores state after failed validation, so
+correcting an untrusted delivery envelope does not consume a receive generation.
+
+The candidate shared core retains at most two previous MLS epochs for at most
+24 hours, pruned on load/use and SDK state-export checkpoints. Consumed generation
+keys remain replay-protected. Newly joining devices do not receive earlier epoch
+secrets. Offline files or snapshots cannot be remotely erased while a client is
+not running; age enforcement occurs before runtime use, and old captured snapshots
+remain a compromise risk. History beyond that window requires authorized encrypted
+record transfer/backup, not unlimited MLS secret retention. This is candidate
+behavior requiring release review, not a statement about deployed mobile clients.

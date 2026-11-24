@@ -96,11 +96,13 @@ fn forward_secrecy_consumed_and_past_epoch_secrets_are_not_reconstructible() {
             )
             .unwrap();
         merged(d[1].process(&mut g[1], &rm.commit).unwrap());
+        // One delayed epoch is recoverable, but the replay remains refused.
+        assert!(d[1].process(&mut g[1], &early).is_ok());
         late_refused = d[1].process(&mut g[1], &early).is_err();
     }
     assert!(
         late_refused,
-        "no past-epoch decryption is retained (max_past_epochs = 0)"
+        "consumed generations remain replay-protected within the bounded retention window"
     );
 }
 

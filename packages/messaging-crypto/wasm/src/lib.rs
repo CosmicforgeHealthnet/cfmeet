@@ -484,8 +484,13 @@ impl WebDevice {
     /// The complete secret state (keys and every group). The worker encrypts it before
     /// it leaves memory and never posts it out of the worker.
     #[wasm_bindgen(js_name = exportState)]
-    pub fn export_state(&self) -> Vec<u8> {
-        self.device.export_state().to_vec()
+    pub fn export_state(&mut self) -> Result<Vec<u8>, JsError> {
+        for (_, group) in &mut self.groups {
+            self.device
+                .prune_history_window(group)
+                .map_err(|e| code(e.public_code()))?;
+        }
+        Ok(self.device.export_state().to_vec())
     }
 
     #[wasm_bindgen(getter, js_name = deviceId)]
@@ -659,6 +664,7 @@ impl WebDevice {
         allowed_joiners: Vec<String>,
     ) -> Result<ProcessResult, JsError> {
         let checkpoint = self.device.export_state();
+        let known_groups: Vec<Vec<u8>> = self.groups.iter().map(|(id, _)| id.clone()).collect();
         let result = (|| {
             let g = group_of(&self.device, &mut self.groups, group_id)?;
             let allowed = |device: Uuid, key: &[u8]| {
@@ -724,6 +730,15 @@ impl WebDevice {
             self.device = Device::import_state(self.device.device_id(), &checkpoint)
                 .map_err(|_| code("DEVICE_STATE_INVALID"))?;
             self.groups.clear();
+            for id in known_groups {
+                if let Some(group) = self
+                    .device
+                    .load_group(&id)
+                    .map_err(|e| code(e.public_code()))?
+                {
+                    self.groups.push((id, group));
+                }
+            }
         }
         result
     }

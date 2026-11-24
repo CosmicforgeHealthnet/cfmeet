@@ -16,6 +16,7 @@ use openmls::prelude::{
     MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn, ProcessMessageError,
     ProcessedMessageContent, ProtocolMessage, Sender, StagedWelcome, ValidationError,
 };
+use openmls::prelude::{PastEpochDeletion, PastEpochDeletionPolicy};
 use uuid::Uuid;
 
 use crate::{
@@ -54,7 +55,7 @@ impl GroupError {
     }
 }
 
-fn processing_error<E>(error: ProcessMessageError<E>) -> GroupError {
+fn processing_error<E>(error: ProcessMessageError<E>, historical: bool) -> GroupError {
     use MessageDecryptionError as D;
     use ProcessMessageError as P;
     use ValidationError as V;
@@ -70,7 +71,13 @@ fn processing_error<E>(error: ProcessMessageError<E>) -> GroupError {
         ))) => "REPLAY_REJECTED",
         P::ValidationError(V::UnableToDecrypt(D::SecretTreeError(
             SecretTreeError::TooDistantInThePast,
-        ))) => "RATCHET_STATE_UNAVAILABLE",
+        ))) => {
+            if historical {
+                "HISTORICAL_EPOCH_UNAVAILABLE"
+            } else {
+                "RATCHET_STATE_UNAVAILABLE"
+            }
+        }
         P::ValidationError(V::UnableToDecrypt(D::GenerationOutOfBound)) => {
             "RATCHET_GENERATION_UNAVAILABLE"
         }
@@ -167,13 +174,45 @@ fn key_package(provider: &CfMlsProvider, encoded: &[u8]) -> Result<KeyPackage, G
         .map_err(|_| GroupError::Refused)
 }
 
+/// Bounded in-flight recovery window. Consumed message keys remain replay-protected.
+pub const MAX_RETAINED_EPOCHS: usize = 2;
+pub const MAX_EPOCH_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 impl Device {
+    fn enforce_history_window(&self, group: &mut MlsGroup) -> Result<(), GroupError> {
+        group
+            .set_past_epoch_deletion_policy(
+                self.provider(),
+                PastEpochDeletionPolicy::MaxEpochs(MAX_RETAINED_EPOCHS),
+            )
+            .map_err(|_| GroupError::Refused)?;
+        // Legacy entries without age provenance are never granted indefinite retention.
+        group
+            .delete_past_epoch_secrets(
+                self.provider(),
+                PastEpochDeletion::delete_all_without_timestamps(),
+            )
+            .map_err(|_| GroupError::Refused)?;
+        group
+            .delete_past_epoch_secrets(
+                self.provider(),
+                PastEpochDeletion::older_than_duration(MAX_EPOCH_AGE)
+                    .max_past_epochs(MAX_RETAINED_EPOCHS),
+            )
+            .map_err(|_| GroupError::Refused)
+    }
+    /// Enforce the fixed bounded retention policy before SDK state persistence.
+    pub fn prune_history_window(&self, group: &mut ClientGroup) -> Result<(), GroupError> {
+        self.enforce_history_window(&mut group.group)
+    }
+
     /// Creates a group with the conversation's server-assigned 32-byte group id (epoch 0,
     /// this device the only member).
     pub fn create_group(&self, group_id: &[u8]) -> Result<ClientGroup, GroupError> {
         let config = MlsGroupCreateConfig::builder()
             .ciphersuite(MANDATORY_CIPHERSUITE)
             .use_ratchet_tree_extension(true)
+            .max_past_epochs(MAX_RETAINED_EPOCHS)
             .build();
         let group = MlsGroup::new_with_group_id(
             self.provider(),
@@ -323,9 +362,14 @@ impl Device {
     /// The device's state of a group it created or joined earlier, read back from its
     /// own storage (after [`Device::import_state`]). `None`: the device has no such group.
     pub fn load_group(&self, group_id: &[u8]) -> Result<Option<ClientGroup>, GroupError> {
-        MlsGroup::load(self.provider().storage(), &GroupId::from_slice(group_id))
-            .map(|g| g.map(|group| ClientGroup { group }))
-            .map_err(|_| GroupError::Malformed)
+        let Some(mut group) =
+            MlsGroup::load(self.provider().storage(), &GroupId::from_slice(group_id))
+                .map_err(|_| GroupError::Malformed)?
+        else {
+            return Ok(None);
+        };
+        self.enforce_history_window(&mut group)?;
+        Ok(Some(ClientGroup { group }))
     }
 
     /// Joins a group from a Welcome addressed to one of this device's KeyPackages.
@@ -339,6 +383,7 @@ impl Device {
         // must carry the tree, or the devices it adds can never join.
         let config = MlsGroupJoinConfig::builder()
             .use_ratchet_tree_extension(true)
+            .max_past_epochs(MAX_RETAINED_EPOCHS)
             .build();
         let group = StagedWelcome::new_from_welcome(self.provider(), &config, welcome, None)
             .map_err(|_| GroupError::Refused)?
@@ -381,6 +426,7 @@ impl Device {
         let epoch = info.epoch().as_u64();
         let config = MlsGroupJoinConfig::builder()
             .use_ratchet_tree_extension(true)
+            .max_past_epochs(MAX_RETAINED_EPOCHS)
             .build();
         let (group, bundle) = MlsGroup::external_commit_builder()
             .with_config(config)
@@ -419,6 +465,7 @@ impl Device {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<Vec<u8>, GroupError> {
+        self.enforce_history_window(&mut group.group)?;
         if group.group.pending_commit().is_some() {
             return Err(GroupError::Refused);
         }
@@ -454,15 +501,17 @@ impl Device {
         encoded: &[u8],
         joiner_allowed: impl Fn(Uuid, &[u8]) -> bool,
     ) -> Result<Processed, GroupError> {
+        self.enforce_history_window(&mut group.group)?;
         let message =
             MlsMessageIn::tls_deserialize_exact(encoded).map_err(|_| GroupError::Malformed)?;
         let protocol: ProtocolMessage = message
             .try_into_protocol_message()
             .map_err(|_| GroupError::Malformed)?;
+        let historical = protocol.epoch().as_u64() < group.epoch();
         let processed = group
             .group
             .process_message(self.provider(), protocol)
-            .map_err(processing_error)?;
+            .map_err(|error| processing_error(error, historical))?;
         let aad = processed.aad().to_vec();
         let external = matches!(processed.sender(), Sender::NewMemberCommit);
         if matches!(
@@ -539,5 +588,55 @@ impl ClientGroup {
             .collect();
         out.sort();
         out
+    }
+}
+
+#[cfg(test)]
+mod bounded_history_tests {
+    use super::*;
+
+    #[test]
+    fn delayed_membership_traffic_is_bounded_by_epoch_count_and_age() {
+        let alice = Device::generate(Uuid::new_v4()).unwrap();
+        let bob = Device::generate(Uuid::new_v4()).unwrap();
+        let mut a = alice.create_group(&[91; 32]).unwrap();
+        let added = alice
+            .add_devices(&mut a, &[bob.key_package().unwrap()])
+            .unwrap();
+        let mut b = bob.join(added.welcome.as_ref().unwrap()).unwrap();
+        let recent = alice.encrypt(&mut a, b"test", b"delayed").unwrap();
+        let expired_by_count = alice.encrypt(&mut a, b"test", b"epoch bound").unwrap();
+        let update = alice.update_keys(&mut a).unwrap();
+        bob.process(&mut b, &update.commit).unwrap();
+        assert!(bob.process(&mut b, &recent).is_ok());
+        assert_eq!(
+            bob.process(&mut b, &recent).unwrap_err().public_code(),
+            "REPLAY_REJECTED"
+        );
+        for _ in 0..MAX_RETAINED_EPOCHS {
+            let update = alice.update_keys(&mut a).unwrap();
+            bob.process(&mut b, &update.commit).unwrap();
+        }
+        assert_eq!(
+            bob.process(&mut b, &expired_by_count)
+                .unwrap_err()
+                .public_code(),
+            "HISTORICAL_EPOCH_UNAVAILABLE"
+        );
+        let aged = alice.encrypt(&mut a, b"test", b"age bound").unwrap();
+        let update = alice.update_keys(&mut a).unwrap();
+        bob.process(&mut b, &update.commit).unwrap();
+        // Deterministic expiry injection using OpenMLS's own age-pruning API.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        b.group
+            .delete_past_epoch_secrets(
+                bob.provider(),
+                PastEpochDeletion::older_than_duration(std::time::Duration::ZERO),
+            )
+            .unwrap();
+        assert_eq!(
+            bob.process(&mut b, &aged).unwrap_err().public_code(),
+            "HISTORICAL_EPOCH_UNAVAILABLE"
+        );
     }
 }

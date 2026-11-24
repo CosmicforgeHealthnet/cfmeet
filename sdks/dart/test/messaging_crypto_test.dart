@@ -104,14 +104,15 @@ void main() {
     expect(r.epoch, 1);
 
     expect(() => bob.process(groupId, ct, expectedAad: a),
-        refusedWith('MESSAGE_REFUSED'));
+        refusedWith('REPLAY_REJECTED'));
     final second = alice.encrypt(groupId, a, utf8.encode('second'));
     final tampered = Uint8List.fromList(second)..[second.length - 5] ^= 0x80;
     expect(() => bob.process(groupId, tampered, expectedAad: a),
-        refusedWith('MESSAGE_REFUSED'));
+        refusedWith('MESSAGE_AUTHENTICATION_FAILED'));
     final third = alice.encrypt(groupId, a, utf8.encode('third'));
     expect(() => bob.process(groupId, third, expectedAad: aad(bobId)),
         refusedWith('AAD_MISMATCH'));
+    expect(utf8.decode(bob.process(groupId, third, expectedAad: a).plaintext), 'third');
     final fourth = alice.encrypt(groupId, a, utf8.encode('fourth'));
     expect(() => bob.process(groupId, fourth), refusedWith('AAD_MISMATCH'));
 

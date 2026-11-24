@@ -150,6 +150,7 @@ async function roundTrip(c: MessagingCrypto): Promise<void> {
   assert.equal(new TextDecoder().decode(processed.plaintext), 'hello bob');
   const again = alice.encrypt(group, msgAad, new TextEncoder().encode('second'));
   assert.throws(() => bob.process(group, again, c.messageAad(binding), []), (e: unknown) => e instanceof MessagingCryptoError && e.code === 'AAD_MISMATCH');
+  assert.equal(new TextDecoder().decode(bob.process(group, again, msgAad, []).plaintext), 'second');
 
   // A third device joins by itself from the GroupInfo (external commit); members merge it
   // only for a verified joiner.

@@ -996,7 +996,16 @@ pub unsafe extern "C" fn cfm_device_export_state(
             return Err(INVALID);
         }
         // SAFETY: caller contract.
-        let state = unsafe { with_device(device, |s| Ok(s.device.export_state())) }?;
+        let state = unsafe {
+            with_device(device, |s| {
+                for (_, group) in &mut s.groups {
+                    s.device
+                        .prune_history_window(group)
+                        .map_err(|e| code(e.public_code()))?;
+                }
+                Ok(s.device.export_state())
+            })
+        }?;
         // SAFETY: checked non-NULL.
         unsafe { write(out, secret_buffer(state)) }
     })
@@ -1345,6 +1354,8 @@ pub unsafe extern "C" fn cfm_device_process(
         let result = unsafe {
             with_device(device, |s| {
                 let checkpoint = s.device.export_state();
+                let known_groups: Vec<Vec<u8>> =
+                    s.groups.iter().map(|(id, _)| id.clone()).collect();
                 let result = (|| {
                     let (d, g) = s.device_and_group(gid)?;
                     let p = d
@@ -1384,6 +1395,15 @@ pub unsafe extern "C" fn cfm_device_process(
                     s.device = Device::import_state(s.device.device_id(), &checkpoint)
                         .map_err(|_| code("DEVICE_STATE_INVALID"))?;
                     s.groups.clear();
+                    for id in known_groups {
+                        if let Some(group) = s
+                            .device
+                            .load_group(&id)
+                            .map_err(|e| code(e.public_code()))?
+                        {
+                            s.groups.push((id, group));
+                        }
+                    }
                 }
                 result
             })
