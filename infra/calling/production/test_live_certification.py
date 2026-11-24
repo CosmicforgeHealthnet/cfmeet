@@ -101,6 +101,8 @@ class FakeHost:
             for fragment, answer in self.http.items():
                 if fragment in url:
                     return 0, answer
+            if '/internal/cfmeet-admin/v1/' in url:
+                return 0, '{}\n404'  # dark bridge's ops listener never exposes the HQ API
             if '/internal/' in url or url.endswith(('/api/v1/users/me', '/v1/calls', '/sms-bridge/disclosure')):
                 return 0, '{"error":{"code":"INTERNAL_AUTHENTICATION_FAILED"}}\n401'
             return 0, '{"status":"ok"}\n200'

@@ -116,6 +116,21 @@ NOTIFICATIONS_DARK_ENV = {
     'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
 }
 
+# Admin Bridge first-time dark bootstrap. No DB, HQ port, private TLS route or
+# owner grants are created while disabled; those are governed by the separately
+# reviewed full Admin Bridge cutover (design section 14). The process serves
+# only its in-container loopback ops listener (no published Docker port).
+ADMIN_BRIDGE_MODULES = ('ACCOUNTS', 'MEETINGS', 'MESSAGING', 'CALLING', 'COMMUNICATIONS',
+    'ORGANIZATIONS', 'PARTNERS', 'IDENTITY', 'APPS', 'VERIFICATION', 'PRICING',
+    'FINANCE', 'NOTIFICATIONS', 'PRIVACY', 'OPERATIONS', 'AUDIT', 'TELECOM')
+ADMIN_BRIDGE_DARK_ENV = {
+    'ADMIN_BRIDGE_ENABLED': 'false',
+    'ADMIN_BRIDGE_WRITES_ENABLED': 'false',
+    'ADMIN_BRIDGE_OPS_BIND_ADDRESS': '127.0.0.1:8190',
+    'ADMIN_BRIDGE_HQ_BIND_ADDRESS': '127.0.0.1:8443',
+    **{'ADMIN_BRIDGE_MODULE_' + module: 'false' for module in ADMIN_BRIDGE_MODULES},
+}
+
 SERVICES = {
     'platform-access': _service('cfmeet-platform-access', 8094, '/ready', tls=8443,
         db='cfmeet_platform_access', role='platform_access', migrations=['platform-access-migration'],
@@ -184,6 +199,11 @@ SERVICES = {
              'DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WEBHOOKS_ENABLED': 'false',
              'DEVELOPER_PLATFORM_WORKER_INSTANCE_ID': 'worker-production-1'}),
+    # Private, dark-only Admin Bridge. No HQ listener, database session or inbound
+    # network exposure until the separately certified HQ integration is merged.
+    # /ready lives on 127.0.0.1:8190 and is probed via the container namespace.
+    'admin-bridge': _service('cfmeet-admin-bridge', 8190, '/ready',
+        memory=128, env=ADMIN_BRIDGE_DARK_ENV),
     # No database, no trust bundle (it receives no internal call); public only after
     # activate-developer-platform + activate-gateway-routing.
     'api-gateway': _service('cfmeet-api-gateway', 8099, '/ready', memory=192,
@@ -194,7 +214,7 @@ SERVICES = {
 # Owners before callers (final-production-activation-runbook §1).
 ORDER = ('platform-access', 'organizations', 'notifications', 'notifications-2',
          'messaging', 'calling', 'communications', 'numbering', 'privacy-relay', 'sms-gateway', 'telephony',
-         'meeting-service', 'developer-platform', 'developer-platform-worker', 'api-gateway')
+         'meeting-service', 'developer-platform', 'developer-platform-worker', 'admin-bridge', 'api-gateway')
 DEPENDS = {
     'organizations': ('platform-access',),
     'notifications': ('platform-access',),
@@ -207,9 +227,10 @@ DEPENDS = {
     'developer-platform': ('platform-access', 'meeting-service', 'calling'),
     'developer-platform-worker': ('developer-platform',),
     'api-gateway': ('platform-access', 'developer-platform'),
+    'admin-bridge': ('organizations',),
 }
 IMAGES = ('platform-access', 'organizations', 'notifications', 'messaging', 'calling', 'communications', 'numbering',
-          'privacy-relay', 'sms-gateway', 'telephony', 'meeting-service', 'developer-platform',
+          'privacy-relay', 'sms-gateway', 'telephony', 'meeting-service', 'developer-platform', 'admin-bridge',
           'api-gateway', 'security-scan-gateway')
 
 # --- Resource gate -----------------------------------------------------------------------
@@ -318,7 +339,7 @@ FLAGS = (
     'EMAIL_PROVIDER', 'EMAIL_FROM_ADDRESS', 'EMAIL_VERIFICATION_REQUIRED', 'EMAIL_VERIFICATION_ENFORCE_FROM',
     'EMAIL_VERIFICATION_GRACE_UNTIL', 'FEATURE_MEETING_V2_ENABLED', 'FEATURE_RTC_PROVIDER_CONTROL_V2',
     'CONFERENCE_EMPTY_TIMEOUT_SECS', 'FEATURE_RECORDING_V2_ENABLED',
-) + platform_ops.FLAGS + integrate_ops.FLAGS + tuple(sorted(p.SAFE_ENV))
+) + platform_ops.FLAGS + integrate_ops.FLAGS + tuple(sorted(p.SAFE_ENV)) + tuple(ADMIN_BRIDGE_DARK_ENV)
 SECRET_HINT = re.compile(r'(SECRET|PASSWORD|TOKEN|KEY|PEPPER|DATABASE_URL|REDIS_URL|CREDENTIAL|DSN)', re.I)
 
 
@@ -1302,6 +1323,9 @@ def deploy(name, image_id, sha, run_id, entry):
 
 
 SAFE_DEFAULTS = {
+    'admin-bridge': {key: (None, 'false') for key in
+        ('ADMIN_BRIDGE_ENABLED', 'ADMIN_BRIDGE_WRITES_ENABLED') +
+        tuple('ADMIN_BRIDGE_MODULE_' + module for module in ADMIN_BRIDGE_MODULES)},
     'sms-gateway': {'SMS_GATEWAY_PROVIDER': (None, '', 'none')},
     'numbering': {'NUMBERING_PROVIDERS': (None, ''), 'NUMBERING_PORTING_ENABLED': (None, 'false')},
     'telephony': {k: (None, 'false') for k in ('TELEPHONY_ENABLED', 'PUBLIC_OUTBOUND_CALLING_ENABLED',

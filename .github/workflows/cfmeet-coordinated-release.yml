@@ -105,7 +105,7 @@ jobs:
             // that ran on this push must be green; a path-filtered one that did not run must
             // have its latest completed main run green (its inputs did not change).
             const required = [
-              'backend.yml', 'platform-access.yml', 'organizations.yml', 'notifications.yml', 'messaging.yml', 'calling.yml',
+              'backend.yml', 'platform-access.yml', 'organizations.yml', 'notifications.yml', 'admin-bridge.yml', 'messaging.yml', 'calling.yml',
               'communications-hub.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
               'contracts.yml', 'service-boundaries.yml', 'dependency-security.yml', 'migration-guard.yml',
               'certification.yml', 'unified-messaging-e2e.yml', 'enterprise-calling-certification.yml'

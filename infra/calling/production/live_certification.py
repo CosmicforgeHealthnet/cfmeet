@@ -51,7 +51,7 @@ READINESS_PROVES_DB = {
     'messaging': True, 'calling': True,
     'communications': True, 'numbering': True, 'privacy-relay': True, 'sms-gateway': True,
     'telephony': True, 'meeting-service': False, 'developer-platform': True,
-    'developer-platform-worker': False, 'api-gateway': False,
+    'developer-platform-worker': False, 'api-gateway': False, 'admin-bridge': False,
 }
 
 # One credential-free GET per service that its authentication layer must reject before any
@@ -79,6 +79,7 @@ AUTH_PROBES = {
     'meeting-service': '/api/v1/users/me',
     'developer-platform': None,
     'api-gateway': '/v1/calls',
+    'admin-bridge': '/internal/cfmeet-admin/v1/capabilities',
 }
 
 # External integrations and the switch that governs each. A value in `off` means the
@@ -201,6 +202,8 @@ def authentication(name, container):
     expected = (401,)
     if name == 'api-gateway' and p.env_of(p.inspect(container)).get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true':
         expected = (404,)  # deny-all table while public routing is off
+    if name == 'admin-bridge':
+        expected = (404,)  # loopback ops listener must NOT serve the HQ APIs
     return dict(probe='GET ' + path, status=status, errorCode=code.group(1) if code else None,
                 expected=list(expected), result='PASS' if status in expected else 'FAIL')
 
