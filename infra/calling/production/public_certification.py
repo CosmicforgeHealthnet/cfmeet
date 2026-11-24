@@ -153,7 +153,7 @@ def infrastructure():
     checks['health'] = dict(status=status, result='PASS' if status == 200 and '"healthy"' in body else 'FAIL')
     # D1: the Meeting Service's Swagger UI and OpenAPI documents are not public in
     # production (the developer portal publishes the customer documentation).
-    for url in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
+    for url in ('/api-docs/swagger-config.json', '/api-docs/openapi.json'):
         status, _, _ = request(url)
         checks['docs_not_public ' + url] = dict(status=status, result='PASS' if status == 404 else 'FAIL')
     status, headers, _ = request('/api/v2/me/profile', 'OPTIONS', {

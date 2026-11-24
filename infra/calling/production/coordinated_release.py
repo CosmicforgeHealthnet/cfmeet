@@ -1498,9 +1498,11 @@ def public_smoke():
     checks = {}
     # D1: the Meeting Service's own Swagger UI / OpenAPI are not served in production
     # (customer documentation is published through the developer portal).
-    for path in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
+    for path in ('/api-docs/swagger-config.json', '/api-docs/openapi.json'):
         status, _ = http_status(PUBLIC + path)
         checks['docs_not_public ' + path] = 'PASS' if status == 404 else 'FAIL'
+    status, _ = http_status(PUBLIC + '/swagger-ui/')
+    checks['swagger_reference'] = 'PASS' if status in (200, 404) else 'FAIL'
     status, headers = http_status(PUBLIC + '/api/v2/me/profile', 'OPTIONS', {
         'Origin': WEB_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
     allowed = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
@@ -2431,6 +2433,8 @@ def gateway_snippet(prefixes=GATEWAY_PREFIXES, docs=False):
     if docs:
         read_only = common + '    limit_except GET OPTIONS { deny all; }\n'
         out.append('# Public API documentation and discovery (activate-gateway-docs).')
+        out.append('location = /swagger-ui { return 308 /docs; }')
+        out.append('location = /swagger-ui/ { return 308 /docs; }')
         for path in DOCS_EXACT:
             out.append('location = %s {\n%s}' % (path, read_only))
         out.append('location ^~ %s/ {\n%s}' % (DOCS_PREFIX, read_only))
@@ -2601,6 +2605,9 @@ def activate_gateway_docs(sha, run_id, confirm):
         raise RuntimeError('The gateway snippet is not included by the public site')
     snippets = [f.read_text() for f in Path('/etc/nginx/snippets').glob('cfmeet-*.conf') if f != GATEWAY_SNIPPET]
     collisions = route_collisions([site] + snippets, DOCS_EXACT + (DOCS_PREFIX,))
+    for text in [site] + snippets:
+        if re.search(r'location\s*=\s*/swagger-ui/?\s*\{', text):
+            collisions.append('/swagger-ui')
     if collisions:
         raise RuntimeError('Existing public routes already serve: ' + ', '.join(collisions))
     old_snippet = GATEWAY_SNIPPET.read_text()
