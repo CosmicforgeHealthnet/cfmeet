@@ -7,6 +7,7 @@ import { Mic, MicOff, MonitorUp, MonitorX, SwitchCamera, Video, VideoOff, Volume
 import { cn } from "@/lib/utils";
 import type { MediaCredential } from "@/types/calling";
 import { quietExpectedLiveKitTeardown } from "@/lib/calling/livekit-quiet";
+import { DeviceRecordingProvider } from "@/components/recording/DeviceRecording";
 
 quietExpectedLiveKitTeardown();
 
@@ -377,7 +378,8 @@ export default function CallMedia({ credential, video, onConnected, onDisconnect
       <SoundUnlock />
       <ProviderReconnectEvents onReconnecting={onProviderReconnecting} onReconnected={onProviderReconnected} />
       <PublishWhenAllowed audio={credential.capabilities.canPublishAudio} video={video && credential.capabilities.canPublishVideo} />
-      {children}
+      {/* Old calls (APP_MEDIA_V1) have no canPublishData, so they can't record. */}
+      <DeviceRecordingProvider label="call" canStart={credential.capabilities.canPublishAudio && credential.capabilities.canPublishData}>{children}</DeviceRecordingProvider>
     </LiveKitRoom>
   );
 }

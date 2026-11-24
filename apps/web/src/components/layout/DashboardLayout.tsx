@@ -30,7 +30,7 @@ export default function DashboardLayout({
   useEffect(() => {
     // If not loading and no user (either error like 401 Guest, or just no session), redirect
     if (mounted && !isLoading && (!user || error)) {
-      router.push("/login");
+      router.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
     }
   }, [user, isLoading, error, router, mounted]);
 

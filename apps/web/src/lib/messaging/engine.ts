@@ -259,6 +259,31 @@ const ATTACHMENT_FORMAT = "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1";
 
 const uuid = () => crypto.randomUUID();
 
+/** Photos the chat shows inline; any other type (SVG included) is only ever downloaded. */
+export function isInlineImage(mediaType: string | null | undefined): boolean {
+  return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp" || mediaType === "image/gif";
+}
+
+/** Voice notes and audio files the chat plays inline. */
+export function isPlayableAudio(mediaType: string | null | undefined): boolean {
+  return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
+}
+
+/** Length of an audio or video file, read by the browser (null: it can't tell). */
+function mediaDurationMs(file: Blob): Promise<number | null> {
+  if (typeof document === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const el = document.createElement(file.type.startsWith("video/") ? "video" : "audio");
+    const url = URL.createObjectURL(file);
+    const done = (v: number | null) => { URL.revokeObjectURL(url); el.removeAttribute("src"); resolve(v); };
+    el.preload = "metadata";
+    el.onloadedmetadata = () => done(Number.isFinite(el.duration) && el.duration > 0 ? Math.max(1, Math.round(el.duration * 1000)) : null);
+    el.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    el.src = url;
+  });
+}
+
 function attachmentKind(mediaType: string): string {
   if (mediaType.startsWith("image/")) return "IMAGE";
   if (mediaType.startsWith("video/")) return "VIDEO";
@@ -703,6 +728,27 @@ export class MessagingEngine {
   }
 
   /** A member's device list, cached for `maxAgeMs`. */
+  /**
+   * The security code of a private one-to-one chat (WhatsApp): 60 digits from both people's
+   * active device keys. Both phones show the same code; if it matches when you compare it in
+   * person, nobody swapped a key. It changes when either person adds or removes a device.
+   */
+  async securityCode(conversationId: string): Promise<{ code: string; logChecked: boolean } | null> {
+    const conv = this.server.get(conversationId);
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!conv || !me || conv.securityProfile !== "PRIVATE_E2EE" || !view || view.members.length !== 2) return null;
+    const people = [...view.members].sort();
+    const parts = await Promise.all(people.map(async (p) => {
+      const keys = (await this.principalDevices(p, 0)).filter((d) => d.status === "ACTIVE").map((d) => d.signaturePublicKey).sort();
+      return `${p}:${keys.join(",")}`;
+    }));
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-512", new TextEncoder().encode(`cfmeet-security-code-v1|${parts.join("|")}`)));
+    const view32 = new DataView(digest.buffer);
+    const blocks = Array.from({ length: 12 }, (_, i) => String(view32.getUint32(i * 4) % 100000).padStart(5, "0"));
+    return { code: blocks.join(" "), logChecked: this.snapshot.ktPinned };
+  }
+
   private async principalDevices(principalId: string, maxAgeMs: number): Promise<ServerDevice[]> {
     const hit = this.deviceLists.get(principalId);
     if (hit && Date.now() - hit.at < maxAgeMs) return hit.devices;
@@ -2565,16 +2611,42 @@ export class MessagingEngine {
     }
   }
 
-  /** Sends a file: PRIVATE_E2EE encrypts it here (only ciphertext is uploaded). */
-  async sendFile(conversationId: string, file: File): Promise<void> {
+  /**
+   * Sends a file: PRIVATE_E2EE encrypts it here (only ciphertext is uploaded). Voice notes pass
+   * their recorded length; other audio and video files are measured here.
+   */
+  async sendFile(conversationId: string, file: File, durationMs?: number): Promise<void> {
     const conv = this.server.get(conversationId);
     if (!conv) return;
     const key = `p${uuid()}`;
     this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text: null, file: { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, attachmentId: null }, note: null, transferred: false });
-    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file));
+    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file, durationMs));
   }
 
-  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File): Promise<void> {
+  /** Sends a failed file again (it stays on this page until sent or discarded). */
+  retryFile(conversationId: string, key: string): void {
+    const failed = this.failedFiles.get(key);
+    const conv = this.server.get(conversationId);
+    if (!failed || !conv) return;
+    this.failedFiles.delete(key);
+    const view = (this.pendingSends.get(conversationId) ?? []).find((m) => m.key === key);
+    if (view) this.addPending(conversationId, { ...view, state: "sending", note: null });
+    void this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, failed.file, failed.durationMs));
+  }
+
+  discardFile(conversationId: string, key: string): void {
+    this.failedFiles.delete(key);
+    this.pendingSends.set(conversationId, (this.pendingSends.get(conversationId) ?? []).filter((m) => m.key !== key));
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: (this.snapshot.messages[conversationId] ?? []).filter((m) => m.key !== key) } });
+  }
+
+  /** A failed file that can be sent again. */
+  canRetryFile(key: string): boolean {
+    return this.failedFiles.has(key);
+  }
+  private failedFiles = new Map<string, { file: File; durationMs?: number }>();
+
+  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File, durationMs?: number): Promise<void> {
     try {
       const data = new Uint8Array(await file.arrayBuffer());
       const mediaType = file.type || "application/octet-stream";
@@ -2591,12 +2663,17 @@ export class MessagingEngine {
         await relay("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
         await this.sendEncrypted(conv, { t: "file", handle: enc.handle, attachmentId: intent.attachmentId }, [intent.attachmentId]);
       } else {
+        const kind = attachmentKind(mediaType);
+        // The server needs the length of voice notes and videos (and refuses them without it).
+        const length = kind === "VOICE_NOTE" || kind === "VIDEO" ? (durationMs ?? (await mediaDurationMs(file))) : null;
+        if ((kind === "VOICE_NOTE" || kind === "VIDEO") && !length) throw new MessagingApiError(0, "DURATION_UNKNOWN", null, "This browser can't read how long this file is.");
         const intent = await relay<{ attachmentId: string; upload: { url: string; headers: { name: string; value: string }[] } }>("POST", `v1/conversations/${conversationId}/attachments`, {
-          kind: attachmentKind(mediaType),
+          kind,
           size: data.length,
           sha256: await sha256Hex(data),
           mediaType,
           fileName: file.name.slice(0, 255),
+          ...(length ? { durationMs: length } : {}),
         });
         await this.uploadWithRetry(intent.upload, data);
         let fin = await relay<{ state: string; stateReason?: string | null }>("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
@@ -2615,6 +2692,7 @@ export class MessagingEngine {
       }
       this.settlePending(conversationId, key, null);
     } catch (e) {
+      this.failedFiles.set(key, { file, durationMs });
       this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
     }
     await this.sync(conversationId);
@@ -2646,6 +2724,22 @@ export class MessagingEngine {
   }
 
   /** Downloads an attachment; PRIVATE_E2EE is decrypted on this device. */
+  /**
+   * A photo shown in the chat (WhatsApp): only plain raster types are rendered (never SVG,
+   * which can carry script); everything else stays a download. Cached per attachment.
+   */
+  async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
+    const aid = message.file?.attachmentId;
+    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType))) return null;
+    const cached = this.imageUrls.get(aid);
+    if (cached) return cached;
+    const { blob } = await this.download(conversationId, message);
+    const url = URL.createObjectURL(new Blob([blob], { type: message.file!.mediaType }));
+    this.imageUrls.set(aid, url);
+    return url;
+  }
+  private imageUrls = new Map<string, string>();
+
   async download(conversationId: string, message: MessageView): Promise<{ blob: Blob; name: string }> {
     const conv = this.server.get(conversationId);
     const aid = message.file?.attachmentId;

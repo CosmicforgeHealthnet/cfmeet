@@ -1,13 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Mic, MicOff } from "lucide-react";
+import { MicOff } from "lucide-react";
 
 const tiles: { name: string; src: string; speaking?: boolean; muted?: boolean; position?: string }[] = [
-  { name: "Tunde", src: "/landing/auth-1.jpg" },
+  { name: "Alicia", src: "/landing/meet-1.png" },
   { name: "Grace", src: "/landing/auth-grace.jpg", speaking: true },
-  { name: "Kwame", src: "/landing/hero-3.jpg", muted: true },
+  { name: "Jordan", src: "/landing/meet-2.png", muted: true },
   { name: "Mei", src: "/landing/hero-4.jpg" },
-  { name: "Arjun", src: "/landing/hero-5.jpg", muted: true },
+  { name: "Ravi", src: "/landing/meet-3.png", muted: true },
   { name: "Sofia", src: "/landing/hero-6.jpg" },
 ];
 
@@ -29,41 +29,33 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
 
       <aside aria-hidden className="hidden h-full p-3 lg:block">
-        <div className="relative h-full overflow-hidden rounded-[24px]">
-          <div className="grid h-full grid-cols-2 grid-rows-3 gap-1.5 bg-background">
-            {tiles.map((t, i) => (
-              <div key={t.name} className="relative overflow-hidden bg-muted">
+        {/* Like a meeting in Google Meet: separate rounded tiles on a dark stage, names bottom-left. */}
+        <div className="flex h-full flex-col rounded-[24px] bg-[#202124] p-3">
+          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-3 gap-2">
+            {tiles.map((t) => (
+              <div key={t.name} className="relative overflow-hidden rounded-xl bg-[#3C4043]">
                 <Image src={t.src} alt="" fill sizes="25vw" className="object-cover" style={{ objectPosition: t.position ?? "center" }} priority />
-                <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                {t.speaking ? <span className="pointer-events-none absolute inset-0 rounded-xl ring-[3px] ring-inset ring-[#8AB4F8]" /> : null}
+                <span className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                  {t.name}
                   {t.speaking ? (
-                    <span className="flex size-4 items-center justify-center gap-[2px] rounded-full bg-primary">
+                    <span className="flex size-4 items-center justify-center gap-[2px] rounded-full bg-[#1A73E8]">
                       {[0, 1, 2].map((b) => (
                         <span key={b} className="cf-eq w-[2px] rounded-full bg-white" style={{ animationDelay: `${b * 0.15}s` }} />
                       ))}
                     </span>
                   ) : t.muted ? (
                     <MicOff className="size-3 text-red-300" />
-                  ) : (
-                    <Mic className="size-3" />
-                  )}
-                  {t.name}
+                  ) : null}
                 </span>
-                {t.speaking && (
-                  <span
-                    className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-primary"
-                    // Follow the panel's rounded outer corner when the tile sits in one.
-                    style={{ borderRadius: ["24px 0 0 0", "0 24px 0 0", "0", "0", "0 0 0 24px", "0 0 24px 0"][i] }}
-                  />
-                )}
               </div>
             ))}
           </div>
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-linear-to-t from-black/80 via-black/40 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-8 xl:p-10">
+          <div className="px-3 pb-3 pt-6 xl:px-5 xl:pb-5">
             <p className="max-w-md text-2xl font-bold leading-tight tracking-tight text-white xl:text-3xl">
               Meet, call and message, all in one place.
             </p>
-            <p className="mt-2 max-w-md text-sm text-white/80 xl:text-base">
+            <p className="mt-2 max-w-md text-sm text-white/70 xl:text-base">
               Video meetings, calls, chats and your contacts, together in CF Meet.
             </p>
           </div>

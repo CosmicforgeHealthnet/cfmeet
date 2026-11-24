@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { developerApiConfig } from "@/lib/developer-platform/config";
 import { ArrowRight, Check, KeyRound, Webhook } from "lucide-react";
 import Reveal from "./Reveal";
 
@@ -47,7 +48,7 @@ export default function LandingDevelopers() {
             ))}
           </ul>
           <Link
-            href="/developers"
+            href={developerApiConfig().available ? "/developers" : "/dashboard/developers"}
             className="group mt-8 inline-flex h-12 items-center gap-2 rounded-xl bg-white px-6 font-semibold text-slate-900 transition-colors hover:bg-slate-100"
           >
             Visit Developer Portal

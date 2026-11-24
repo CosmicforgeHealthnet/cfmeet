@@ -14,13 +14,13 @@ import { useMemo, useState } from "react";
 import { PhoneForwarded, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useCreateForwardingRule, useDeleteForwardingRule, useForwardingRules, useVoicemailMailboxes } from "@/hooks/calling";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { identityApi } from "@/lib/messaging/api";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import type { ForwardingCondition, ForwardingRule } from "@/types/calling";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 const conditions: Record<ForwardingCondition, string> = {
   ALWAYS: "Always (before ringing)",
@@ -83,20 +83,13 @@ export default function ForwardingSettings() {
         </ul>
       )}
       <form onSubmit={submit} className="grid gap-3 rounded-xl border border-border p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-        <div className="space-y-2">
-          <Label htmlFor="forward-condition">When</Label>
-          <select id="forward-condition" value={condition} onChange={(e) => setCondition(e.target.value as ForwardingCondition)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-            {(Object.keys(conditions) as ForwardingCondition[]).map((c) => <option key={c} value={c} disabled={usedConditions.has(c)}>{conditions[c]}</option>)}
-          </select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="forward-destination">Forward to</Label>
-          <select id="forward-destination" required value={destination} onChange={(e) => setDestination(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-            <option value="">Choose…</option>
-            {mailboxes.data?.mailboxes.length ? <optgroup label="My voicemail">{mailboxes.data.mailboxes.map((m) => <option key={m.mailboxId} value={`VOICEMAIL:${m.mailboxId}`}>{m.displayLabel}</option>)}</optgroup> : null}
-            {directory.data?.people.length ? <optgroup label="Colleagues">{directory.data.people.map((p) => <option key={p.userId} value={`USER:${p.userId}`}>{p.displayName}</option>)}</optgroup> : null}
-          </select>
-        </div>
+        <NiceSelect label="When" value={condition} onChange={setCondition}
+          options={(Object.keys(conditions) as ForwardingCondition[]).map((c) => ({ value: c, label: conditions[c], disabled: usedConditions.has(c) }))} />
+        <NiceSelect label="Forward to" placeholder="Choose…" value={destination} onChange={setDestination}
+          options={[
+            ...(mailboxes.data?.mailboxes ?? []).map((m) => ({ value: `VOICEMAIL:${m.mailboxId}`, label: m.displayLabel, hint: "My voicemail" })),
+            ...(directory.data?.people ?? []).map((p) => ({ value: `USER:${p.userId}`, label: p.displayName, hint: "Colleague" })),
+          ]} />
         <Button type="submit" disabled={create.isPending || !destination || usedConditions.has(condition)}>Add rule</Button>
       </form>
       <p className="text-xs text-muted-foreground">One rule per condition. Forwarding never goes to a telephone number. Rules to queues, ring groups or menus are managed by your organization&apos;s administrator.</p>

@@ -38,6 +38,7 @@ import type { SidebarPanel } from "./sidebar";
 import { useMediaDeviceSelect } from "@livekit/components-react";
 import Sidebar from "@/components/room/sidebar";
 import FooterControls from "@/components/room/footer-controls";
+import { DeviceRecordingProvider } from "@/components/recording/DeviceRecording";
 import type { RoomJoinData } from "@/lib/prejoin";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -304,8 +305,11 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
     };
   }, [room, queryClient, joinData.conferenceId]);
 
+  // Device recording: same rule as before (policy on, role may start recording).
+  const canRecordToDevice = !!space.data && space.data.recordingPolicy !== "DISABLED" && meetingAllows(role, "recording.start", space.data.rolePolicy);
+
   return (
-    <>
+    <DeviceRecordingProvider label="meeting" canStart={canRecordToDevice}>
       <div className="room-space dark flex h-dvh overflow-hidden bg-[#202124] text-foreground">
         <div className="flex min-w-0 flex-col flex-1 overflow-hidden">
           <header className="flex h-14 shrink-0 items-center justify-between gap-3 px-3 sm:h-16 sm:px-5">
@@ -391,7 +395,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
           </aside>
         )}
       </div>
-    </>
+    </DeviceRecordingProvider>
   );
 }
 

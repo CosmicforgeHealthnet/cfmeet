@@ -325,6 +325,7 @@ const RETURN_PATHS = [
   /^\/organizations\/exports\/download$/,
   /^\/settings\/data-export\/download$/,
   /^\/dashboard(\/[A-Za-z0-9_\-/]*)?$/,
+  /^\/developers(\/[A-Za-z0-9_\-/]*)?$/,
 ];
 
 export function safeReturnPath(value: string | null | undefined): string | null {

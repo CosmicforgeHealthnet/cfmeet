@@ -7,6 +7,7 @@ import { useEndMessagingSessions, useMessagingDevices, useRevokeMessagingDevice 
 import { messagingErrorMessage } from "@/lib/messaging/errors";
 import type { MessagingEngine } from "@/lib/messaging/engine";
 import type { DeviceRevocationReason, MessagingDevice } from "@/types/messaging";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 export default function MessagingDevicesPanel({ engine }: { engine: MessagingEngine }) {
   const snapshot = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -43,9 +44,8 @@ export default function MessagingDevicesPanel({ engine }: { engine: MessagingEng
           <DialogTitle>{selected === "sessions" ? "End every messaging session?" : "Revoke this messaging device?"}</DialogTitle>
           <DialogDescription>{selected === "sessions" ? "This ends existing realtime sessions on all devices, including this browser. It keeps devices, encryption keys, and message history. Signed-in devices can establish new sessions." : "This device will no longer receive encrypted messages or use existing sessions. Its keys will be removed by that client when it learns of the revocation."}</DialogDescription>
         </DialogHeader>
-        {selected && selected !== "sessions" ? <label className="space-y-2 text-sm">Reason<select className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3" value={reason} onChange={(event) => setReason(event.target.value as DeviceRevocationReason)}>
-          <option value="USER_REQUESTED">No longer used</option><option value="LOST_OR_STOLEN">Lost or stolen</option><option value="COMPROMISED">Possibly compromised</option><option value="REPLACED">Replaced</option>
-        </select></label> : null}
+        {selected && selected !== "sessions" ? <NiceSelect<DeviceRevocationReason> label="Reason" value={reason} onChange={setReason}
+          options={[{ value: "USER_REQUESTED", label: "No longer used" }, { value: "LOST_OR_STOLEN", label: "Lost or stolen" }, { value: "COMPROMISED", label: "Possibly compromised" }, { value: "REPLACED", label: "Replaced" }]} /> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{messagingErrorMessage(error)}</p> : null}
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={() => setSelected(null)}>Cancel</Button>

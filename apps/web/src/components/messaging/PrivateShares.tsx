@@ -8,6 +8,7 @@ import type { Contact } from "@/types/communications";
 import type { MessagingEngine } from "@/lib/messaging/engine";
 import { sharePrivately, type ShareResult } from "@/lib/messaging/private-shares";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 async function listAudience(id: string): Promise<Contact[]> {
   const result: Contact[] = [];
@@ -55,12 +56,8 @@ export default function PrivateShares({ engine, mode, onClose }: {
           <DialogDescription>{status ? "Share an encrypted text status with a contact list. It disappears after 24 hours." : "Send an encrypted message separately to each person in a contact list. Replies stay in your private chats."}</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-          <label className="block space-y-1 text-sm font-medium">Audience
-            <select className="h-11 w-full rounded-xl border bg-background px-3" value={listId} disabled={busy || !!result} onChange={(event) => setListId(event.target.value)}>
-              <option value="">Choose a contact list</option>
-              {lists.data?.data.map((list) => <option key={list.listId} value={list.listId}>{list.name} ({list.memberCount})</option>)}
-            </select>
-          </label>
+          <NiceSelect label="Audience" placeholder="Choose a contact list" value={listId} disabled={busy || !!result} onChange={setListId}
+            options={(lists.data?.data ?? []).map((list) => ({ value: list.listId, label: list.name, hint: list.memberCount === 1 ? "1 person" : `${list.memberCount} people` }))} />
           {lists.data?.data.length === 0 ? <p className="text-sm text-muted-foreground">Create a list under Contacts → Lists, then choose it here.</p> : null}
           {lists.isError || audience.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(lists.error ?? audience.error)}</p> : null}
           <label className="block space-y-1 text-sm font-medium">{status ? "Your status" : "Message"}

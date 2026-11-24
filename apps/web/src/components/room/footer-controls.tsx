@@ -10,6 +10,7 @@ import { schedulingError } from "@/lib/meeting-scheduling";
 import type { SidebarPanel } from "./sidebar";
 import RoomEngagementControls from "./RoomEngagementControls";
 import MutedSpeechPrompt from "./MutedSpeechPrompt";
+import { DeviceRecordButton } from "@/components/recording/DeviceRecording";
 
 interface Props {
   onOpenPanel: (panel: SidebarPanel) => void;
@@ -115,6 +116,7 @@ export default function FooterControls({ onOpenPanel, sidebarPanel, isSidebarOpe
             {isScreenShareEnabled ? <MonitorX /> : <MonitorUp />}
           </button>
           <RoomEngagementControls conferenceId={conferenceId} />
+          <DeviceRecordButton />
           {moreControls}
           <button type="button" aria-label="Leave call" title="Leave call" className="room-leave-button" onClick={() => { setError(""); setLeaveOpen(true); }}>
             <PhoneOff />

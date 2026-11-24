@@ -11,12 +11,12 @@
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useReportAbuse } from "@/hooks/calling";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import type { AbuseCategory } from "@/types/calling";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 const categoryLabels: Record<AbuseCategory, string> = {
   UNWANTED: "Unwanted call",
@@ -58,13 +58,8 @@ export default function AbuseReportDialog({ callId, open, onOpenChange }: {
             reportAbuse.mutate({ category }, { onError: (e) => setError(callingErrorMessage(e)) });
           }}>
             {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
-            <div className="space-y-2">
-              <Label htmlFor="abuse-category">Reason</Label>
-              <select id="abuse-category" value={category} onChange={(e) => setCategory(e.target.value as AbuseCategory)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                {Object.entries(categoryLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-              </select>
-            </div>
+            <NiceSelect label="Reason" value={category} onChange={setCategory}
+              options={(Object.entries(categoryLabels) as [AbuseCategory, string][]).map(([value, label]) => ({ value, label }))} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={close}>Cancel</Button>
               <Button type="submit" variant="destructive" disabled={reportAbuse.isPending}>

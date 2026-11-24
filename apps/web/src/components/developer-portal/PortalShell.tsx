@@ -4,13 +4,12 @@
  * The Developer Portal console layout: its own sidebar and header (not the chat / meeting
  * dashboard), gated by deployment configuration and the CF Meet sign-in.
  */
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ArrowLeft, BarChart3, BookOpen, Building2, Code2, FolderKanban, KeyRound, LayoutDashboard, Menu, PlugZap, ScrollText, Users, Webhook, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { ArrowLeft, BarChart3, BookOpen, Building2, Code2, FolderKanban, KeyRound, LayoutDashboard, Menu, ScrollText, Users, Webhook, X } from "lucide-react";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { cn } from "@/lib/utils";
-import { DEVELOPER_API_CONFIG_REASONS } from "@/lib/developer-platform/config";
 import { activeSection, PORTAL_BASE, visibleSections } from "@/lib/developer-platform/navigation";
 import { DeveloperPortalProvider, useDeveloperPortal } from "./DeveloperPortalProvider";
 import { ErrorNotice, Loading, StatusBadge, Toaster } from "./ui";
@@ -27,56 +26,15 @@ export default function PortalShell({ children }: { children: React.ReactNode })
   );
 }
 
-function CenteredCard({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-6">
-      <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-card p-8 shadow-sm">
-        <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">{icon}</span>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function Gate({ children }: { children: React.ReactNode }) {
   const { config, signedIn } = useDeveloperPortal();
-
-  if (!config.available) {
-    return (
-      <CenteredCard icon={<PlugZap className="size-6" />}>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">The developer console isn&apos;t on yet</h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            It&apos;s where you&apos;ll manage API keys, webhooks and usage for apps built on CF Meet. It hasn&apos;t been switched on for this site, so nothing was loaded.
-          </p>
-        </div>
-        <details className="rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer font-medium">Technical detail</summary>
-          <p className="mt-1.5 font-mono">{DEVELOPER_API_CONFIG_REASONS[config.reason]}</p>
-        </details>
-        <Link href="/dashboard/developers" className="inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold ring-1 ring-border hover:bg-muted">
-          <ArrowLeft className="size-4" /> Back to CF Meet
-        </Link>
-      </CenteredCard>
-    );
-  }
-
-  if (!signedIn) {
-    return (
-      <CenteredCard icon={<Code2 className="size-6" />}>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Sign in to the developer console</h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Use your CF Meet account. What you can do inside depends on your developer role, not your organization role.</p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/login" className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Sign in</Link>
-          <Link href="/signup" className="inline-flex h-10 items-center rounded-full px-5 text-sm font-semibold ring-1 ring-border hover:bg-muted">Create an account</Link>
-        </div>
-        <p className="text-xs text-muted-foreground">After signing in, come back to {PORTAL_BASE}.</p>
-      </CenteredCard>
-    );
-  }
-
+  const router = useRouter();
+  const pathname = usePathname();
+  // While the console is off, the dashboard's Developers page explains it (it signs you in
+  // first if needed). Signed out: the normal sign-in, then straight back here.
+  const target = !config.available ? "/dashboard/developers" : !signedIn ? `/login?next=${encodeURIComponent(pathname)}` : null;
+  useEffect(() => { if (target) router.replace(target); }, [router, target]);
+  if (target) return <div className="flex min-h-screen items-center justify-center"><Loading /></div>;
   return <Console>{children}</Console>;
 }
 

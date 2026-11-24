@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Globe, Laptop, ShieldCheck, Smartphone, Tablet, UserCheck, Video } from "lucide-react";
+import { CalendarDays, Clock, Globe, Laptop, ShieldCheck, Smartphone, Tablet, UserCheck, Video } from "lucide-react";
 import Reveal from "./Reveal";
 
 const safety = [
@@ -92,17 +92,18 @@ export function LandingCta() {
   return (
     <section aria-labelledby="cta-heading" className="px-4 pb-14 sm:px-6 sm:pb-20 lg:px-8">
       <Reveal className="relative mx-auto max-w-7xl overflow-hidden rounded-[28px] bg-primary px-6 py-12 dark:bg-[#0B57D0] text-center sm:px-12 sm:py-16">
-        <div
-          aria-hidden
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.2) 1px, transparent 1px)",
-            backgroundSize: "40px 40px",
-            maskImage: "radial-gradient(ellipse 70% 90% at 100% 0%, black 10%, transparent 70%)",
-            WebkitMaskImage: "radial-gradient(ellipse 70% 90% at 100% 0%, black 10%, transparent 70%)",
-          }}
-        />
+        {/* Depth from light, plus faint rings spreading out like a call connecting. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 bg-linear-to-br from-white/10 via-transparent to-black/25" />
+        <div aria-hidden className="pointer-events-none absolute -right-40 -top-40 sm:-right-24 sm:-top-48">
+          {[720, 560, 400, 240].map((size, i) => (
+            <span
+              key={size}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white"
+              style={{ width: size, height: size, opacity: 0.06 + i * 0.04 }}
+            />
+          ))}
+        </div>
+        <div aria-hidden className="pointer-events-none absolute -bottom-40 -left-32 size-96 rounded-full bg-sky-300/20 blur-3xl" />
         <h2 id="cta-heading" className="relative text-3xl font-bold tracking-tight text-white sm:text-5xl">
           Start connecting with CF Meet today.
         </h2>

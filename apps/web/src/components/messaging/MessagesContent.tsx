@@ -14,6 +14,10 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
 import { AttachMenu, RichContentView } from "./RichMessages";
+import { ChatImage, LinkifiedText } from "./BubbleParts";
+import { isInlineImage, isPlayableAudio } from "@/lib/messaging/engine";
+import { SecurityCode } from "./SecurityCode";
+import { MicButton, VoicePlayer, VoiceRecorder, voiceRecordingSupported } from "./VoiceNote";
 import PrivateShares from "./PrivateShares";
 import { isLiveStatus, statusPostId } from "@/lib/messaging/private-shares";
 import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
@@ -22,7 +26,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BellOff, Check, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
   UserPlus, Users,
@@ -91,6 +95,8 @@ function useEngine(): MessagingEngine {
 /* ─── Small shared pieces ─────────────────────────────────────────────── */
 
 /** Why private messages can't be sent from this browser right now, in plain words. */
+const noSubscribe = () => () => {};
+
 function composerBlockedReason(s: { phase: string; detail: string | null; identity: unknown }): string {
   if (!s.identity || s.phase === "loading") return "Loading…";
   if (s.phase === "locked") return "Messages are open in another tab of this browser";
@@ -162,7 +168,7 @@ function StatusBar({ engine }: { engine: MessagingEngine }) {
       </p>
       <p className={row} data-testid="kt-state">
         {s.ktPinned ? <ShieldCheck className="size-4 shrink-0 text-emerald-600" /> : <ShieldAlert className="size-4 shrink-0 text-amber-600" />}
-        {s.ktPinned ? "Contacts' security keys are verified" : "Contacts' security keys couldn't be verified yet"}
+        {s.ktPinned ? "Contacts' keys are checked against CF Meet's key log (run by CF Meet)" : "Contacts' keys couldn't be checked against the key log yet"}
       </p>
     </div>
   );
@@ -571,12 +577,17 @@ type BubbleActions = {
   report: () => void;
   retry: () => void;
   discard: () => void;
+  /** A failed send that "Try again" can resend. */
+  canRetry: boolean;
   /** F4: vote in a private chat's poll (absent: not a poll). */
   vote?: (choices: number[]) => void;
 };
 
-function MessageBubble({ m, name, names, onDownload, actions, first, last, group }: {
+function MessageBubble({ m, name, names, onDownload, loadImage, onJump, highlight, actions, first, last, group }: {
   m: MessageView; name: string; names: Record<string, string>; onDownload: () => void; actions: BubbleActions; managed: boolean;
+  /** A photo shown in the chat (null: not an inline photo). */ loadImage: (() => Promise<string | null>) | null;
+  /** Scroll to the quoted message. */ onJump: (messageId: string) => void;
+  /** Briefly highlighted after a jump. */ highlight: boolean;
   /** first / last of a run from the same sender (grouping, Messenger-style corners) */ first: boolean; last: boolean; group: boolean;
 }) {
   const [menu, setMenu] = useState(false);
@@ -585,8 +596,36 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
   const live = !!m.messageId && (m.state === "delivered" || m.state === "sent");
   const mine = m.mine;
   // A message held until the chat's encryption is ready looks like any message being sent.
-  const status = m.state === "queued" ? "Waiting…" : m.state === "sending" || m.state === "pending-setup" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
+  // WhatsApp: the time shows at once, with a small clock until the server has it (then a tick).
+  const pending = m.state === "queued" || m.state === "sending" || m.state === "pending-setup";
+  const status = m.state === "failed" ? "Not sent" : clock(m.createdAt);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
+  const [dx, setDx] = useState(0);
+  const touch = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> | null; moved: boolean } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (!live || editing !== null) return;
+    const t = e.touches[0];
+    const timer = setTimeout(() => { navigator.vibrate?.(10); setMenu(true); touch.current = null; }, 450);
+    touch.current = { x: t.clientX, y: t.clientY, timer, moved: false };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const start = touch.current;
+    if (!start) return;
+    const t = e.touches[0];
+    const x = t.clientX - start.x;
+    const y = t.clientY - start.y;
+    if (Math.abs(x) > 8 || Math.abs(y) > 8) { if (start.timer) clearTimeout(start.timer); start.timer = null; }
+    // A mostly sideways drag to the right is a swipe-to-reply; anything else is scrolling.
+    if (x > 0 && Math.abs(x) > Math.abs(y) * 1.5) { start.moved = true; setDx(Math.min(x, 80)); }
+  };
+  const onTouchEnd = () => {
+    const start = touch.current;
+    if (start?.timer) clearTimeout(start.timer);
+    if (start?.moved && dx >= 56) { navigator.vibrate?.(10); actions.reply(); }
+    touch.current = null;
+    setDx(0);
+  };
+  const copy = () => { if (m.text) void navigator.clipboard?.writeText(m.text); setMenu(false); };
 
   return (
     <li
@@ -594,8 +633,12 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
       data-state={m.state}
       data-mine={mine ? "true" : "false"}
       data-message-id={m.messageId ?? undefined}
-      className={cn("group/msg flex items-end gap-2", mine ? "flex-row-reverse" : "flex-row", first ? "mt-3" : "mt-0.5")}
+      className={cn("group/msg relative flex items-end gap-2 rounded-xl transition-colors duration-700", mine ? "flex-row-reverse" : "flex-row", first ? "mt-3" : "mt-0.5", highlight && "bg-primary/15")}
+      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
+      onContextMenu={(e) => { if (live && editing === null && window.matchMedia("(hover: none)").matches) e.preventDefault(); }}
+      style={dx ? { transform: `translateX(${dx}px)` } : undefined}
     >
+      {dx ? <CornerUpLeft aria-hidden className="absolute -left-7 bottom-3 size-5 text-muted-foreground" style={{ opacity: Math.min(dx / 56, 1) }} /> : null}
       {!mine && group ? (last ? <Avatar name={name} seed={m.senderPrincipalId ?? name} size="size-7" className="mb-0.5 text-[10px]" /> : <span className="w-7 shrink-0" />) : null}
       <div className={cn("flex min-w-0 max-w-[min(78%,34rem)] flex-col", mine ? "items-end" : "items-start")}>
         {!mine && group && first ? <p className="mb-1 px-3 text-xs font-semibold" style={{ color: colorFor(m.senderPrincipalId ?? name) }}>{name}</p> : null}
@@ -612,9 +655,10 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
           >
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
             {m.replyTo ? (
-              <p className={cn("mb-1.5 rounded-lg px-2.5 py-1.5 text-xs", mine ? "bg-white/15" : "bg-background/70")} data-testid="message-reply">
+              <button type="button" disabled={m.replyTo.removed} onClick={() => onJump(m.replyTo!.messageId)}
+                className={cn("mb-1.5 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left text-xs", mine ? "border-white/60 bg-white/15" : "border-primary bg-background/70")} data-testid="message-reply">
                 {m.replyTo.removed ? <span className="italic opacity-80">Original message deleted</span> : <><span className="block font-semibold">{m.replyTo.senderPrincipalId ? (names[m.replyTo.senderPrincipalId] ?? "CF Meet user") : "Message"}</span><span className="line-clamp-2 opacity-80">{m.replyTo.text ?? "…"}</span></>}
-              </p>
+              </button>
             ) : null}
             {editing !== null ? (
               <form className="flex min-w-56 flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void actions.edit(editing).then(() => setEditing(null)); }}>
@@ -625,10 +669,10 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
                 </span>
               </form>
             ) : m.text !== null ? (
-              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text">{m.text}</p>
+              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
-            {m.file ? (
+            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} mine={mine} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} name={m.file.name} onDownload={onDownload} /> : m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
                 <span className="min-w-0"><span className="block truncate text-sm font-medium">{m.file.name}</span>{m.file.size ? <span className="block text-xs opacity-70">{Math.ceil(m.file.size / 1024)} KB · Download</span> : null}</span>
@@ -637,6 +681,7 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
             {m.note ? <p className="text-xs italic opacity-80" data-testid="message-note">{m.note}</p> : null}
             <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[11px] tabular-nums", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
               {m.editCount ? "edited · " : ""}{m.transferred ? "recovered · " : ""}{status}
+              {mine && pending ? <Clock3 className="size-3.5 shrink-0 opacity-70" aria-label="Sending" /> : null}
               {mine && (m.state === "sent" || m.state === "delivered") ? <Ticks receipt={m.seenBy?.length ? "read" : m.receipt ?? "sent"} /> : null}
             </p>
           </div>
@@ -661,6 +706,7 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
                       {QUICK_REACTIONS.map((r) => <button key={r} type="button" aria-label={`React ${r}`} onClick={() => { actions.react(r, !(m.reactions ?? []).some((x) => x.reaction === r && x.reactedByMe)); setMenu(false); }} className="flex size-7 items-center justify-center rounded-full text-base hover:bg-muted">{r}</button>)}
                     </div>
                     <button type="button" className={item} data-testid="reply" onClick={() => { actions.reply(); setMenu(false); }}><CornerUpLeft className="size-4 text-muted-foreground" />Reply</button>
+                    {m.text ? <button type="button" className={item} data-testid="copy" onClick={copy}><Copy className="size-4 text-muted-foreground" />Copy</button> : null}
                     <button type="button" className={item} data-testid="forward" onClick={() => { actions.forward(); setMenu(false); }}><Forward className="size-4 text-muted-foreground" />Forward</button>
                     {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
@@ -686,7 +732,7 @@ function MessageBubble({ m, name, names, onDownload, actions, first, last, group
           </div>
         ) : null}
         {m.seenBy?.length ? <p className="mt-0.5 px-2 text-[11px] text-muted-foreground" data-testid="seen-by">Seen by {m.seenBy.map((p) => names[p] ?? "CF Meet user").join(", ")}</p> : null}
-        {m.outboxKey && m.state === "failed" ? (
+        {actions.canRetry && m.state === "failed" ? (
           <span className="mt-1 flex gap-1 text-xs font-semibold">
             <button type="button" className="rounded-full px-2.5 py-1 text-destructive hover:bg-destructive/10" data-testid="retry-send" onClick={actions.retry}>Try again</button>
             <button type="button" className="rounded-full px-2.5 py-1 text-muted-foreground hover:bg-muted" onClick={actions.discard}>Discard</button>
@@ -759,6 +805,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
           <p className="mt-3 text-lg font-semibold">{title}</p>
           <div className="mt-1"><ProfileBadge profile={conversation.securityProfile} /></div>
         </div>
+        {!managed && !isGroup && conversation.members.length === 2 ? <SecurityCode engine={engine} conversationId={conversation.id} name={title} /> : null}
         {isGroup && (managed || manager) ? (
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(engine.renameConversation(conversation.id, name)); }}>
             <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={field} />
@@ -874,6 +921,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const client = useQueryClient();
   const [text, setText] = useState("");
+  const [recording, setRecording] = useState(false);
+  const canRecord = useSyncExternalStore(noSubscribe, voiceRecordingSupported, () => false);
   const [details, setDetails] = useState(false);
   const [searching, setSearching] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
@@ -936,8 +985,62 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     window.addEventListener("focus", read);
     return () => { document.removeEventListener("visibilitychange", read); window.removeEventListener("focus", read); };
   }, [engine, conversation.id]);
-  // Keep the newest message in view.
-  useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
+  // WhatsApp scrolling: open at the "unread messages" line (or the end); keep the end in view
+  // only while you are at it, otherwise count what arrives below and offer a ↓ button.
+  const scroller = useRef<HTMLDivElement>(null);
+  const atBottom = useRef(true);
+  const shown = useRef(0);
+  const [newBelow, setNewBelow] = useState(0);
+  const [away, setAway] = useState(false);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const [unreadAtOpen] = useState(() => conversation.unreadCount);
+  const [divider, setDivider] = useState<string | null | undefined>(undefined);
+  if (divider === undefined && messages.length) {
+    const incoming = messages.filter((m) => !m.mine && m.sequence !== null);
+    setDivider(unreadAtOpen > 0 && incoming.length ? incoming[Math.max(0, incoming.length - unreadAtOpen)].key : null);
+  }
+  const toBottom = (smooth = false) => {
+    bottom.current?.scrollIntoView({ block: "end", behavior: smooth ? "smooth" : "auto" });
+    atBottom.current = true;
+    setNewBelow(0);
+    setAway(false);
+  };
+  useEffect(() => {
+    if (divider === undefined) return;
+    const line = divider ? scroller.current?.querySelector('[data-testid="unread-divider"]') : null;
+    if (line) { line.scrollIntoView({ block: "start" }); atBottom.current = false; }
+    else bottom.current?.scrollIntoView({ block: "end" });
+    shown.current = items.length;
+    // Only when the chat first has messages: later arrivals are handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [divider]);
+  useEffect(() => {
+    const added = items.length - shown.current;
+    shown.current = items.length;
+    if (added <= 0 || divider === undefined) return;
+    const latest = items.at(-1);
+    const fromMe = latest?.type === "message" && latest.message.mine;
+    const frame = requestAnimationFrame(() => {
+      if (atBottom.current || fromMe) toBottom(true);
+      else setNewBelow((n) => n + added);
+    });
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setAway(!atBottom.current);
+    if (atBottom.current && newBelow) setNewBelow(0);
+  };
+  const jump = (messageId: string) => {
+    const el = scroller.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!el) { setError("That message is further back than this chat has loaded."); return; }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlight(messageId);
+    setTimeout(() => setHighlight((h) => (h === messageId ? null : h)), 1600);
+  };
   // Composer grows with the text, up to ~6 lines.
   useEffect(() => {
     const el = composer.current;
@@ -978,8 +1081,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
       const savedId = savedIds.get(m.messageId);
       void (savedId ? hub.unsaveMessage(savedId) : hub.saveMessage(conversation.id, m.messageId)).then(() => queryClient.invalidateQueries({ queryKey: SAVED_KEY })).catch(fail);
     },
-    retry: () => { if (m.outboxKey) engine.retrySend(m.outboxKey); },
-    discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); },
+    canRetry: !!m.outboxKey || engine.canRetryFile(m.key),
+    retry: () => { if (m.outboxKey) engine.retrySend(m.outboxKey); else engine.retryFile(conversation.id, m.key); },
+    discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); else engine.discardFile(conversation.id, m.key); },
     vote: m.messageId && m.rich?.kind === "poll" ? (choices) => { void engine.sendRich(conversation.id, { t: "vote", poll: m.messageId!, choices }).catch(fail); } : undefined,
   });
   const mentions = (t: string) =>
@@ -1052,8 +1156,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           </div>
         ) : null}
 
-        <div className="chat-wallpaper flex min-h-0 flex-1 flex-col">
-        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
+        <div className="chat-wallpaper relative flex min-h-0 flex-1 flex-col">
+        <div ref={scroller} onScroll={onScroll} className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">
             {managed && s.hasOlder[conversation.id] ? (
               <li className="py-2 text-center">
@@ -1084,14 +1188,26 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
               return (
                 <Fragment key={item.key}>
                   {separator}
+                  {divider && m.key === divider ? (
+                    <li className="my-3 flex justify-center" data-testid="unread-divider"><span className="rounded-full bg-background/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm ring-1 ring-border">{unreadAtOpen === 1 ? "1 unread message" : `${unreadAtOpen} unread messages`}</span></li>
+                  ) : null}
                   <MessageBubble m={m} managed={managed} names={s.names} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
-                    onDownload={() => { setError(null); void download(m).catch(fail); }} />
+                    onDownload={() => { setError(null); void download(m).catch(fail); }}
+                    loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
+                    onJump={jump} highlight={!!m.messageId && highlight === m.messageId} />
                 </Fragment>
               );
             })}
           </ol>
           <div ref={bottom} />
         </div>
+        {newBelow > 0 || away ? (
+          <button type="button" onClick={() => toBottom(true)} aria-label={newBelow ? `${newBelow} new messages` : "Go to latest"} data-testid="scroll-to-latest"
+            className={cn("absolute bottom-3 right-3 z-10 flex size-11 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-lg transition-opacity hover:text-foreground sm:right-6")}>
+            <ArrowDown className="size-5" />
+            {newBelow ? <span className="absolute -top-1.5 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-bold text-primary-foreground">{newBelow > 99 ? "99+" : newBelow}</span> : null}
+          </button>
+        ) : null}
 
         {error ? <p role="alert" className="mx-3 mb-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-6">{error}</p> : null}
         <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
@@ -1103,6 +1219,14 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 <button type="button" aria-label="Cancel reply" onClick={() => setReplyTo(null)} className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-4" /></button>
               </div>
             ) : null}
+            {recording ? (
+              <VoiceRecorder onDone={() => setRecording(false)} onError={setError}
+                onSend={(f, ms) => {
+                  const tooLarge = attachmentSizeRefusal(f.size, attachments);
+                  setError(tooLarge);
+                  if (!tooLarge) void engine.sendFile(conversation.id, f, ms).catch(fail);
+                }} />
+            ) : (
             <form className="flex items-end gap-1.5 rounded-[26px] border border-border bg-card p-1.5 shadow-sm focus-within:border-primary/50" onSubmit={(e) => { e.preventDefault(); send(); }}>
               <input
                 ref={file}
@@ -1133,8 +1257,11 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
-              <button type="submit" data-testid="send" disabled={!canSend || !text.trim()} aria-label="Send" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:bg-primary/90 disabled:opacity-30"><SendHorizontal className="size-5" /></button>
+              {!text.trim() && canAttach && canRecord ? <MicButton disabled={!canSend} onClick={() => { setError(null); setRecording(true); }} /> : (
+                <button type="submit" data-testid="send" disabled={!canSend || !text.trim()} aria-label="Send" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:bg-primary/90 disabled:opacity-30"><SendHorizontal className="size-5" /></button>
+              )}
             </form>
+            )}
             <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground sm:block">{e2ee ? <><Lock className="mr-1 inline size-3" />End-to-end encrypted</> : "Enter to send · Shift + Enter for a new line"}</p>
           </div>
         </div>
@@ -1299,6 +1426,7 @@ function PersonalMessages() {
                       <span className="mt-0.5 flex items-center justify-between gap-2">
                         <span className={cn("flex min-w-0 items-center gap-1 text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
                           {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
+                          {mine && latest && (latest.state === "queued" || latest.state === "sending" || latest.state === "pending-setup") ? <Clock3 className="size-3.5 shrink-0" aria-label="Sending" /> : null}
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {preview === null
