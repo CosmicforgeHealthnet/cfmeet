@@ -15,6 +15,7 @@ import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
 import { AttachMenu, RichContentView } from "./RichMessages";
 import { ChatImage, LinkifiedText } from "./BubbleParts";
+import { AttachmentPreview } from "./AttachmentPreview";
 import { isInlineImage, isPlayableAudio } from "@/lib/messaging/engine";
 import { SecurityCode } from "./SecurityCode";
 import { MicButton, VoicePlayer, VoiceRecorder, voiceRecordingSupported } from "./VoiceNote";
@@ -28,7 +29,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
-  Trash2, EyeOff, Video, WifiOff, X,
+  Trash2, EyeOff, Video, WifiOff, X, Camera, Mic, Headphones, Paperclip,
   UserPlus, Users,
 } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -39,7 +40,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import { MessagingEngine, type ConversationView, type MessageView, type SearchHit, type SecurityProfile } from "@/lib/messaging/engine";
 import { mergeTimeline, type TimelineCard } from "@/lib/messaging/managed-store";
-import { chatPreview } from "@/lib/messaging/e2ee-membership";
+import { attachmentKind, chatPreview, type AttachmentKind } from "@/lib/messaging/e2ee-membership";
 import { useMessagingDirectory, useMessagingDevices, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
 import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubContacts, useHubInbox } from "@/hooks/v2/useCommunications";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -583,9 +584,13 @@ type BubbleActions = {
   vote?: (choices: number[]) => void;
 };
 
-function MessageBubble({ m, name, names, onDownload, loadImage, onJump, highlight, actions, first, last, group }: {
+/** The chat list's icon for a file message (WhatsApp: camera for a photo, mic for a voice message). */
+const FILE_ICONS = { photo: Camera, video: Video, voice: Mic, audio: Headphones, document: FileText, file: Paperclip } as const;
+
+function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJump, highlight, actions, first, last, group }: {
   m: MessageView; name: string; names: Record<string, string>; onDownload: () => void; actions: BubbleActions; managed: boolean;
   /** A photo shown in the chat (null: not an inline photo). */ loadImage: (() => Promise<string | null>) | null;
+  /** That photo or voice note, if it was already loaded on this visit. */ cachedMedia: string | null;
   /** Scroll to the quoted message. */ onJump: (messageId: string) => void;
   /** Briefly highlighted after a jump. */ highlight: boolean;
   /** first / last of a run from the same sender (grouping, Messenger-style corners) */ first: boolean; last: boolean; group: boolean;
@@ -668,16 +673,18 @@ function MessageBubble({ m, name, names, onDownload, loadImage, onJump, highligh
                   <button type="submit" className="rounded-full bg-background px-2.5 py-1 text-foreground" data-testid="edit-save">Save</button>
                 </span>
               </form>
-            ) : m.text !== null ? (
+            ) : m.text !== null && !m.file ? (
               m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
-            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} mine={mine} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} name={m.file.name} onDownload={onDownload} /> : m.file ? (
+            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
                 <span className="min-w-0"><span className="block truncate text-sm font-medium">{m.file.name}</span>{m.file.size ? <span className="block text-xs opacity-70">{Math.ceil(m.file.size / 1024)} KB · Download</span> : null}</span>
               </button>
             ) : null}
+            {/* A photo's caption sits under it (WhatsApp); a normal chat's file without one carries its name, so that isn't repeated. */}
+            {m.file && m.text && editing === null && m.text !== m.file.name ? <p className="whitespace-pre-wrap break-words" data-testid="file-caption"><LinkifiedText text={m.text} mine={mine} /></p> : null}
             {m.note ? <p className="text-xs italic opacity-80" data-testid="message-note">{m.note}</p> : null}
             <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[11px] tabular-nums", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
               {m.editCount ? "edited · " : ""}{m.transferred ? "recovered · " : ""}{status}
@@ -922,6 +929,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const client = useQueryClient();
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
+  /** A picked file waiting in the preview until you press Send. */
+  const [staged, setStaged] = useState<File | null>(null);
   const canRecord = useSyncExternalStore(noSubscribe, voiceRecordingSupported, () => false);
   const [details, setDetails] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -1194,6 +1203,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                   <MessageBubble m={m} managed={managed} names={s.names} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
                     onDownload={() => { setError(null); void download(m).catch(fail); }}
                     loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
+                    cachedMedia={engine.cachedMediaUrl(m)}
                     onJump={jump} highlight={!!m.messageId && highlight === m.messageId} />
                 </Fragment>
               );
@@ -1228,6 +1238,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 }} />
             ) : (
             <form className="flex items-end gap-1.5 rounded-[26px] border border-border bg-card p-1.5 shadow-sm focus-within:border-primary/50" onSubmit={(e) => { e.preventDefault(); send(); }}>
+              <AttachmentPreview file={staged} to={title} onCancel={() => setStaged(null)}
+                onSend={(f, caption) => { setStaged(null); void engine.sendFile(conversation.id, f, undefined, caption).catch(fail); }} />
               <input
                 ref={file}
                 type="file"
@@ -1238,7 +1250,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                   if (f) {
                     const tooLarge = attachmentSizeRefusal(f.size, attachments);
                     setError(tooLarge);
-                    if (!tooLarge) void engine.sendFile(conversation.id, f).catch(fail);
+                    if (!tooLarge) setStaged(f);
                   }
                   e.target.value = "";
                 }}
@@ -1396,6 +1408,10 @@ function PersonalMessages() {
               // one sent before it joined reads so. The bar only shows while a readable chat loads.
               const preview = chatPreview({ e2ee: c.securityProfile === "PRIVATE_E2EE", groupReady: c.groupReady, loaded: s.messages[c.id] !== undefined, latest, summary, joinedAt: s.deviceRegisteredAt });
               const at = latest?.createdAt ?? summary?.createdAt ?? null;
+              const fileKind: AttachmentKind | "file" | null = latest ? (latest.file ? attachmentKind(latest.file) : null)
+                : summary?.attachmentCount && summary.lifecycle === "ACTIVE" && c.securityProfile !== "PRIVATE_E2EE" ? // The summary only has text: a file name says the kind, a caption doesn't (a paperclip then).
+                  (summary.previewText && /\.\w{2,5}$/.test(summary.previewText) ? attachmentKind({ name: summary.previewText }) : "file") : null;
+              const FileIcon = fileKind ? FILE_ICONS[fileKind] : null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
               const unread = c.id === selected ? 0 : c.unreadCount;
               const active = c.id === selected;
@@ -1431,7 +1447,7 @@ function PersonalMessages() {
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {preview === null
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
-                            : <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>}
+                            : <>{FileIcon ? <FileIcon className="size-4 shrink-0" aria-hidden /> : null}<span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span></>}
                           </>}
                         </span>
                         {unread ? (

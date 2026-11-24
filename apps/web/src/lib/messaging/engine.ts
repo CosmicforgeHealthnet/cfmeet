@@ -269,6 +269,17 @@ export function isPlayableAudio(mediaType: string | null | undefined): boolean {
   return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
 }
 
+/**
+ * Photos and voice notes already shown, by attachment, for the whole visit. Kept outside the
+ * engine so leaving the chat and coming back doesn't download and decrypt them again.
+ */
+const mediaUrls = new Map<string, string>();
+
+/** Remembers a file this device just sent, so its own photo shows without downloading it back. */
+function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
+  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
+}
+
 /** Length of an audio or video file, read by the browser (null: it can't tell). */
 function mediaDurationMs(file: Blob): Promise<number | null> {
   if (typeof document === "undefined") return Promise.resolve(null);
@@ -2615,12 +2626,13 @@ export class MessagingEngine {
    * Sends a file: PRIVATE_E2EE encrypts it here (only ciphertext is uploaded). Voice notes pass
    * their recorded length; other audio and video files are measured here.
    */
-  async sendFile(conversationId: string, file: File, durationMs?: number): Promise<void> {
+  async sendFile(conversationId: string, file: File, durationMs?: number, caption?: string): Promise<void> {
+    caption = caption?.trim() || undefined;
     const conv = this.server.get(conversationId);
     if (!conv) return;
     const key = `p${uuid()}`;
-    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text: null, file: { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, attachmentId: null }, note: null, transferred: false });
-    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file, durationMs));
+    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text: caption ?? null, file: { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, attachmentId: null }, note: null, transferred: false });
+    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file, durationMs, caption));
   }
 
   /** Sends a failed file again (it stays on this page until sent or discarded). */
@@ -2631,7 +2643,7 @@ export class MessagingEngine {
     this.failedFiles.delete(key);
     const view = (this.pendingSends.get(conversationId) ?? []).find((m) => m.key === key);
     if (view) this.addPending(conversationId, { ...view, state: "sending", note: null });
-    void this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, failed.file, failed.durationMs));
+    void this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, failed.file, failed.durationMs, failed.caption));
   }
 
   discardFile(conversationId: string, key: string): void {
@@ -2644,9 +2656,9 @@ export class MessagingEngine {
   canRetryFile(key: string): boolean {
     return this.failedFiles.has(key);
   }
-  private failedFiles = new Map<string, { file: File; durationMs?: number }>();
+  private failedFiles = new Map<string, { file: File; durationMs?: number; caption?: string }>();
 
-  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File, durationMs?: number): Promise<void> {
+  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File, durationMs?: number, caption?: string): Promise<void> {
     try {
       const data = new Uint8Array(await file.arrayBuffer());
       const mediaType = file.type || "application/octet-stream";
@@ -2661,7 +2673,8 @@ export class MessagingEngine {
         });
         await this.upload(intent.upload, enc.ciphertext);
         await relay("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
-        await this.sendEncrypted(conv, { t: "file", handle: enc.handle, attachmentId: intent.attachmentId }, [intent.attachmentId]);
+        await this.sendEncrypted(conv, { t: "file", handle: enc.handle, attachmentId: intent.attachmentId, ...(caption ? { caption } : {}) }, [intent.attachmentId]);
+        rememberSentMedia(intent.attachmentId, file, mediaType);
       } else {
         const kind = attachmentKind(mediaType);
         // The server needs the length of voice notes and videos (and refuses them without it).
@@ -2684,15 +2697,16 @@ export class MessagingEngine {
         }
         if (fin.state !== "READY") throw new MessagingApiError(0, `ATTACHMENT_${fin.state}`, fin.stateReason ?? null, fin.state === "QUARANTINED" || fin.state === "REJECTED" ? "The file was rejected by the security scan." : `The file is not ready (${fin.state}).`);
         this.attachmentMeta.set(intent.attachmentId, { name: file.name, mediaType, size: data.length, state: "READY", kind: attachmentKind(mediaType) });
+        rememberSentMedia(intent.attachmentId, file, mediaType);
         const clientMessageId = uuid();
-        const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId, text: file.name.slice(0, 255), attachmentIds: [intent.attachmentId] });
+        const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId, text: caption ?? file.name.slice(0, 255), attachmentIds: [intent.attachmentId] });
         // A lost response is retried with the same clientMessageId (answered as a replay).
         const msg = await send().catch((e) => (e instanceof MessagingApiError && (e.status === 0 || e.status >= 500) ? send() : Promise.reject(e)));
         this.stateFor(conversationId).applyMessages([msg]);
       }
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.failedFiles.set(key, { file, durationMs });
+      this.failedFiles.set(key, { file, durationMs, caption });
       this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
     }
     await this.sync(conversationId);
@@ -2731,14 +2745,18 @@ export class MessagingEngine {
   async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
     const aid = message.file?.attachmentId;
     if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType))) return null;
-    const cached = this.imageUrls.get(aid);
+    const cached = mediaUrls.get(aid);
     if (cached) return cached;
     const { blob } = await this.download(conversationId, message);
     const url = URL.createObjectURL(new Blob([blob], { type: message.file!.mediaType }));
-    this.imageUrls.set(aid, url);
+    mediaUrls.set(aid, url);
     return url;
   }
-  private imageUrls = new Map<string, string>();
+
+  /** A photo or voice note already loaded on this visit, so it shows at once (no placeholder). */
+  cachedMediaUrl(message: MessageView): string | null {
+    return (message.file?.attachmentId && mediaUrls.get(message.file.attachmentId)) || null;
+  }
 
   async download(conversationId: string, message: MessageView): Promise<{ blob: Blob; name: string }> {
     const conv = this.server.get(conversationId);

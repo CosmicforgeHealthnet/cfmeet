@@ -110,17 +110,41 @@ export type PreviewInput = {
  * brief placeholder bar). A private message this device cannot read (yet) is shown as
  * WAITING_PREVIEW, never as an empty or endless placeholder.
  */
+/** What kind of file a message carries, for the chat list's icon (WhatsApp). */
+export type AttachmentKind = "photo" | "video" | "voice" | "audio" | "document";
+
+export function attachmentKind(file: { name: string; mediaType?: string | null }): AttachmentKind {
+  const type = file.mediaType ?? "";
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (/^image\//.test(type) || /^(jpe?g|png|gif|webp|heic|avif)$/.test(ext)) return "photo";
+  // Voice notes are named by the recorder, and their .webm would otherwise read as a video.
+  if (/^voice note /i.test(file.name) && (/^audio\//.test(type) || /^(webm|m4a|ogg)$/.test(ext))) return "voice";
+  if (/^audio\//.test(type) || /^(m4a|ogg|mp3|aac|wav|amr|opus)$/.test(ext)) return "audio";
+  if (/^video\//.test(type) || /^(mp4|mov|webm|m4v)$/.test(ext)) return "video";
+  return "document";
+}
+
+/**
+ * The chat list line for a file: its caption when it has one, else "Photo", "Video",
+ * "Voice message", or the document's name. The list draws the matching icon in front.
+ */
+export function attachmentPreview(file: { name: string; mediaType?: string | null }, caption?: string | null): string {
+  if (caption && caption !== file.name) return caption;
+  const kind = attachmentKind(file);
+  return kind === "photo" ? "Photo" : kind === "video" ? "Video" : kind === "voice" ? "Voice message" : file.name;
+}
+
 export function chatPreview({ e2ee, groupReady, loaded, latest, summary, joinedAt }: PreviewInput): string | null {
   if (latest) {
+    if (latest.file) return attachmentPreview(latest.file, latest.text);
     if (latest.text) return latest.text;
-    if (latest.file) return `📎 ${latest.file.name}`;
     if (latest.state === "before-join") return BEFORE_JOIN_PREVIEW;
     if (latest.state === "unreadable") return WAITING_PREVIEW;
     return latest.note ?? "";
   }
   if (!summary) return "No messages yet";
   if (summary.lifecycle !== "ACTIVE") return "Message deleted";
-  if (!e2ee) return summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : "");
+  if (!e2ee) return summary.attachmentCount && summary.previewText ? attachmentPreview({ name: summary.previewText }) : summary.previewText ?? (summary.attachmentCount ? "Attachment" : "");
   if (groupReady && !loaded) return null;
   return sentBeforeJoin(summary.createdAt, joinedAt) ? BEFORE_JOIN_PREVIEW : WAITING_PREVIEW;
 }

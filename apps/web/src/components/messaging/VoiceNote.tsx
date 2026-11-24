@@ -194,14 +194,15 @@ function AudioBar({ src, knownMs, mine, className }: { src: string; knownMs?: nu
 }
 
 /** A voice note (or other audio) in a chat bubble. */
-export function VoicePlayer({ load, mine, onDownload }: { load: () => Promise<string | null>; mine: boolean; onDownload: () => void }) {
-  const [url, setUrl] = useState<string | null>(null);
+export function VoicePlayer({ load, mine, onDownload, initial = null }: { load: () => Promise<string | null>; mine: boolean; onDownload: () => void; initial?: string | null }) {
+  const [url, setUrl] = useState<string | null>(initial);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (initial) return;
     let active = true;
     load().then((u) => { if (active) { if (u) setUrl(u); else setFailed(true); } }, () => { if (active) setFailed(true); });
     return () => { active = false; };
-  }, [load]);
+  }, [load, initial]);
 
   if (failed) return <button type="button" onClick={onDownload} className="mt-1 text-sm underline opacity-80">Couldn&apos;t play this voice note · Download</button>;
   return (

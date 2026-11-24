@@ -99,13 +99,13 @@ test("the chat list never shows a blank bar for a private message", () => {
   // The latest decrypted message text, a file, or the label for one that can't be read.
   const latest = (extra) => ({ text: null, file: null, note: null, state: "delivered", ...extra });
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ text: "hi" }), summary }), "hi");
-  assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ file: { name: "a.pdf" } }), summary }), "📎 a.pdf");
+  assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ file: { name: "a.pdf" } }), summary }), "a.pdf");
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "unreadable", note: "a long explanation" }), summary }), WAITING_PREVIEW);
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "before-join", note: "a long explanation" }), summary }), BEFORE_JOIN_PREVIEW);
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "removed", note: "Message deleted" }), summary }), "Message deleted");
   // Server-readable chats and deleted / empty chats as before.
   assert.equal(chatPreview({ e2ee: false, groupReady: false, loaded: false, latest: undefined, summary: { ...summary, previewText: "managed" } }), "managed");
-  assert.equal(chatPreview({ e2ee: false, groupReady: false, loaded: false, latest: undefined, summary: { ...summary, attachmentCount: 1 } }), "📎 Attachment");
+  assert.equal(chatPreview({ e2ee: false, groupReady: false, loaded: false, latest: undefined, summary: { ...summary, attachmentCount: 1 } }), "Attachment");
   assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: false, latest: undefined, summary: { ...summary, lifecycle: "DELETED" } }), "Message deleted");
   assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: false, latest: undefined, summary: null }), "No messages yet");
 });
