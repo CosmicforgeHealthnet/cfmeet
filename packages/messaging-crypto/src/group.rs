@@ -8,12 +8,13 @@
 //! relays. Every key stays in the device's OpenMLS provider. No primitive is implemented
 //! here.
 
+use openmls::framing::errors::{MessageDecryptionError, SecretTreeError};
 use openmls::prelude::OpenMlsProvider as _;
 use openmls::prelude::{
     tls_codec::{Deserialize as _, Serialize as _},
     BasicCredential, GroupId, KeyPackage, KeyPackageIn, LeafNodeIndex, MlsGroup,
-    MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn,
-    ProcessedMessageContent, ProtocolMessage, Sender, StagedWelcome,
+    MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn, ProcessMessageError,
+    ProcessedMessageContent, ProtocolMessage, Sender, StagedWelcome, ValidationError,
 };
 use uuid::Uuid;
 
@@ -30,12 +31,58 @@ pub enum GroupError {
     Malformed,
     #[error("the MLS operation was refused")]
     Refused,
+    /// Allowlisted public processing diagnostic, never formatted crypto internals.
+    #[error("{0}")]
+    Processing(&'static str),
     #[error("no such member device")]
     UnknownMember,
     /// An external commit (RFC 9420 §12.4.3.2) whose joining device the caller has not
     /// (yet) verified as a registered device of a member: nothing was merged.
     #[error("the joining device is not verified")]
     JoinerNotAllowed(Uuid),
+}
+
+impl GroupError {
+    pub fn public_code(&self) -> &'static str {
+        match self {
+            Self::Malformed => "MALFORMED_MLS_MESSAGE",
+            Self::Processing(code) => code,
+            Self::UnknownMember => "MEMBERSHIP_UNKNOWN",
+            Self::JoinerNotAllowed(_) => "JOINER_UNVERIFIED",
+            Self::Refused => "MESSAGE_REFUSED",
+        }
+    }
+}
+
+fn processing_error<E>(error: ProcessMessageError<E>) -> GroupError {
+    use MessageDecryptionError as D;
+    use ProcessMessageError as P;
+    use ValidationError as V;
+    let code = match error {
+        P::ValidationError(V::WrongEpoch) => "EPOCH_MISMATCH",
+        P::ValidationError(V::NoPastEpochData) => "HISTORICAL_EPOCH_UNAVAILABLE",
+        P::ValidationError(V::WrongGroupId) => "GROUP_ID_MISMATCH",
+        P::ValidationError(V::UnknownMember | V::NonMemberApplicationMessage) => {
+            "MEMBERSHIP_UNKNOWN"
+        }
+        P::ValidationError(V::UnableToDecrypt(D::SecretTreeError(
+            SecretTreeError::SecretReuseError,
+        ))) => "REPLAY_REJECTED",
+        P::ValidationError(V::UnableToDecrypt(D::SecretTreeError(
+            SecretTreeError::TooDistantInThePast,
+        ))) => "RATCHET_STATE_UNAVAILABLE",
+        P::ValidationError(V::UnableToDecrypt(D::GenerationOutOfBound)) => {
+            "RATCHET_GENERATION_UNAVAILABLE"
+        }
+        P::ValidationError(
+            V::UnableToDecrypt(D::AeadError) | V::InvalidSignature | V::InvalidMembershipTag,
+        ) => "MESSAGE_AUTHENTICATION_FAILED",
+        P::StorageError(_) => "CRYPTO_STORAGE_ERROR",
+        P::GroupStateError(_) => "GROUP_STATE_REFUSED",
+        P::InvalidCommit(_) => "COMMIT_REFUSED",
+        _ => "MESSAGE_VALIDATION_FAILED",
+    };
+    GroupError::Processing(code)
 }
 
 /// The device's state of one MLS group.
@@ -415,7 +462,7 @@ impl Device {
         let processed = group
             .group
             .process_message(self.provider(), protocol)
-            .map_err(|_| GroupError::Refused)?;
+            .map_err(processing_error)?;
         let aad = processed.aad().to_vec();
         let external = matches!(processed.sender(), Sender::NewMemberCommit);
         if matches!(
@@ -433,7 +480,7 @@ impl Device {
             if binding::parse_device_credential_identity(credential.identity())
                 != Some(claimed.sender_device_id)
             {
-                return Err(GroupError::Refused);
+                return Err(GroupError::Processing("SENDER_BINDING_MISMATCH"));
             }
         }
         match processed.into_content() {

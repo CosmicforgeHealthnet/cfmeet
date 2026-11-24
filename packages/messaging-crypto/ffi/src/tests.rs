@@ -354,19 +354,23 @@ fn two_devices_exchange_messages_and_refuse_tampering_replay_and_wrong_aad() {
 
     // Replay of the same ciphertext.
     assert_eq!(process(bob, &ct, Some(&a_aad)), Err(CFM_ERROR));
-    assert_eq!(last_error(), "MESSAGE_REFUSED");
+    assert_eq!(last_error(), "REPLAY_REJECTED");
 
     // Tampered ciphertext.
     let mut bad = encrypt(alice, &a_aad, b"second");
     let i = bad.len() - 5;
     bad[i] ^= 0x80;
     assert_eq!(process(bob, &bad, Some(&a_aad)), Err(CFM_ERROR));
-    assert_eq!(last_error(), "MESSAGE_REFUSED");
+    assert_eq!(last_error(), "MESSAGE_AUTHENTICATION_FAILED");
 
     // A message bound to another sender (AAD of Bob) is refused, and so is a missing AAD.
     let ct = encrypt(alice, &a_aad, b"third");
     assert_eq!(process(bob, &ct, Some(&aad(BOB))), Err(CFM_ERROR));
     assert_eq!(last_error(), "AAD_MISMATCH");
+    assert!(
+        process(bob, &ct, Some(&a_aad)).is_ok(),
+        "AAD validation failure must not consume the receive generation"
+    );
     let ct = encrypt(alice, &a_aad, b"fourth");
     assert_eq!(process(bob, &ct, None), Err(CFM_ERROR));
     assert_eq!(last_error(), "AAD_MISMATCH");

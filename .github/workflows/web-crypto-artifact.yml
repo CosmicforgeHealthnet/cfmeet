@@ -28,6 +28,11 @@ on:
       - "scripts/messaging/build-web-crypto.sh"
       - ".github/workflows/web-crypto-artifact.yml"
   workflow_dispatch:
+    inputs:
+      build_candidate:
+        description: Build candidate artifacts for review only (never deploy)
+        type: boolean
+        default: false
 
 concurrency:
   group: web-crypto-artifact-${{ github.ref }}
@@ -68,4 +73,19 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
 
       - name: rebuild from source and compare byte for byte
-        run: scripts/messaging/build-web-crypto.sh --check
+        run: |
+          if [ "${{ inputs.build_candidate }}" = "true" ]; then
+            scripts/messaging/build-web-crypto.sh
+          else
+            scripts/messaging/build-web-crypto.sh --check
+          fi
+
+      - name: Upload candidate crypto assets (review only)
+        if: inputs.build_candidate == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: messaging-crypto-candidate
+          path: |
+            apps/web/public/messaging-crypto/
+            apps/web/src/lib/messaging/crypto-artifact.ts
+

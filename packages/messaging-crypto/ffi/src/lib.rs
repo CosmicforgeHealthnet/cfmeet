@@ -1344,38 +1344,48 @@ pub unsafe extern "C" fn cfm_device_process(
         // SAFETY: caller contract.
         let result = unsafe {
             with_device(device, |s| {
-                let (d, g) = s.device_and_group(gid)?;
-                let p = d.process(g, message).map_err(|_| code("MESSAGE_REFUSED"))?;
-                let epoch = g.epoch();
-                Ok(match p {
-                    Processed::Application { aad, plaintext } => {
-                        if expected != Some(aad.as_slice()) {
-                            let mut plaintext = plaintext;
-                            plaintext.zeroize();
-                            return Err(code("AAD_MISMATCH"));
+                let checkpoint = s.device.export_state();
+                let result = (|| {
+                    let (d, g) = s.device_and_group(gid)?;
+                    let p = d
+                        .process(g, message)
+                        .map_err(|error| code(error.public_code()))?;
+                    let epoch = g.epoch();
+                    Ok(match p {
+                        Processed::Application { aad, plaintext } => {
+                            if expected != Some(aad.as_slice()) {
+                                let mut plaintext = plaintext;
+                                plaintext.zeroize();
+                                return Err(code("AAD_MISMATCH"));
+                            }
+                            CfmProcessResult {
+                                kind: CFM_PROCESSED_APPLICATION,
+                                plaintext: buffer(plaintext),
+                                epoch,
+                            }
                         }
-                        CfmProcessResult {
-                            kind: CFM_PROCESSED_APPLICATION,
-                            plaintext: buffer(plaintext),
-                            epoch,
-                        }
-                    }
-                    // An external join (a member's own new device, RFC 9420 §12.4.3.2)
-                    // passed the protocol checks of the core; the native SDK verifies the
-                    // joiner against the device directory like any added device.
-                    Processed::CommitMerged { epoch } | Processed::ExternalJoin { epoch, .. } => {
-                        CfmProcessResult {
+                        // An external join (a member's own new device, RFC 9420 §12.4.3.2)
+                        // passed the protocol checks of the core; the native SDK verifies the
+                        // joiner against the device directory like any added device.
+                        Processed::CommitMerged { epoch }
+                        | Processed::ExternalJoin { epoch, .. } => CfmProcessResult {
                             kind: CFM_PROCESSED_COMMIT,
                             plaintext: buffer(Vec::new()),
                             epoch,
-                        }
-                    }
-                    Processed::Proposal => CfmProcessResult {
-                        kind: CFM_PROCESSED_PROPOSAL,
-                        plaintext: buffer(Vec::new()),
-                        epoch,
-                    },
-                })
+                        },
+                        Processed::Proposal => CfmProcessResult {
+                            kind: CFM_PROCESSED_PROPOSAL,
+                            plaintext: buffer(Vec::new()),
+                            epoch,
+                        },
+                    })
+                })();
+                if result.is_err() {
+                    s.device = Device::import_state(s.device.device_id(), &checkpoint)
+                        .map_err(|_| code("DEVICE_STATE_INVALID"))?;
+                    s.groups.clear();
+                }
+                result
             })
         }?;
         // SAFETY: checked non-NULL.

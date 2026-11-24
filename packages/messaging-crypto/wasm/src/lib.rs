@@ -658,64 +658,74 @@ impl WebDevice {
         expected_aad: Option<Vec<u8>>,
         allowed_joiners: Vec<String>,
     ) -> Result<ProcessResult, JsError> {
-        let g = group_of(&self.device, &mut self.groups, group_id)?;
-        let allowed = |device: Uuid, key: &[u8]| {
-            let entry = format!("{device}:{}", hex(key));
-            allowed_joiners.contains(&entry)
-        };
-        let p = match self.device.process_with_joiners(g, message, allowed) {
-            Ok(p) => p,
-            Err(GroupError::JoinerNotAllowed(device)) => {
-                return Ok(ProcessResult {
-                    kind: "JOINER_UNVERIFIED".into(),
-                    plaintext: vec![],
-                    epoch: g.epoch(),
-                    joiner: Some(device.to_string()),
-                    joiner_key: vec![],
-                })
-            }
-            Err(_) => return Err(code("MESSAGE_REFUSED")),
-        };
-        let epoch = g.epoch();
-        Ok(match p {
-            Processed::Application { aad, plaintext } => {
-                if expected_aad.as_deref() != Some(aad.as_slice()) {
-                    return Err(code("AAD_MISMATCH"));
+        let checkpoint = self.device.export_state();
+        let result = (|| {
+            let g = group_of(&self.device, &mut self.groups, group_id)?;
+            let allowed = |device: Uuid, key: &[u8]| {
+                let entry = format!("{device}:{}", hex(key));
+                allowed_joiners.contains(&entry)
+            };
+            let p = match self.device.process_with_joiners(g, message, allowed) {
+                Ok(p) => p,
+                Err(GroupError::JoinerNotAllowed(device)) => {
+                    return Ok(ProcessResult {
+                        kind: "JOINER_UNVERIFIED".into(),
+                        plaintext: vec![],
+                        epoch: g.epoch(),
+                        joiner: Some(device.to_string()),
+                        joiner_key: vec![],
+                    })
                 }
-                ProcessResult {
-                    kind: "APPLICATION".into(),
-                    plaintext,
+                Err(error) => return Err(code(error.public_code())),
+            };
+            let epoch = g.epoch();
+            Ok(match p {
+                Processed::Application { aad, mut plaintext } => {
+                    if expected_aad.as_deref() != Some(aad.as_slice()) {
+                        plaintext.fill(0);
+                        return Err(code("AAD_MISMATCH"));
+                    }
+                    ProcessResult {
+                        kind: "APPLICATION".into(),
+                        plaintext,
+                        epoch,
+                        joiner: None,
+                        joiner_key: vec![],
+                    }
+                }
+                Processed::CommitMerged { epoch } => ProcessResult {
+                    kind: "COMMIT".into(),
+                    plaintext: vec![],
                     epoch,
                     joiner: None,
                     joiner_key: vec![],
-                }
-            }
-            Processed::CommitMerged { epoch } => ProcessResult {
-                kind: "COMMIT".into(),
-                plaintext: vec![],
-                epoch,
-                joiner: None,
-                joiner_key: vec![],
-            },
-            Processed::ExternalJoin {
-                epoch,
-                device_id,
-                signature_key,
-            } => ProcessResult {
-                kind: "COMMIT".into(),
-                plaintext: vec![],
-                epoch,
-                joiner: Some(device_id.to_string()),
-                joiner_key: signature_key,
-            },
-            Processed::Proposal => ProcessResult {
-                kind: "PROPOSAL".into(),
-                plaintext: vec![],
-                epoch,
-                joiner: None,
-                joiner_key: vec![],
-            },
-        })
+                },
+                Processed::ExternalJoin {
+                    epoch,
+                    device_id,
+                    signature_key,
+                } => ProcessResult {
+                    kind: "COMMIT".into(),
+                    plaintext: vec![],
+                    epoch,
+                    joiner: Some(device_id.to_string()),
+                    joiner_key: signature_key,
+                },
+                Processed::Proposal => ProcessResult {
+                    kind: "PROPOSAL".into(),
+                    plaintext: vec![],
+                    epoch,
+                    joiner: None,
+                    joiner_key: vec![],
+                },
+            })
+        })();
+        if result.is_err() || result.as_ref().is_ok_and(|r| r.kind == "JOINER_UNVERIFIED") {
+            self.device = Device::import_state(self.device.device_id(), &checkpoint)
+                .map_err(|_| code("DEVICE_STATE_INVALID"))?;
+            self.groups.clear();
+        }
+        result
     }
 
     pub fn epoch(&mut self, group_id: &[u8]) -> Result<u64, JsError> {
