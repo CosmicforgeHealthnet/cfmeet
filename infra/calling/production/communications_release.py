@@ -1,4 +1,4 @@
-"""Sections 4â€“7 release operations through the existing GitHub-controlled VPS access.
+"""Sections 4–7 release operations through the existing GitHub-controlled VPS access.
 Secret-bearing inspection and rollback files never leave the VPS.
 """
 import json
