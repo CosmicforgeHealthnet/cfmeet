@@ -17,10 +17,10 @@
 //   place where 'wasm-unsafe-eval' is granted.
 // * A device is held by one tab at a time (Web Locks): two tabs advancing one MLS state
 //   would fork it.
-import init, * as core from "./cf-messaging-crypto.10a025959e37d129.js";
+import init, * as core from "./cf-messaging-crypto.7872d1cf2b4c1795.js";
 
-const WASM_URL = new URL("./cf-messaging-crypto.1a13255bf1413795.wasm", import.meta.url);
-const WASM_SHA384 = "Y5G82ax/kLUG/zltG5pCCLtP+wTeJ3s8tHAlkP11xrSWUzAEVLGgrXKOOBxPrckS";
+const WASM_URL = new URL("./cf-messaging-crypto.6278b8e12f404d27.wasm", import.meta.url);
+const WASM_SHA384 = "YLWC7Hepgtm9Ov/XbZOAK9hUE8eZUMxQHA5N1T+lKOW5AthEON99Z5HV9pUkFbXH";
 const DB_NAME = "cfmeet-messaging";
 const DB_VERSION = 1;
 const MAX_TEXT = 16384;
