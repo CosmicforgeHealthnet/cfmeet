@@ -31,6 +31,9 @@ use openmls::prelude::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Negotiated, bounded and independently authenticated objects for resumable archives.
+pub mod paged;
+
 /// Domain separation of every transfer signature and of the HPKE `info`.
 pub const LABEL: &[u8] = b"cfmeet-messaging-history-transfer:v1";
 /// Format version of a sealed history.
@@ -170,12 +173,16 @@ pub(crate) struct Sealed<'a> {
 }
 
 pub(crate) fn parse(sealed: &[u8]) -> Result<Sealed<'_>, TransferError> {
+    parse_version(sealed, SEALED_VERSION)
+}
+
+pub(crate) fn parse_version(sealed: &[u8], version: u8) -> Result<Sealed<'_>, TransferError> {
     let take = |b: &[u8], at: usize| -> Option<(usize, usize)> {
         let len = u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?) as usize;
         let start = at + 4;
         (b.len() >= start + len).then_some((start, start + len))
     };
-    if sealed.first() != Some(&SEALED_VERSION) || sealed.len() < 1 + 8 + SIGNATURE_LEN {
+    if sealed.first() != Some(&version) || sealed.len() < 1 + 8 + SIGNATURE_LEN {
         return Err(TransferError::Malformed);
     }
     let (k0, k1) = take(sealed, 1).ok_or(TransferError::Malformed)?;
@@ -231,6 +238,7 @@ mod client {
     pub struct TransferKeys {
         private: HpkePrivateKey,
         public: Vec<u8>,
+        seed: zeroize::Zeroizing<[u8; 32]>,
     }
 
     impl TransferKeys {
@@ -241,17 +249,47 @@ mod client {
                     .random_array::<32>()
                     .map_err(|_| TransferError::KeyGeneration)?,
             );
-            let kp = crypto
-                .derive_hpke_keypair(HPKE, ikm.as_ref())
+            Self::from_seed(*ikm)
+        }
+
+        fn from_seed(seed: [u8; 32]) -> Result<Self, TransferError> {
+            let seed = zeroize::Zeroizing::new(seed);
+            let kp = CfMlsCrypto
+                .derive_hpke_keypair(HPKE, seed.as_ref())
                 .map_err(|_| TransferError::KeyGeneration)?;
             Ok(Self {
                 private: kp.private,
                 public: kp.public,
+                seed,
             })
         }
 
         pub fn public_key(&self) -> &[u8] {
             &self.public
+        }
+
+        /// Secret checkpoint for the client envelope only. Never send to a relay or log.
+        /// The envelope must authenticate the account, target and transfer UUID, and be
+        /// deleted on completion, cancellation, expiry or device revocation.
+        pub fn export_secret(&self) -> zeroize::Zeroizing<Vec<u8>> {
+            let mut out = zeroize::Zeroizing::new(b"CFHTK\0\x02".to_vec());
+            out.extend_from_slice(self.seed.as_ref());
+            out
+        }
+
+        pub fn import_secret(bytes: &[u8]) -> Result<Self, TransferError> {
+            if bytes.len() != 39 || &bytes[..7] != b"CFHTK\0\x02" {
+                return Err(TransferError::Malformed);
+            }
+            Self::from_seed(
+                bytes[7..]
+                    .try_into()
+                    .map_err(|_| TransferError::Malformed)?,
+            )
+        }
+
+        pub(crate) fn private_key(&self) -> &[u8] {
+            self.private.as_ref()
         }
     }
 

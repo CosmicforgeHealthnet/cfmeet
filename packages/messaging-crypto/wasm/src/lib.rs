@@ -370,6 +370,49 @@ fn transfer_context(ids: &[String]) -> Result<TransferContext, JsError> {
     })
 }
 
+fn history_object_context(
+    ids: &[String],
+    snapshot_id: &str,
+    expires_at: i64,
+    manifest_digest: &[u8],
+    chunk_count: u32,
+    total_plaintext_bytes: u64,
+    object_index: u32,
+) -> Result<history_transfer::paged::ObjectContext, JsError> {
+    let c = history_transfer::paged::ObjectContext {
+        transfer: transfer_context(ids)?,
+        snapshot_id: id(snapshot_id)?,
+        expires_at_unix: expires_at,
+        manifest_digest: manifest_digest
+            .try_into()
+            .map_err(|_| code("TRANSFER_MALFORMED"))?,
+        chunk_count,
+        total_plaintext_bytes,
+        object_index,
+    };
+    if !c.valid() {
+        return Err(code("TRANSFER_MALFORMED"));
+    }
+    Ok(c)
+}
+
+#[wasm_bindgen(js_name = verifyTransferRequestV2)]
+pub fn verify_transfer_request_v2(
+    target_key: &[u8],
+    ctx: Vec<String>,
+    transfer_key: &[u8],
+    expires_at: i64,
+    signature: &[u8],
+) -> Result<bool, JsError> {
+    Ok(history_transfer::paged::verify_request(
+        target_key,
+        &transfer_context(&ctx)?,
+        transfer_key,
+        expires_at,
+        signature,
+    ))
+}
+
 /// SOURCE: checks the target device signed the transfer request with its registered key.
 #[wasm_bindgen]
 pub fn verify_transfer_request(
@@ -764,6 +807,125 @@ impl WebDevice {
         let public = keys.public_key().to_vec();
         self.transfer = Some(keys);
         Ok(public)
+    }
+
+    /// Secret checkpoint: the worker must encrypt this in a transfer-bound envelope.
+    #[wasm_bindgen(js_name = exportTransferSecret)]
+    pub fn export_transfer_secret(&self) -> Result<Vec<u8>, JsError> {
+        Ok(self
+            .transfer
+            .as_ref()
+            .ok_or_else(|| code("NO_TRANSFER"))?
+            .export_secret()
+            .to_vec())
+    }
+
+    #[wasm_bindgen(js_name = importTransferSecret)]
+    pub fn import_transfer_secret(&mut self, bytes: &[u8]) -> Result<(), JsError> {
+        self.transfer =
+            Some(TransferKeys::import_secret(bytes).map_err(|_| code("TRANSFER_MALFORMED"))?);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = finishTransfer)]
+    pub fn finish_transfer(&mut self) {
+        self.transfer = None;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = signHistoryCheckpoint)]
+    pub fn sign_history_checkpoint(
+        &self,
+        ctx: Vec<String>,
+        snapshot_id: &str,
+        expires_at: i64,
+        manifest_digest: &[u8],
+        chunk_count: u32,
+        total_plaintext_bytes: u64,
+        next_index: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        let c = history_object_context(
+            &ctx,
+            snapshot_id,
+            expires_at,
+            manifest_digest,
+            chunk_count,
+            total_plaintext_bytes,
+            history_transfer::paged::MANIFEST_INDEX,
+        )?;
+        history_transfer::paged::sign_checkpoint(&self.device, &c, next_index)
+            .map_err(|_| code("TRANSFER_SIGN_FAILED"))
+    }
+
+    #[wasm_bindgen(js_name = signTransferRequestV2)]
+    pub fn sign_transfer_request_v2(
+        &self,
+        ctx: Vec<String>,
+        expires_at: i64,
+    ) -> Result<Vec<u8>, JsError> {
+        let keys = self.transfer.as_ref().ok_or_else(|| code("NO_TRANSFER"))?;
+        history_transfer::paged::sign_request(
+            &self.device,
+            &transfer_context(&ctx)?,
+            keys,
+            expires_at,
+        )
+        .map_err(|_| code("TRANSFER_SIGN_FAILED"))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = sealHistoryObject)]
+    pub fn seal_history_object(
+        &self,
+        ctx: Vec<String>,
+        snapshot_id: &str,
+        expires_at: i64,
+        manifest_digest: &[u8],
+        chunk_count: u32,
+        total_plaintext_bytes: u64,
+        object_index: u32,
+        transfer_key: &[u8],
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, JsError> {
+        let c = history_object_context(
+            &ctx,
+            snapshot_id,
+            expires_at,
+            manifest_digest,
+            chunk_count,
+            total_plaintext_bytes,
+            object_index,
+        )?;
+        history_transfer::paged::seal_object(&self.device, &c, transfer_key, plaintext)
+            .map_err(|_| code("TRANSFER_SEAL_FAILED"))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = openHistoryObject)]
+    pub fn open_history_object(
+        &self,
+        ctx: Vec<String>,
+        snapshot_id: &str,
+        expires_at: i64,
+        manifest_digest: &[u8],
+        chunk_count: u32,
+        total_plaintext_bytes: u64,
+        object_index: u32,
+        source_key: &[u8],
+        sealed: &[u8],
+    ) -> Result<Vec<u8>, JsError> {
+        let c = history_object_context(
+            &ctx,
+            snapshot_id,
+            expires_at,
+            manifest_digest,
+            chunk_count,
+            total_plaintext_bytes,
+            object_index,
+        )?;
+        let keys = self.transfer.as_ref().ok_or_else(|| code("NO_TRANSFER"))?;
+        history_transfer::paged::open_object(keys, source_key, &c, sealed)
+            .map_err(|_| code("TRANSFER_REFUSED"))
     }
 
     /// TARGET: signs the transfer request with the device key.
