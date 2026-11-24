@@ -5,7 +5,6 @@ import { LiveKitRoom, RoomAudioRenderer, useAudioPlayback, useLocalParticipant, 
 import { DisconnectReason, RoomEvent, Track, type LocalVideoTrack, type Room } from "livekit-client";
 import { Mic, MicOff, MonitorUp, MonitorX, SwitchCamera, Video, VideoOff, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import LocalRecordingControls from "@/components/room/LocalRecordingControls";
 import type { MediaCredential } from "@/types/calling";
 import { quietExpectedLiveKitTeardown } from "@/lib/calling/livekit-quiet";
 
@@ -378,7 +377,6 @@ export default function CallMedia({ credential, video, onConnected, onDisconnect
       <SoundUnlock />
       <ProviderReconnectEvents onReconnecting={onProviderReconnecting} onReconnected={onProviderReconnected} />
       <PublishWhenAllowed audio={credential.capabilities.canPublishAudio} video={video && credential.capabilities.canPublishVideo} />
-      <div className="fixed left-2 right-2 top-16 z-[70] max-h-[35vh] overflow-y-auto"><LocalRecordingControls label="call" canStart={credential.capabilities.canPublishAudio && credential.capabilities.canPublishData} /></div>
       {children}
     </LiveKitRoom>
   );

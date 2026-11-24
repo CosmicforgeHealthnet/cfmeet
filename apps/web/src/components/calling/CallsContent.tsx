@@ -29,6 +29,7 @@ import { activeParticipant, isWindingDown, ownParticipant, ownSession, visibleCo
 import { hubCallsService, type HubContact } from "@/services/calling/hub-calls.service";
 import type { CallKind, CallState, IvrInputRequest } from "@/types/calling";
 import type { CallHistoryEntry } from "@/types/calling/history";
+import CallRecordingControls from "./CallRecordingControls";
 import AbuseReportDialog from "./AbuseReportDialog";
 import VoicemailInbox from "./VoicemailInbox";
 import { CALL_SETTINGS_LINKS } from "./CallingNavigation";
@@ -627,6 +628,7 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
           </form>
         ) : null}
 
+        {mine && live && data.canViewRecordings ? <div className="mt-6 w-full max-w-sm text-left"><CallRecordingControls callId={callId} participantId={mine.participantId} endpointId={session ? endpointId : null} live={live} /></div> : null}
 
         <CallOrigin callId={callId} />
 

@@ -182,8 +182,5 @@ jobs:
       - name: Install Chromium (Playwright, pinned in package-lock)
         run: npx playwright install --with-deps chromium
 
-      - name: Device-only recording media and consent tests
-        run: node --experimental-strip-types --test tests/local-recording.test.mjs
-
       - name: Browser security — CSP, Trusted Types, XSS sinks, framing (Chromium)
         run: node --test tests/browser-security.test.mjs
