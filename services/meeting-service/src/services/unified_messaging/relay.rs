@@ -49,10 +49,11 @@ impl ColleagueScope {
 enum Seg {
     Lit(&'static str),
     Id,
+    ChunkIndex,
     Reaction,
 }
 
-use Seg::{Id, Lit, Reaction};
+use Seg::{ChunkIndex, Id, Lit, Reaction};
 
 /// One relayed operation: method, path shape (under `/v1/`), accepted query keys and
 /// whether the client's `Idempotency-Key` is forwarded.
@@ -82,6 +83,7 @@ impl RelayRoute {
             match seg {
                 Lit(l) => out.push_str(l),
                 Id => out.push_str("{id}"),
+                ChunkIndex => out.push_str("{chunkIndex}"),
                 Reaction => out.push_str("{reaction}"),
             }
         }
@@ -289,7 +291,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("principals"), Id, Lit("devices")],
-        &[],
+        PAGE,
         false,
     ),
     r(
@@ -348,6 +350,109 @@ pub static ROUTES: &[RelayRoute] = &[
         false,
     ),
     // Device-to-device history transfer (opaque sealed bytes only).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("history-transfer-capabilities")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("history-transfers-v2")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("history-transfers-v2")],
+        &["deviceId"],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("history-transfers-v2"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("manifest"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("manifest"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("chunks"),
+            ChunkIndex,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("chunks"),
+            ChunkIndex,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("checkpoint"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("complete"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("history-transfers-v2"),
+            Id,
+            Lit("cancel"),
+        ],
+        &[],
+        false,
+    ),
     r(
         Method::POST,
         &[Lit("messaging"), Lit("history-transfers")],
@@ -673,6 +778,9 @@ pub fn route_for(method: &Method, path: &str) -> Option<&'static RelayRoute> {
             && r.path.iter().zip(&segs).all(|(p, s)| match p {
                 Lit(l) => l == s,
                 Id => Uuid::parse_str(s).is_ok_and(|u| u.hyphenated().to_string() == *s),
+                ChunkIndex => s
+                    .parse::<u16>()
+                    .is_ok_and(|n| n < 4096 && n.to_string() == *s),
                 Reaction => safe_reaction_segment(s),
             })
     })
@@ -708,6 +816,8 @@ pub fn native_public_path(method: &str, template: &str) -> Option<String> {
         .map(|part| {
             if part == "{reaction}" {
                 ":example:"
+            } else if part == "{chunkIndex}" {
+                "0"
             } else if part.starts_with('{') && part.ends_with('}') {
                 "00000000-0000-0000-0000-000000000001"
             } else {
@@ -1079,6 +1189,39 @@ mod tests {
             assert!(route_for(&m, &p).is_none(), "{m} {p}");
         }
     }
+    #[test]
+    fn paged_history_and_device_pagination_keep_their_narrow_contract() {
+        let directory = route_for(
+            &Method::GET,
+            &format!("v1/messaging/principals/{C}/devices"),
+        )
+        .unwrap();
+        assert_eq!(directory.query_keys(), &["limit", "cursor"]);
+        for index in ["0", "1", "4095"] {
+            let path = format!("v1/messaging/history-transfers-v2/{C}/chunks/{index}");
+            assert!(route_for(&Method::GET, &path).is_some());
+            assert!(route_for(&Method::PUT, &path).is_some());
+            assert!(route_for(&Method::DELETE, &path).is_none());
+        }
+        for index in [
+            "4096",
+            "4294967295",
+            "-1",
+            "+1",
+            "01",
+            "0?admin=true",
+            "..",
+            "%30",
+        ] {
+            assert!(route_for(
+                &Method::GET,
+                &format!("v1/messaging/history-transfers-v2/{C}/chunks/{index}")
+            )
+            .is_none());
+        }
+        assert!(route_for(&Method::GET, "v1/messaging/history-transfer-capabilities").is_some());
+        assert!(route_for(&Method::POST, "v1/messaging/history-transfer-capabilities").is_none());
+    }
     /// MSG-001/002/003: every relayed operation takes exactly the query keys of the
     /// Messaging consumer contract (walked from the bundled contract, so a contract change
     /// fails here until the allowlist follows), and every allowlisted operation exists in
@@ -1121,6 +1264,7 @@ mod tests {
                     .split('/')
                     .map(|p| match p {
                         "{reaction}" => ":thumbsup:",
+                        "{chunkIndex}" => "0",
                         p if p.starts_with('{') => C,
                         p => p,
                     })

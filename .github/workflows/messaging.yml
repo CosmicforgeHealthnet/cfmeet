@@ -470,7 +470,7 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Destructive migration guard (SEC-015)
-        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/messaging-migration target/debug/messaging-communications-migration target/debug/messaging-notification-fence-migration target/debug/messaging-send-policy-projection-migration
+        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/messaging-migration target/debug/messaging-communications-migration target/debug/messaging-notification-fence-migration target/debug/messaging-send-policy-projection-migration target/debug/messaging-history-transfer-v2-migration
 
       - name: Migration smoke (up / reset / up)
         env:
@@ -492,6 +492,9 @@ jobs:
           ./target/debug/messaging-notification-fence-migration up
           ./target/debug/messaging-notification-fence-migration up
           ./target/debug/messaging-notification-fence-migration status
+          ./target/debug/messaging-history-transfer-v2-migration up
+          ./target/debug/messaging-history-transfer-v2-migration up
+          ./target/debug/messaging-history-transfer-v2-migration status
           q() { psql -h 127.0.0.1 -U postgres -d messaging_migration_smoke -tAc "$1"; }
           test "$(q "SELECT count(*) FROM messaging_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # Only messaging_ tables, and no column that could hold an E2EE secret or plaintext.
@@ -519,7 +522,7 @@ jobs:
       - name: image contains only the Messaging binaries and no key material
         run: |
           set -euo pipefail
-          test "$(docker run --rm --entrypoint /bin/ls cfmeet-messaging:ci /app | tr '\n' ' ')" = "messaging messaging-communications-migration messaging-kt-witness messaging-migration messaging-notification-fence-migration messaging-send-policy-projection-migration "
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-messaging:ci /app | tr '\n' ' ')" = "messaging messaging-communications-migration messaging-history-transfer-v2-migration messaging-kt-witness messaging-migration messaging-notification-fence-migration messaging-send-policy-projection-migration "
           if docker run --rm --entrypoint /bin/sh cfmeet-messaging:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi

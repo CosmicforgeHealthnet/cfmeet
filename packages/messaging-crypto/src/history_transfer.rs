@@ -199,24 +199,6 @@ pub(crate) fn parse_version(sealed: &[u8], version: u8) -> Result<Sealed<'_>, Tr
     })
 }
 
-#[cfg(test)]
-mod framing_regressions {
-    use super::*;
-
-    #[test]
-    fn untrusted_lengths_cannot_wrap_or_escape_the_frame() {
-        for version in [1, 2] {
-            let mut malformed = vec![0; 1 + 8 + SIGNATURE_LEN];
-            malformed[0] = version;
-            malformed[1..5].copy_from_slice(&u32::MAX.to_be_bytes());
-            assert!(parse_version(&malformed, version).is_err());
-            malformed[1..5].copy_from_slice(&0u32.to_be_bytes());
-            malformed[5..9].copy_from_slice(&u32::MAX.to_be_bytes());
-            assert!(parse_version(&malformed, version).is_err());
-        }
-    }
-}
-
 fn sealed_signing_input(ctx: &TransferContext, signed: &[u8]) -> Vec<u8> {
     let mut out = ctx.encode(b"sealed");
     out.extend_from_slice(&(signed.len() as u64).to_be_bytes());
@@ -473,5 +455,23 @@ mod tests {
             open_history(&keys, &spk, &c, &sealed[..10]),
             Err(TransferError::Malformed)
         );
+    }
+}
+
+#[cfg(test)]
+mod framing_regressions {
+    use super::*;
+
+    #[test]
+    fn untrusted_lengths_cannot_wrap_or_escape_the_frame() {
+        for version in [1, 2] {
+            let mut malformed = vec![0; 1 + 8 + SIGNATURE_LEN];
+            malformed[0] = version;
+            malformed[1..5].copy_from_slice(&u32::MAX.to_be_bytes());
+            assert!(parse_version(&malformed, version).is_err());
+            malformed[1..5].copy_from_slice(&0u32.to_be_bytes());
+            malformed[5..9].copy_from_slice(&u32::MAX.to_be_bytes());
+            assert!(parse_version(&malformed, version).is_err());
+        }
     }
 }

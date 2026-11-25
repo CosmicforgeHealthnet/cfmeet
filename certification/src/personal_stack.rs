@@ -232,6 +232,11 @@ impl PersonalStack {
                 db::migrate(&self.bin.join("meeting-audit-migration"), &owner)?;
                 db::migrate(&self.bin.join("account-privacy-migration"), &owner)?;
                 db::migrate(&self.bin.join("account-phone-migration"), &owner)?;
+                db::migrate(
+                    &self.bin.join("meeting-concurrent-devices-migration"),
+                    &owner,
+                )?;
+                db::migrate(&self.bin.join("messaging-installations-migration"), &owner)?;
                 db::migrate(&self.bin.join("admin-operations-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
@@ -245,6 +250,16 @@ impl PersonalStack {
                 conn.close().await?;
             }
             if name == "messaging" {
+                // This real binary starts the publication worker, and negotiates v2
+                // history only after the owner's independent histories are applied.
+                db::migrate(
+                    &self.bin.join("messaging-notification-fence-migration"),
+                    &owner,
+                )?;
+                db::migrate(
+                    &self.bin.join("messaging-history-transfer-v2-migration"),
+                    &owner,
+                )?;
                 db::migrate(
                     &self.bin.join("messaging-send-policy-projection-migration"),
                     &owner,

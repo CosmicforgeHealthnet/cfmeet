@@ -10,12 +10,12 @@
 
 pub use sea_orm_migration::prelude::*;
 
-mod history_transfer_v2;
+mod m20261124_000001_history_transfer_v2;
 pub struct HistoryTransferV2Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for HistoryTransferV2Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(history_transfer_v2::Migration)]
+        vec![Box::new(m20261124_000001_history_transfer_v2::Migration)]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("messaging_history_transfer_v2_migrations").into_iden()

@@ -17293,6 +17293,8 @@
         "tags": [
           "Messaging (v2)"
         ],
+        "summary": "Read my Messaging installation binding",
+        "description": "Reports whether the active Messaging identity belongs to the current trusted\nAccount installation. It does not unlock local history or grant a new sign-in\nMessaging authority. A fresh possession challenge is required for its client token.",
         "operationId": "v2_messaging_installation_status",
         "parameters": [
           {
@@ -17358,6 +17360,8 @@
         "tags": [
           "Messaging (v2)"
         ],
+        "summary": "Bind a protected Messaging installation",
+        "description": "Verifies the registration-bound KeyPackage proof and binds the existing active\nMessaging identity to this trusted Account installation and sign-in. Terminal\nrevocations and immutable bindings remain enforced. Ordinary sign-out ends\nsession authority without revoking a proved persistent identity.",
         "operationId": "v2_messaging_bind_installation",
         "parameters": [
           {
@@ -17435,6 +17439,8 @@
         "tags": [
           "Messaging (v2)"
         ],
+        "summary": "Challenge an existing Messaging installation",
+        "description": "Issues a short-lived, one-use possession challenge bound to the current trusted\nAccount installation, sign-in and active Messaging identity. The client answers\nusing its existing MLS signature key; no history key is sent to the server.",
         "operationId": "v2_messaging_installation_challenge",
         "parameters": [
           {

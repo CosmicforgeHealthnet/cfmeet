@@ -323,11 +323,37 @@ function exportRecord(conversationId, r) {
   };
 }
 
+// Authoritative removals are separate encrypted references, not an unbounded device
+// metadata map. A removed base can be on another server page, absent locally, or
+// older than the current visibility window while its EDIT control remains present.
+const removalKey = (conversationId, messageId) => `history-removal:${uuid(conversationId)}:${uuid(messageId)}`;
+function removedRecord(record, lifecycle) {
+  return { sequence: record.sequence, messageId: record.messageId, kind: record.kind,
+    senderPrincipalId: record.senderPrincipalId, senderDeviceId: record.senderDeviceId,
+    createdAt: record.createdAt, replyToMessageId: record.replyToMessageId ?? null,
+    targetMessageId: record.targetMessageId ?? null, status: "REMOVED", lifecycle };
+}
+async function removalReference(conversationId, messageId, account = ctx.account, key = ctx.key) {
+  const identity = removalKey(conversationId, messageId);
+  const sealed = await req((await db()).transaction("pending").objectStore("pending").get([account, identity]));
+  if (!sealed) return null;
+  const plain = await unseal(key, pendingAad(account, identity), sealed);
+  try { return str(JSON.parse(dec.decode(plain)).lifecycle, 40, 1); } finally { plain.fill(0); }
+}
+async function redactRemovedRecord(conversationId, record, currentPage = null, account = ctx.account, key = ctx.key) {
+  if (!record?.messageId) return record;
+  const lookup = async id => currentPage?.get(id) ?? await removalReference(conversationId, id, account, key);
+  const own = await lookup(record.messageId);
+  const target = !own && record.kind === "EDIT" && record.targetMessageId ? await lookup(record.targetMessageId) : null;
+  return own || target ? removedRecord(record, own ?? target) : record;
+}
+
 async function loadRecord(conversationId, sequence) {
   const d = await db();
   const sealed = await req(d.transaction("records").objectStore("records").get([ctx.account, conversationId, sequence]));
   if (!sealed) return null;
-  return JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), sealed)));
+  const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), sealed);
+  try { return await redactRemovedRecord(conversationId, JSON.parse(dec.decode(plain))); } finally { plain.fill(0); }
 }
 
 // Retry references use the existing encrypted pending store: no schema upgrade,
@@ -1032,7 +1058,7 @@ const ops = {
       const [, conversationId, sequence] = keys[i];
       if (ctx?.account === account && sequence < (ctx.meta.visibleFrom?.[conversationId] ?? 1)) continue;
       const record = JSON.parse(dec.decode(await unseal(key, recordAad(account, conversationId, sequence), values[i])));
-      records.push(exportRecord(conversationId, record));
+      records.push(exportRecord(conversationId, await redactRemovedRecord(conversationId, record, null, account, key)));
     }
     const last = keys[Math.min(keys.length, 100) - 1];
     return { records, next: keys.length > 100 ? { conversationId: last[1], sequence: last[2] } : null };
@@ -1050,7 +1076,8 @@ const ops = {
     const out = [];
     for (let i = Math.max(0, values.length - limit); i < values.length; i++) {
       const seq = keys[i][2];
-      out.push(view(JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conversationId, seq), values[i])))));
+      const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, seq), values[i]);
+      try { out.push(view(await redactRemovedRecord(conversationId, JSON.parse(dec.decode(plain))))); } finally { plain.fill(0); }
     }
     return out;
   },
@@ -1066,6 +1093,7 @@ const ops = {
       const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), values[i]);
       let record;
       try { record = JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+      record = await redactRemovedRecord(conversationId, record);
       if (record.kind !== "MLS_COMMIT" && ["FAILED", "BEFORE_JOIN", "SENT_ELSEWHERE"].includes(record.status)) needed = true;
     }
     ctx.meta.historyRecoveryScan = keys.length === 128 ? keys[keys.length - 1] : null;
@@ -1098,14 +1126,26 @@ const ops = {
   async reconcileHistoryMetadata({ conversationId, messages }) {
     requireDevice(); uuid(conversationId);
     if (!Array.isArray(messages) || messages.length > 500) fail("BAD_MESSAGES");
-    const puts = [];
+    const puts = [], removals = new Map();
+    // Validate and stage references first, including targets with no local record.
+    // At most 500 entries live in memory; encrypted references survive page/restart boundaries.
     for (const message of messages) {
       if (!Number.isSafeInteger(message.sequence) || message.sequence < 1) fail("BAD_SEQUENCE");
+      uuid(message.messageId);
+      const lifecycle = str(message.lifecycle, 40, 1);
+      if (lifecycle !== "ACTIVE") {
+        removals.set(message.messageId, lifecycle);
+        puts.push(await jsonPut(removalKey(conversationId, message.messageId), { lifecycle }));
+      }
+    }
+    for (const message of messages) {
       const existing = await loadRecord(conversationId, message.sequence);
       if (!existing) continue;
-      if (existing.messageId !== uuid(message.messageId)) fail("HISTORY_RECORD_CONFLICT");
-      let updated = { ...existing, lifecycle: message.lifecycle, replyToMessageId: message.replyToMessageId ? uuid(message.replyToMessageId) : null, targetMessageId: message.targetMessageId ? uuid(message.targetMessageId) : null };
-      if (message.lifecycle !== "ACTIVE") updated = { sequence: existing.sequence, messageId: existing.messageId, kind: existing.kind, senderPrincipalId: existing.senderPrincipalId, senderDeviceId: existing.senderDeviceId, createdAt: existing.createdAt, status: "REMOVED", lifecycle: str(message.lifecycle, 40, 1) };
+      if (existing.messageId !== message.messageId) fail("HISTORY_RECORD_CONFLICT");
+      const target = message.targetMessageId ? uuid(message.targetMessageId) : existing.targetMessageId ?? null;
+      if (existing.targetMessageId && existing.targetMessageId !== target) fail("HISTORY_RECORD_CONFLICT");
+      let updated = { ...existing, lifecycle: message.lifecycle, replyToMessageId: message.replyToMessageId ? uuid(message.replyToMessageId) : null, targetMessageId: target };
+      updated = await redactRemovedRecord(conversationId, updated, removals);
       const plain = enc.encode(JSON.stringify(updated));
       try { puts.push(["records", [ctx.account, conversationId, message.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, message.sequence), plain)]); } finally { plain.fill(0); }
     }
@@ -1184,6 +1224,7 @@ const ops = {
         const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), values[i]);
         let record;
         try { record = JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+        record = await redactRemovedRecord(conversationId, record);
         const c = coverage.get(conversationId) ?? { conversationId, firstSequence: window.firstSequence, lastSequence: window.lastSequence, availableRecords: 0, unreadableRecords: 0, missingRecords: 0, observedThrough: window.firstSequence - 1 };
         if (sequence > c.observedThrough + 1) c.missingRecords += sequence - c.observedThrough - 1;
         c.observedThrough = Math.max(c.observedThrough, sequence);
@@ -1290,7 +1331,7 @@ const ops = {
       let imported = 0;
       for (const entry of chunk.records) {
         const conversationId = uuid(entry?.conversationId, "ARCHIVE_INVALID");
-        const record = historyRecord(entry.record);
+        const record = await redactRemovedRecord(conversationId, historyRecord(entry.record));
         if (!eligibleRecord(conversationId, record, visibility)) fail("HISTORY_VISIBILITY_CHANGED");
         const identity = `${conversationId}:${record.sequence}`;
         if (seen.has(identity)) fail("ARCHIVE_INVALID"); seen.add(identity);
@@ -1369,7 +1410,7 @@ const ops = {
     let size = 0;
     for (let i = values.length - 1; i >= 0; i--) {
       const [, conv, seq] = keys[i];
-      const r = JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conv, seq), values[i])));
+      const r = await redactRemovedRecord(conv, JSON.parse(dec.decode(await unseal(ctx.key, recordAad(ctx.account, conv, seq), values[i]))));
       if (!["DECRYPTED", "SENT"].includes(r.status)) continue;
       const line = JSON.stringify(r);
       if (size + enc.encode(line).length > MAX_ARCHIVE_BYTES) fail("HISTORY_REQUIRES_PAGINATION");
@@ -1399,7 +1440,7 @@ const ops = {
       uuid(conv);
       for (const r of records) {
         if (!Number.isSafeInteger(r.sequence) || !["DECRYPTED", "SENT"].includes(r.status)) continue;
-        const rec = { ...r, status: r.status === "SENT" ? "SENT" : "DECRYPTED", transferred: true };
+        const rec = await redactRemovedRecord(conv, { ...r, status: r.status === "SENT" ? "SENT" : "DECRYPTED", transferred: true });
         puts.push(["records", [ctx.account, conv, r.sequence], await seal(ctx.key, recordAad(ctx.account, conv, r.sequence), enc.encode(JSON.stringify(rec)))]);
         n++;
       }

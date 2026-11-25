@@ -1,7 +1,8 @@
 /** Messaging hooks (MANAGED conversations; polling — no push, see Settings → Notifications). */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { messagingApi } from "@/features/messaging/api";
-import { mergeChatLines, summarizeConversation, toChatLines, type ChatLine } from "@/lib/messaging/relay-paths";
+import { summarizeConversation } from "@/lib/messaging/relay-paths";
+import { collectConversationPages, readConversationHistory, type ConversationHistory } from "@/lib/messaging/history";
 
 export const messagingKeys = {
   me: ["messaging", "me"] as const,
@@ -21,15 +22,8 @@ export function useConversations(enabled: boolean) {
     queryKey: messagingKeys.conversations,
     enabled,
     refetchInterval: 15_000,
-    queryFn: async () => {
-      const out = [];
-      let cursor: string | null = null;
-      for (let i = 0; i < 5; i++) {
-        const page: Awaited<ReturnType<typeof messagingApi.conversations>> = await messagingApi.conversations(cursor);
-        out.push(...page.conversations);
-        cursor = page.nextCursor;
-        if (!cursor) break;
-      }
+    queryFn: async ({ signal }) => {
+      const out = await collectConversationPages((cursor) => messagingApi.conversations(cursor, signal));
       // The list carries at most two members; read group members in full.
       for (const c of out) {
         if (c.contextClass !== "DIRECT") {
@@ -71,9 +65,6 @@ export function useConversation(id: string) {
   });
 }
 
-/** Highest sequence read per conversation (commits/edits advance it without producing a line). */
-const cursors = new Map<string, number>();
-
 /** Incremental history of a MANAGED conversation (afterSequence cursor, merged by sequence). */
 export function useConversationLines(id: string, me: string | null, enabled: boolean) {
   const qc = useQueryClient();
@@ -81,19 +72,14 @@ export function useConversationLines(id: string, me: string | null, enabled: boo
     queryKey: messagingKeys.lines(id),
     enabled,
     refetchInterval: 5000,
-    queryFn: async () => {
-      let lines: ChatLine[] = qc.getQueryData<ChatLine[]>(messagingKeys.lines(id)) ?? [];
-      const previous = cursors.get(id) ?? 0;
-      let after = Math.max(cursors.get(id) ?? 0, lines.length ? lines[lines.length - 1].sequence : 0);
-      for (let i = 0; i < 20; i++) {
-        const page = await messagingApi.messagesAfter(id, after);
-        lines = mergeChatLines(lines, toChatLines(page.messages, me));
-        after = page.messages.reduce((m, x) => Math.max(m, x.sequence), after);
-        if (page.messages.length < 50) break;
+    select: (history: ConversationHistory) => history.lines,
+    queryFn: async ({ signal }) => {
+      const previous = qc.getQueryData<ConversationHistory>(messagingKeys.lines(id));
+      const history = await readConversationHistory(previous, me, (after) => messagingApi.messagesAfter(id, after, signal));
+      if (!signal.aborted && history.afterSequence > (previous?.afterSequence ?? 0)) {
+        void messagingApi.markRead(id, history.afterSequence).catch(() => undefined);
       }
-      cursors.set(id, after);
-      if (after > previous) void messagingApi.markRead(id, after).catch(() => undefined);
-      return lines;
+      return history;
     },
   });
 }

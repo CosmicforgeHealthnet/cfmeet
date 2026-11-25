@@ -33,7 +33,7 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["POST", `${c}/mls/commits`, []], ["GET", `${c}/mls/state`, []],
   ["POST", `${c}/mls/key-package-claims`, []],
   ["GET", `messaging/devices/${id}/welcomes`, []], ["POST", `messaging/devices/${id}/welcomes/${id}/consume`, []],
-  ["GET", `messaging/principals/${id}/devices`, []],
+  ["GET", `messaging/principals/${id}/devices`, page],
   ["GET", "messaging/key-transparency/proofs", ["deviceId", "fromTreeSize"]],
   ["POST", `${c}/attachments`, []], ["GET", `${c}/attachments/${id}`, []],
   ["POST", `${c}/attachments/${id}/finalize`, []],
@@ -44,6 +44,14 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["PUT", `messaging/history-transfers/${id}/sealed-history`, []],
   ["GET", `messaging/history-transfers/${id}/sealed-history`, []],
   ["POST", `messaging/history-transfers/${id}/complete`, []], ["POST", `messaging/history-transfers/${id}/cancel`, []],
+  ["GET", "messaging/history-transfer-capabilities", []],
+  ["POST", "messaging/history-transfers-v2", []], ["GET", "messaging/history-transfers-v2", ["deviceId"]],
+  ["GET", `messaging/history-transfers-v2/${id}`, []],
+  ["PUT", `messaging/history-transfers-v2/${id}/manifest`, []], ["GET", `messaging/history-transfers-v2/${id}/manifest`, []],
+  ["PUT", `messaging/history-transfers-v2/${id}/chunks/(?:0|[1-9][0-9]{0,3})`, []],
+  ["GET", `messaging/history-transfers-v2/${id}/chunks/(?:0|[1-9][0-9]{0,3})`, []],
+  ["POST", `messaging/history-transfers-v2/${id}/checkpoint`, []],
+  ["POST", `messaging/history-transfers-v2/${id}/complete`, []], ["POST", `messaging/history-transfers-v2/${id}/cancel`, []],
   ["GET", "messaging/blocks", []], ["POST", "messaging/blocks", []], ["DELETE", `messaging/blocks/${id}`, []],
   ["POST", `messaging/client-sessions/${id}/revoke`, []],
   ["GET", "messaging/presence/settings", []], ["PUT", "messaging/presence/settings", []],
@@ -57,6 +65,8 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
 export function isMessagingRelayRoute(method: MessagingMethod, path: string): boolean {
   if (path.includes("#") || path.split("?").length > 2) return false;
   const [pathname, query] = path.split("?");
+  const chunk = pathname.match(/\/history-transfers-v2\/[^/]+\/chunks\/(\d+)$/);
+  if (chunk && Number(chunk[1]) > 4095) return false;
   if (pathname.includes("..") || /%2e/i.test(pathname)) return false;
   const route = routes.find(([verb, pattern]) => verb === method && new RegExp(`^v1/${pattern}$`).test(pathname));
   if (!route) return false;

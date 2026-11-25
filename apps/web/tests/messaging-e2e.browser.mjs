@@ -73,7 +73,7 @@ after(async () => {
  * its in-memory token through `/api/session/refresh` on load. One login per context, so
  * no two contexts share a single-use refresh token.
  */
-async function signIn(ctx, who) {
+async function signIn(ctx, who, origin = BASE) {
   const login = await fetch(`${API}/auth/otp/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -82,19 +82,20 @@ async function signIn(ctx, who) {
   const body = await login.json().catch(() => null);
   assert.equal(login.status, 200, `one-time-code sign-in for ${who}: ${JSON.stringify(body)}`);
   assert.ok(body?.refresh_token, `the login for ${who} returned a refresh token`);
-  const session = await ctx.request.post(`${BASE}/api/session`, {
-    headers: { "X-CF-Session": "1", Origin: BASE },
+  const session = await ctx.request.post(`${origin}/api/session`, {
+    headers: { "X-CF-Session": "1", Origin: origin },
     data: { refresh_token: body.refresh_token, remember: false },
   });
   assert.equal(session.status(), 200, `session cookie for ${who}: ${await session.text()}`);
 }
 
-async function open(who, { route, mobile = false } = {}) {
+async function open(who, { route, mobile = false, authenticator = false } = {}) {
+  const origin = authenticator ? BASE.replace("127.0.0.1", "localhost") : BASE;
   const ctx = await browser.newContext({ acceptDownloads: true, ...(mobile ? {
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
     userAgent: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
   } : {}) });
-  await signIn(ctx, who);
+  await signIn(ctx, who, origin);
   // What the login flow stores for a signed-in account (the dashboard requires it).
   await ctx.addInitScript((u) => {
     if (!localStorage.getItem("cosmic_user_info")) localStorage.setItem("cosmic_user_info", JSON.stringify(u));
@@ -105,6 +106,15 @@ async function open(who, { route, mobile = false } = {}) {
   });
   if (route) await route(ctx);
   const page = await ctx.newPage();
+  if (authenticator) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("WebAuthn.enable", { enableUI: false });
+    await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+      protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal",
+      hasResidentKey: true, hasUserVerification: true, hasPrf: true,
+      automaticPresenceSimulation: true, isUserVerified: true,
+    } });
+  }
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   if (process.env.E2E_DEBUG) {
@@ -112,8 +122,8 @@ async function open(who, { route, mobile = false } = {}) {
     page.on("requestfailed", (r) => console.log(`[${who} failed] ${r.method()} ${r.url()} ${r.failure()?.errorText}`));
     page.on("response", (r) => r.status() >= 400 && console.log(`[${who} ${r.status()}] ${r.request().method()} ${r.url()}`));
   }
-  await page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
-  return { ctx, page, errors };
+  await page.goto(`${origin}/dashboard/messages`, { waitUntil: "load" });
+  return { ctx, page, errors, origin };
 }
 
 // The device / connection status lives in the "Security & devices" sheet, which stays
@@ -224,7 +234,7 @@ test("the CF Meet web app runs real end-to-end encrypted messaging", { timeout: 
   } catch (e) {
     for (const [who, p] of Object.entries(pages)) {
       const text = await p.locator("[data-testid=messages-page]").innerText().catch(() => "(closed)");
-      console.log(`--- ${who} page at failure ---\n${text}`);
+      console.log(`--- ${who} page at failure ---\n${text.length > 24000 ? text.slice(0, 12000) + "\n[large fixture text omitted]\n" + text.slice(-12000) : text}`);
     }
     throw e;
   }
@@ -258,7 +268,7 @@ async function journey() {
 
   const pageCsp = (await alice.page.request.get(`${BASE}/dashboard/messages`)).headers()["content-security-policy"];
   assert.ok(pageCsp && !pageCsp.includes("wasm-unsafe-eval") && !pageCsp.includes("'unsafe-eval'"), pageCsp);
-  step("device registration", { devices: 2, pageCspWithoutWasmEval: true });
+  step("device registration", { devices: 10, accountADevices: 5, accountBDevices: 5, pageCspWithoutWasmEval: true });
 
   // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI while Bob is
   //         OFFLINE: his device published its keys in advance, so Alice's device adds it
@@ -319,6 +329,43 @@ async function journey() {
   await send(alice.page, `${SECRET} original tab remains active`);
   await shown(bob.page, `${SECRET} original tab remains active`);
   step("two real application tabs coordinate one cryptographic identity", {});
+
+  // Metadata uses the real server endpoints and encrypted edit/reply payloads.
+  const metadataOriginal = `${SECRET} metadata original`;
+  const metadataEdited = `${SECRET} metadata revised`;
+  const metadataReply = `${SECRET} metadata reply`;
+  await send(alice.page, metadataOriginal);
+  let metadataRow = alice.page.locator("[data-testid=message][data-message-id]", { hasText: metadataOriginal }).first();
+  await metadataRow.locator("[data-testid=message-actions]").waitFor({ timeout: T });
+  const metadataMessageId = await metadataRow.getAttribute("data-message-id");
+  assert.ok(metadataMessageId, "the metadata target is an accepted server message");
+  metadataRow = alice.page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"]`);
+  const allDevicePages = [alice.page, bob.page, ...otherDevices.map(([, device]) => device.page)];
+  for (const page of allDevicePages) await shown(page, metadataOriginal);
+  const phoneOriginal = bobPhone.page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"]`);
+  await phoneOriginal.locator("[data-testid=message-actions]").click();
+  await bobPhone.page.locator("[data-testid=reply]").click();
+  await send(bobPhone.page, metadataReply);
+  for (const page of allDevicePages) {
+    const replyRow = page.locator("[data-testid=message]", { hasText: metadataReply }).first();
+    await replyRow.locator("[data-testid=message-reply]").waitFor({ timeout: T });
+  }
+  const bobOriginal = bob.page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"]`);
+  await bobOriginal.getByRole("button", { name: "React", exact: true }).click();
+  await bob.page.getByRole("button", { name: "React \u{1F44D}", exact: true }).click();
+  for (const page of allDevicePages) await page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"] [data-testid=reaction]`).waitFor({ timeout: T });
+  await metadataRow.locator("[data-testid=message-actions]").click();
+  await alice.page.locator("[data-testid=edit]").click();
+  await metadataRow.locator("[data-testid=edit-input]").fill(metadataEdited);
+  await metadataRow.locator("[data-testid=edit-save]").click();
+  for (const page of allDevicePages) await shown(page, metadataEdited);
+  await bob.page.bringToFront();
+  await metadataRow.getByLabel("Read", { exact: true }).waitFor({ timeout: T });
+  await metadataRow.locator("[data-testid=message-actions]").click();
+  await alice.page.locator("[data-testid=delete]").click();
+  for (const page of allDevicePages) await page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"][data-state=removed]`).waitFor({ timeout: T });
+  step("replies reactions encrypted edits read receipts and deletion synchronize across ten devices", { devices: 10 });
+
 
 
 
@@ -432,6 +479,22 @@ async function journey() {
   await dialog.waitFor({ state: "detached", timeout: T });
   step("new chats are private-only", {});
 
+  // A real application archive above the legacy ceiling. Every encrypted send must
+  // be accepted and every eligible source must possess it before the new browser joins.
+  const bulkPrefix = `${SECRET} large-history block `;
+  const bulkHistory = Array.from({ length: 45 }, (_, i) => `${bulkPrefix}${String(i).padStart(2, "0")} ${"x".repeat(13900)}`);
+  assert.ok(bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) > 512 * 1024);
+  for (const text of bulkHistory) {
+    await send(alice.page, text);
+    await alice.page.locator("[data-testid=message][data-state=sent]", { hasText: text }).waitFor({ timeout: T });
+  }
+  for (const page of [bob.page, ...otherDevices.filter(([who]) => who === "bob").map(([, device]) => device.page)]) {
+    await shown(page, bulkHistory[0]);
+    await shown(page, bulkHistory.at(-1));
+    assert.equal(await page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), 45);
+  }
+  step("large encrypted history accepted and available on every source", { messages: 45, plaintextBytes: bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) });
+
   // ---- 10. Bob's second device: added to the group by a member device, then his history
   //          is recovered device-to-device after both devices show the same code.
   for (const [, device] of otherDevices) await device.page.close();
@@ -449,8 +512,8 @@ async function journey() {
   step("second browser trusted by its own sign-in (no verification step)", {});
   await previewIsText(bob2.page);
   await openConversation(bob2.page, "PRIVATE_E2EE");
-  // Older messages show a calm, accurate label (they can never arrive on this browser; history
-  // can be transferred from Bob's other browser), never "Waiting for this message".
+  // Earlier MLS secrets are not granted to the new browser; authenticated history
+  // copies can arrive from Bob's authorized source, never an indefinite waiting claim.
   const older = bob2.page.locator("[data-testid=message][data-state=before-join] [data-testid=message-note]").first();
   await older.waitFor({ timeout: T });
   assert.match(await older.textContent(), /^Sent before this browser joined/);
@@ -483,15 +546,65 @@ async function journey() {
   await bob2.page.click("[data-testid=recover-history]");
   await bob2.page.locator("[data-testid=transfer-source]").first().click({ timeout: T });
   const targetCode = (await bob2.page.locator("[data-testid=outgoing-code]").textContent({ timeout: T })).trim();
-  const incoming = bob.page.locator("[data-testid=incoming-code]");
-  await incoming.waitFor({ timeout: 2 * T });
-  assert.equal((await incoming.textContent()).trim(), targetCode, "both devices show the same comparison code");
-  await bob.page.click("[data-testid=approve-transfer]");
-  await bob2.page.locator("[data-testid=outgoing-transfer][data-state^=received]").waitFor({ timeout: 2 * T });
+  // Device directories are UUID-paginated, so the first source is not necessarily
+  // Bob's oldest desktop. Approve on the actual source displaying this request's SAS.
+  const sourcePages = [bob.page, ...otherDevices.filter(([who]) => who === "bob").map(([, device]) => device.page)];
+  const incomingTransfer = await Promise.any(sourcePages.map(async (page) => {
+    const row = page.locator("[data-testid=incoming-transfer]").filter({ hasText: targetCode });
+    await row.waitFor({ timeout: 2 * T });
+    return row;
+  }));
+  assert.equal((await incomingTransfer.locator("[data-testid=incoming-code]").textContent()).trim(), targetCode, "both devices show the same comparison code");
+  let interruptedTransferId = null;
+  let permitResumedDownload = false;
+  let checkpointBeforeInterruption = 0;
+  let receivedManifest = null;
+  let signalInterruption;
+  const interruption = new Promise(resolve => { signalInterruption = resolve; });
+  const v2Path = /\/api\/v2\/messaging\/relay\/v1\/messaging\/history-transfers-v2\/([0-9a-f-]+)\/(manifest|checkpoint|chunks\/1)(?:\?|$)/;
+  bob2.page.on("request", request => {
+    if (request.method() === "POST" && /\/history-transfers-v2\/[^/]+\/checkpoint$/.test(request.url())) checkpointBeforeInterruption = Math.max(checkpointBeforeInterruption, request.postDataJSON()?.nextIndex ?? 0);
+  });
+  bob2.page.on("response", async response => {
+    if (response.request().method() === "GET" && /\/history-transfers-v2\/[^/]+\/manifest$/.test(response.url()) && response.status() === 200) receivedManifest = await response.json().catch(() => null);
+  });
+  await bob2.page.route(v2Path, async route => {
+    const match = v2Path.exec(route.request().url());
+    if (route.request().method() === "GET" && match?.[2] === "chunks/1" && !permitResumedDownload) {
+      if (!interruptedTransferId) interruptedTransferId = match[1];
+      await route.abort("connectionreset");
+      signalInterruption();
+    } else await route.continue();
+  });
+  await incomingTransfer.locator("[data-testid=approve-transfer]").click();
+  let interruptTimeout;
+  try {
+    await Promise.race([interruption, new Promise((_, reject) => { interruptTimeout = setTimeout(() => reject(Error("v2 chunk interruption was not reached")), 2 * T); })]);
+  } finally { clearTimeout(interruptTimeout); }
+  assert.ok(checkpointBeforeInterruption >= 1, "an authenticated first chunk was durably imported before interruption");
+  const resumedCompletion = bob2.page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith(`/history-transfers-v2/${interruptedTransferId}/complete`) && response.status() === 200, { timeout: 2 * T });
+  await bob2.page.reload({ waitUntil: "load" });
+  permitResumedDownload = true;
+  await register(bob2.page);
+  await openConversation(bob2.page, "PRIVATE_E2EE");
+  await resumedCompletion;
   await shown(bob2.page, hello);
-  step("second device + history transfer", { comparisonCode: "#### ####" });
+  await shown(bob2.page, bulkHistory[0]);
+  await shown(bob2.page, bulkHistory.at(-1));
+  assert.equal(await bob2.page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), 45, "every bulk record imports exactly once after interruption");
+  assert.ok(receivedManifest?.totalPlaintextBytes > 512 * 1024 && receivedManifest.chunkCount > 2, "actual transferred manifest exceeds 512 KiB and requires multiple chunks");
+  assert.equal(await bob2.page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"][data-state=removed]`).count(), 1, "history recovery preserves the deletion tombstone");
+  await bob2.page.locator("[data-testid=message]", { hasText: metadataReply }).first().locator("[data-testid=message-reply]").waitFor({ timeout: T });
+  const recoveredAttachment = bob2.page.locator("[data-testid=attachment]", { hasText: "plan.txt" });
+  await recoveredAttachment.waitFor({ timeout: T });
+  const [recoveredDownload] = await Promise.all([bob2.page.waitForEvent("download", { timeout: T }), recoveredAttachment.click()]);
+  assert.equal(recoveredDownload.suggestedFilename(), "plan.txt");
+  assert.ok(readFileSync(await recoveredDownload.path()).equals(fileBody), "recovered attachment descriptor and key decrypt the original bytes on the new device");
+  await bob2.page.unroute(v2Path);
+  step("large v2 application history resumes automatically after chunk failure and page restart", { comparisonCode: "#### ####", messages: 45, chunkCount: receivedManifest.chunkCount, plaintextBytes: receivedManifest.totalPlaintextBytes });
 
   // ---- 11. Removing a device erases its keys and history from that browser.
+  if (await settings.getAttribute("aria-expanded") !== "true") await settings.click();
   await bob2.page.click("[data-testid=remove-device]");
   await phase(bob2.page, "revoked");
   const wiped = await inspectStorage(bob2.page, SECRET);
@@ -575,6 +688,48 @@ async function journey() {
   const afterLogout = await inspectStorage(alice.page, SECRET);
   assert.equal(afterLogout.values, 0, `nothing of the account remains: ${JSON.stringify(afterLogout)}`);
   step("logout erased the device", { remainingValues: afterLogout.values });
+
+  // Ordinary logout with the selected PRF policy retains only locked ciphertext.
+  const protectedBrowser = await open("alice", { authenticator: true });
+  await register(protectedBrowser.page);
+  await protectedBrowser.page.waitForFunction(async () => {
+    const db = await new Promise((resolve, reject) => { const q = indexedDB.open("cfmeet-messaging"); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error); });
+    const values = await new Promise((resolve, reject) => { const q = db.transaction("keys").objectStore("keys").getAll(); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error); });
+    db.close(); return values.some(value => value?.kind === "LOCAL_AUTHENTICATOR_V1");
+  }, null, { timeout: T });
+  await openConversation(protectedBrowser.page, "PRIVATE_E2EE");
+  const retainedMessage = `${SECRET} authenticator-protected logout`;
+  await send(protectedBrowser.page, retainedMessage);
+  await shown(protectedBrowser.page, retainedMessage);
+  await protectedBrowser.page.locator("[data-testid=message][data-state=sent]", { hasText: retainedMessage }).waitFor({ timeout: T });
+  const retainedDeviceId = await protectedBrowser.page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => { const request = indexedDB.open("cfmeet-messaging"); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const values = await new Promise((resolve, reject) => { const request = db.transaction("keys").objectStore("keys").getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    db.close(); return values.find(value => value?.kind === "LOCAL_AUTHENTICATOR_V1")?.descriptor.messagingDeviceId;
+  });
+  assert.ok(retainedDeviceId);
+  await protectedBrowser.page.locator("[data-testid=profile-menu-toggle]:visible").first().click();
+  await protectedBrowser.page.locator("[data-testid=logout-open]:visible").first().click();
+  await protectedBrowser.page.locator("[data-testid=logout-confirm]").click();
+  await protectedBrowser.page.waitForFunction(() => !location.pathname.startsWith("/dashboard"), null, { timeout: T });
+  const lockedStorage = await inspectStorage(protectedBrowser.page, SECRET);
+  assert.ok(lockedStorage.values > 0, "ordinary sign-out retains encrypted history");
+  assert.equal(lockedStorage.found, 0, "retained values contain no plaintext");
+  assert.equal(lockedStorage.keys.length, 0, "no directly usable wrapping key remains");
+  await signIn(protectedBrowser.ctx, "alice", protectedBrowser.origin);
+  await protectedBrowser.page.goto(`${protectedBrowser.origin}/dashboard/messages`, { waitUntil: "load" });
+  await register(protectedBrowser.page);
+  await openConversation(protectedBrowser.page, "PRIVATE_E2EE");
+  await shown(protectedBrowser.page, retainedMessage);
+  const restoredDeviceId = await protectedBrowser.page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => { const request = indexedDB.open("cfmeet-messaging"); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const values = await new Promise((resolve, reject) => { const request = db.transaction("keys").objectStore("keys").getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    db.close(); return values.find(value => value?.kind === "LOCAL_AUTHENTICATOR_V1")?.descriptor.messagingDeviceId;
+  });
+  assert.equal(restoredDeviceId, retainedDeviceId, "fresh sign-in reuses the same unrevoked protected Messaging identity");
+  await phase(bob.page, "ready");
+  step("authenticator-protected logout and fresh sign-in restore history without disconnecting other devices", { plaintextHits: lockedStorage.found });
+  await protectedBrowser.ctx.close();
 
   for (const s of [alice, bob, bob2, ...otherDevices.map(([, device]) => device)]) {
     assert.deepEqual(s.errors.filter((e) => !/ResizeObserver/.test(e)), [], "no page errors");

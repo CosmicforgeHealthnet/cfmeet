@@ -114,12 +114,12 @@ try {
     await call(page, 'open', { account, scope }); await call(page, 'generate', { deviceId }); await call(page, 'adopt');
   }
   for (const groupId of groups) { await call(source, 'createGroup', { groupId }); await call(source, 'confirm'); }
-  async function send(which, payload) {
+  async function send(which, payload, extra = {}) {
     const sequence = ++sequences[which], clientMessageId = id(100 + which * 100 + sequence);
     const encrypted = await call(source, 'encrypt', { conversationId: conversations[which], groupId: groups[which], clientMessageId, payload });
     const processed = await call(source, 'processMessages', { conversationId: conversations[which], groupId: groups[which], messages: [{
       sequence, messageId: id(1000 + which * 100 + sequence), clientMessageId, senderDeviceId: sourceId, senderPrincipalId: account,
-      kind: 'APPLICATION', lifecycle: 'ACTIVE', createdAt: '2026-11-24T00:00:00Z', epoch: encrypted.epoch, ciphertext: b64(encrypted.ciphertext),
+      kind: extra.kind ?? 'APPLICATION', targetMessageId: extra.targetMessageId, lifecycle: 'ACTIVE', createdAt: '2026-11-24T00:00:00Z', epoch: encrypted.epoch, ciphertext: b64(encrypted.ciphertext),
     }] });
     assert.equal(processed.records[0].status, 'SENT');
   }
@@ -127,6 +127,8 @@ try {
   const filePlaintext = new Uint8Array([12, 34, 56, 78]);
   const attachment = await call(source, 'encryptFile', { data: filePlaintext, mediaType: 'application/octet-stream', fileName: 'history.bin' });
   await send(0, { t: 'file', handle: attachment.handle, attachmentId: id(9000) });
+  const removedBaseId = id(1001), deletedEditText = 'deleted edit must never reach recovered plaintext';
+  await send(0, { t: 'text', text: deletedEditText }, { kind: 'EDIT', targetMessageId: removedBaseId });
   const eligibleConversations = conversations.map((conversationId, i) => ({ conversationId, firstSequence: 1, lastSequence: sequences[i] }));
   const context = [id(20), scope.tenantId, scope.applicationId, scope.environmentId, account, sourceId, targetId];
   const expiresAt = Math.floor(Date.now() / 1000) + 600;
@@ -137,6 +139,16 @@ try {
   const snapshot = await call(source, 'prepareHistoryV2', { context, transferKey, expiresAt, eligibleConversations });
   assert.ok(snapshot.descriptor.totalPlaintextBytes > 1024 * 1024); assert.ok(snapshot.descriptor.chunkCount > 2);
   assert.equal(snapshot.coverage, 'SOURCE_AVAILABLE'); confirmed('more than 1 MiB and two conversations form a complete bounded snapshot');
+  // Freeze a valid archive, then remove its target in a separate authoritative page.
+  // The target has no local base record: it must still reject the stale EDIT payload.
+  const removalPage = { conversationId: conversations[0], messages: [{ sequence: 1, messageId: removedBaseId, lifecycle: 'DELETED' }] };
+  await call(source, 'reconcileHistoryMetadata', removalPage);
+  await call(target, 'reconcileHistoryMetadata', removalPage);
+  const exported = await call(source, 'exportLocalHistory', { account });
+  assert.equal(exported.records.find(r => r.conversationId === conversations[0] && r.sequence === sequences[0]).status, 'REMOVED');
+  assert.equal(JSON.stringify(exported).includes(deletedEditText), false);
+  confirmed('authoritative target tombstones redact source plaintext exports across page boundaries');
+
   const sourceKey = (await call(source, 'status')).signaturePublicKey;
   const sealedManifest = await call(source, 'historyObjectV2', { transferId: context[0], index: 0xffffffff });
   // These attacker-controlled lengths overflowed unchecked usize arithmetic on
@@ -179,9 +191,13 @@ try {
     const sealed = index === 1 ? second : await call(source, 'historyObjectV2', { transferId: context[0], index });
     last = await call(target, 'importHistoryChunkV2', { transferId: context[0], index, sealed, eligibleConversations });
   }
-  assert.equal(last.records, 81); assert.equal(last.nextIndex, snapshot.descriptor.chunkCount); assert.ok(last.signature.length > 0);
+  assert.equal(last.records, 82); assert.equal(last.nextIndex, snapshot.descriptor.chunkCount); assert.ok(last.signature.length > 0);
   const history = await Promise.all(conversations.map((conversationId) => call(target, 'history', { conversationId })));
-  assert.equal(history.flat().length, 81); assert.equal(history[1].some((r) => r.payload?.text === 'after frozen snapshot'), false);
+  assert.equal(history.flat().length, 82); assert.equal(history[1].some((r) => r.payload?.text === 'after frozen snapshot'), false);
+  assert.equal(history[0].find(r => r.messageId === removedBaseId).status, 'REMOVED');
+  assert.equal(history[0].find(r => r.kind === 'EDIT').status, 'REMOVED');
+  assert.equal(JSON.stringify(history).includes(deletedEditText), false);
+  confirmed('stale frozen archives cannot resurrect deleted EDIT plaintext on a new device');
   const file = history[0].find((r) => r.payload?.t === 'file'); assert.ok(file);
   const decrypted = await call(target, 'decryptAttachment', { conversationId: conversations[0], sequence: file.sequence, ciphertext: attachment.ciphertext });
   assert.deepEqual(decrypted.data, filePlaintext);
@@ -189,7 +205,7 @@ try {
   confirmed('complete resumed history includes attachment keys and never imports MLS group secrets');
   await call(target, 'forgetHistoryTransferV2', { transferId: context[0] });
   await assert.rejects(call(target, 'historyProgressV2', { transferId: context[0] }));
-  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 41);
+  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 42);
   confirmed('transfer cleanup removes checkpoint secrets while retaining authorized history');
   const expiringContext = [...context]; expiringContext[0] = id(99);
   await call(target, 'beginTransferV2', { context: expiringContext, expiresAt: Math.floor(Date.now() / 1000) + 2 });
@@ -197,7 +213,7 @@ try {
   const remaining = await call(target, 'listHistoryTransfersV2');
   assert.equal(remaining.some(t => t.transferId === expiringContext[0]), false);
   await assert.rejects(call(target, 'historyProgressV2', { transferId: expiringContext[0] }), /NO_TRANSFER/);
-  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 41);
+  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 42);
   confirmed('runtime expiry removes private transfer checkpoints without deleting recovered history');
   const evidence = { at: new Date().toISOString(), boundary: 'real shipped worker/WASM, two independent Chromium profiles, IndexedDB; server relay and authentication tested separately', events };
   if (output) await writeFile(output, JSON.stringify(evidence, null, 2));

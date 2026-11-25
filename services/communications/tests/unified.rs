@@ -168,7 +168,7 @@ async fn session_end_rechecks_installation_promotion_before_revoking_owner() {
         vec![a.profile.id.into(),chat.into(),"5b".repeat(32).into()]).await.unwrap();
     execute(
         &promotion,
-        "UPDATE communication_devices SET account_session_ref=NULL WHERE id=$1",
+        "UPDATE communication_devices SET account_session_ref=NULL,version=version+1,updated_at=now() WHERE id=$1",
         vec![id.into()],
     )
     .await

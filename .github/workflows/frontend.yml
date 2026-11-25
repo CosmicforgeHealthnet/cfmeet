@@ -68,6 +68,7 @@ jobs:
         run: |
           node --experimental-strip-types --test tests/messaging-e2ee-membership.test.mjs
           node --test tests/messaging-crypto-external-join.test.mjs
+          node --experimental-strip-types --test tests/messaging-relay-routes.test.mjs
       # Chat titles: a direct chat is the other person (alias first, never a member list); a
       # group shows its name; a private group's name travels only inside its encrypted group.
       - name: Chat title tests

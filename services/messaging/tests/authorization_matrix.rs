@@ -51,6 +51,7 @@ use messaging::{
 };
 use sea_orm::{ConnectionTrait, Statement};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 // ------------------------------------------------------------------ peers in-process
@@ -219,6 +220,11 @@ struct Fx {
     transfer_download: String,
     transfer_complete: String,
     transfer_cancel: String,
+    paged_create_body: Value,
+    paged_transfer: String,
+    paged_manifest: Value,
+    paged_chunk: Value,
+    paged_checkpoint: Value,
     /// Opt-in secure backups of the owner: an intent body, a READY and an uploaded PENDING one.
     backup_create_body: Value,
     backup_ready: String,
@@ -245,6 +251,7 @@ impl Fx {
             self.transfer_download.clone(),
             self.transfer_complete.clone(),
             self.transfer_cancel.clone(),
+            self.paged_transfer.clone(),
             self.backup_ready.clone(),
             self.backup_pending.clone(),
             self.owner.device_id().to_string(),
@@ -723,6 +730,83 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         transfer_ids.push(id);
     }
     let (transfer_create_body, _, _, _) = transfer(4, false);
+    // One real, fully receipted v2 snapshot supports idempotent positive calls for
+    // every v2 route. A second signed request exercises creation without quota bypass.
+    let paged_request = |target: &Device| {
+        let (mut body, tc, keys) = transfer_request(h, &a, owner.principal, &owner.device, target);
+        let expires = chrono::DateTime::parse_from_rfc3339(body["expiresAt"].as_str().unwrap())
+            .unwrap()
+            .timestamp();
+        body["requestSignature"] = json!(b64(&ht::paged::sign_request(
+            target, &tc, &keys, expires
+        )
+        .unwrap()));
+        (body, tc, keys, expires)
+    };
+    let (body, tc, keys, expires) = paged_request(&targets[0]);
+    let paged_transfer = tc.transfer_id.to_string();
+    let base = format!("/v1/messaging/history-transfers-v2/{paged_transfer}");
+    ok(
+        &h.post(
+            &a,
+            Some(owner.principal),
+            "/v1/messaging/history-transfers-v2",
+            body,
+        )
+        .await,
+        "v2 history request",
+    );
+    let manifest = b"matrix authenticated v2 manifest";
+    let history = b"matrix encrypted v2 history";
+    let mut object = ht::paged::ObjectContext {
+        transfer: tc,
+        snapshot_id: Uuid::new_v4(),
+        expires_at_unix: expires,
+        manifest_digest: Sha256::digest(manifest).into(),
+        chunk_count: 1,
+        total_plaintext_bytes: history.len() as u64,
+        object_index: ht::paged::MANIFEST_INDEX,
+    };
+    let sealed =
+        ht::paged::seal_object(&owner.device, &object, keys.public_key(), manifest).unwrap();
+    let paged_manifest = json!({"snapshotId":object.snapshot_id,"manifestDigest":hex::encode(object.manifest_digest),"chunkCount":1,"totalPlaintextBytes":history.len(),"sealedManifest":b64(&sealed)});
+    ok(
+        &h.put(
+            &a,
+            Some(owner.principal),
+            &format!("{base}/manifest"),
+            paged_manifest.clone(),
+        )
+        .await,
+        "v2 manifest",
+    );
+    object.object_index = 0;
+    let sealed =
+        ht::paged::seal_object(&owner.device, &object, keys.public_key(), history).unwrap();
+    let paged_chunk = json!({"sealedChunk":b64(&sealed)});
+    ok(
+        &h.put(
+            &a,
+            Some(owner.principal),
+            &format!("{base}/chunks/0"),
+            paged_chunk.clone(),
+        )
+        .await,
+        "v2 chunk",
+    );
+    let signature = ht::paged::sign_checkpoint(&targets[0], &object, 1).unwrap();
+    let paged_checkpoint = json!({"nextIndex":1,"signature":b64(&signature)});
+    ok(
+        &h.post(
+            &a,
+            Some(owner.principal),
+            &format!("{base}/checkpoint"),
+            paged_checkpoint.clone(),
+        )
+        .await,
+        "v2 receipt",
+    );
+    let (paged_create_body, _, _, _) = paged_request(&targets[4]);
     let owner_device = owner.device_id();
     let (_, ready_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix backup")]);
     let backup_ready = h
@@ -752,6 +836,11 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         backup_ready,
         backup_pending,
         transfer_create_body,
+        paged_create_body,
+        paged_transfer,
+        paged_manifest,
+        paged_chunk,
+        paged_checkpoint,
         transfer_requested: transfer_ids[0].clone(),
         transfer_seal_body: seal_body,
         transfer_download: transfer_ids[1].clone(),
@@ -956,6 +1045,39 @@ fn ops() -> Vec<Op> {
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::POST, template: "/v1/messaging/history-transfers/{transferId}/cancel", scopes: SEND, acting: AM, res: Res::Device,
              req: |f| r(format!("/v1/messaging/history-transfers/{}/cancel", f.transfer_cancel), Some(f.owner.principal), Some(json!({ "reason": "MATRIX" }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfer-capabilities", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/history-transfer-capabilities".into(), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers-v2", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/history-transfers-v2".into(), Some(f.owner.principal), Some(f.paged_create_body.clone())),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers-v2", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2?deviceId={}", f.owner.device_id()), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers-v2/{transferId}", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}", f.paged_transfer), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::PUT, template: "/v1/messaging/history-transfers-v2/{transferId}/manifest", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/manifest", f.paged_transfer), Some(f.owner.principal), Some(f.paged_manifest.clone())),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers-v2/{transferId}/manifest", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/manifest", f.paged_transfer), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::PUT, template: "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/chunks/0", f.paged_transfer), Some(f.owner.principal), Some(f.paged_chunk.clone())),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/chunks/0", f.paged_transfer), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers-v2/{transferId}/checkpoint", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/checkpoint", f.paged_transfer), Some(f.owner.principal), Some(f.paged_checkpoint.clone())),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers-v2/{transferId}/complete", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/complete", f.paged_transfer), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers-v2/{transferId}/cancel", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers-v2/{}/cancel", f.paged_transfer), Some(f.owner.principal), Some(json!({}))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ---------------------------------------------------------- conversations
         Op { method: M::POST, template: "/v1/conversations", scopes: CREATE, acting: AM, res: Res::Env,

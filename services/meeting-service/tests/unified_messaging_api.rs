@@ -687,6 +687,7 @@ async fn the_relay_reaches_every_contract_operation_with_its_documented_query() 
                 .split('/')
                 .map(|p| match p {
                     "{reaction}" => ":thumbsup:".to_string(),
+                    "{chunkIndex}" => "0".to_string(),
                     p if p.starts_with('{') => id.clone(),
                     p => p.to_string(),
                 })

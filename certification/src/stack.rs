@@ -54,11 +54,16 @@ pub const BINARIES: &[&str] = &[
     "meeting-audit-migration",
     "account-privacy-migration",
     "account-phone-migration",
+    "meeting-concurrent-devices-migration",
+    "messaging-installations-migration",
     "admin-operations-migration",
     "calling",
     "calling-migration",
     "messaging",
     "messaging-migration",
+    "messaging-notification-fence-migration",
+    "messaging-history-transfer-v2-migration",
+    "messaging-send-policy-projection-migration",
     "numbering",
     "numbering-migration",
     "sms-gateway",
@@ -372,8 +377,18 @@ impl Stack {
             // S2: account-deletion erasure jobs, required at startup.
             db::migrate(&self.bin("account-privacy-migration"), &url)?;
             db::migrate(&self.bin("account-phone-migration"), &url)?;
+            db::migrate(&self.bin("meeting-concurrent-devices-migration"), &url)?;
+            db::migrate(&self.bin("messaging-installations-migration"), &url)?;
             // ADR 0068: the admin bridge operations ledger and the account version.
             db::migrate(&self.bin("admin-operations-migration"), &url)?;
+        }
+        if service == MESSAGING {
+            db::migrate(&self.bin("messaging-notification-fence-migration"), &url)?;
+            db::migrate(&self.bin("messaging-history-transfer-v2-migration"), &url)?;
+            db::migrate(
+                &self.bin("messaging-send-policy-projection-migration"),
+                &url,
+            )?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

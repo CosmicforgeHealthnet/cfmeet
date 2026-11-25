@@ -4,7 +4,8 @@
 //! Account A links a primary mobile and two web browsers (each browser is trusted by its own
 //! fresh sign-in, ADR 0067; a third browser signs in and removes itself); account B has one
 //! web browser. Every device decrypts locally.
-//! A's mobile is then replaced by a new phone: the old phone's sign-in, Hub device and
+//! An additional phone is approved without disconnecting A's existing phone or browsers.
+//! The owner then explicitly revokes the old phone: its sign-in, Hub device and
 //! Messaging device are revoked, a web device commits its MLS removal, the old phone cannot
 //! decrypt anything after the rekey, both web devices keep working, and the new phone joins
 //! with fresh keys and reads future messages only. Then, WhatsApp-style, with every other
@@ -836,13 +837,59 @@ impl Journey {
         }
         self.pass("mobile_to_web_encrypted_messages_and_idempotent_retries");
 
-        // ---- Mobile replacement: approved by a web device, old phone revoked everywhere.
+        // ---- Additional mobile approval preserves the existing authorized devices.
         let mut a_mobile2 = self.sign_in(&a, "mobile-b", "MOBILE", "IOS").await?;
         self.declare(&mut a_mobile2).await?;
-        let replaced = self.link(&a_mobile2, &a_web2).await?;
-        if replaced["replacedDeviceId"] != json!(a_mobile.device.unwrap()) {
-            bail!("the new phone did not replace the previous primary mobile");
+        let approved = self.link(&a_mobile2, &a_web2).await?;
+        if !approved["replacedDeviceId"].is_null() || approved["endedSessions"] != 0 {
+            bail!("approving an additional phone revoked another installation or session");
         }
+        for s in [&a_mobile, &a_mobile2, &a_web1, &a_web2] {
+            self.api
+                .ok(
+                    Method::GET,
+                    "/api/v2/messaging/me",
+                    Some(&s.access),
+                    None,
+                    &[200],
+                    "coexisting approved installation",
+                )
+                .await?;
+            if self.policy(s).await?["maxPrimaryMobiles"] != 0 {
+                bail!(
+                    "{} still reports an exclusive mobile-device product limit",
+                    s.name
+                );
+            }
+        }
+        let coexist = format!("acceptance {tag} from the still-authorized original phone");
+        self.send(&a, &a_mobile, &mut m_mobile, &coexist).await?;
+        for (s, m) in [
+            (&a_web1, &mut m_web1),
+            (&a_web2, &mut m_web2),
+            (&b_web, &mut m_b),
+        ] {
+            if self.receive(s, m).await?.last() != Some(&coexist) {
+                bail!(
+                    "{} could not decrypt the original phone after additional-device approval",
+                    s.name
+                );
+            }
+        }
+        self.pass("approved_android_and_ios_installations_coexist_without_disconnecting_browsers");
+
+        // Explicit security revocation remains terminal and fans out to owners.
+        let account_device = a_mobile.device.unwrap();
+        self.api
+            .ok(
+                Method::POST,
+                &format!("/api/v2/me/devices/{account_device}/revoke"),
+                Some(&a_web2.access),
+                Some(json!({"proof":a_web2.proof("REVOKE", &account_device.to_string())})),
+                &[200],
+                "explicit old phone revocation",
+            )
+            .await?;
         if self
             .api
             .call(
@@ -855,14 +902,14 @@ impl Journey {
             .status
             != 401
         {
-            bail!("the replaced phone kept authority");
+            bail!("the explicitly revoked phone kept authority");
         }
         for s in [&a_web1, &a_web2] {
             if self.policy(s).await?["accountState"] != "MOBILE_PRIMARY" {
-                bail!("{} lost its sign-in on mobile replacement", s.name);
+                bail!("{} lost its sign-in when another phone was revoked", s.name);
             }
         }
-        self.pass("new_mobile_replaces_old_and_web_devices_stay_connected");
+        self.pass("explicit_phone_revocation_preserves_other_approved_installations");
         let cid = self.conversation.clone().unwrap();
         let old_device = m_mobile.device.device_id();
         let mut removed = false;
@@ -887,7 +934,7 @@ impl Journey {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         if !removed {
-            bail!("the replaced phone's Messaging device was not revoked (no pending MLS removal)");
+            bail!("the explicitly revoked phone's Messaging device remains active (no pending MLS removal)");
         }
         let hub = self
             .api
@@ -906,9 +953,9 @@ impl Journey {
             .iter()
             .any(|d| d["chatDeviceId"] == json!(old_device) && d["state"] == "REVOKED");
         if !gone {
-            bail!("the Hub still lists the replaced phone as active");
+            bail!("the Hub still lists the explicitly revoked phone as active");
         }
-        self.pass("replaced_phone_hub_and_messaging_devices_revoked_by_fan_out");
+        self.pass("explicit_phone_revocation_reaches_hub_and_messaging_owners");
         // A genuine MLS application message is held until a member commits the removal.
         let early_id = Uuid::new_v4();
         let early_aad = Self::aad(&a, &cid, early_id, m_web2.device.device_id())?;

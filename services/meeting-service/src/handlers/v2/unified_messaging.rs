@@ -171,6 +171,11 @@ pub async fn register_device(
     relay_enrollment(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
 }
 
+/// Challenge an existing Messaging installation
+///
+/// Issues a short-lived, one-use possession challenge bound to the current trusted
+/// Account installation, sign-in and active Messaging identity. The client answers
+/// using its existing MLS signature key; no history key is sent to the server.
 #[utoipa::path(
     post,path="/api/v2/messaging/devices/{deviceId}/installation-challenges",tag="Messaging (v2)",operation_id="v2_messaging_installation_challenge",
     params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
@@ -211,6 +216,12 @@ pub async fn installation_challenge(
     ))
 }
 
+/// Bind a protected Messaging installation
+///
+/// Verifies the registration-bound KeyPackage proof and binds the existing active
+/// Messaging identity to this trusted Account installation and sign-in. Terminal
+/// revocations and immutable bindings remain enforced. Ordinary sign-out ends
+/// session authority without revoking a proved persistent identity.
 #[utoipa::path(
     post,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_bind_installation",
     params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
@@ -242,6 +253,11 @@ pub async fn bind_installation(
     ))
 }
 
+/// Read my Messaging installation binding
+///
+/// Reports whether the active Messaging identity belongs to the current trusted
+/// Account installation. It does not unlock local history or grant a new sign-in
+/// Messaging authority. A fresh possession challenge is required for its client token.
 #[utoipa::path(
     get,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_installation_status",
     params(("deviceId"=Uuid,Path,description="Existing Messaging identity")),

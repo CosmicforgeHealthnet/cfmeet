@@ -134,6 +134,26 @@ jobs:
       - name: Disk usage (before cargo test)
         run: df -h / && (du -sh target 2>/dev/null || true)
 
+      # Installation authorization is proved across actual Account / Platform Access /
+      # Messaging boundaries. Its requests are recorded by the same TestApp middleware
+      # as every other v2 integration test, so strict route coverage cannot pass by
+      # skipping the peer-backed success paths or fabricating coverage records.
+      - name: Build real Messaging identity peers for integration and route coverage
+        working-directory: .
+        run: |
+          set -euo pipefail
+          peer_target="$GITHUB_WORKSPACE/services/meeting-service/target"
+          for service in platform-access messaging; do
+            cargo build --manifest-path "services/$service/Cargo.toml" --workspace --bins --locked --target-dir "$peer_target"
+          done
+          {
+            echo "PLATFORM_ACCESS_BIN=$peer_target/debug/platform-access"
+            echo "PLATFORM_ACCESS_MIGRATION_BIN=$peer_target/debug/platform-access-migration"
+            echo "MESSAGING_BIN=$peer_target/debug/messaging"
+            echo "MESSAGING_MIGRATION_BIN=$peer_target/debug/messaging-migration"
+            echo "UNIFIED_MESSAGING_E2E_REQUIRED=1"
+          } >> "$GITHUB_ENV"
+
       # Includes the security, IDOR, credential-replay, concurrency, failure-injection,
       # system E2E, flag/rollback and migration-certification suites.
       - name: cargo test
@@ -193,7 +213,7 @@ jobs:
       - name: Meeting-service migration histories (release order)
         run: |
           d="$GITHUB_WORKSPACE/services/meeting-service/target/debug"
-          echo "MEETING_SERVICE_MIGRATION_BINS=$d/migration $d/account-security-migration $d/meetings-calendar-migration $d/profile-notifications-migration $d/account-communications-migration $d/account-hardening-migration $d/organization-integration-migration $d/lifecycle-delivery-migration $d/notification-fence-migration $d/gap-closure-migration $d/meeting-audit-migration $d/account-privacy-migration $d/account-phone-migration $d/admin-operations-migration" >> "$GITHUB_ENV"
+          echo "MEETING_SERVICE_MIGRATION_BINS=$d/migration $d/account-security-migration $d/meetings-calendar-migration $d/profile-notifications-migration $d/account-communications-migration $d/account-hardening-migration $d/organization-integration-migration $d/lifecycle-delivery-migration $d/notification-fence-migration $d/gap-closure-migration $d/meeting-audit-migration $d/account-privacy-migration $d/account-phone-migration $d/admin-operations-migration $d/messaging-installations-migration $d/meeting-concurrent-devices-migration" >> "$GITHUB_ENV"
 
       # New database: every history applies as the MIGRATOR role; the RUNTIME role gets
       # data access only (DML, sequences, triggers fire) and is refused DDL.

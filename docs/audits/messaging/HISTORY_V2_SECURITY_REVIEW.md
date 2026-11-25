@@ -60,3 +60,8 @@ The added browser regression makes an unconfirmed epoch change, refuses KeyPacka
 Existing core and browser tests establish useful framing, tamper, large-history and restart properties. They do not independently establish all Account/Hub/Messaging authorization paths, physical authenticators, native SDK parity or actual production incident recovery. The current production `BEFORE_JOIN` and mobile `MESSAGE_REFUSED` incidents therefore remain separately unconfirmed until their specific device/message chronology and available recovery sources are inspected.
 
 This review approves neither encrypted-backup activation nor server-controlled recovery keys. Backup requires its separate design/implementation review. Do not issue multi-device, deployment or production-feature certification from this document alone.
+
+
+## Authoritative edit-target removal follow-up
+
+Review found that an ACTIVE encrypted EDIT control could outlive its removed base APPLICATION row. Filtering only the EDIT row lifecycle would copy its hidden old plaintext into a new snapshot despite a correct UI tombstone. The worker now records authoritative removals as encrypted per-message references in the existing protected pending store. Read, export, source snapshot and target import paths consult both the record ID and EDIT target ID, including when the base is absent locally, on a different page or known before an interrupted transfer resumes. Removed payloads and attachment material are excluded; no historical MLS state is imported. References survive restarts without an unbounded in-memory metadata map. Regression results are recorded with the final worker evidence; production activation still requires final service tests.

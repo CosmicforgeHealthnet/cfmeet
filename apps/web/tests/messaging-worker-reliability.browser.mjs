@@ -145,8 +145,22 @@ try {
  const selfMessage=await call('encrypt',{conversationId:conv,groupId:gid,clientMessageId:id(5000),payload:{t:'text',text:'synthetic persistence probe'}});
  await process([{sequence:1,messageId:id(5001),clientMessageId:id(5000),senderDeviceId:id(40),senderPrincipalId:account,kind:'APPLICATION',lifecycle:'ACTIVE',epoch:0,ciphertext:b64(selfMessage.ciphertext)}]);
  check('readable history needs no recovery',!(await call('historyRecoveryNeeded')));
- await process([{sequence:2,messageId:id(5002),clientMessageId:id(5003),senderDeviceId:senderId,senderPrincipalId:id(8),kind:'EDIT',lifecycle:'ACTIVE',epoch:0,ciphertext:'AQID'}]);
+ await process([{sequence:2,messageId:id(5002),clientMessageId:id(5003),senderDeviceId:senderId,senderPrincipalId:id(8),kind:'EDIT',targetMessageId:id(5001),lifecycle:'ACTIVE',epoch:0,ciphertext:'AQID'}]);
  check('failed edit controls trigger automatic recovery discovery',await call('historyRecoveryNeeded'));
+ const kept=await call('encrypt',{conversationId:conv,groupId:gid,clientMessageId:id(5010),payload:{t:'text',text:'visible after removal'}});
+ await process([{sequence:3,messageId:id(5011),clientMessageId:id(5010),senderDeviceId:id(40),senderPrincipalId:account,kind:'APPLICATION',lifecycle:'ACTIVE',epoch:0,ciphertext:b64(kept.ciphertext)}]);
+ await call('reconcileHistoryMetadata',{conversationId:conv,messages:[{sequence:1,messageId:id(5001),lifecycle:'DELETED'}]});
+ check('removed target stops recovery of its failed hidden edit',!(await call('historyRecoveryNeeded')));
+ check('cross-page target removal strips hidden edit payload',(await call('history',{conversationId:conv})).find(r=>r.sequence===2)?.status==='REMOVED');
+ const absentConv=id(6000),absentTarget=id(6001),editId=id(6002),editCmid=id(6003);
+ const absentEdit=await call('encrypt',{conversationId:absentConv,groupId:gid,clientMessageId:editCmid,payload:{t:'text',text:'deleted edit must not transfer'}});
+ await call('processMessages',{conversationId:absentConv,groupId:gid,messages:[{sequence:2,messageId:editId,clientMessageId:editCmid,senderDeviceId:id(40),senderPrincipalId:account,kind:'EDIT',targetMessageId:absentTarget,lifecycle:'ACTIVE',epoch:0,ciphertext:b64(absentEdit.ciphertext)}]});
+ await call('reconcileHistoryMetadata',{conversationId:absentConv,messages:[{sequence:1,messageId:absentTarget,lifecycle:'DELETED'}]});
+ w.terminate();await new Promise(r=>setTimeout(r,100));start();await call('open',{account,scope});
+ await call('reconcileHistoryMetadata',{conversationId:absentConv,messages:[{sequence:2,messageId:editId,targetMessageId:absentTarget,lifecycle:'ACTIVE'}]});
+ const absentResult=(await call('history',{conversationId:absentConv}))[0];
+ check('removal of an absent target survives restart and redacts later-page edits',absentResult.status==='REMOVED'&&absentResult.payload===undefined);
+
  w.terminate();return {boundary:'shipped worker and real WASM MLS with real Chromium IndexedDB; no backend or authentication services',events};
  },{worker:role('worker'),glue:role('glue'),wasm:role('wasm')});
  const probe=async p=>p.evaluate(async worker=>{

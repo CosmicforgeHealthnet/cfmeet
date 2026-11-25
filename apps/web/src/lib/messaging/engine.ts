@@ -650,7 +650,7 @@ export class MessagingEngine {
 
   private async bindProtectedInstallation(descriptor: LocalProtectionDescriptor): Promise<void> {
     const challenge = await identityApi.installationChallenge(descriptor.messagingDeviceId);
-    if (challenge.deviceId !== descriptor.messagingDeviceId || challenge.accountDeviceId !== descriptor.accountDeviceId || challenge.installationId !== descriptor.installationId
+    if (challenge.deviceId !== descriptor.messagingDeviceId || challenge.accountDeviceId !== descriptor.accountDeviceId
       || !Number.isFinite(Date.parse(challenge.expiresAt)) || Date.parse(challenge.expiresAt) <= Date.now()) throw new LocalAuthenticatorError("LOCAL_UNLOCK_BINDING_MISMATCH");
     const keyPackage = await this.crypto!.call<Uint8Array>("registrationKeyPackage", { challengeId: challenge.challengeId, nonce: fromHex(challenge.nonce) });
     const bound = await identityApi.bindInstallation(descriptor.messagingDeviceId, challenge.challengeId, b64u.enc(keyPackage));

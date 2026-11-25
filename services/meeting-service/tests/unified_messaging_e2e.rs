@@ -1801,7 +1801,7 @@ async fn web_messaging_client_in_chromium_across_real_services() {
     let extra = vec![
         (
             "MESSAGING_REALTIME_ALLOWED_ORIGINS".to_string(),
-            web_origin.to_string(),
+            format!("{web_origin},http://localhost:3100"),
         ),
         ("MESSAGING_ATTACHMENTS_S3_ENDPOINT".into(), s3.clone()),
         (
@@ -1922,10 +1922,10 @@ async fn web_messaging_client_in_chromium_across_real_services() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18080")
         .await
         .unwrap();
-    let router = app
-        .router
-        .clone()
-        .layer(backend::routes::cors_layer(&[web_origin.to_string()]));
+    let router = app.router.clone().layer(backend::routes::cors_layer(&[
+        web_origin.to_string(),
+        "http://localhost:3100".to_owned(),
+    ]));
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let um = um(&app);
     let worker = tokio::spawn(async move {

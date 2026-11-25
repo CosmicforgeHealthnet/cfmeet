@@ -1825,8 +1825,8 @@ async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
 
 /// The production multi-device E2EE acceptance client (`cfmeet-e2ee-acceptance`, run by
 /// `messaging-encrypted-verify` against api.cfmeet.com) passes end to end against the REAL Account,
-/// Platform Access, Communications, Calling and Messaging processes: linked devices, primary
-/// mobile replacement, Hub and Messaging fan-out, MLS removal, future-only history.
+/// Platform Access, Communications, Calling and Messaging processes: coexisting approved
+/// mobiles, explicit revocation, Hub/Messaging fan-out, MLS removal, future-only history.
 #[tokio::test]
 async fn production_e2ee_acceptance_client_passes_against_real_services() -> anyhow::Result<()> {
     let mut s = PersonalStack::start().await?;

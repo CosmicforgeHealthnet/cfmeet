@@ -10,20 +10,22 @@ impl MigrationTrait for Migration {
         manager.get_connection().execute_unprepared(r#"
 CREATE TABLE account_messaging_installations (
     environment_id UUID NOT NULL,
-    messaging_device_id UUID NOT NULL,
+    -- Opaque foreign-owner UUID reference only; the canonical device and all MLS
+    -- state remain exclusively at the Messaging owner and its authorized client.
+    canonical_device_ref UUID NOT NULL,
     user_id UUID NOT NULL,
     account_device_id UUID NOT NULL REFERENCES account_devices(id),
     signature_key_sha256 CHAR(64) NOT NULL CHECK (signature_key_sha256 ~ '^[0-9a-f]{64}$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ NULL,
-    PRIMARY KEY (environment_id, messaging_device_id)
+    PRIMARY KEY (environment_id, canonical_device_ref)
 );
 CREATE INDEX account_messaging_installations_account_device
     ON account_messaging_installations(account_device_id) WHERE revoked_at IS NULL;
 CREATE TABLE account_messaging_installation_challenges (
     id UUID PRIMARY KEY,
     environment_id UUID NOT NULL,
-    messaging_device_id UUID NOT NULL,
+    canonical_device_ref UUID NOT NULL,
     user_id UUID NOT NULL,
     account_device_id UUID NOT NULL REFERENCES account_devices(id),
     account_session_id UUID NOT NULL,
@@ -36,27 +38,27 @@ CREATE INDEX account_messaging_installation_challenges_expiry
     ON account_messaging_installation_challenges(expires_at);
 CREATE TABLE account_messaging_installation_sessions (
     environment_id UUID NOT NULL,
-    messaging_device_id UUID NOT NULL,
+    canonical_device_ref UUID NOT NULL,
     account_session_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY(environment_id, messaging_device_id, account_session_id),
-    FOREIGN KEY(environment_id, messaging_device_id)
-        REFERENCES account_messaging_installations(environment_id, messaging_device_id)
+    PRIMARY KEY(environment_id, canonical_device_ref, account_session_id),
+    FOREIGN KEY(environment_id, canonical_device_ref)
+        REFERENCES account_messaging_installations(environment_id, canonical_device_ref)
 );
 CREATE TABLE account_messaging_installation_revocations (
     environment_id UUID NOT NULL,
-    messaging_device_id UUID NOT NULL,
+    canonical_device_ref UUID NOT NULL,
     user_id UUID NOT NULL,
     reason VARCHAR(32) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     attempts INTEGER NOT NULL DEFAULT 0,
     done_at TIMESTAMPTZ NULL,
-    PRIMARY KEY(environment_id, messaging_device_id)
+    PRIMARY KEY(environment_id, canonical_device_ref)
 );
 CREATE FUNCTION account_messaging_installation_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NEW.environment_id <> OLD.environment_id OR NEW.messaging_device_id <> OLD.messaging_device_id
+    IF NEW.environment_id <> OLD.environment_id OR NEW.canonical_device_ref <> OLD.canonical_device_ref
        OR NEW.user_id <> OLD.user_id OR NEW.account_device_id <> OLD.account_device_id
        OR NEW.signature_key_sha256 <> OLD.signature_key_sha256
        OR (OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at) THEN
@@ -74,10 +76,10 @@ BEGIN
         WITH revoked AS (
             UPDATE account_messaging_installations SET revoked_at = now()
             WHERE account_device_id = NEW.id AND revoked_at IS NULL
-            RETURNING environment_id, messaging_device_id, user_id
+            RETURNING environment_id, canonical_device_ref, user_id
         ) INSERT INTO account_messaging_installation_revocations
-            (environment_id, messaging_device_id, user_id, reason)
-            SELECT environment_id, messaging_device_id, user_id, COALESCE(NEW.revoke_reason,'DEVICE_REVOKED')
+            (environment_id, canonical_device_ref, user_id, reason)
+            SELECT environment_id, canonical_device_ref, user_id, COALESCE(NEW.revoke_reason,'DEVICE_REVOKED')
             FROM revoked ON CONFLICT DO NOTHING;
     END IF;
     RETURN NEW;

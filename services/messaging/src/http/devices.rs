@@ -246,7 +246,9 @@ async fn directory(
 ) -> Result<impl IntoResponse, ApiError> {
     let limit = q.limit.unwrap_or(100);
     if !(1..=500).contains(&limit) {
-        return Err(crate::error::Error::validation("limit must be between 1 and 500").into());
+        return Err(crate::error::Error::validation(
+            "limit must be between 1 and 500",
+        ));
     }
     let ctx = caller.require_scope(MESSAGES_READ)?;
     let acting = require_acting(&state, &caller, &headers).await?;

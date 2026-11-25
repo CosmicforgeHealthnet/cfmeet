@@ -40,15 +40,15 @@ export const messagingApi = {
       data: { principalIds },
     }),
 
-  conversations: (cursor?: string | null) =>
+  conversations: (cursor?: string | null, signal?: AbortSignal) =>
     send<{ conversations: ServerConversation[]; nextCursor: string | null }>(ROUTES.relayGet, [
       checked("GET", relayPaths.conversations(cursor)),
-    ]),
+    ], { signal }),
   conversation: (id: string) => send<ServerConversation>(ROUTES.relayGet, [checked("GET", relayPaths.conversation(id))]),
   members: (id: string) =>
     send<{ members: { principalId: string }[] }>(ROUTES.relayGet, [checked("GET", relayPaths.members(id))]),
-  messagesAfter: (id: string, afterSequence: number) =>
-    send<{ messages: ServerMessage[] }>(ROUTES.relayGet, [checked("GET", relayPaths.messagesAfter(id, afterSequence))]),
+  messagesAfter: (id: string, afterSequence: number, signal?: AbortSignal) =>
+    send<{ messages: ServerMessage[] }>(ROUTES.relayGet, [checked("GET", relayPaths.messagesAfter(id, afterSequence))], { signal }),
   send: (id: string, text: string) =>
     send<ServerMessage>(ROUTES.relayPost, [checked("POST", relayPaths.sendMessage(id))], {
       data: { clientMessageId: idempotencyKey(), text },

@@ -80,12 +80,12 @@ schema_of() {
 # Every migration binary a service ships, in the order its deployment applies them.
 migrations_for() {
   case "$1" in
-    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration lifecycle-delivery-migration notification-fence-migration gap-closure-migration platform-build-migration meeting-audit-migration account-privacy-migration account-phone-migration admin-operations-migration" ;;
+    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration lifecycle-delivery-migration notification-fence-migration gap-closure-migration platform-build-migration meeting-audit-migration account-privacy-migration account-phone-migration admin-operations-migration messaging-installations-migration meeting-concurrent-devices-migration" ;;
     communications) echo "communications-migration" ;;
     developer-platform) echo "developer-platform-migration" ;;
     platform-access) echo "platform-access-migration" ;;
     calling) echo "calling-migration calling-communications-migration" ;;
-    messaging) echo "messaging-migration messaging-communications-migration messaging-notification-fence-migration messaging-send-policy-projection-migration" ;;
+    messaging) echo "messaging-migration messaging-communications-migration messaging-notification-fence-migration messaging-send-policy-projection-migration messaging-history-transfer-v2-migration" ;;
     numbering) echo "numbering-migration" ;;
     privacy-relay) echo "privacy-relay-migration" ;;
     telephony) echo "telephony-migration" ;;
