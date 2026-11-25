@@ -267,6 +267,13 @@ function richPayload(p) {
       if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 12) fail("PAYLOAD_INVALID");
       return { v: 1, t: "poll", question: str(p.question, 300, 1), options: p.options.map((o) => str(o, 100, 1)), multiple: p.multiple === true };
     }
+    case "reaction": {
+      const reaction = str(p.reaction, 64, 1);
+      const short = /^:[a-z0-9_+\-]+:$/.test(reaction);
+      const emoji = /[^\x00-\x7f]/.test(reaction) && Array.from(reaction).length <= 8 && !/[a-z0-9]/i.test(reaction);
+      if (enc.encode(reaction).length > 64 || /[\s\u0000-\u001f\u007f-\u009f]/u.test(reaction) || (!short && !emoji) || typeof p.add !== "boolean") fail("PAYLOAD_INVALID");
+      return { v: 1, t: "reaction", target: uuid(p.target, "PAYLOAD_INVALID"), reaction, add: p.add };
+    }
     case "vote": {
       if (!Array.isArray(p.choices) || p.choices.length > 12) fail("PAYLOAD_INVALID");
       const choices = [...new Set(p.choices)];
@@ -331,7 +338,8 @@ function removedRecord(record, lifecycle) {
   return { sequence: record.sequence, messageId: record.messageId, kind: record.kind,
     senderPrincipalId: record.senderPrincipalId, senderDeviceId: record.senderDeviceId,
     createdAt: record.createdAt, replyToMessageId: record.replyToMessageId ?? null,
-    targetMessageId: record.targetMessageId ?? null, status: "REMOVED", lifecycle };
+    targetMessageId: record.targetMessageId ?? null,
+    ...(record.privateControl === "REACTION" || record.payload?.t === "reaction" ? { privateControl: "REACTION" } : {}), status: "REMOVED", lifecycle };
 }
 async function removalReference(conversationId, messageId, account = ctx.account, key = ctx.key) {
   const identity = removalKey(conversationId, messageId);
@@ -344,7 +352,8 @@ async function redactRemovedRecord(conversationId, record, currentPage = null, a
   if (!record?.messageId) return record;
   const lookup = async id => currentPage?.get(id) ?? await removalReference(conversationId, id, account, key);
   const own = await lookup(record.messageId);
-  const target = !own && record.kind === "EDIT" && record.targetMessageId ? await lookup(record.targetMessageId) : null;
+  const targetId = record.kind === "EDIT" ? record.targetMessageId : record.payload?.t === "reaction" ? record.payload.target : null;
+  const target = !own && targetId ? await lookup(targetId) : null;
   return own || target ? removedRecord(record, own ?? target) : record;
 }
 
@@ -435,6 +444,7 @@ function historyRecord(record) {
   const out = { sequence: record.sequence, messageId: uuid(record.messageId, "ARCHIVE_INVALID"),
     senderPrincipalId: uuid(record.senderPrincipalId, "ARCHIVE_INVALID"), senderDeviceId: uuid(record.senderDeviceId, "ARCHIVE_INVALID"),
     kind: str(record.kind, 40, 1), createdAt: typeof record.createdAt === "string" ? str(record.createdAt, 80) : null, status: record.status, transferred: true };
+  if (record.privateControl === "REACTION" || record.payload?.t === "reaction") out.privateControl = "REACTION";
   if (record.status === "REMOVED") {
     out.lifecycle = str(record.lifecycle, 40, 1);
     if (out.lifecycle === "ACTIVE") fail("ARCHIVE_INVALID");
@@ -877,7 +887,7 @@ const ops = {
       const existing = await loadRecord(conversationId, m.sequence);
       if (existing && ["DECRYPTED", "SENT", "REMOVED", "COMMIT"].includes(existing.status)) {
         if (m.lifecycle && m.lifecycle !== "ACTIVE") {
-          const tombstone = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind, status: "REMOVED", lifecycle: m.lifecycle };
+          const tombstone = removedRecord(existing, m.lifecycle);
           puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(tombstone)))]);
           out.push(view(tombstone));
         }
@@ -951,6 +961,8 @@ const ops = {
         const code = e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message) ? e.message : "FAILED";
         record = { ...base, status: "FAILED", error: historical && code === "MESSAGE_REFUSED" ? "HISTORICAL_EPOCH_UNAVAILABLE" : code };
       } finally { beforeMessage.fill(0); }
+      if (record.payload?.t === "reaction") record.privateControl = "REACTION";
+      record = await redactRemovedRecord(conversationId, record);
       if (record.status === "FAILED") {
         newlyFailed.add(m.sequence);
         puts.push(await retryPut(conversationId, m.sequence));
@@ -1080,6 +1092,42 @@ const ops = {
       try { out.push(view(await redactRemovedRecord(conversationId, JSON.parse(dec.decode(plain))))); } finally { plain.fill(0); }
     }
     return out;
+  },
+
+  /** Bounded older-history page. The exclusive cursor follows raw stored outcomes,
+   * including controls hidden by the timeline; callers must follow it even when no
+   * displayable messages remain in a page. Legacy history RPC stays compatible. */
+  async historyPage({ conversationId, beforeSequence, limit = 200 }) {
+    requireDevice();
+    uuid(conversationId);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail("BAD_LIMIT");
+    if (beforeSequence !== undefined && (!Number.isSafeInteger(beforeSequence) || beforeSequence < 1)) fail("BAD_CURSOR");
+    const first = ctx.meta.visibleFrom?.[conversationId] ?? 1;
+    if (beforeSequence !== undefined && beforeSequence <= first) return { records: [], nextBeforeSequence: null };
+    const range = IDBKeyRange.bound([ctx.account, conversationId, first],
+      [ctx.account, conversationId, beforeSequence ?? Number.MAX_SAFE_INTEGER], false, beforeSequence !== undefined);
+    const d = await db();
+    const items = await new Promise((resolve, reject) => {
+      const collected = [];
+      const request = d.transaction("records").objectStore("records").openCursor(range, "prev");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || collected.length === limit + 1) { resolve(collected); return; }
+        collected.push({ sequence: cursor.key[2], value: cursor.value });
+        if (collected.length === limit + 1) { resolve(collected); return; }
+        cursor.continue();
+      };
+    });
+    const page = items.slice(0, limit);
+    const nextBeforeSequence = items.length > limit ? page[page.length - 1].sequence : null;
+    const records = [];
+    for (const item of page.reverse()) {
+      const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, item.sequence), item.value);
+      try { records.push(view(await redactRemovedRecord(conversationId, JSON.parse(dec.decode(plain))))); }
+      finally { plain.fill(0); }
+    }
+    return { records, nextBeforeSequence };
   },
 
   /** Scan durable outcomes, including EDIT/control records hidden by the timeline. */

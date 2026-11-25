@@ -62,10 +62,23 @@ try {
  await call('reconcileHistoryMetadata',{conversationId:conv,messages:[]});
  w.terminate();await new Promise(r=>setTimeout(r,100));start();await call('open',{account,scope});
  check('metadata checkpoint never persists an unaccepted epoch',(await call('epoch',{groupId:gid}))===joinedEpoch);
- let seq=0;const encode=(size=20)=>{const cmid=id(100+(++seq));const aad=core.message_aad(scope.tenantId,scope.applicationId,scope.environmentId,conv,cmid,senderId);const ciphertext=sender.encrypt(gid,aad,new TextEncoder().encode(JSON.stringify({v:1,t:'text',text:'x'.repeat(size)})));return {sequence:seq,messageId:id(1000+seq),clientMessageId:cmid,senderDeviceId:senderId,senderPrincipalId:id(8),kind:'APPLICATION',lifecycle:'ACTIVE',createdAt:'2026-11-24T00:00:00Z',epoch:Number(sender.epoch(gid)),ciphertext:b64(ciphertext)};};
+ let seq=0;const encode=(size=20,payload=null)=>{const cmid=id(100+(++seq));const aad=core.message_aad(scope.tenantId,scope.applicationId,scope.environmentId,conv,cmid,senderId);const ciphertext=sender.encrypt(gid,aad,new TextEncoder().encode(JSON.stringify(payload??{v:1,t:'text',text:'x'.repeat(size)})));return {sequence:seq,messageId:id(1000+seq),clientMessageId:cmid,senderDeviceId:senderId,senderPrincipalId:id(8),kind:'APPLICATION',lifecycle:'ACTIVE',createdAt:'2026-11-24T00:00:00Z',epoch:Number(sender.epoch(gid)),ciphertext:b64(ciphertext)};};
  const process=messages=>call('processMessages',{conversationId:conv,groupId:gid,messages});
  const first=encode();check('normal real MLS decrypt',(await process([first])).records[0].status==='DECRYPTED');
  w.terminate();await new Promise(r=>setTimeout(r,100));start();check('worker restart preserves identity',(await call('open',{account,scope})).deviceId===receiverId);check('worker restart preserves encrypted history',(await call('history',{conversationId:conv})).length===1);
+ const encryptedReaction=encode(20,{v:1,t:'reaction',target:first.messageId,reaction:':yes:',add:true,senderPrincipalId:id(999)});
+ const reactionResult=(await process([encryptedReaction])).records[0];
+ check('actual MLS reactions retain authenticated envelope actor and bounded private payload',reactionResult.status==='DECRYPTED'&&reactionResult.payload.t==='reaction'&&reactionResult.payload.add===true&&reactionResult.payload.target===first.messageId&&reactionResult.payload.senderPrincipalId===undefined&&reactionResult.senderPrincipalId===id(8)&&reactionResult.privateControl==='REACTION');
+ const removedReaction=(await process([{...encryptedReaction,lifecycle:'DELETED'}])).records[0];
+ check('deleted encrypted controls keep hidden classification without content',removedReaction.status==='REMOVED'&&removedReaction.privateControl==='REACTION'&&removedReaction.payload===undefined);
+ for(const malformed of [{target:'bad-id',reaction:':yes:',add:true},{target:first.messageId,reaction:'plain-ascii',add:true},{target:first.messageId,reaction:':yes:',add:'true'},{target:first.messageId,reaction:':'+ 'x'.repeat(64)+':',add:true}]){
+   const badReaction=encode(20,{v:1,t:'reaction',...malformed});
+   const badResult=(await process([badReaction])).records[0];
+   checkSilent(badResult.status==='FAILED'&&badResult.error==='PAYLOAD_INVALID');
+ }
+ check('malformed private reaction UUID boolean and reaction bounds are refused',true);
+ function checkSilent(ok){if(!ok)throw Error('malformed reaction accepted');}
+
  const other=new Worker('/'+worker,{type:'module'});const locked=await new Promise(r=>{other.onmessage=({data})=>r(data.result);other.postMessage({id:1,op:'open',args:{account,scope}});});other.terminate();check('second worker cannot fork device',locked.status==='LOCKED');
  // Independently measure real core retention; do not assume old epochs remain decryptable.
  const rawSender=new core.WebDevice(id(21)),rawReceiver=new core.WebDevice(id(22));rawSender.createGroup(gid);

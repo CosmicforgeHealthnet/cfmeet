@@ -984,7 +984,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     return () => { active = false; };
   }, [engine, conversation.id]);
   // New messages while the conversation is open are read.
-  const lastSequence = messages.at(-1)?.sequence ?? null;
+  const lastSequence = Math.max(messages.at(-1)?.sequence ?? 0, s.processedSequences?.[conversation.id] ?? 0) || null;
   useEffect(() => {
     if (lastSequence !== null && typeof document !== "undefined" && document.visibilityState === "visible") void engine.markRead(conversation.id);
   }, [engine, conversation.id, lastSequence]);
@@ -1169,7 +1169,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
         <div className="chat-wallpaper relative flex min-h-0 flex-1 flex-col">
         <div ref={scroller} onScroll={onScroll} className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">
-            {managed && s.hasOlder[conversation.id] ? (
+            {s.hasOlder[conversation.id] ? (
               <li className="py-2 text-center">
                 <button type="button" data-testid="load-older" onClick={() => void engine.loadOlder(conversation.id).catch(fail)} className="h-8 rounded-full px-4 text-sm font-semibold text-primary hover:bg-primary/10">Load older messages</button>
               </li>

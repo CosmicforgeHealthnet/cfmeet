@@ -66,7 +66,7 @@ jobs:
       # KeyPackages published, removals never block a chat, unreadable messages show a label.
       - name: Messaging private-chat membership tests
         run: |
-          node --experimental-strip-types --test tests/messaging-e2ee-membership.test.mjs
+          node --experimental-strip-types --test tests/messaging-e2ee-membership.test.mjs tests/messaging-member-pages.test.mjs tests/messaging-private-history.test.mjs
           node --test tests/messaging-crypto-external-join.test.mjs
           node --experimental-strip-types --test tests/messaging-relay-routes.test.mjs
       # Chat titles: a direct chat is the other person (alias first, never a member list); a

@@ -21,7 +21,8 @@ export type RichPayload =
   | { t: "contact"; cfMeetId: string; name: string }
   | { t: "location"; lat: number; lng: number; label: string | null }
   | { t: "poll"; question: string; options: string[]; multiple: boolean }
-  | { t: "vote"; poll: string; choices: number[] };
+  | { t: "vote"; poll: string; choices: number[] }
+  | { t: "reaction"; target: string; reaction: string; add: boolean };
 
 type StoredPayload = { t?: string; [k: string]: unknown } | null | undefined;
 
@@ -86,3 +87,29 @@ export function richContent(p: StoredPayload, messageId: string | null, votes: V
 
 /** A map link for a shared location (opened in a new tab; nothing is loaded inside CF Meet). */
 export const mapUrl = (lat: number, lng: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
+
+/** Private reactions are authenticated encrypted APPLICATION controls, not server rows. */
+export type PrivateReactionRecord = { target: string; reaction: string; add: boolean; sender: string; sequence: number };
+export function privateReactionState(controls: PrivateReactionRecord[], targets: ReadonlyMap<string, number>, me: string | null): Map<string, { reaction: string; count: number; reactedByMe: boolean }[]> {
+  const latest = new Map<string, PrivateReactionRecord>();
+  for (const control of controls) {
+    const targetSequence = targets.get(control.target);
+    if (targetSequence === undefined || targetSequence >= control.sequence || !control.sender) continue;
+    const key = JSON.stringify([control.target, control.sender, control.reaction]);
+    const previous = latest.get(key);
+    if (!previous || previous.sequence < control.sequence) latest.set(key, control);
+  }
+  const perActor = new Map<string, number>();
+  const grouped = new Map<string, Map<string, Set<string>>>();
+  for (const control of [...latest.values()].sort((a, b) => b.sequence - a.sequence)) {
+    if (!control.add) continue;
+    const actor = JSON.stringify([control.target, control.sender]);
+    const count = perActor.get(actor) ?? 0;
+    if (count >= 20) continue;
+    perActor.set(actor, count + 1);
+    const reactions = grouped.get(control.target) ?? new Map<string, Set<string>>();
+    const senders = reactions.get(control.reaction) ?? new Set<string>();
+    senders.add(control.sender); reactions.set(control.reaction, senders); grouped.set(control.target, reactions);
+  }
+  return new Map([...grouped].map(([target, reactions]) => [target, [...reactions].sort(([a], [b]) => a.localeCompare(b)).map(([reaction, senders]) => ({ reaction, count: senders.size, reactedByMe: me !== null && senders.has(me) }))]));
+}

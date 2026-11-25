@@ -1,5 +1,6 @@
 import { messagingRequest as call } from "./messaging-http";
 import { MessagingApiError } from "@/lib/messaging/errors";
+import { allDevicePages } from "@/lib/messaging/member-pages";
 import { isMessagingRelayRoute, type MessagingMethod } from "@/lib/messaging/routes";
 import type { Colleague, DeviceRevocationReason, MessagingClientToken, MessagingDevice, MessagingIdentity, PublishedKeyPackages, RegistrationChallenge } from "@/types/messaging";
 
@@ -34,6 +35,9 @@ export const messagingService = {
   sessionToken: (sessionDeviceId?: string | null) =>
     call<unknown>("POST", "/messaging/session-tokens", sessionDeviceId ? { sessionDeviceId } : {}),
   revokeAllSessions: () => call<{ revokedSessions: number }>("POST", "/messaging/client-sessions/revoke-all"),
-  devices: (principalId: string) => relay<{ devices: MessagingDevice[] }>("GET", `v1/messaging/principals/${principalId}/devices`),
+  devices: async (principalId: string) => ({ devices: await allDevicePages<MessagingDevice>(
+    query => relay("GET", `v1/messaging/principals/${principalId}/devices${query}`),
+    code => new MessagingApiError(0, code, null),
+  ) }),
   relay,
 };

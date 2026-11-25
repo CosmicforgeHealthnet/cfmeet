@@ -16,6 +16,8 @@ export type StoredRecord = {
   senderDeviceId?: string;
   createdAt?: string;
   kind?: string;
+  /** Private control classification retained after its content is removed. */
+  privateControl?: "REACTION";
   lifecycle?: string;
   replyToMessageId?: string | null;
   targetMessageId?: string | null;

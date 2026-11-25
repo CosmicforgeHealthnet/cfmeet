@@ -40,10 +40,11 @@ import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
 import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
 import { inboxFlags, type InboxFlags } from "./chat-list";
-import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
+import { linkPreviewFor, richContent, richSummary, privateReactionState, type PrivateReactionRecord, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 import { statusPostId } from "./private-shares";
-import { allMemberPages } from "./member-pages";
+import { allDevicePages, allMemberPages } from "./member-pages";
+import { PrivateHistoryWindow, type PrivateHistoryPage } from "./private-history";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
@@ -149,6 +150,8 @@ export type EngineSnapshot = {
   deviceId: string | null;
   conversations: ConversationView[];
   messages: Record<string, MessageView[]>;
+  /** Received private sequence head, including hidden encrypted control messages. */
+  processedSequences?: Record<string, number>;
   names: Record<string, string>;
   incomingTransfers: IncomingTransfer[];
   ktPinned: boolean;
@@ -389,6 +392,9 @@ export class MessagingEngine {
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
   private loadedManaged = new Set<string>();
+  private privateWindows = new Map<string, PrivateHistoryWindow>();
+  private privateVisibility = new Map<string, number>();
+  private privatePaging = new Map<string, Promise<void>>();
   private reactions = new Map<string, Map<string, ReactionView[]>>();
   private e2eeMeta = new Map<string, Map<string, E2eeMeta>>();
   private attachmentMeta = new Map<string, AttachmentMeta>();
@@ -601,6 +607,7 @@ export class MessagingEngine {
   }
 
   stop(): void {
+    this.privateWindows.clear(); this.privateVisibility.clear(); this.privatePaging.clear();
     this.stopped = true;
     if (MessagingEngine.active === this) MessagingEngine.active = null;
     if (typeof window !== "undefined") {
@@ -636,7 +643,7 @@ export class MessagingEngine {
     this.groupTitles.clear();
     this.waiting.clear();
     clearMediaUrls();
-    this.snapshot = { ...this.snapshot, phase: "locked", detail: "Sign in to unlock your messages.", identity: null, deviceId: null, messages: {}, conversations: [], names: {}, incomingTransfers: [], incomingLinks: [], typing: {}, pins: {}, connection: "auth-required" };
+    this.snapshot = { ...this.snapshot, phase: "locked", detail: "Sign in to unlock your messages.", identity: null, deviceId: null, messages: {}, processedSequences: {}, conversations: [], names: {}, incomingTransfers: [], incomingLinks: [], typing: {}, pins: {}, connection: "auth-required" };
     for (const listener of this.listeners) listener();
   }
 
@@ -740,17 +747,10 @@ export class MessagingEngine {
   }
 
   private async loadDeviceDirectory(principalId: string): Promise<ServerDevice[]> {
-    const devices = new Map<string, ServerDevice>();
-    const seen = new Set<string>();
-    let cursor: string | null = null;
-    for (;;) {
-      const page: { devices: ServerDevice[]; nextCursor?: string | null } = await relay("GET", `v1/messaging/principals/${principalId}/devices?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-      for (const device of page.devices) devices.set(device.deviceId, device);
-      if (page.nextCursor == null) return [...devices.values()];
-      if (!page.devices.length || seen.has(page.nextCursor)) throw new MessagingApiError(0, "DEVICE_DIRECTORY_PAGE_INVALID", null);
-      cursor = page.nextCursor;
-      seen.add(cursor);
-    }
+    return allDevicePages<ServerDevice>(
+      query => relay("GET", `v1/messaging/principals/${principalId}/devices${query}`),
+      code => new MessagingApiError(0, code, null),
+    );
   }
 
   private async deviceIsActive(deviceId: string): Promise<boolean> {
@@ -1285,7 +1285,7 @@ export class MessagingEngine {
     if (next.some((v, i) => v !== views[i])) this.set({ messages: { ...this.snapshot.messages, [conversationId]: next } });
   }
 
-  private onRealtimeEvent(event: MessagingRealtimeEvent): void {
+  private async onRealtimeEvent(event: MessagingRealtimeEvent): Promise<void> {
     const conv = this.server.get(event.conversationId);
     if (!conv) return;
     if (event.type === "read.cursor.updated" || event.type === "delivery.cursor.updated") {
@@ -1298,6 +1298,14 @@ export class MessagingEngine {
       }
     }
     if (conv.securityProfile !== "MANAGED") {
+      const type = typeof event.type === "string" ? event.type.replace(/^messaging\./, "") : "";
+      if (type.startsWith("message.") && type !== "message.created") {
+        const data = (event.data ?? {}) as { messageId?: unknown; message_id?: unknown; message?: { messageId?: unknown } };
+        const target = data.messageId ?? data.message_id ?? data.message?.messageId;
+        await this.refreshE2eeMeta(event.conversationId, typeof target === "string" ? target : undefined);
+        await this.renderE2ee(event.conversationId);
+      }
+      if (type.startsWith("pin.")) await this.loadPins(event.conversationId);
       this.scheduleSync(event.conversationId);
       return;
     }
@@ -1318,6 +1326,8 @@ export class MessagingEngine {
       return;
     }
     await this.sync(conversationId);
+    await this.refreshE2eeMeta(conversationId);
+    await this.renderE2ee(conversationId);
     // The event cursor the gateway resumes from: the head of the durable event log.
     let after = this.transport?.cursor(conversationId) ?? 0;
     for (;;) {
@@ -2030,6 +2040,7 @@ export class MessagingEngine {
       for (let round = 0; round < 200; round++) {
         const after = retrying ? retryAfter! : await c.call<number>("cursor", { conversationId });
         const page = await relay<{ messages: ServerMessage[]; visibleFromSequence?: number }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
+        this.notePrivateVisibility(conversationId, page.visibleFromSequence);
         if (!page.messages.length) {
           if (page.visibleFromSequence !== undefined) await this.withMlsLock(() => c.call("processMessages", { conversationId, groupId: gid, visibleFromSequence: page.visibleFromSequence, messages: [] }));
           break;
@@ -2056,6 +2067,7 @@ export class MessagingEngine {
             attachmentIds: m.attachmentIds,
           })),
         }));
+        this.privateWindows.get(conversationId)?.updateKnown(processed.records);
         if (processed.joiner) {
           const verdict = await this.verifyJoiner(conv, processed.joiner);
           if (verdict) allowedJoiners.push(verdict);
@@ -2087,15 +2099,41 @@ export class MessagingEngine {
     const id = conv.conversationId;
     const last = conv.inbox?.lastMessage?.sequence ?? 0;
     if (!last) return;
-    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${id}/messages?afterSequence=${Math.max(0, last - PAGE)}&limit=${PAGE}`).catch(() => null);
+    const page = await relay<{ messages: ServerMessage[]; visibleFromSequence?: number }>("GET", `v1/conversations/${id}/messages?afterSequence=${Math.max(0, last - PAGE)}&limit=${PAGE}`).catch(() => null);
     if (!page) return;
+    this.notePrivateVisibility(id, page.visibleFromSequence);
     this.noteMeta(id, page.messages);
     this.waiting.set(id, page.messages.filter((m) => m.kind === "APPLICATION"));
   }
 
+  private async readPrivatePage(conversationId: string, beforeSequence?: number): Promise<PrivateHistoryWindow | null> {
+    const crypto = this.crypto, generation = this.generation;
+    if (!crypto || !this.snapshot.deviceId || this.stopped) return null;
+    const window = this.privateWindows.get(conversationId) ?? new PrivateHistoryWindow();
+    this.privateWindows.set(conversationId, window);
+    const page = await crypto.call<PrivateHistoryPage>("historyPage", { conversationId, limit: 200, ...(beforeSequence === undefined ? {} : { beforeSequence }) });
+    if (this.stopped || crypto !== this.crypto || generation !== this.generation || this.privateWindows.get(conversationId) !== window) return null;
+    window.prune(this.privateVisibility.get(conversationId) ?? 1);
+    const visibleFrom = this.privateVisibility.get(conversationId) ?? 1;
+    window.merge({ records: page.records.filter(record => record.sequence >= visibleFrom), nextBeforeSequence: page.nextBeforeSequence !== null && page.nextBeforeSequence > visibleFrom ? page.nextBeforeSequence : null }, beforeSequence);
+    this.set({ hasOlder: { ...this.snapshot.hasOlder, [conversationId]: window.cursor !== null } });
+    return window;
+  }
+
+  private notePrivateVisibility(conversationId: string, first: number | undefined): void {
+    if (first === undefined) return;
+    if (!Number.isSafeInteger(first) || first < 1) throw new MessagingApiError(0, "HISTORY_VISIBILITY_REQUIRED", null);
+    const bound = Math.max(first, this.privateVisibility.get(conversationId) ?? 1);
+    this.privateVisibility.set(conversationId, bound);
+    this.privateWindows.get(conversationId)?.prune(bound);
+  }
+
   private async renderE2ee(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId ?? null;
-    const records = this.crypto && this.snapshot.deviceId ? await this.crypto.call<StoredRecord[]>("history", { conversationId }).catch(() => []) : [];
+    const hadCrypto = !!this.crypto && !!this.snapshot.deviceId;
+    const window = hadCrypto ? await this.readPrivatePage(conversationId) : null;
+    if (this.stopped || (hadCrypto && !window)) return;
+    const records = window?.ordered ?? [];
     const views: MessageView[] = [];
     const meta = this.metaFor(conversationId);
     // Older history comes from another device of this account (history transfer), if any.
@@ -2107,7 +2145,16 @@ export class MessagingEngine {
       const own = await this.ownDeviceIds().catch(() => new Set<string>());
       olderNote = beforeJoinNote([...own].some((d) => d !== this.snapshot.deviceId));
     }
-    const reactions = this.reactions.get(conversationId);
+    const reactionTargets = new Map<string, number>();
+    const reactionControls: PrivateReactionRecord[] = [];
+    for (const record of records) {
+      const lifecycle = record.messageId ? meta.get(record.messageId)?.lifecycle ?? record.lifecycle ?? "ACTIVE" : "ACTIVE";
+      if (record.kind !== "APPLICATION" || !["SENT", "DECRYPTED"].includes(record.status) || lifecycle !== "ACTIVE") continue;
+      if (record.payload?.t === "reaction") {
+        if (record.senderPrincipalId) reactionControls.push({ ...record.payload, sender: record.senderPrincipalId, sequence: record.sequence });
+      } else if (record.messageId && record.payload?.t !== "vote" && !(record.payload?.t === "text" && isGroupTitleText(record.payload.text))) reactionTargets.set(record.messageId, record.sequence);
+    }
+    const reactions = privateReactionState(reactionControls, reactionTargets, me);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
     // Edits are encrypted messages that point at the original (the link is server metadata).
     const edits = new Map<string, string>();
@@ -2128,7 +2175,7 @@ export class MessagingEngine {
       if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "vote") votes.push({ poll: r.payload.poll, choices: r.payload.choices, sender: r.senderPrincipalId ?? null, sequence: r.sequence });
     }
     for (const r of records) {
-      if (r.status === "COMMIT" || r.kind === "EDIT" || r.payload?.t === "vote") continue;
+      if (r.status === "COMMIT" || r.kind === "EDIT" || r.payload?.t === "vote" || r.payload?.t === "reaction" || r.privateControl === "REACTION") continue;
       if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text)) {
         const t = named.changes.get(r.sequence);
         if (t) {
@@ -2157,6 +2204,7 @@ export class MessagingEngine {
       };
       if (m && m.lifecycle !== "ACTIVE") {
         base.state = "removed";
+        base.reactions = [];
         base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
         views.push(base);
         continue;
@@ -2246,7 +2294,7 @@ export class MessagingEngine {
       }
     }
     if (named.title && this.server.get(conversationId)?.contextClass !== "DIRECT") this.applyGroupTitle(conversationId, named.title);
-    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...pending]) } });
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...pending]) }, processedSequences: { ...this.snapshot.processedSequences, [conversationId]: records.reduce((head, record) => Math.max(head, record.sequence), 0) } });
   }
 
   private stateFor(conversationId: string): ManagedConversationState {
@@ -2452,6 +2500,22 @@ export class MessagingEngine {
   /** Back-pagination of MANAGED history (`beforeSequence`). */
   async loadOlder(conversationId: string): Promise<void> {
     const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      const existing = this.privatePaging.get(conversationId);
+      if (existing) return existing;
+      const generation = this.generation;
+      const job = (async () => {
+        const window = this.privateWindows.get(conversationId) ?? await this.readPrivatePage(conversationId);
+        const before = window?.cursor;
+        if (before === null || before === undefined || this.stopped || generation !== this.generation) return;
+        const loaded = await this.readPrivatePage(conversationId, before);
+        if (!loaded || this.stopped || generation !== this.generation) return;
+        await this.refreshE2eeMeta(conversationId);
+        await this.renderE2ee(conversationId);
+      })().finally(() => { if (this.privatePaging.get(conversationId) === job) this.privatePaging.delete(conversationId); });
+      this.privatePaging.set(conversationId, job);
+      return job;
+    }
     const st = this.managed.get(conversationId);
     if (!conv || conv.securityProfile !== "MANAGED" || !st?.hasOlder || st.minSequence === null) return;
     const page = await relay<{ messages: ManagedServerMessage[]; nextBeforeSequence?: number | null }>(
@@ -2482,6 +2546,7 @@ export class MessagingEngine {
   }
 
   async loadReactions(conversationId: string, messageIds: string[]): Promise<void> {
+    if (this.server.get(conversationId)?.securityProfile === "PRIVATE_E2EE") { await this.renderE2ee(conversationId); return; }
     const map = this.reactions.get(conversationId) ?? new Map<string, ReactionView[]>();
     this.reactions.set(conversationId, map);
     const queue = [...new Set(messageIds)];
@@ -2512,12 +2577,40 @@ export class MessagingEngine {
     for (const x of messages) m.set(x.messageId, { lifecycle: x.lifecycle, replyTo: x.replyToMessageId ?? null, target: x.targetMessageId ?? null });
   }
 
-  /** Re-reads the newest private messages' server state (deletions, replies, edits); never their content. */
-  private async refreshE2eeMeta(conversationId: string): Promise<void> {
-    const newest = Math.max(0, ...(this.snapshot.messages[conversationId] ?? []).map((v) => v.sequence ?? 0));
-    if (!newest) return;
-    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?beforeSequence=${newest + 1}&limit=${PAGE}`).catch(() => null);
-    if (page) this.noteMeta(conversationId, page.messages);
+  /** Reconcile only the locally loaded window, in bounded authoritative pages. */
+  private async refreshE2eeMeta(conversationId: string, messageId?: string): Promise<void> {
+    const crypto = this.crypto;
+    if (!crypto || !this.snapshot.deviceId) return;
+    const generation = this.generation;
+    const window = this.privateWindows.get(conversationId) ?? await this.readPrivatePage(conversationId);
+    if (!window || this.stopped || crypto !== this.crypto || generation !== this.generation) return;
+    const records = window.ordered;
+    if (!records.length) return;
+    const ids = new Set(records.flatMap(record => record.messageId ? [record.messageId] : []));
+    const reconcile = async (messages: ServerMessage[]) => {
+      const loaded = messages.filter(message => ids.has(message.messageId));
+      if (this.stopped || crypto !== this.crypto || generation !== this.generation) return;
+      this.noteMeta(conversationId, loaded);
+      this.privateWindows.get(conversationId)?.reconcile(loaded);
+      if (loaded.length) await this.withMlsLock(() => crypto.call("reconcileHistoryMetadata", { conversationId, messages: loaded.map(message => ({ sequence: message.sequence, messageId: message.messageId, lifecycle: message.lifecycle, replyToMessageId: message.replyToMessageId, targetMessageId: message.targetMessageId })) }));
+    };
+    if (messageId) {
+      if (!ids.has(messageId)) return;
+      const result = await relay<{ message: ServerMessage }>("GET", `v1/conversations/${conversationId}/messages/${messageId}`);
+      if (!result.message || result.message.messageId !== messageId) throw new MessagingApiError(0, "MESSAGE_METADATA_INVALID", null);
+      await reconcile([result.message]);
+      return;
+    }
+    const first = records.reduce((value, record) => Math.min(value, record.sequence), Number.MAX_SAFE_INTEGER);
+    let before = records.reduce((value, record) => Math.max(value, record.sequence), 0) + 1;
+    for (;;) {
+      const page = await relay<{ messages: ServerMessage[]; nextBeforeSequence: number | null }>("GET", `v1/conversations/${conversationId}/messages?beforeSequence=${before}&limit=500`);
+      await reconcile(page.messages);
+      const oldest = page.messages.reduce((value, message) => Math.min(value, message.sequence), before);
+      if (page.nextBeforeSequence === null || oldest <= first) break;
+      if (!page.messages.length || page.nextBeforeSequence >= before) throw new MessagingApiError(0, "MESSAGE_METADATA_PAGE_INVALID", null);
+      before = page.nextBeforeSequence;
+    }
   }
 
   async loadPins(conversationId: string): Promise<void> {
@@ -2527,6 +2620,14 @@ export class MessagingEngine {
   }
 
   async react(conversationId: string, messageId: string, reaction: string, add: boolean): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      const target = this.snapshot.messages[conversationId]?.find(message => message.messageId === messageId);
+      if (!target || !["sent", "delivered"].includes(target.state)) throw new MessagingApiError(0, "MESSAGE_NOT_ACTIVE", null);
+      if (add && !target.reactions?.some(item => item.reaction === reaction && item.reactedByMe) && (target.reactions?.filter(item => item.reactedByMe).length ?? 0) >= 20) throw new MessagingApiError(0, "REACTION_LIMIT_REACHED", null);
+      await this.sendRich(conversationId, { t: "reaction", target: messageId, reaction, add });
+      return;
+    }
     await relay(add ? "PUT" : "DELETE", `v1/conversations/${conversationId}/messages/${messageId}/reactions/${reactionSegment(reaction)}`, add ? {} : undefined);
     await this.loadReactions(conversationId, [messageId]);
   }
@@ -2618,7 +2719,8 @@ export class MessagingEngine {
     // not only when the live connection starts: a missed update can't leave ticks stuck.
     try { this.transport?.queryReceipts(conversationId); } catch { /* not connected: the next connect asks */ }
     const list = this.snapshot.messages[conversationId] ?? [];
-    const last = [...list].reverse().find((m) => m.sequence !== null)?.sequence;
+    const visibleLast = [...list].reverse().find((m) => m.sequence !== null)?.sequence ?? 0;
+    const last = Math.max(visibleLast, this.snapshot.processedSequences?.[conversationId] ?? 0);
     // Only a read position that moves is written (no duplicate receipt events, MSG-018).
     if (!last || last <= (this.lastReadSent.get(conversationId) ?? 0)) {
       this.clearUnread(conversationId);
@@ -2991,6 +3093,7 @@ export class MessagingEngine {
         const page = await relay<{ messages: ServerMessage[]; visibleFromSequence?: number; nextAfterSequence: number | null }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=500`);
         if (page.visibleFromSequence === undefined) throw new MessagingApiError(0, "HISTORY_VISIBILITY_REQUIRED", null);
         firstSequence = page.visibleFromSequence;
+        this.notePrivateVisibility(conversationId, firstSequence);
         this.noteMeta(conversationId, page.messages);
         await this.crypto!.call("reconcileHistoryMetadata", { conversationId, messages: page.messages.map(m => ({ sequence: m.sequence, messageId: m.messageId, lifecycle: m.lifecycle, replyToMessageId: m.replyToMessageId, targetMessageId: m.targetMessageId })) });
         for (const m of page.messages) lastSequence = Math.max(lastSequence, m.sequence);
@@ -3059,6 +3162,7 @@ export class MessagingEngine {
           const done = await this.crypto.call<{ nextIndex: number; records: number; signature: Uint8Array; coverage: string }>("historyProgressV2", { transferId });
           await relay("POST", `v1/messaging/history-transfers-v2/${transferId}/checkpoint`, { nextIndex: done.nextIndex, signature: b64u.enc(done.signature) });
           await this.historyVisibility();
+          this.privateWindows.clear();
           for (const id of this.server.keys()) { await this.renderOrSync(id); await this.loadReactions(id, (this.snapshot.messages[id] ?? []).flatMap(m => m.messageId ? [m.messageId] : [])); }
           await relay("POST", `v1/messaging/history-transfers-v2/${transferId}/complete`, {});
           await this.crypto.call("forgetHistoryTransferV2", { transferId });
@@ -3132,6 +3236,7 @@ export class MessagingEngine {
         const ctx = this.transferContext(transferId, sealed.sourceDeviceId, this.snapshot.deviceId!);
         const r = await this.crypto!.call<{ records: number }>("openHistory", { sourceKey: b64u.dec(source.signaturePublicKey), context: ctx, sealed: b64u.dec(sealed.sealedHistory) });
         await relay("POST", `v1/messaging/history-transfers/${transferId}/complete`, {});
+        this.privateWindows.clear();
         for (const id of this.server.keys()) await this.renderOrSync(id);
         return r.records;
       }

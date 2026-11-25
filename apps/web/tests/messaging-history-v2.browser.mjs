@@ -129,6 +129,9 @@ try {
   await send(0, { t: 'file', handle: attachment.handle, attachmentId: id(9000) });
   const removedBaseId = id(1001), deletedEditText = 'deleted edit must never reach recovered plaintext';
   await send(0, { t: 'text', text: deletedEditText }, { kind: 'EDIT', targetMessageId: removedBaseId });
+  await send(0, { t: 'reaction', target: id(1041), reaction: ':visible:', add: true });
+  await send(0, { t: 'reaction', target: removedBaseId, reaction: ':deleted:', add: true });
+
   const eligibleConversations = conversations.map((conversationId, i) => ({ conversationId, firstSequence: 1, lastSequence: sequences[i] }));
   const context = [id(20), scope.tenantId, scope.applicationId, scope.environmentId, account, sourceId, targetId];
   const expiresAt = Math.floor(Date.now() / 1000) + 600;
@@ -191,12 +194,19 @@ try {
     const sealed = index === 1 ? second : await call(source, 'historyObjectV2', { transferId: context[0], index });
     last = await call(target, 'importHistoryChunkV2', { transferId: context[0], index, sealed, eligibleConversations });
   }
-  assert.equal(last.records, 82); assert.equal(last.nextIndex, snapshot.descriptor.chunkCount); assert.ok(last.signature.length > 0);
+  assert.equal(last.records, 84); assert.equal(last.nextIndex, snapshot.descriptor.chunkCount); assert.ok(last.signature.length > 0);
   const history = await Promise.all(conversations.map((conversationId) => call(target, 'history', { conversationId })));
-  assert.equal(history.flat().length, 82); assert.equal(history[1].some((r) => r.payload?.text === 'after frozen snapshot'), false);
+  assert.equal(history.flat().length, 84); assert.equal(history[1].some((r) => r.payload?.text === 'after frozen snapshot'), false);
   assert.equal(history[0].find(r => r.messageId === removedBaseId).status, 'REMOVED');
   assert.equal(history[0].find(r => r.kind === 'EDIT').status, 'REMOVED');
   assert.equal(JSON.stringify(history).includes(deletedEditText), false);
+  const liveReaction = history[0].find(record => record.payload?.t === 'reaction');
+  assert.deepEqual(liveReaction.payload, { t: 'reaction', target: id(1041), reaction: ':visible:', add: true });
+  assert.equal(liveReaction.privateControl, 'REACTION');
+  assert.equal(history[0].some(record => record.privateControl === 'REACTION' && record.status === 'REMOVED' && record.payload === undefined), true);
+  assert.equal(JSON.stringify(history).includes(':deleted:'), false);
+  confirmed('encrypted reaction controls survive history recovery while deleted-target reactions stay redacted');
+
   confirmed('stale frozen archives cannot resurrect deleted EDIT plaintext on a new device');
   const file = history[0].find((r) => r.payload?.t === 'file'); assert.ok(file);
   const decrypted = await call(target, 'decryptAttachment', { conversationId: conversations[0], sequence: file.sequence, ciphertext: attachment.ciphertext });
@@ -205,7 +215,7 @@ try {
   confirmed('complete resumed history includes attachment keys and never imports MLS group secrets');
   await call(target, 'forgetHistoryTransferV2', { transferId: context[0] });
   await assert.rejects(call(target, 'historyProgressV2', { transferId: context[0] }));
-  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 42);
+  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 44);
   confirmed('transfer cleanup removes checkpoint secrets while retaining authorized history');
   const expiringContext = [...context]; expiringContext[0] = id(99);
   await call(target, 'beginTransferV2', { context: expiringContext, expiresAt: Math.floor(Date.now() / 1000) + 2 });
@@ -213,7 +223,7 @@ try {
   const remaining = await call(target, 'listHistoryTransfersV2');
   assert.equal(remaining.some(t => t.transferId === expiringContext[0]), false);
   await assert.rejects(call(target, 'historyProgressV2', { transferId: expiringContext[0] }), /NO_TRANSFER/);
-  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 42);
+  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 44);
   confirmed('runtime expiry removes private transfer checkpoints without deleting recovered history');
   const evidence = { at: new Date().toISOString(), boundary: 'real shipped worker/WASM, two independent Chromium profiles, IndexedDB; server relay and authentication tested separately', events };
   if (output) await writeFile(output, JSON.stringify(evidence, null, 2));

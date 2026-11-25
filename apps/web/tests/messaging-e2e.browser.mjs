@@ -165,6 +165,17 @@ async function send(page, text) {
 }
 
 const shown = (page, text) => page.locator("[data-testid=message-text]", { hasText: text }).first().waitFor({ timeout: T });
+async function loadAllPrivateHistory(page) {
+  for (let pages = 0; pages < 20; pages++) {
+    const button = page.locator('[data-testid=load-older]');
+    if (!await button.count()) return;
+    const previous = await page.locator('[data-testid=message]').count();
+    await button.click();
+    await page.waitForFunction(count => !document.querySelector('[data-testid=load-older]') || document.querySelectorAll('[data-testid=message]').length > count, previous, { timeout: T });
+  }
+  assert.fail('private history cursor did not reach the start within the fixture page budget');
+}
+
 
 /** Reopens a closed browser of `who` (same profile: same device) on the messages page. */
 async function reopen(who, s) {
@@ -372,10 +383,15 @@ async function journey() {
   // Fault injection at the untrusted delivery boundary. Services and ciphertext in
   // the database remain real and unchanged; only one browser response is corrupted.
   let damagedOnce = false;
+  let retriedClientMessageId = null;
+  const captureRetryPublication = request => {
+    if (request.method() === "POST" && /\/conversations\/[^/]+\/messages$/.test(request.url())) retriedClientMessageId = request.postDataJSON()?.clientMessageId ?? null;
+  };
+  alice.page.on("request", captureRetryPublication);
   let orderedPages = 0;
   const deliveryRoute = /\/api\/v2\/messaging\/relay\/v1\/conversations\/[^/]+\/messages\?/;
   const damage = async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
+    if (route.request().method() !== "GET" || !new URL(route.request().url()).searchParams.has("afterSequence")) return route.continue();
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
     const body = await response.json();
@@ -385,7 +401,7 @@ async function journey() {
         assert.equal(body.messages[i].sequence, body.messages[i - 1].sequence + 1, "authoritative pages must be contiguous, including tombstones");
       }
     }
-    const application = body.messages?.find((m) => m.kind === "APPLICATION" && m.e2ee?.ciphertext);
+    const application = body.messages?.find((m) => m.kind === "APPLICATION" && m.clientMessageId === retriedClientMessageId && m.e2ee?.ciphertext);
     if (!damagedOnce && application) {
       damagedOnce = true;
       application.e2ee.ciphertext = "AQID";
@@ -397,6 +413,8 @@ async function journey() {
   const retried = `${SECRET} recovered after a failed delivery`;
   await send(alice.page, retried);
   await shown(bob.page, retried);
+  alice.page.off("request", captureRetryPublication);
+  assert.ok(retriedClientMessageId, "the encrypted publication to corrupt was identified");
   assert.equal(damagedOnce, true, "the integration test must exercise failed decryption");
   assert.ok(orderedPages >= 2, "the failed page is refetched from the authoritative endpoint");
   assert.equal(await bob.page.locator("[data-testid=message-text]").filter({ hasText: retried }).count(), 1, "recovery does not duplicate the message");
@@ -482,18 +500,19 @@ async function journey() {
   // A real application archive above the legacy ceiling. Every encrypted send must
   // be accepted and every eligible source must possess it before the new browser joins.
   const bulkPrefix = `${SECRET} large-history block `;
-  const bulkHistory = Array.from({ length: 45 }, (_, i) => `${bulkPrefix}${String(i).padStart(2, "0")} ${"x".repeat(13900)}`);
+  const bulkHistory = Array.from({ length: 205 }, (_, i) => `${bulkPrefix}${String(i).padStart(3, "0")} ${"x".repeat(4000)}`);
   assert.ok(bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) > 512 * 1024);
   for (const text of bulkHistory) {
     await send(alice.page, text);
     await alice.page.locator("[data-testid=message][data-state=sent]", { hasText: text }).waitFor({ timeout: T });
   }
   for (const page of [bob.page, ...otherDevices.filter(([who]) => who === "bob").map(([, device]) => device.page)]) {
-    await shown(page, bulkHistory[0]);
     await shown(page, bulkHistory.at(-1));
-    assert.equal(await page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), 45);
+    await loadAllPrivateHistory(page);
+    await shown(page, bulkHistory[0]);
+    assert.equal(await page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), bulkHistory.length);
   }
-  step("large encrypted history accepted and available on every source", { messages: 45, plaintextBytes: bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) });
+  step("large encrypted history accepted and available on every source", { messages: bulkHistory.length, plaintextBytes: bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) });
 
   // ---- 10. Bob's second device: added to the group by a member device, then his history
   //          is recovered device-to-device after both devices show the same code.
@@ -588,10 +607,13 @@ async function journey() {
   await register(bob2.page);
   await openConversation(bob2.page, "PRIVATE_E2EE");
   await resumedCompletion;
+  await shown(bob2.page, bulkHistory.at(-1));
+  assert.ok(await bob2.page.locator("[data-testid=load-older]").count(), "transferred history beyond 200 raw records exposes private pagination");
+  await loadAllPrivateHistory(bob2.page);
   await shown(bob2.page, hello);
   await shown(bob2.page, bulkHistory[0]);
   await shown(bob2.page, bulkHistory.at(-1));
-  assert.equal(await bob2.page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), 45, "every bulk record imports exactly once after interruption");
+  assert.equal(await bob2.page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), bulkHistory.length, "every bulk record imports exactly once after interruption");
   assert.ok(receivedManifest?.totalPlaintextBytes > 512 * 1024 && receivedManifest.chunkCount > 2, "actual transferred manifest exceeds 512 KiB and requires multiple chunks");
   assert.equal(await bob2.page.locator(`[data-testid=message][data-message-id="${metadataMessageId}"][data-state=removed]`).count(), 1, "history recovery preserves the deletion tombstone");
   await bob2.page.locator("[data-testid=message]", { hasText: metadataReply }).first().locator("[data-testid=message-reply]").waitFor({ timeout: T });
@@ -601,7 +623,7 @@ async function journey() {
   assert.equal(recoveredDownload.suggestedFilename(), "plan.txt");
   assert.ok(readFileSync(await recoveredDownload.path()).equals(fileBody), "recovered attachment descriptor and key decrypt the original bytes on the new device");
   await bob2.page.unroute(v2Path);
-  step("large v2 application history resumes automatically after chunk failure and page restart", { comparisonCode: "#### ####", messages: 45, chunkCount: receivedManifest.chunkCount, plaintextBytes: receivedManifest.totalPlaintextBytes });
+  step("large v2 application history resumes automatically after chunk failure and page restart", { comparisonCode: "#### ####", messages: bulkHistory.length, chunkCount: receivedManifest.chunkCount, plaintextBytes: receivedManifest.totalPlaintextBytes });
 
   // ---- 11. Removing a device erases its keys and history from that browser.
   if (await settings.getAttribute("aria-expanded") !== "true") await settings.click();

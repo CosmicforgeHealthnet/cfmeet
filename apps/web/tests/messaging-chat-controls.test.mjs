@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { MAX_PINNED_CHATS, arrangeChats, inboxFlags, pinnedCount } from "../src/lib/messaging/chat-list.ts";
-import { linkPreviewFor, richContent, richSummary, tallyVotes } from "../src/lib/messaging/rich-content.ts";
+import { linkPreviewFor, richContent, richSummary, tallyVotes, privateReactionState } from "../src/lib/messaging/rich-content.ts";
 
 const chat = (id, at, flags = {}) => ({ id, lastActivityAt: at, archived: false, pinned: false, pinnedAt: null, ...flags });
 
@@ -64,4 +64,26 @@ test("the crypto worker allows only the bounded payload shapes", () => {
   assert.match(src, /default:\s*return fail\("PAYLOAD_INVALID"\);/);
   // Only http(s) links are previewed.
   assert.match(src, /parsed\.protocol !== "https:" && parsed\.protocol !== "http:"/);
+});
+
+
+test("private reaction state uses canonical control order, deduplicates devices per principal, and removes without resurrecting older adds", () => {
+  const targets = new Map([["message", 1]]);
+  const controls = [
+    { target: "message", reaction: ":yes:", add: false, sender: "A", sequence: 5 },
+    { target: "message", reaction: ":yes:", add: true, sender: "A", sequence: 2 },
+    { target: "message", reaction: ":yes:", add: true, sender: "A", sequence: 4 },
+    { target: "message", reaction: ":yes:", add: true, sender: "B", sequence: 3 },
+    { target: "message", reaction: ":yes:", add: true, sender: "B", sequence: 3 },
+    { target: "other-conversation", reaction: ":yes:", add: true, sender: "C", sequence: 8 },
+  ];
+  assert.deepEqual(privateReactionState(controls, targets, "A").get("message"), [{ reaction: ":yes:", count: 1, reactedByMe: false }]);
+  assert.deepEqual(privateReactionState(controls, targets, "B").get("message"), [{ reaction: ":yes:", count: 1, reactedByMe: true }]);
+  assert.equal(privateReactionState(controls, new Map(), "B").size, 0, "deleted or unloaded targets cannot acquire badges");
+  assert.equal(privateReactionState(controls, new Map([["message", 20]]), "B").size, 0, "controls cannot target later messages");
+});
+
+test("private reaction rendering bounds per-person badges while retaining removals", () => {
+  const controls = Array.from({ length: 25 }, (_, index) => ({ target: "message", reaction: `:r${index}:`, add: true, sender: "A", sequence: index + 2 }));
+  assert.equal(privateReactionState(controls, new Map([["message", 1]]), "A").get("message").length, 20);
 });
