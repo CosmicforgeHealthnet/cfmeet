@@ -253,6 +253,7 @@ jobs:
         run: |
           set -euo pipefail
             python3 scripts/messaging/generate_consumer_guide.py --check
+          python3 -m unittest discover -s scripts/messaging -p test_generate_consumer_guide.py -v
           if grep -n -E 'services/(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)|\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)' \
                services/messaging/Cargo.toml services/messaging/migration/Cargo.toml; then
             echo "::error::services/messaging depends on another service"; exit 1
@@ -496,7 +497,15 @@ jobs:
           ./target/debug/messaging-history-transfer-v2-migration up
           ./target/debug/messaging-history-transfer-v2-migration status
           q() { psql -h 127.0.0.1 -U postgres -d messaging_migration_smoke -tAc "$1"; }
-          test "$(q "SELECT count(*) FROM messaging_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # Each independently versioned migrator owns its own history. Counting every
+          # Box::new(m20...) in lib.rs incorrectly includes the v2 transfer history in
+          # the base history. Reuse DATA-014's parser and verify both histories.
+          registered="$(python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "../../scripts/migrations"); from check_migration_order import migrators; print(len(migrators(Path("migration/src/lib.rs"))["Migrator"]))')"
+          history_v2_registered="$(python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "../../scripts/migrations"); from check_migration_order import migrators; print(len(migrators(Path("migration/src/lib.rs"))["HistoryTransferV2Migrator"]))')"
+          test "$registered" -gt 0
+          test "$history_v2_registered" -gt 0
+          test "$(q "SELECT count(*) FROM messaging_seaql_migrations")" = "$registered"
+          test "$(q "SELECT count(*) FROM messaging_history_transfer_v2_migrations")" = "$history_v2_registered"
           # Only messaging_ tables, and no column that could hold an E2EE secret or plaintext.
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename !~ '^messaging_'")" = "0"
           # `mls_epoch` (the PUBLIC epoch number of RFC 9420 framing) is the one exact

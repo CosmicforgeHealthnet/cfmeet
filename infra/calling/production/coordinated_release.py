@@ -1141,6 +1141,24 @@ def inspect(sha, run_id):
     if MEETING in names:
         emit('migrations', {'database': 'meeting-service', 'histories': history_state(meeting_psql)})
         emit('mail', mail_presence(p.env_of(p.inspect(MEETING))))
+    if SERVICES['communications']['container'] in names:
+        # Aggregate compatibility evidence only: never expose account/device IDs.
+        # Combined legacy Calling/Messaging links cannot safely opt into retained
+        # history until their split/revocation compatibility protocol is reviewed.
+        try:
+            coverage = release.db_sql(SERVICES['communications']['db'], """
+SELECT json_build_object(
+ 'activeCombinedSessionLinks', count(*) FILTER (
+   WHERE state='ACTIVE' AND account_session_ref IS NOT NULL
+     AND chat_device_ref IS NOT NULL AND call_endpoint_ref IS NOT NULL),
+ 'activeChatOnlySessionLinks', count(*) FILTER (
+   WHERE state='ACTIVE' AND account_session_ref IS NOT NULL
+     AND chat_device_ref IS NOT NULL AND call_endpoint_ref IS NULL)
+) FROM communication_devices;
+""")
+            emit('messagingLifecycleCoverage', json.loads(coverage))
+        except (RuntimeError, ValueError):
+            emit('messagingLifecycleCoverage', {'status': 'not_available'})
     emit('journal', [{k: e[k] for k in ('operation', 'sha', 'runId', 'status')} for e in load_journal()[-10:]])
     emit('plannedNewContainers', planned_new(names))
     emit('resourceGatePreview', dict(memAvailableMiB=mem_available_mib(), requiredMiB=required_mib(planned_new(names)),

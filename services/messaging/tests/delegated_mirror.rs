@@ -121,6 +121,17 @@ const MIRROR: &[(&str, &str)] = &[
     ("PUT", "/internal/v1/delegated/v1/messaging/history-transfers/{transferId}/sealed-history"),
     ("POST", "/internal/v1/delegated/v1/messaging/history-transfers/{transferId}/complete"),
     ("POST", "/internal/v1/delegated/v1/messaging/history-transfers/{transferId}/cancel"),
+    ("GET", "/internal/v1/delegated/v1/messaging/history-transfer-capabilities"),
+    ("POST", "/internal/v1/delegated/v1/messaging/history-transfers-v2"),
+    ("GET", "/internal/v1/delegated/v1/messaging/history-transfers-v2"),
+    ("GET", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}"),
+    ("PUT", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/manifest"),
+    ("GET", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/manifest"),
+    ("PUT", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}"),
+    ("GET", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}"),
+    ("POST", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/checkpoint"),
+    ("POST", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/complete"),
+    ("POST", "/internal/v1/delegated/v1/messaging/history-transfers-v2/{transferId}/cancel"),
     ("POST", "/internal/v1/delegated/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants"),
     ("POST", "/internal/v1/delegated/v1/messaging/backups"),
     ("GET", "/internal/v1/delegated/v1/messaging/backups/latest"),
@@ -177,12 +188,13 @@ fn mirrored_contract_operations() -> BTreeSet<(String, String)> {
     out
 }
 
-/// Concrete path: every `{param}` becomes a fresh id (a reaction gets a valid token).
+/// Concrete path: IDs are fresh; reactions and bounded chunk indexes keep their types.
 fn concrete(template: &str) -> String {
     template
         .split('/')
         .map(|seg| match seg {
             "{reaction}" => "thumbs_up".to_string(),
+            "{chunkIndex}" => "0".to_string(),
             s if s.starts_with('{') && s.ends_with('}') => Uuid::new_v4().to_string(),
             s => s.to_string(),
         })

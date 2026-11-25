@@ -24,7 +24,7 @@ PROBES = {
         ("organizations", "ORGANIZATIONS_EVENT_DESTINATIONS", "cfmeet.meeting-service"),
     ),
     "activate-enterprise-calling": (
-        ("meeting-service", "CALLING_ORGANIZATION_FORWARDING_ENABLED", "true"),
+        ("calling", "CALLING_ORGANIZATION_FORWARDING_ENABLED", "true"),
         ("meeting-service", "ORGANIZATION_CALLING_SCOPE", "organization"),
     ),
     "activate-developer-platform": (

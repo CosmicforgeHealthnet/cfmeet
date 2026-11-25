@@ -5,6 +5,18 @@ import activation_manager as manager
 
 
 class ActivationManagerTests(unittest.TestCase):
+    def test_enterprise_forwarding_is_attested_on_its_calling_owner(self):
+        journal = [{"operation": "activate-enterprise-calling", "status": "done"}]
+        envs = {"calling": {"CALLING_ORGANIZATION_FORWARDING_ENABLED": "true"},
+                "meeting-service": {"ORGANIZATION_CALLING_SCOPE": "organization"}}
+        running = {"calling", "meeting-service"}
+        self.assertEqual(manager.operation_state("activate-enterprise-calling", journal,
+                                                 envs, running), "active")
+        envs["calling"]["CALLING_ORGANIZATION_FORWARDING_ENABLED"] = "false"
+        envs["meeting-service"]["CALLING_ORGANIZATION_FORWARDING_ENABLED"] = "true"
+        self.assertEqual(manager.operation_state("activate-enterprise-calling", journal,
+                                                 envs, running), "drift")
+
     def test_rollbacks_override_prior_success(self):
         journal = [{"operation": "activate-provisioning", "status": "done"},
                    {"operation": "activate-provisioning", "status": "rolled-back"}]

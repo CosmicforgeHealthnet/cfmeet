@@ -10,12 +10,13 @@ ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / 'docs/operations/messaging-native-api-map.md'
 RELAY = ROOT / 'services/meeting-service/src/services/unified_messaging/relay.rs'
 CONTRACT = ROOT / 'packages/contracts/bundled/public/messaging/v1.openapi.json'
+CANONICAL_CONTRACT = ROOT / 'packages/contracts/bundled/messaging/http/v1.openapi.json'
 ADMIN_PREFIXES = ('/v1/messaging/policy', '/v1/messaging/legal-holds', '/v1/messaging/reports',
     '/v1/messaging/moderation', '/v1/messaging/exports', '/v1/messaging/deletion-requests', '/v1/messaging/audit')
 
 
 def shape(path):
-    return '/'.join('Reaction' if x == '{reaction}' else 'Id' if x.startswith('{') else x
+    return '/'.join('Reaction' if x == '{reaction}' else 'ChunkIndex' if x == '{chunkIndex}' else 'Id' if x.startswith('{') else x
                     for x in path.removeprefix('/v1/').split('/'))
 
 
@@ -23,7 +24,7 @@ def mappings(source):
     table = source.split('pub static ROUTES:', 1)[1].split('\n];', 1)[0]
     routes = set()
     for method, segments in re.findall(r'r\(\s*Method::(\w+),\s*&\[([^]]+)\]', table):
-        parts = re.findall(r'Lit\("([^"]+)"\)|\b(Id|Reaction)\b', segments)
+        parts = re.findall(r'Lit\("([^"]+)"\)|\b(Id|Reaction|ChunkIndex)\b', segments)
         routes.add((method.lower(), '/'.join(a or b for a, b in parts)))
     direct = dict(((method, path), native) for method, path, native in re.findall(
         r'\("(\w+)",\s*"([^"]+)"\)\s*=>\s*(?:\{\s*)?Some\(\s*"([^"]+)"\s*\)', source))
@@ -33,13 +34,19 @@ def mappings(source):
 
 def render():
     contract = json.loads(CONTRACT.read_text(encoding='utf-8'))
+    canonical = json.loads(CANONICAL_CONTRACT.read_text(encoding='utf-8'))
+    verbs = ('get', 'post', 'put', 'patch', 'delete')
+    canonical_count = sum(method in verbs for item in canonical['paths'].values() for method in item)
     routes, direct = mappings(RELAY.read_text(encoding='utf-8'))
     rows, native, served = [], 0, 0
     for path, item in contract['paths'].items():
         for method, op in item.items():
             if method not in ('get', 'post', 'put', 'patch', 'delete'): continue
             is_admin = path.startswith(ADMIN_PREFIXES)
-            if not is_admin: served += 1
+            # CONTRACT is already the audience-filtered public bundle. Application
+            # administration APIs can be documented publicly without being exposed
+            # through Account's native relay; do not subtract them a second time.
+            served += 1
             transport = direct.get((method, path))
             if not transport and (method, shape(path)) in routes:
                 transport = '/api/v2/messaging/relay' + path
@@ -50,13 +57,13 @@ def render():
                 transport, audience = path, 'Device token / one-use WS ticket'
             else:
                 transport = 'Not exposed by Account relay'
-                audience = 'Application administration; excluded from public Swagger' if is_admin else 'Separate service/application context; not native personal Messaging'
+                audience = 'Application administration; not exposed by Account relay' if is_admin else 'Separate service/application context; not native personal Messaging'
             rows.append('| ' + ' | '.join((method.upper(), '`' + path + '`', op['operationId'],
                 '`' + transport + '`' if transport.startswith('/') else transport, audience)) + ' |')
     return f'''# Messaging — native authenticated API map
 
 Generated from the Account relay and Messaging {contract['info']['version']} contract.
-Canonical SDK contract: **{len(rows)} operations**; audience-filtered public Swagger:
+Canonical SDK contract: **{canonical_count} operations**; audience-filtered public Swagger:
 **{served} operations**; native Account transports: **{native} operations**.
 There are no new canonical message/conversation/device endpoints.
 
@@ -84,8 +91,11 @@ unchanged. UUID addressing remains compatible and enforces the same owner polici
 
 ## Security and device prerequisites
 
-Production PRIVATE_E2EE enrollment is BLOCKED pending independent assessment and
-accepted cryptographic decisions. Production continues rejecting the enable flag.
+PRIVATE_E2EE enrollment requires enabled device registration and valid runtime
+configuration. In production, enabling also requires the owner's release decision
+(`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`), recording the actual independent-assessment
+status and accepted residual risks. This guide does not certify activation or claim
+an assessment was completed.
 Disabled enrollment returns 503 `FEATURE_DISABLED` / `E2EE_DEVICES_DISABLED`; private
 conversation creation returns 409 `E2EE_NOT_AVAILABLE`. Neither chooses MANAGED.
 `GET /api/v2/communications/me/capabilities` must be checked; a ready HTTP service
@@ -93,7 +103,7 @@ alone does not imply device security readiness or witnessed transparency.
 
 Authenticated, active users first resolve their own identity with
 `GET /api/v2/messaging/me`, establish an accepted Communications connection, then enroll
-devices in an authorized non-production environment. Challenge -> client-held Ed25519/
+devices in an authorized runtime. Challenge -> client-held Ed25519/
 HPKE keys -> challenge-bound MLS registration KeyPackage -> publish one-use public
 KeyPackages. No server private-key read/decrypt endpoint exists. Signed tree heads and
 inclusion/consistency proofs need pinned log/witness keys from a trusted release channel.

@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
 Generated from the Account relay and Messaging 1.23.0 contract.
-Canonical SDK contract: **107 operations**; audience-filtered public Swagger:
-**91 operations**; native Account transports: **74 operations**.
+Canonical SDK contract: **123 operations**; audience-filtered public Swagger:
+**118 operations**; native Account transports: **85 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -29,8 +29,11 @@ unchanged. UUID addressing remains compatible and enforces the same owner polici
 
 ## Security and device prerequisites
 
-Production PRIVATE_E2EE enrollment is BLOCKED pending independent assessment and
-accepted cryptographic decisions. Production continues rejecting the enable flag.
+PRIVATE_E2EE enrollment requires enabled device registration and valid runtime
+configuration. In production, enabling also requires the owner's release decision
+(`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`), recording the actual independent-assessment
+status and accepted residual risks. This guide does not certify activation or claim
+an assessment was completed.
 Disabled enrollment returns 503 `FEATURE_DISABLED` / `E2EE_DEVICES_DISABLED`; private
 conversation creation returns 409 `E2EE_NOT_AVAILABLE`. Neither chooses MANAGED.
 `GET /api/v2/communications/me/capabilities` must be checked; a ready HTTP service
@@ -38,7 +41,7 @@ alone does not imply device security readiness or witnessed transparency.
 
 Authenticated, active users first resolve their own identity with
 `GET /api/v2/messaging/me`, establish an accepted Communications connection, then enroll
-devices in an authorized non-production environment. Challenge -> client-held Ed25519/
+devices in an authorized runtime. Challenge -> client-held Ed25519/
 HPKE keys -> challenge-bound MLS registration KeyPackage -> publish one-use public
 KeyPackages. No server private-key read/decrypt endpoint exists. Signed tree heads and
 inclusion/consistency proofs need pinned log/witness keys from a trusted release channel.
@@ -127,8 +130,8 @@ required. Meetings and established permitted service contexts retain independent
 | GET | `/v1/conversations` | listConversations | `/api/v2/messaging/relay/v1/conversations` | Account session |
 | GET | `/v1/conversations/{conversationId}` | getConversation | `/api/v2/messaging/relay/v1/conversations/{conversationId}` | Account session |
 | PATCH | `/v1/conversations/{conversationId}` | updateConversation | `/api/v2/messaging/relay/v1/conversations/{conversationId}` | Account session |
-| GET | `/v1/messaging/policy` | getMessagingPolicy | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| PUT | `/v1/messaging/policy` | updateMessagingPolicy | Not exposed by Account relay | Application administration; excluded from public Swagger |
+| GET | `/v1/messaging/policy` | getMessagingPolicy | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| PUT | `/v1/messaging/policy` | updateMessagingPolicy | Not exposed by Account relay | Application administration; not exposed by Account relay |
 | GET | `/v1/conversations/{conversationId}/members` | listMembers | `/api/v2/messaging/relay/v1/conversations/{conversationId}/members` | Account session |
 | POST | `/v1/conversations/{conversationId}/members` | addMember | `/api/v2/messaging/relay/v1/conversations/{conversationId}/members` | Account session |
 | DELETE | `/v1/conversations/{conversationId}/members/{principalId}` | removeMember | `/api/v2/messaging/relay/v1/conversations/{conversationId}/members/{principalId}` | Account session |
@@ -164,23 +167,23 @@ required. Meetings and established permitted service contexts retain independent
 | POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | finalizeAttachment | `/api/v2/messaging/relay/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | Account session |
 | POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants` | grantAttachmentDownload | `/api/v2/messaging/relay/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants` | Account session |
 | GET | `/v1/conversations/{conversationId}/attachments/{attachmentId}/content` | readAttachmentContent | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
-| GET | `/v1/messaging/legal-holds` | listLegalHolds | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/legal-holds` | createLegalHold | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/legal-holds/{holdId}` | getLegalHold | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/legal-holds/{holdId}/release` | releaseLegalHold | Not exposed by Account relay | Application administration; excluded from public Swagger |
+| GET | `/v1/messaging/legal-holds` | listLegalHolds | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/legal-holds` | createLegalHold | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/legal-holds/{holdId}` | getLegalHold | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/legal-holds/{holdId}/release` | releaseLegalHold | Not exposed by Account relay | Application administration; not exposed by Account relay |
 | GET | `/v1/conversations/{conversationId}/search` | searchConversation | `/api/v2/messaging/relay/v1/conversations/{conversationId}/search` | Account session |
 | GET | `/v1/messaging/search` | searchMessages | `/api/v2/messaging/relay/v1/messaging/search` | Account session |
 | POST | `/v1/conversations/{conversationId}/reports` | createReport | `/api/v2/messaging/relay/v1/conversations/{conversationId}/reports` | Account session |
-| GET | `/v1/messaging/reports` | listReports | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/reports/{reportId}` | getReport | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/moderation/actions` | listModerationActions | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/moderation/actions` | applyModerationAction | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/exports` | requestExport | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/exports/{exportId}` | getExport | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/exports/{exportId}/download-grants` | grantExportDownload | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| POST | `/v1/messaging/deletion-requests` | requestDataDeletion | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/deletion-requests/{requestId}` | getDataDeletion | Not exposed by Account relay | Application administration; excluded from public Swagger |
-| GET | `/v1/messaging/audit` | listAudit | Not exposed by Account relay | Application administration; excluded from public Swagger |
+| GET | `/v1/messaging/reports` | listReports | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/reports/{reportId}` | getReport | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/moderation/actions` | listModerationActions | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/moderation/actions` | applyModerationAction | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/exports` | requestExport | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/exports/{exportId}` | getExport | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/exports/{exportId}/download-grants` | grantExportDownload | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| POST | `/v1/messaging/deletion-requests` | requestDataDeletion | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/deletion-requests/{requestId}` | getDataDeletion | Not exposed by Account relay | Application administration; not exposed by Account relay |
+| GET | `/v1/messaging/audit` | listAudit | Not exposed by Account relay | Application administration; not exposed by Account relay |
 | POST | `/v1/messaging/client-sessions/revoke-all` | revokeAllClientSessions | `/api/v2/messaging/client-sessions/revoke-all` | Account session |
 | GET | `/v1/messaging/sms-bridge/disclosure` | getSmsBridgeDisclosure | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
 | GET | `/v1/conversations/{conversationId}/sms-bridges` | listSmsBridges | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
@@ -224,3 +227,14 @@ required. Meetings and established permitted service contexts retain independent
 | GET | `/v1/conversations/{conversationId}/invite-links` | listInviteLinks | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
 | POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | revokeInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
 | POST | `/v1/messaging/invite-links/join` | joinInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| GET | `/v1/messaging/history-transfer-capabilities` | getHistoryTransferCapabilities | `/api/v2/messaging/relay/v1/messaging/history-transfer-capabilities` | Account session |
+| POST | `/v1/messaging/history-transfers-v2` | createHistoryTransferV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2` | Account session |
+| GET | `/v1/messaging/history-transfers-v2` | listHistoryTransfersV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2` | Account session |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}` | getHistoryTransferV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}` | Account session |
+| PUT | `/v1/messaging/history-transfers-v2/{transferId}/manifest` | putHistoryManifestV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/manifest` | Account session |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}/manifest` | getHistoryManifestV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/manifest` | Account session |
+| PUT | `/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | putHistoryChunkV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | Account session |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | getHistoryChunkV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | Account session |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/checkpoint` | checkpointHistoryTransferV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/checkpoint` | Account session |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/complete` | completeHistoryTransferV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/complete` | Account session |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/cancel` | cancelHistoryTransferV2 | `/api/v2/messaging/relay/v1/messaging/history-transfers-v2/{transferId}/cancel` | Account session |
