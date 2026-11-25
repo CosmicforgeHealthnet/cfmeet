@@ -60,7 +60,7 @@ export default function LinkedDevices() {
           <h2 className="text-base font-semibold">Linked devices</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Browsers and phones that can use your private messages.
-            {p ? ` ${p.activeWebDevices} of ${p.maxWebDevices} browsers in use.` : ""}
+            {p ? (p.maxWebDevices > 0 ? ` ${p.activeWebDevices} of ${p.maxWebDevices} browsers in use.` : ` ${p.activeWebDevices} browsers in use.`) : ""}
           </p>
         </div>
         {error && <p role="alert" className="flex items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"><span className="flex-1">{error}</span><button type="button" aria-label="Dismiss" onClick={() => setError(null)}><X className="size-4" /></button></p>}

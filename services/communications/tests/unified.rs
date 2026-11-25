@@ -101,6 +101,90 @@ async fn protected_messaging_installation_survives_ordinary_session_end() {
     );
     h.close().await;
 }
+
+/// An already-read logout page must not revoke a device promoted while that page
+/// waited for its row lock. This uses actual PostgreSQL lock/recheck semantics.
+#[tokio::test]
+async fn session_end_rechecks_installation_promotion_before_revoking_owner() {
+    use sea_orm::TransactionTrait;
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let scope = h.delegated(&a.account);
+    let chat = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat, (a.profile.principal_id, "ACTIVE".into()));
+    let session = "3a".repeat(32);
+    let linked = h
+        .state
+        .link_device(
+            &scope,
+            &a.profile,
+            json!({"platform":"WEB","chatDeviceId":chat}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(linked["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let promotion = h.state.store.db.begin().await.unwrap();
+    let _: Value = one(
+        &promotion,
+        "SELECT to_jsonb(d) doc FROM communication_devices d WHERE id=$1 FOR UPDATE",
+        vec![id.into()],
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let state = h.state.clone();
+    let profile = a.profile.clone();
+    let end_scope = scope.clone();
+    let task = tokio::spawn(async move {
+        state
+            .end_session_devices(&end_scope, &profile, &session)
+            .await
+    });
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let waiting: Value = one(&h.state.store.db,
+            "SELECT jsonb_build_object('waiting',EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock')) doc",vec![]).await.unwrap().unwrap();
+        if waiting["waiting"] == true {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session end never reached the locked device"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        !h.world.read().unwrap().revoked_devices.contains(&chat),
+        "canonical revocation must wait for the current binding"
+    );
+    execute(&promotion,
+        "INSERT INTO communication_messaging_installations(tenant_id,application_id,environment_id,principal_id,chat_device_id,installation_ref) SELECT tenant_id,application_id,environment_id,principal_id,$2,$3 FROM communication_profiles WHERE id=$1",
+        vec![a.profile.id.into(),chat.into(),"5b".repeat(32).into()]).await.unwrap();
+    execute(
+        &promotion,
+        "UPDATE communication_devices SET account_session_ref=NULL WHERE id=$1",
+        vec![id.into()],
+    )
+    .await
+    .unwrap();
+    promotion.commit().await.unwrap();
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        0
+    );
+    assert!(!h.world.read().unwrap().revoked_devices.contains(&chat));
+    h.close().await;
+}
 async fn contact_id(h: &Harness, owner: &Profile, other: &Profile) -> Uuid {
     let v: Value = one(&h.state.store.db,
         "SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.owner_profile_id=$1 AND (c.left_profile_id=$2 OR c.right_profile_id=$2)",

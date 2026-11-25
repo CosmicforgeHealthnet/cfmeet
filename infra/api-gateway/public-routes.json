@@ -5395,6 +5395,27 @@
       "method": "GET",
       "path": "/v1/sms/threads/{threadId}/messages",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/messaging/devices/{deviceId}/installation",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices/{deviceId}/installation",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices/{deviceId}/installation-challenges",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
     }
   ]
 }

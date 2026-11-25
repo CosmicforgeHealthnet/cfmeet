@@ -52,6 +52,26 @@ mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
 mod m20261121_000001_account_phones;
 mod m20261124_000001_messaging_installations;
+mod m20261124_000002_concurrent_devices;
+
+/// Independently versioned, forward-only removal of native-device exclusivity.
+pub struct ConcurrentDevicesMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ConcurrentDevicesMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261124_000002_concurrent_devices::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_concurrent_device_migrations").into_iden()
+    }
+}
+pub async fn concurrent_devices_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, DbErr> {
+    Ok(pending_migrations::<ConcurrentDevicesMigrator, _>(db)
+        .await?
+        .is_empty())
+}
 
 /// Independent additive history; earlier images ignore it on rollback.
 pub struct MessagingInstallationsMigrator;

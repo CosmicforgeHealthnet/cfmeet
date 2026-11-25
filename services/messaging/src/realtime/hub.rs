@@ -184,12 +184,15 @@ impl Hub {
         {
             return Err(LimitExceeded::Tenant);
         }
-        if s.per_principal.get(&pk).copied().unwrap_or(0) >= self.settings.per_principal_connections
+        if self.settings.per_principal_connections > 0
+            && s.per_principal.get(&pk).copied().unwrap_or(0)
+                >= self.settings.per_principal_connections
         {
             return Err(LimitExceeded::Principal);
         }
-        if s.by_device.get(&a.device_id).map_or(0, HashSet::len)
-            >= self.settings.per_device_connections
+        if self.settings.per_device_connections > 0
+            && s.by_device.get(&a.device_id).map_or(0, HashSet::len)
+                >= self.settings.per_device_connections
         {
             return Err(LimitExceeded::Device);
         }
@@ -241,12 +244,14 @@ impl Hub {
             >= self.settings.per_tenant_connections
         {
             Err(LimitExceeded::Tenant)
-        } else if s.per_principal.get(&pk).copied().unwrap_or(0)
-            >= self.settings.per_principal_connections
+        } else if self.settings.per_principal_connections > 0
+            && s.per_principal.get(&pk).copied().unwrap_or(0)
+                >= self.settings.per_principal_connections
         {
             Err(LimitExceeded::Principal)
-        } else if s.by_device.get(&a.device_id).map_or(0, HashSet::len)
-            >= self.settings.per_device_connections
+        } else if self.settings.per_device_connections > 0
+            && s.by_device.get(&a.device_id).map_or(0, HashSet::len)
+                >= self.settings.per_device_connections
         {
             Err(LimitExceeded::Device)
         } else {
@@ -589,6 +594,20 @@ mod tests {
             device_id: device,
             session_id: Uuid::new_v4(),
         }
+    }
+
+    #[test]
+    fn concurrent_tabs_and_devices_do_not_replace_existing_connections() {
+        let hub = Hub::new(RealtimeSettings::default());
+        let (t, p, d) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let connections = (0..32)
+            .map(|_| hub.register(adm(t, p, d)).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(hub.connections(), 32);
+        for connection in connections {
+            hub.unregister(connection.id);
+        }
+        assert_eq!(hub.connections(), 0);
     }
 
     #[test]

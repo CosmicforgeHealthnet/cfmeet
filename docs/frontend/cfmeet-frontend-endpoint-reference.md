@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 325 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 120 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **758** |
+| **Total** | | | **772** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -323,6 +323,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.11.0**; b
 | POST | `/api/v2/messaging/client-tokens` | account session | Issue a short-lived, device-bound Messaging client token (for the realtime gateway). | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_client_token` |
 | POST | `/api/v2/messaging/devices` | account session | Register a device with its proof-of-possession KeyPackage. | 201, 401, 403, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_messaging_register_device` |
 | POST | `/api/v2/messaging/devices/registration-challenges` | account session | Start a device registration (the challenge the device signs with its own key). | 201, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_registration_challenge` |
+| GET | `/api/v2/messaging/devices/{deviceId}/installation` | account session |  | 200, 401, 403, 503 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_messaging_installation_status` |
+| POST | `/api/v2/messaging/devices/{deviceId}/installation` | account session |  | 200, 401, 403, 503 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_messaging_bind_installation` |
+| POST | `/api/v2/messaging/devices/{deviceId}/installation-challenges` | account session |  | 201, 401, 403, 503 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_messaging_installation_challenge` |
 | POST | `/api/v2/messaging/devices/{deviceId}/key-packages` | account session | Publish one-time KeyPackages of the caller's device. | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_publish_key_packages` |
 | POST | `/api/v2/messaging/devices/{deviceId}/revoke` | account session | Revoke one of the caller's devices. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_device` |
 | GET | `/api/v2/messaging/directory` | account session | Colleagues (active members of the caller's organizations) the caller may message. | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_directory` |
@@ -1130,8 +1133,19 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/messaging/history-transfer-capabilities` | customer credential (server-side only); Messaging client token | Discover deployed history-transfer versions and finite bounds | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#getHistoryTransferCapabilities` |
 | GET | `/v1/messaging/history-transfers` | customer credential (server-side only); Messaging client token | list History Transfers | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#listHistoryTransfers` |
 | POST | `/v1/messaging/history-transfers` | customer credential (server-side only); Messaging client token | create History Transfer | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createHistoryTransfer` |
+| GET | `/v1/messaging/history-transfers-v2` | customer credential (server-side only); Messaging client token | List recent device transfers | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#listHistoryTransfersV2` |
+| POST | `/v1/messaging/history-transfers-v2` | customer credential (server-side only); Messaging client token | Request an approved resumable transfer | 201, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#createHistoryTransferV2` |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}` | customer credential (server-side only); Messaging client token | Read transfer progress | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#getHistoryTransferV2` |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/cancel` | customer credential (server-side only); Messaging client token | Cancel and delete relay objects | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#cancelHistoryTransferV2` |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/checkpoint` | customer credential (server-side only); Messaging client token | Record signed durable target progress | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#checkpointHistoryTransferV2` |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | customer credential (server-side only); Messaging client token | Fetch an indexed ciphertext chunk | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#getHistoryChunkV2` |
+| PUT | `/v1/messaging/history-transfers-v2/{transferId}/chunks/{chunkIndex}` | customer credential (server-side only); Messaging client token | Upload an immutable bounded chunk idempotently | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#putHistoryChunkV2` |
+| POST | `/v1/messaging/history-transfers-v2/{transferId}/complete` | customer credential (server-side only); Messaging client token | Complete only after all chunks are durably acknowledged and delete relay objects | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#completeHistoryTransferV2` |
+| GET | `/v1/messaging/history-transfers-v2/{transferId}/manifest` | customer credential (server-side only); Messaging client token | Fetch the sealed manifest | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#getHistoryManifestV2` |
+| PUT | `/v1/messaging/history-transfers-v2/{transferId}/manifest` | customer credential (server-side only); Messaging client token | Publish an immutable source-authenticated encrypted manifest | 200, 400, 401, 403, 404, 409, 413, 429, 503 | — | `messaging/http/v1.openapi.json#putHistoryManifestV2` |
 | GET | `/v1/messaging/history-transfers/{transferId}` | customer credential (server-side only); Messaging client token | get History Transfer | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getHistoryTransfer` |
 | POST | `/v1/messaging/history-transfers/{transferId}/cancel` | customer credential (server-side only); Messaging client token | cancel History Transfer | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#cancelHistoryTransfer` |
 | POST | `/v1/messaging/history-transfers/{transferId}/complete` | customer credential (server-side only); Messaging client token | complete History Transfer | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#completeHistoryTransfer` |

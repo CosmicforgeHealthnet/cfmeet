@@ -230,12 +230,24 @@ async fn revoke(
 /// The ACTIVE devices of a principal of the caller's own environment. The target must be
 /// an ACTIVE messaging principal there (Platform Access, fresh); anything else — another
 /// tenant's principal included — is NOT_FOUND. Lookups are rate-limited per credential.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectoryQuery {
+    cursor: Option<Uuid>,
+    limit: Option<i64>,
+}
+
 async fn directory(
     State(state): State<AppState>,
     caller: CustomerCaller,
     headers: HeaderMap,
     Path(principal_id): Path<Uuid>,
+    Query(q): Query<DirectoryQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let limit = q.limit.unwrap_or(100);
+    if !(1..=500).contains(&limit) {
+        return Err(crate::error::Error::validation("limit must be between 1 and 500").into());
+    }
     let ctx = caller.require_scope(MESSAGES_READ)?;
     let acting = require_acting(&state, &caller, &headers).await?;
     devices::directory_lookup_allowed(&state, ctx).await?;
@@ -260,7 +272,14 @@ async fn directory(
             return Err(ApiError::code(ErrorCode::ServiceUnavailable));
         }
     }
-    let rows = devices::active_devices(&state, ctx, principal_id).await?;
+    let mut rows = devices::active_devices(&state, ctx, principal_id, q.cursor, limit).await?;
+    let more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let next_cursor = if more {
+        rows.last().map(|d| d.id)
+    } else {
+        None
+    };
     // The acting principal's OWN devices also show their KeyPackage stock, so each device
     // keeps enough published for others to add it while it is offline (never shown for
     // another principal's devices).
@@ -277,6 +296,7 @@ async fn directory(
     let head = transparency::tree_head(&state.db).await?;
     Ok(Json(json!({
         "principalId": principal_id,
+        "nextCursor": next_cursor,
         "devices": rows.iter().map(|d| {
             let mut v = devices::device_view(d);
             if principal_id == acting.principal_id {

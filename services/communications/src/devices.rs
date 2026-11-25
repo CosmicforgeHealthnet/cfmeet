@@ -13,7 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-pub const MAX_DEVICES: i64 = 20;
+/// Compatibility field: zero means no fixed device-count restriction.
+pub const MAX_DEVICES: i64 = 0;
 
 /// Account alone attests that a trusted installation proved possession of this
 /// Messaging identity after local protection completed. No client can assert this
@@ -162,6 +163,17 @@ impl State {
         let mut ended = 0;
         for d in &bound {
             let id = uuid_field(d, "id")?;
+            // Promotion clears the session pointer under this same row lock. Recheck
+            // before calling a canonical owner: an earlier unlocked page is not
+            // authority to revoke an installation which has since been protected.
+            let txn = self.store.begin().await?;
+            let current: Option<Value> = one(&txn,
+                "SELECT to_jsonb(d) doc FROM communication_devices d WHERE id=$1 AND profile_id=$2 AND account_session_ref=$3 AND state='ACTIVE' FOR UPDATE",
+                vec![id.into(),p.id.into(),session_ref.into()]).await?;
+            let Some(d) = current else {
+                txn.commit().await?;
+                continue;
+            };
             if let Some(chat) = d["chat_device_ref"].as_str() {
                 match self
                     .messaging(&acting)?
@@ -188,7 +200,6 @@ impl State {
                     Err(e) => return Err(e),
                 }
             }
-            let txn = self.store.begin().await?;
             let row:Option<Value>=one(&txn,"UPDATE communication_devices d SET state='REVOKED',revoked_at=now(),revocation_reason='ACCOUNT_SESSION_ENDED',push_platform=NULL,push_registered_at=NULL,version=d.version+1,updated_at=now() WHERE id=$1 AND profile_id=$2 AND state='ACTIVE' RETURNING to_jsonb(d) doc",
                 vec![id.into(),p.id.into()]).await?;
             if let Some(row) = row {
@@ -388,10 +399,6 @@ impl State {
                 .await?;
             txn.commit().await?;
             return Ok(result);
-        }
-        let count:Value=one(&txn,"SELECT jsonb_build_object('n',count(*)) doc FROM communication_devices WHERE profile_id=$1 AND state='ACTIVE'",vec![p.id.into()]).await?.ok_or(Error::Unavailable)?;
-        if count["n"].as_i64().unwrap_or(MAX_DEVICES) >= MAX_DEVICES {
-            return Err(Error::PolicyValidation);
         }
         // A proved protected Messaging installation is independent of sign-in. The
         // Account-only promotion endpoint also handles an existing legacy link.

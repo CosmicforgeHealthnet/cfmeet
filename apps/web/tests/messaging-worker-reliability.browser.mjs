@@ -54,6 +54,14 @@ try {
  const packed=new Uint8Array(kp.length+4);new DataView(packed.buffer).setUint32(0,kp.length);packed.set(kp,4);const add=sender.addDevices(gid,packed);
  await call('join',{groupId:gid,welcome:add.welcome});
  const joinedEpoch=await call('epoch',{groupId:gid});
+ // A metadata checkpoint while HTTP acceptance is pending must not make the
+ // tentative epoch durable. Private KeyPackages must not escape in that window.
+ await call('updateKeys',{groupId:gid});
+ let pendingKeysRefused=false;try{await call('keyPackages',{count:1});}catch(e){pendingKeysRefused=e.message==='MLS_CHANGE_PENDING';}
+ check('unconfirmed group changes block KeyPackage publication',pendingKeysRefused);
+ await call('reconcileHistoryMetadata',{conversationId:conv,messages:[]});
+ w.terminate();await new Promise(r=>setTimeout(r,100));start();await call('open',{account,scope});
+ check('metadata checkpoint never persists an unaccepted epoch',(await call('epoch',{groupId:gid}))===joinedEpoch);
  let seq=0;const encode=(size=20)=>{const cmid=id(100+(++seq));const aad=core.message_aad(scope.tenantId,scope.applicationId,scope.environmentId,conv,cmid,senderId);const ciphertext=sender.encrypt(gid,aad,new TextEncoder().encode(JSON.stringify({v:1,t:'text',text:'x'.repeat(size)})));return {sequence:seq,messageId:id(1000+seq),clientMessageId:cmid,senderDeviceId:senderId,senderPrincipalId:id(8),kind:'APPLICATION',lifecycle:'ACTIVE',createdAt:'2026-11-24T00:00:00Z',epoch:Number(sender.epoch(gid)),ciphertext:b64(ciphertext)};};
  const process=messages=>call('processMessages',{conversationId:conv,groupId:gid,messages});
  const first=encode();check('normal real MLS decrypt',(await process([first])).records[0].status==='DECRYPTED');
@@ -136,6 +144,9 @@ try {
  await call('createGroup',{groupId:gid});await call('confirm');
  const selfMessage=await call('encrypt',{conversationId:conv,groupId:gid,clientMessageId:id(5000),payload:{t:'text',text:'synthetic persistence probe'}});
  await process([{sequence:1,messageId:id(5001),clientMessageId:id(5000),senderDeviceId:id(40),senderPrincipalId:account,kind:'APPLICATION',lifecycle:'ACTIVE',epoch:0,ciphertext:b64(selfMessage.ciphertext)}]);
+ check('readable history needs no recovery',!(await call('historyRecoveryNeeded')));
+ await process([{sequence:2,messageId:id(5002),clientMessageId:id(5003),senderDeviceId:senderId,senderPrincipalId:id(8),kind:'EDIT',lifecycle:'ACTIVE',epoch:0,ciphertext:'AQID'}]);
+ check('failed edit controls trigger automatic recovery discovery',await call('historyRecoveryNeeded'));
  w.terminate();return {boundary:'shipped worker and real WASM MLS with real Chromium IndexedDB; no backend or authentication services',events};
  },{worker:role('worker'),glue:role('glue'),wasm:role('wasm')});
  const probe=async p=>p.evaluate(async worker=>{
@@ -148,5 +159,34 @@ try {
  await page.reload();if(!await probe(page))throw Error('refresh persistence');evidence.events.push({name:'page refresh preserves identity and sent history',result:'CONFIRMED'});
  await page.close();const reopened=await context.newPage();await reopened.goto(base);if(!await probe(reopened))throw Error('tab closure persistence');evidence.events.push({name:'tab close/reopen preserves identity and sent history',result:'CONFIRMED'});
  await browser.close();browser=await chromium.launchPersistentContext(profile);const restarted=await browser.newPage();await restarted.goto(base);if(!await probe(restarted))throw Error('browser restart persistence');evidence.events.push({name:'browser process restart with same profile preserves identity and sent history',result:'CONFIRMED'});
+ // Two real tabs share one serialized runtime without exporting private state.
+ const sharedTabs = [await browser.newPage(), await browser.newPage()];
+ for (const tab of sharedTabs) {
+   await tab.goto(base);
+   await tab.evaluate(worker => {
+     const shared = new SharedWorker('/' + worker, {type:'module',name:'cfmeet-shared-tab-regression'});
+     const waiting = new Map(); let serial=0;
+     shared.port.onmessage=({data})=>{const p=waiting.get(data.id);waiting.delete(data.id);data.ok?p.resolve(data.result):p.reject(Error(data.error));};
+     shared.port.start();
+     window.sharedCall=(op,args={})=>new Promise((resolve,reject)=>{const id=++serial;waiting.set(id,{resolve,reject});shared.port.postMessage({id,op,args});});
+     window.sharedIds=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+   },role('worker'));
+ }
+ const openShared=tab=>tab.evaluate(()=>sharedCall('open',{account:sharedIds(8000),scope:{tenantId:sharedIds(1),applicationId:sharedIds(2),environmentId:sharedIds(3)}}));
+ if((await openShared(sharedTabs[0])).status!=='NONE')throw Error('shared initial account');
+ await sharedTabs[0].evaluate(async()=>{await sharedCall('generate',{deviceId:sharedIds(8001)});await sharedCall('adopt');await sharedCall('createGroup',{groupId:new Uint8Array(32).fill(81)});await sharedCall('confirm');});
+ if((await openShared(sharedTabs[1])).status!=='READY')throw Error('second tab shared identity');
+ const sharedSent=await sharedTabs[1].evaluate(async()=>{const r=await sharedCall('encrypt',{conversationId:sharedIds(8002),groupId:new Uint8Array(32).fill(81),clientMessageId:sharedIds(8003),payload:{t:'text',text:'shared tab encrypted send'}});return{epoch:r.epoch,ciphertext:btoa(String.fromCharCode(...r.ciphertext)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'')};});
+ await sharedTabs[0].evaluate(sent=>sharedCall('processMessages',{conversationId:sharedIds(8002),groupId:new Uint8Array(32).fill(81),messages:[{sequence:1,messageId:sharedIds(8004),senderDeviceId:sharedIds(8001),senderPrincipalId:sharedIds(8000),clientMessageId:sharedIds(8003),kind:'APPLICATION',lifecycle:'ACTIVE',...sent}]}),sharedSent);
+ const sharedHistory=await sharedTabs[1].evaluate(()=>sharedCall('history',{conversationId:sharedIds(8002)}));
+ if(sharedHistory.length!==1||sharedHistory[0].status!=='SENT')throw Error('shared history');
+ await sharedTabs[0].close();
+ if((await sharedTabs[1].evaluate(()=>sharedCall('status'))).deviceId!=='00000000-0000-4000-8000-000000008001')throw Error('tab close stopped other tab');
+ await sharedTabs[1].evaluate(()=>sharedCall('lock'));
+ let sharedLocked=false;try{await sharedTabs[1].evaluate(()=>sharedCall('history',{conversationId:sharedIds(8002)}));}catch{sharedLocked=true;}
+ if(!sharedLocked)throw Error('shared lock did not evict key');
+ if((await openShared(sharedTabs[1])).status!=='READY')throw Error('shared runtime re-entry');
+ await sharedTabs[1].close();
+ evidence.events.push({name:'two tabs share one MLS runtime, closing one preserves the other and explicit lock evicts keys',result:'CONFIRMED'});
  await writeFile(out,JSON.stringify({at:new Date().toISOString(),...evidence},null,2));console.log(JSON.stringify(evidence,null,2));
 }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

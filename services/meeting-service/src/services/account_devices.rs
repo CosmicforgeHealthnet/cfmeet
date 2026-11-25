@@ -1,4 +1,4 @@
-//! Account-wide linked devices: one primary mobile, several web devices, web-only accounts.
+//! Account-wide linked devices: independently approved mobile and browser installations.
 //!
 //! The Account authority (this service) owns the device policy. A *device* is one browser
 //! profile or one mobile app installation, identified by a client-generated installation
@@ -8,7 +8,7 @@
 //!
 //! States (per account):
 //! * `WEB_ONLY` — no primary mobile; trusted web devices work on their own;
-//! * `MOBILE_PRIMARY` — exactly one ACTIVE mobile (database-enforced), plus web devices;
+//! * `MOBILE_PRIMARY` — legacy policy label for an account with ACTIVE mobile devices;
 //! * `DEVICE_REPLACEMENT_PENDING` — a newly signed-in mobile waits for approval by a
 //!   trusted device or an email step-up. Its sign-in is refused everywhere except the
 //!   device endpoints until the replacement completes;
@@ -20,8 +20,8 @@
 //! types the comparison code shown on the new device and signs with its own device key),
 //! or an email step-up code (account recovery; proves control of the account mailbox).
 //! ADR 0067: a browser (WEB device) is trusted by the fresh sign-in it is declared from
-//! (recorded as `BOOTSTRAP`), with no verification step; the per-account browser limit
-//! signs out the least recently used browser instead of refusing. A new mobile still
+//! (recorded as `BOOTSTRAP`), with no verification step; independent browsers and
+//! sessions coexist without automatically evicting older sign-ins. A new mobile still
 //! completes a link (primary-mobile replacement).
 //!
 //! Every proof is an Ed25519 signature over a domain-separated statement with a purpose,
@@ -51,7 +51,7 @@ use crate::{
     state::AppState,
 };
 
-pub const DEFAULT_MAX_WEB_DEVICES: i64 = 4;
+pub const DEFAULT_MAX_WEB_DEVICES: i64 = 0;
 const PROOF_DOMAIN: &str = "cfmeet-account-device-proof:v1";
 const INSTALLATION_DOMAIN: &str = "cfmeet-account-installation:v1";
 const MAX_LINKS_PER_HOUR: i64 = 10;
@@ -61,7 +61,7 @@ const EMAIL_RESEND_SECS: i64 = 60;
 /// Backend device policy (environment; no client hard-codes these values).
 #[derive(Debug, Clone)]
 pub struct DevicePolicy {
-    /// `ACCOUNT_MAX_WEB_DEVICES` (default 4, bounded 1-20): active web devices per account.
+    /// Deprecated compatibility field: 0 means no concurrent browser-device limit.
     pub max_web_devices: i64,
     /// `ACCOUNT_DEVICE_LINK_TTL_SECS` (default 300, bounded 60-900).
     pub link_ttl_secs: i64,
@@ -125,7 +125,7 @@ impl DevicePolicy {
             )
         };
         Self {
-            max_web_devices: num("ACCOUNT_MAX_WEB_DEVICES", DEFAULT_MAX_WEB_DEVICES, 1, 20),
+            max_web_devices: DEFAULT_MAX_WEB_DEVICES,
             link_ttl_secs: num("ACCOUNT_DEVICE_LINK_TTL_SECS", 300, 60, 900),
             proof_window_secs: num("ACCOUNT_DEVICE_PROOF_WINDOW_SECS", 300, 30, 900),
             email_step_up: flag("ACCOUNT_DEVICE_EMAIL_STEP_UP"),
@@ -230,7 +230,7 @@ pub struct DeviceView {
     /// `BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,
     /// ADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
     pub trusted_via: Option<String>,
-    /// True for the account's ACTIVE mobile.
+    /// Legacy field: true for an ACTIVE approved mobile; several may be true.
     pub primary: bool,
     /// Lowercase hex SHA-256 of the device public key (compare across devices).
     pub key_thumbprint: String,
@@ -253,10 +253,11 @@ pub struct DeviceView {
 pub struct DevicePolicyView {
     /// `WEB_ONLY`, `MOBILE_PRIMARY` or `DEVICE_REPLACEMENT_PENDING` (a new mobile waits).
     pub account_state: String,
-    /// Always 1: at most one primary mobile.
+    /// Zero means no product cap on approved mobile installations.
     pub max_primary_mobiles: i64,
     pub max_web_devices: i64,
     pub active_web_devices: i64,
+    /// Legacy summary of an active mobile, not exclusive device authority.
     pub primary_mobile_device_id: Option<Uuid>,
     pub pending_mobile_device_ids: Vec<Uuid>,
     /// Ways a new device can be approved: `DEVICE_APPROVAL` (when a trusted device exists)
@@ -305,9 +306,9 @@ pub struct DeviceLinkView {
 #[serde(rename_all = "camelCase")]
 pub struct DeviceOutcome {
     pub device: DeviceView,
-    /// The primary mobile this completion replaced (revoked), if any.
+    /// Legacy compatibility field; additional-device approval never replaces a device.
     pub replaced_device_id: Option<Uuid>,
-    /// Sign-ins ended by this operation (replaced mobile, superseded sign-ins).
+    /// Sign-ins explicitly ended by this operation; additional-device approval returns zero.
     pub ended_sessions: i64,
 }
 
@@ -769,70 +770,6 @@ async fn trust_web_by_sign_in(
     Ok(())
 }
 
-/// ADR 0067: the per-account browser limit never blocks a sign-in. When it is reached, the
-/// least recently used ACTIVE web device(s) are revoked (`USER_REVOKED`: the user's own
-/// sign-in caused it; logged with reason `WEB_DEVICE_LIMIT_REACHED`) until one slot is
-/// free. Their sign-ins end and the usual fan-out ends their downstream credentials.
-/// Called under the account lock (which serializes every device change of the account);
-/// returns the ended sign-ins.
-async fn evict_least_recent_web_device(
-    txn: &DatabaseTransaction,
-    user_id: Uuid,
-    session_id: Uuid,
-    max_web_devices: i64,
-) -> ApiResult<Vec<Uuid>> {
-    let rows = txn
-        .query_all(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "SELECT d.id FROM account_devices d \
-               JOIN account_sessions s ON s.device_id = d.id \
-                AND s.revoked_at IS NULL AND s.absolute_expires_at > now() \
-              WHERE d.user_id = $1 AND d.device_class = 'WEB' AND d.state = 'ACTIVE' \
-              GROUP BY d.id, d.last_seen_at \
-              ORDER BY GREATEST(d.last_seen_at, max(COALESCE(s.last_refreshed_at, s.created_at))) ASC, d.id",
-            [user_id.into()],
-        ))
-        .await?;
-    let ids = rows
-        .iter()
-        .map(|r| r.try_get::<Uuid>("", "id"))
-        .collect::<Result<Vec<_>, _>>()?;
-    let excess = (ids.len() as i64 - max_web_devices + 1).max(0) as usize;
-    let mut ended = vec![];
-    for id in ids.into_iter().take(excess) {
-        let sessions = end_device_sessions(txn, id, "DEVICE_REVOKED", None).await?;
-        txn.execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(), \
-                    revoke_reason = 'USER_REVOKED', updated_at = now() \
-             WHERE id = $1 AND state <> 'REVOKED'",
-            [id.into()],
-        ))
-        .await?;
-        txn.execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE account_device_links SET status = 'CANCELLED', finished_at = now() \
-             WHERE device_id = $1 AND status IN ('PENDING', 'APPROVED')",
-            [id.into()],
-        ))
-        .await?;
-        security::record_event(
-            txn,
-            SecurityEvent::new("DEVICE_REVOKED", Outcome::Success)
-                .by_user(user_id)
-                .session(session_id)
-                .detail(json!({
-                    "deviceId": id, "deviceClass": "WEB", "wasPrimary": false, "self": false,
-                    "reason": "WEB_DEVICE_LIMIT_REACHED", "limit": max_web_devices,
-                    "sessionsEnded": sessions.len(),
-                })),
-        )
-        .await?;
-        ended.extend(sessions);
-    }
-    Ok(ended)
-}
-
 pub async fn session_effects(state: &AppState, user_id: Uuid, session_ids: &[Uuid]) {
     for sid in session_ids {
         // `session_ended` also ends this sign-in's meeting media.
@@ -948,7 +885,7 @@ pub async fn policy_view(state: &AppState, caller: &DeviceCaller) -> ApiResult<D
             "WEB_ONLY"
         }
         .into(),
-        max_primary_mobiles: 1,
+        max_primary_mobiles: 0,
         max_web_devices: p.max_web_devices,
         active_web_devices: web,
         primary_mobile_device_id: primary,
@@ -1122,7 +1059,7 @@ pub async fn declare(
         .as_ref()
         .map(device_row)
         .transpose()?;
-    let mut superseded = vec![];
+    let superseded: Vec<Uuid> = vec![];
     let mut bootstrapped = false;
     let device_id = match same_installation {
         Some(d) => {
@@ -1133,8 +1070,8 @@ pub async fn declare(
                     "This installation is bound to another key; revoke it from a trusted device first",
                 ));
             }
-            superseded =
-                end_device_sessions(&txn, d.id, "SUPERSEDED", Some(caller.session_id)).await?;
+            // Fresh sessions on the same proven installation coexist; explicit
+            // revocation still ends every session bound to that installation.
             if d.device_class == "WEB" && d.trust != "TRUSTED" && d.state == "ACTIVE" {
                 // ADR 0067: a fresh sign-in on this browser is enough to trust it.
                 trust_web_by_sign_in(&txn, user.id, caller.session_id, d.id).await?;
@@ -1173,36 +1110,10 @@ pub async fn declare(
                 .is_some();
             let bootstrap = !ever_trusted;
             let mobile = req.device_class == "MOBILE";
-            if !mobile {
-                let web: i64 = txn
-                    .query_one(Statement::from_sql_and_values(
-                        DbBackend::Postgres,
-                        "SELECT count(*) AS n FROM account_devices d WHERE d.user_id = $1 \
-                           AND d.device_class = 'WEB' AND d.state = 'ACTIVE' AND EXISTS ( \
-                             SELECT 1 FROM account_sessions s WHERE s.device_id = d.id \
-                               AND s.revoked_at IS NULL AND s.absolute_expires_at > now())",
-                        [user.id.into()],
-                    ))
-                    .await?
-                    .map(|r| r.try_get::<i64>("", "n"))
-                    .transpose()?
-                    .unwrap_or(0);
-                if web >= policy.max_web_devices {
-                    // ADR 0067: signing in never blocks. The least recently used browser
-                    // of the account is signed out (revoked) to make room.
-                    let evicted = evict_least_recent_web_device(
-                        &txn,
-                        user.id,
-                        caller.session_id,
-                        policy.max_web_devices,
-                    )
-                    .await?;
-                    superseded.extend(evicted);
-                }
-            }
+            // Independent browser sign-ins never revoke another installation.
             // ADR 0067: a browser is trusted by the fresh sign-in it is declared from
             // (recorded as `BOOTSTRAP`: trusted by its own sign-in, no other device). A new
-            // mobile still waits for a link (primary-mobile replacement, ADR 0060).
+            // mobile still waits for explicit link approval; existing devices remain active.
             let (trust, state_value) = match (mobile, bootstrap) {
                 (_, true) => ("TRUSTED", "ACTIVE"),
                 (false, false) => ("TRUSTED", "ACTIVE"),
@@ -1705,7 +1616,7 @@ pub async fn send_email_code(
     )
     .await?;
     let what = if d.device_class == "MOBILE" {
-        "make a new phone your primary CF Meet mobile (your previous phone will be signed out)"
+        "approve an additional phone for your CF Meet account"
     } else {
         "trust a new browser for your CF Meet account"
     };
@@ -1742,8 +1653,8 @@ pub async fn send_email_code(
 }
 
 /// The new device completes its link (after approval, or with the email code). A web
-/// device becomes trusted; a pending mobile becomes the primary mobile and the previous
-/// primary mobile is revoked atomically (its sign-ins end; web devices are untouched).
+/// device becomes trusted; a pending mobile becomes ACTIVE after proof and approval.
+/// Other approved installations and their sign-ins remain active.
 pub async fn complete_link(
     state: &AppState,
     caller: &DeviceCaller,
@@ -1810,49 +1721,9 @@ pub async fn complete_link(
     if d.state == "REVOKED" {
         return Err(security_revoked());
     }
-    let mut replaced = None;
-    let mut ended = vec![];
     if d.state == "REPLACEMENT_PENDING" {
-        // Atomic primary-mobile replacement under the account lock: the previous primary
-        // is revoked before this one becomes ACTIVE (unique index: one primary).
-        let old = txn
-            .query_one(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "SELECT id FROM account_devices WHERE user_id = $1 AND device_class = 'MOBILE' \
-                   AND state = 'ACTIVE' FOR UPDATE",
-                [caller.user.id.into()],
-            ))
-            .await?
-            .map(|r| r.try_get::<Uuid>("", "id"))
-            .transpose()?;
-        if let Some(old) = old {
-            ended.extend(end_device_sessions(&txn, old, "DEVICE_REPLACED", None).await?);
-            ended.extend(
-                end_unclassified_sessions(
-                    &txn,
-                    caller.user.id,
-                    "DEVICE_REPLACED",
-                    Some(caller.session_id),
-                )
-                .await?,
-            );
-            txn.execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(), \
-                        revoke_reason = 'DEVICE_REPLACED', replaced_by_device_id = $2, updated_at = now() \
-                 WHERE id = $1",
-                [old.into(), d.id.into()],
-            ))
-            .await?;
-            txn.execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "UPDATE account_device_links SET status = 'CANCELLED', finished_at = now() \
-                 WHERE device_id = $1 AND status IN ('PENDING', 'APPROVED')",
-                [old.into()],
-            ))
-            .await?;
-            replaced = Some(old);
-        }
+        // Approval grants this installation authority. It never implies revocation of
+        // another phone or of a separately authenticated session.
         txn.execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "UPDATE account_devices SET trust = 'TRUSTED', trusted_via = $2, trusted_at = now(), \
@@ -1863,10 +1734,10 @@ pub async fn complete_link(
         .await?;
         security::record_event(
             &txn,
-            SecurityEvent::new("PRIMARY_MOBILE_REPLACED", Outcome::Success)
+            SecurityEvent::new("MOBILE_DEVICE_APPROVED", Outcome::Success)
                 .by_user(caller.user.id)
                 .session(caller.session_id)
-                .detail(json!({"deviceId": d.id, "replacedDeviceId": replaced, "via": method, "sessionsEnded": ended.len()})),
+                .detail(json!({"deviceId": d.id, "via": method, "sessionsEnded": 0})),
         )
         .await?;
     } else {
@@ -1894,12 +1765,12 @@ pub async fn complete_link(
     .await?;
     // N0-10 (S-9): the owner's security notice is recorded in the same transaction as the
     // link (deterministic key device-linked:<link id>), so it can never be lost.
-    let (subject, message) = if replaced.is_some() || d.device_class == "MOBILE" {
+    let (subject, message) = if d.device_class == "MOBILE" {
         (
-            "A new phone is now your primary CF Meet mobile",
-            "A new phone was confirmed as the primary mobile of your CF Meet account. Any previous \
-             phone was signed out; your trusted browsers stay signed in. If this was not you, \
-             revoke the phone and sign out all devices under Security & devices.",
+            "An additional phone was approved for your CF Meet account",
+            "An additional phone was approved for your CF Meet account. Your other approved devices \
+             remain signed in. If this was not you, revoke the phone and sign out all devices \
+             under Security & devices.",
         )
     } else {
         (
@@ -1924,14 +1795,13 @@ pub async fn complete_link(
         "device-linked",
     )?;
     txn.commit().await?;
-    session_effects(state, caller.user.id, &ended).await;
     let d = find_device(&state.db, caller.user.id, d.id, false)
         .await?
         .ok_or_else(link_invalid)?;
     Ok(DeviceOutcome {
         device: d.view(Some(d.id)),
-        replaced_device_id: replaced,
-        ended_sessions: ended.len() as i64,
+        replaced_device_id: None,
+        ended_sessions: 0,
     })
 }
 
@@ -2244,14 +2114,14 @@ mod tests {
     #[test]
     fn policy_defaults_and_bounds() {
         let p = DevicePolicy::default();
-        assert_eq!(p.max_web_devices, 4);
+        assert_eq!(p.max_web_devices, 0);
         assert!(p.email_step_up && p.e2ee_requires_trusted_device);
         let q = DevicePolicy::from_lookup(&|k| match k {
             "ACCOUNT_MAX_WEB_DEVICES" => Some("99".into()),
             "ACCOUNT_DEVICE_EMAIL_STEP_UP" => Some("off".into()),
             _ => None,
         });
-        assert_eq!(q.max_web_devices, 20);
+        assert_eq!(q.max_web_devices, 0);
         assert!(!q.email_step_up);
     }
 

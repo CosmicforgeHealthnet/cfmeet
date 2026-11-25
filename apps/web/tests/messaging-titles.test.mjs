@@ -150,7 +150,7 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "./private-shares": privateShares,
     "./errors": errors,
     "@/lib/auth/account-device": { accountDevice: {} },
-    "@/lib/auth/session": { accountSession: {} },
+    "@/lib/auth/session": { accountSession: { subscribe: () => () => {} } },
     "./crypto-client": { CryptoClient: class {}, CryptoWorkerError: class extends Error {} },
     "./managed-store": { ManagedConversationState: class {}, emptyRefresh: () => ({}) },
     "./outbox": { MessageOutbox: class {}, browserOutboxStorage: () => ({}), flushOutbox: async () => 0 },
@@ -159,6 +159,8 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "@/lib/auth/device-label": { browserDeviceLabel: () => "Browser" },
     "./conversation-title": titles,
     "./e2ee-membership": load("../src/lib/messaging/e2ee-membership.ts"),
+    "./local-authenticator": load("../src/lib/messaging/local-authenticator.ts"),
+    "./member-pages": load("../src/lib/messaging/member-pages.ts"),
     "./chat-list": load("../src/lib/messaging/chat-list.ts"),
     "./rich-content": load("../src/lib/messaging/rich-content.ts"),
   });

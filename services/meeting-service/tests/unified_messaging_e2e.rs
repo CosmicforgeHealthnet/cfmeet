@@ -322,6 +322,19 @@ async fn setup_with(
     migrate(&pa_migration, &pa_db);
     let messaging_db_url = create_db(&admin, "um_msg").await;
     migrate(&messaging_migration, &messaging_db_url);
+    // The real Messaging binary starts the N7b publication worker even when no
+    // Notification Service is configured. Its independently versioned tables must
+    // exist before that process starts; a ready HTTP listener alone is insufficient.
+    let notification_migration = messaging_migration.with_file_name(if cfg!(windows) {
+        "messaging-notification-fence-migration.exe"
+    } else {
+        "messaging-notification-fence-migration"
+    });
+    assert!(
+        notification_migration.is_file(),
+        "build the Messaging notification-fence migrator with the service binaries"
+    );
+    migrate(&notification_migration, &messaging_db_url);
 
     let gen = |kid: &str| ServiceSigningKey::generate(KeyId::parse(kid).unwrap());
     let pa_key = gen("pa-um-1");
@@ -702,7 +715,7 @@ async fn protected_installation_rebinds_without_reviving_a_revoked_identity_acro
         )
         .await
         .0,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "same UUID without the existing key is insufficient"
     );
     let package = device
@@ -768,14 +781,14 @@ async fn protected_installation_rebinds_without_reviving_a_revoked_identity_acro
         )
         .await
         .0,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "fresh sign-in alone cannot use a retained Messaging identity"
     );
     assert_eq!(
         app.post(&endpoint, Auth::Bearer(&next_token), proof)
             .await
             .0,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "old-session proof cannot rebind"
     );
     let (status, ch) = app
@@ -829,7 +842,7 @@ async fn protected_installation_rebinds_without_reviving_a_revoked_identity_acro
         )
         .await
         .0,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "same Account cannot move an identity between installations"
     );
     let revoke_proof = installation_account_proof(
@@ -883,7 +896,7 @@ async fn protected_installation_rebinds_without_reviving_a_revoked_identity_acro
         )
         .await
         .0,
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
 }
 

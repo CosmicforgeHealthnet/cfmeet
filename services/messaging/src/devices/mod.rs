@@ -409,7 +409,7 @@ async fn register_in(
         vec![ctx.scope.environment_id.into(), acting.principal_id.into()],
     )
     .await?;
-    if active >= state.devices.max_active_devices {
+    if state.devices.max_active_devices > 0 && active >= state.devices.max_active_devices {
         return Err(Error::code(ErrorCode::DeviceLimitReached));
     }
     let in_use = db::scalar_i64(
@@ -992,18 +992,23 @@ pub async fn active_devices(
     state: &AppState,
     ctx: &TrustedContext,
     principal_id: Uuid,
+    after: Option<Uuid>,
+    limit: i64,
 ) -> Result<Vec<DeviceRow>> {
     Ok(db::all(
         &state.db,
         &format!(
             "SELECT {DEVICE_COLUMNS} FROM messaging_devices WHERE tenant_id = $1 AND application_id = $2 \
-               AND environment_id = $3 AND principal_id = $4 AND status = 'ACTIVE' ORDER BY registered_at, id LIMIT 100"
+               AND environment_id = $3 AND principal_id = $4 AND status = 'ACTIVE' \
+               AND ($5::uuid IS NULL OR id > $5) ORDER BY id LIMIT $6"
         ),
         vec![
             ctx.scope.tenant_id.into(),
             ctx.scope.application_id.into(),
             ctx.scope.environment_id.into(),
             principal_id.into(),
+            after.into(),
+            (limit + 1).into(),
         ],
     )
     .await?)

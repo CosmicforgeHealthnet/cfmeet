@@ -1,0 +1,11 @@
+# Concurrent approved native installations
+
+The owner's 24 November 2026 requirement supersedes the earlier exclusive primary-mobile policy. An Android/iOS installation still proves its own key and completes explicit trusted-device approval or the existing approved email step-up. Completing that authorization activates that installation without revoking another phone, browser, unclassified sign-in or live meeting session. Explicit security/device revocation and sign-out everywhere remain terminal.
+
+`meeting-concurrent-devices-migration up` applies the separate forward-only history `meeting_concurrent_device_migrations`, version `m20261124_000002_concurrent_devices`. It removes only the unique `uq_account_devices_primary_mobile` index. It does not delete or modify any identity, trust state, message, key or session. The new Meeting image refuses startup until that migration is ready. Test databases apply it explicitly.
+
+For wire compatibility, `MOBILE_PRIMARY`, `REPLACEMENT_PENDING`, `primaryMobileDeviceId` and device `primary` remain legacy names. A pending mobile is awaiting authorization, not replacing another device. More than one active trusted mobile can have `primary: true`; the singular policy ID is a compatibility summary, not exclusive authority. `maxPrimaryMobiles: 0` means there is no product cap on approved mobile installations. Link creation, proof freshness, rate limits and abuse protection still apply.
+
+Integration journeys now assert Android/iOS coexistence, valid refresh of the existing phone, concurrent approval of three phones, no media removal when another phone is approved, and terminal explicit revocation. Compilation is not execution evidence: live PostgreSQL/Redis CI must pass the updated journeys. Service fixtures do not establish physical Android/iOS application acceptance or native OS history-unlock parity.
+
+An old Meeting image can still execute its former replacement behavior if rolled back while new approvals are accepted. Do not restore an exclusive database constraint or revoke devices to make a rollback fit. A release/rollback plan must keep device authorization on the compatible implementation, or temporarily suspend new approvals while preserving existing authority. This migration has no destructive down action.

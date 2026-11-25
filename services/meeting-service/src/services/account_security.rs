@@ -586,61 +586,16 @@ pub async fn owns_session<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Gap audit A21: the most sign-ins an account keeps open at once
-/// (`ACCOUNT_MAX_OPEN_SESSIONS`, default 50, at least 5). Signing in past it ends the
-/// least recently used sign-ins (SUPERSEDED), never the new one.
+/// Deprecated compatibility policy: no fixed concurrent sign-in limit. Authentication
+/// rate limits, absolute session expiry and explicit/security revocation remain enforced.
 pub fn max_open_sessions() -> i64 {
-    static MAX: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
-    *MAX.get_or_init(|| {
-        std::env::var("ACCOUNT_MAX_OPEN_SESSIONS")
-            .ok()
-            .and_then(|v| v.trim().parse::<i64>().ok())
-            .unwrap_or(50)
-            .max(5)
-    })
+    0
 }
 
-/// Ends the user's open sign-ins beyond [`max_open_sessions`] (least recently used
-/// first, `keep` excepted) and fans each end out. Returns how many ended.
-pub async fn enforce_session_cap(state: &AppState, user_id: Uuid, keep: Uuid) -> ApiResult<u64> {
-    let rows = state
-        .db
-        .query_all(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'SUPERSEDED' \
-              WHERE id IN (SELECT id FROM account_sessions \
-                            WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL \
-                              AND absolute_expires_at > now() \
-                            ORDER BY COALESCE(last_refreshed_at, created_at) DESC, id \
-                            OFFSET $3) \
-                AND revoked_at IS NULL \
-              RETURNING id",
-            [
-                user_id.into(),
-                keep.into(),
-                (max_open_sessions() - 1).into(),
-            ],
-        ))
-        .await?;
-    let mut ended = 0;
-    for row in rows {
-        let session_id: Uuid = row.try_get("", "id")?;
-        record_event_best_effort(
-            &state.db,
-            SecurityEvent::new("SESSION_REVOKED", Outcome::Success)
-                .by_user(user_id)
-                .session(session_id)
-                .detail(json!({"trigger":"SESSION_CAP"})),
-        )
-        .await;
-        if let Err(e) =
-            crate::services::communications::session_ended(state, user_id, session_id).await
-        {
-            tracing::error!(%session_id, "fan-out of a superseded sign-in failed: {e}");
-        }
-        ended += 1;
-    }
-    Ok(ended)
+/// New sign-ins never supersede other authorized sessions. Keep the existing call
+/// contract so authentication callers continue performing their other security checks.
+pub async fn enforce_session_cap(_state: &AppState, _user_id: Uuid, _keep: Uuid) -> ApiResult<u64> {
+    Ok(0)
 }
 
 pub fn normalize_email(email: &str) -> String {

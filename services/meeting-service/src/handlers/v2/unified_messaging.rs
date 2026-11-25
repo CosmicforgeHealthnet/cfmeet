@@ -29,6 +29,7 @@ use crate::{
         compat::CompatService,
         unified_messaging::{
             identity::BridgeOperation,
+            installations::{InstallationBinding, InstallationChallenge, InstallationProof},
             migration::{MigrationStatusView, ParityRunView, TransitionRequest},
             UnifiedMessaging,
         },
@@ -174,7 +175,7 @@ pub async fn register_device(
     post,path="/api/v2/messaging/devices/{deviceId}/installation-challenges",tag="Messaging (v2)",operation_id="v2_messaging_installation_challenge",
     params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
     request_body=Object,
-    responses((status=201,description="Fresh proof bound to this trusted Account installation and sign-in",body=crate::services::unified_messaging::installations::InstallationChallenge),(status=403,description="DEVICE_PROOF_INVALID / DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    responses((status=201,description="Fresh proof bound to this trusted Account installation and sign-in",body=InstallationChallenge),(status=401,description="DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
     security(("bearer_auth"=[]))
 )]
 pub async fn installation_challenge(
@@ -182,10 +183,7 @@ pub async fn installation_challenge(
     actor: ActorContext,
     V2Path(device): V2Path<Uuid>,
     V2Json(body): V2Json<Value>,
-) -> ApiResult<(
-    StatusCode,
-    Json<crate::services::unified_messaging::installations::InstallationChallenge>,
-)> {
+) -> ApiResult<(StatusCode, Json<InstallationChallenge>)> {
     let user = verified_user(&state, &actor)?;
     require_trusted_device_for_e2ee(&state, &actor).await?;
     if body != serde_json::json!({}) {
@@ -216,16 +214,16 @@ pub async fn installation_challenge(
 #[utoipa::path(
     post,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_bind_installation",
     params(("deviceId"=Uuid,Path,description="Existing active Messaging identity")),
-    request_body=crate::services::unified_messaging::installations::InstallationProof,
-    responses((status=200,description="Identity is bound to the proved protected installation",body=crate::services::unified_messaging::installations::InstallationBinding),(status=403,description="DEVICE_PROOF_INVALID / DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    request_body=InstallationProof,
+    responses((status=200,description="Identity is bound to the proved protected installation",body=InstallationBinding),(status=401,description="DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
     security(("bearer_auth"=[]))
 )]
 pub async fn bind_installation(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(device): V2Path<Uuid>,
-    V2Json(proof): V2Json<crate::services::unified_messaging::installations::InstallationProof>,
-) -> ApiResult<Json<crate::services::unified_messaging::installations::InstallationBinding>> {
+    V2Json(proof): V2Json<InstallationProof>,
+) -> ApiResult<Json<InstallationBinding>> {
     let user = verified_user(&state, &actor)?;
     require_trusted_device_for_e2ee(&state, &actor).await?;
     let session = actor
@@ -247,7 +245,7 @@ pub async fn bind_installation(
 #[utoipa::path(
     get,path="/api/v2/messaging/devices/{deviceId}/installation",tag="Messaging (v2)",operation_id="v2_messaging_installation_status",
     params(("deviceId"=Uuid,Path,description="Existing Messaging identity")),
-    responses((status=200,description="Persistent identity is true only for this proved current installation/sign-in",body=Object),(status=403,description="DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
+    responses((status=200,description="Binding matches this trusted Account installation; fresh MLS proof is still required for token issuance",body=InstallationBinding),(status=401,description="DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",body=ErrorEnvelope),(status=403,description="DEVICE_NOT_TRUSTED",body=ErrorEnvelope),(status=503,description="Capability unavailable",body=ErrorEnvelope)),
     security(("bearer_auth"=[]))
 )]
 pub async fn installation_status(

@@ -1,4 +1,4 @@
-//! Account-wide linked devices (multi-device policy): one primary mobile, several web
+//! Account-wide linked devices (multi-device policy): approved mobile and web
 //! devices, web-only accounts. See `services::account_devices` for the model.
 //!
 //! These endpoints authenticate the bearer themselves so that a new mobile whose
@@ -93,8 +93,8 @@ pub struct MySecurityEventPage {
 /// Read my device policy and state
 ///
 /// The account's multi-device state (`WEB_ONLY`, `MOBILE_PRIMARY`,
-/// `DEVICE_REPLACEMENT_PENDING`), the backend limits (one primary mobile,
-/// `maxWebDevices` web devices), the linking methods available to a new device and the
+/// `DEVICE_REPLACEMENT_PENDING`, retained as compatibility labels), unlimited approved
+/// mobile and web installations (`maxPrimaryMobiles: 0`, `maxWebDevices: 0`), linking methods available to a new device and the
 /// status of the calling sign-in's device. Accepts a pending mobile's sign-in.
 #[utoipa::path(
     get, path = "/api/v2/me/device-policy", tag = "Account devices (v2)", operation_id = "v2_get_my_device_policy",
@@ -144,8 +144,8 @@ pub async fn list_devices(
 ///
 /// * WEB: trusted and active right away (`BOOTSTRAP`: the fresh sign-in is the proof; no
 ///   verification step, ADR 0067). An existing untrusted browser declaring again is
-///   trusted the same way. Beyond `maxWebDevices` active web devices, the least recently
-///   used browser of the account is revoked (its sign-ins end) instead of refusing.
+///   trusted the same way. Independent browser sign-ins never evict another browser;
+///   `maxWebDevices: 0` denotes no fixed concurrency restriction.
 /// * The first device of an account that never had a trusted device is trusted
 ///   (`BOOTSTRAP`); a first mobile then becomes the primary mobile.
 /// * Any other new MOBILE is `UNTRUSTED` and `REPLACEMENT_PENDING` (its sign-in is refused
@@ -354,9 +354,8 @@ pub async fn send_email_code(
 ///
 /// The requesting device finishes its link after approval (or with `emailCode`), proving
 /// possession of its key (purpose `LINK_COMPLETE`, context = `{linkId}`). A web device
-/// becomes trusted. A pending mobile becomes the primary mobile atomically: the previous
-/// primary mobile is revoked (its sign-ins, Messaging device, Calling endpoint, push and
-/// meeting media end) and trusted web devices stay signed in. The account's email gets a
+/// becomes trusted. A pending mobile becomes active after approval without revoking
+/// another phone or sign-in, or ending any existing meeting media. The account's email gets a
 /// notice and the security log records it.
 #[utoipa::path(
     post, path = "/api/v2/me/device-links/{linkId}/complete", tag = "Account devices (v2)", operation_id = "v2_complete_device_link",

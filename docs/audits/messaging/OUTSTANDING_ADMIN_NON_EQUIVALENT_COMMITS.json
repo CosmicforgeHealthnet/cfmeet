@@ -1,0 +1,1635 @@
+{
+  "d8a7842d6773fda42862fa79925f15a65f76e63b": {
+    "subject": "Admin bridge A2.0: Organizations reads end to end",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-deploy",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "packages/contracts/bundled/organizations/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/organizations/internal/v1.openapi.json",
+      "packages/service-auth/src/client.rs",
+      "packages/service-auth/src/operator.rs",
+      "services/admin-bridge/docs/contract/CFMEET_ADMIN_CAPABILITY_MATRIX.json",
+      "services/admin-bridge/docs/contract/SHA256SUMS",
+      "services/admin-bridge/docs/contract/access-policy.v1.json",
+      "services/admin-bridge/docs/contract/bridge-schemas.v1.json",
+      "services/admin-bridge/docs/contract/capabilities.v1.json",
+      "services/admin-bridge/docs/contract/openapi.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationAuditEvent.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationAuditPage.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationBinding.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationBindingPage.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationDetail.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationMember.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationMemberPage.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationPage.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationSummary.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationTeam.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationTeamPage.json",
+      "services/admin-bridge/docs/contract/signing-profile.md",
+      "services/admin-bridge/src/chain/mod.rs",
+      "services/admin-bridge/src/config.rs",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/model.rs",
+      "services/admin-bridge/src/contract/schemas.rs",
+      "services/admin-bridge/src/errors.rs",
+      "services/admin-bridge/src/lib.rs",
+      "services/admin-bridge/src/main.rs",
+      "services/admin-bridge/src/owners.rs",
+      "services/admin-bridge/src/routes.rs",
+      "services/admin-bridge/src/routes/mod.rs",
+      "services/admin-bridge/src/routes/organizations.rs",
+      "services/admin-bridge/src/routes/translate.rs",
+      "services/admin-bridge/tests/common/mod.rs",
+      "services/admin-bridge/tests/contract.rs",
+      "services/admin-bridge/tests/hq_simulator.rs",
+      "services/admin-bridge/tests/owners_organizations.rs",
+      "services/organizations/docs/API.md",
+      "services/organizations/src/http/authorization.rs",
+      "services/organizations/src/http/members.rs",
+      "services/organizations/src/http/middleware.rs",
+      "services/organizations/src/http/mod.rs",
+      "services/organizations/src/http/operator.rs",
+      "services/organizations/src/http/policies.rs",
+      "services/organizations/src/http/teams.rs",
+      "services/organizations/tests/common/mod.rs",
+      "services/organizations/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "82398c3b",
+      "Admin bridge A2.0: Organizations reads end to end"
+    ],
+    "missingMainPaths": [
+      "services/admin-bridge/src/routes.rs"
+    ]
+  },
+  "bdbe74b01af238551209d793ba9cbe971831ac51": {
+    "subject": "Admin bridge A2.0: serve organizations.policies.read",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-deploy",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "services/admin-bridge/docs/contract/CFMEET_ADMIN_CAPABILITY_MATRIX.json",
+      "services/admin-bridge/docs/contract/SHA256SUMS",
+      "services/admin-bridge/docs/contract/bridge-schemas.v1.json",
+      "services/admin-bridge/docs/contract/capabilities.v1.json",
+      "services/admin-bridge/docs/contract/openapi.json",
+      "services/admin-bridge/docs/contract/schemas/OrganizationPolicies.json",
+      "services/admin-bridge/docs/contract/signing-profile.md",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/schemas.rs",
+      "services/admin-bridge/src/routes/organizations.rs",
+      "services/admin-bridge/tests/contract.rs",
+      "services/admin-bridge/tests/owners_organizations.rs"
+    ],
+    "mainSubjectMatch": [
+      "dcf87ecd",
+      "Admin bridge A2.0: serve organizations.policies.read"
+    ],
+    "missingMainPaths": []
+  },
+  "5af2409cb3cb8741aef6fa114e3e06e7c1ed44b0": {
+    "subject": "Admin bridge A2.2: Notifications operator reads (owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/internal/v1.openapi.json",
+      "services/notifications/src/http/middleware.rs",
+      "services/notifications/src/http/mod.rs",
+      "services/notifications/src/http/operator.rs",
+      "services/notifications/tests/common/mod.rs",
+      "services/notifications/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "56325fc5",
+      "Admin bridge A2.2: Notifications operator reads (owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "785fe0d7fc7eb3fc20a2cfcd51f6177814fc8b28": {
+    "subject": "Admin bridge A2.2: Notifications reads (bridge side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "services/admin-bridge/docs/contract/CFMEET_ADMIN_CAPABILITY_MATRIX.json",
+      "services/admin-bridge/docs/contract/SHA256SUMS",
+      "services/admin-bridge/docs/contract/access-policy.v1.json",
+      "services/admin-bridge/docs/contract/bridge-schemas.v1.json",
+      "services/admin-bridge/docs/contract/capabilities.v1.json",
+      "services/admin-bridge/docs/contract/openapi.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationDelivery.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationDeliveryPage.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationProviders.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationRouting.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationSuppression.json",
+      "services/admin-bridge/docs/contract/schemas/NotificationSuppressionPage.json",
+      "services/admin-bridge/docs/contract/signing-profile.md",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/model.rs",
+      "services/admin-bridge/src/contract/schemas.rs",
+      "services/admin-bridge/src/routes/mod.rs",
+      "services/admin-bridge/src/routes/notifications.rs",
+      "services/admin-bridge/tests/contract.rs",
+      "services/admin-bridge/tests/owners_notifications.rs"
+    ],
+    "mainSubjectMatch": [
+      "cc0132d7",
+      "Admin bridge A2.2: Notifications reads (bridge side)"
+    ],
+    "missingMainPaths": []
+  },
+  "15de003d3094ef0fad70b716eb36fb3b0367d21d": {
+    "subject": "Admin bridge A2.2: the decision record is ADR 0068",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/internal/v1.openapi.json",
+      "services/notifications/src/http/middleware.rs",
+      "services/notifications/src/http/mod.rs",
+      "services/notifications/src/http/operator.rs",
+      "services/notifications/tests/common/mod.rs",
+      "services/notifications/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "455bd7f3",
+      "Admin bridge A2.2: the decision record is ADR 0068"
+    ],
+    "missingMainPaths": []
+  },
+  "37af0c6016d56175ccf581dea61181545c4eeda6": {
+    "subject": "Developer Platform: operator reads for the admin bridge (A2.1 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/src/control/operator.rs",
+      "services/developer-platform/src/http/middleware.rs",
+      "services/developer-platform/src/http/mod.rs",
+      "services/developer-platform/src/http/operator.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "ec4bb42d",
+      "Developer Platform: operator reads for the admin bridge (A2.1 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "dc73a4e3985ebad5654dc1b006e0301baa2b241d": {
+    "subject": "Admin bridge A2.1: partner and app reads (bridge side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "services/admin-bridge/docs/contract/CFMEET_ADMIN_CAPABILITY_MATRIX.json",
+      "services/admin-bridge/docs/contract/SHA256SUMS",
+      "services/admin-bridge/docs/contract/access-policy.v1.json",
+      "services/admin-bridge/docs/contract/bridge-schemas.v1.json",
+      "services/admin-bridge/docs/contract/capabilities.v1.json",
+      "services/admin-bridge/docs/contract/openapi.json",
+      "services/admin-bridge/docs/contract/schemas/AppDetail.json",
+      "services/admin-bridge/docs/contract/schemas/AppInstall.json",
+      "services/admin-bridge/docs/contract/schemas/AppInstallPage.json",
+      "services/admin-bridge/docs/contract/schemas/AppPage.json",
+      "services/admin-bridge/docs/contract/schemas/AppSummary.json",
+      "services/admin-bridge/docs/contract/schemas/AppVersion.json",
+      "services/admin-bridge/docs/contract/schemas/AppVersionPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerActivityEvent.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerActivityPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerEnvironment.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerEnvironmentPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerInvitation.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerInvitationPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerMember.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerMemberPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerProject.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerProjectPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerPushKey.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerPushKeyPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebhook.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebhookDelivery.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebhookDeliveryPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebhookPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWorkspace.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWorkspaceDetail.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWorkspacePage.json",
+      "services/admin-bridge/docs/contract/signing-profile.md",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/mod.rs",
+      "services/admin-bridge/src/contract/model.rs",
+      "services/admin-bridge/src/contract/schemas.rs",
+      "services/admin-bridge/src/contract/schemas_partners.rs",
+      "services/admin-bridge/src/routes/mod.rs",
+      "services/admin-bridge/src/routes/partners.rs",
+      "services/admin-bridge/tests/contract.rs",
+      "services/admin-bridge/tests/owners_partners.rs"
+    ],
+    "mainSubjectMatch": [
+      "1bd8f346",
+      "Admin bridge A2.1: partner and app reads (bridge side)"
+    ],
+    "missingMainPaths": []
+  },
+  "67bedc8d77b49f0072706aeffe9331466407e1fb": {
+    "subject": "Admin bridge A2.1: the decision record is ADR 0068",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/src/control/operator.rs",
+      "services/developer-platform/src/http/middleware.rs",
+      "services/developer-platform/src/http/operator.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "f0656466",
+      "Admin bridge A2.1: the decision record is ADR 0068"
+    ],
+    "missingMainPaths": []
+  },
+  "648ce428447ba609c98e3962e54acafcd800b292": {
+    "subject": "Platform Access: operator reads for the admin bridge (A2.3 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-access/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-access/internal/v1.openapi.json",
+      "services/platform-access/src/http/middleware.rs",
+      "services/platform-access/src/http/mod.rs",
+      "services/platform-access/src/http/operator_reads.rs",
+      "services/platform-access/tests/bridge_operator_reads.rs",
+      "services/platform-access/tests/common/mod.rs",
+      "services/platform-access/tests/contracts.rs"
+    ],
+    "mainSubjectMatch": [
+      "99e885c7",
+      "Platform Access: operator reads for the admin bridge (A2.3 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "556f9f5da58e2a8448b79f584040bb71566410ec": {
+    "subject": "Admin bridge A2.3: identity and Platform Access partner reads (bridge side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "services/admin-bridge/docs/contract/CFMEET_ADMIN_CAPABILITY_MATRIX.json",
+      "services/admin-bridge/docs/contract/SHA256SUMS",
+      "services/admin-bridge/docs/contract/access-policy.v1.json",
+      "services/admin-bridge/docs/contract/bridge-schemas.v1.json",
+      "services/admin-bridge/docs/contract/capabilities.v1.json",
+      "services/admin-bridge/docs/contract/openapi.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityAppGrant.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityAppGrantPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityApplication.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityApplicationPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityAuditEntry.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityAuditEntryPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityEnvironment.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityEnvironmentPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityKey.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityKeyPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityOAuthApp.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityOAuthAppPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityPrincipal.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityPrincipalPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityScopeGrant.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityScopeGrantPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityServiceAccount.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityServiceAccountPage.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityTenant.json",
+      "services/admin-bridge/docs/contract/schemas/IdentityTenantPage.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebsites.json",
+      "services/admin-bridge/docs/contract/schemas/PartnerWebsitesPage.json",
+      "services/admin-bridge/docs/contract/signing-profile.md",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/mod.rs",
+      "services/admin-bridge/src/contract/model.rs",
+      "services/admin-bridge/src/contract/schemas.rs",
+      "services/admin-bridge/src/contract/schemas_identity.rs",
+      "services/admin-bridge/src/routes/identity.rs",
+      "services/admin-bridge/src/routes/mod.rs",
+      "services/admin-bridge/tests/contract.rs",
+      "services/admin-bridge/tests/owners_identity.rs",
+      "services/admin-bridge/tests/owners_partners.rs"
+    ],
+    "mainSubjectMatch": [
+      "e63c6f8d",
+      "Admin bridge A2.3: identity and Platform Access partner reads (bridge side)"
+    ],
+    "missingMainPaths": []
+  },
+  "a49ad322bcdec9df8405664c00d0b8844b0fa6b9": {
+    "subject": "Admin bridge A2.3: a principal reference may be an email address, never a phone number",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "docs/admin/cfmeet-admin-bridge.md",
+      "packages/contracts/bundled/platform-access/internal/v1.openapi.json",
+      "packages/contracts/platform-access/internal/v1.openapi.json",
+      "services/admin-bridge/src/contract/catalog.rs",
+      "services/admin-bridge/src/contract/schemas_identity.rs",
+      "services/admin-bridge/src/routes/identity.rs",
+      "services/platform-access/src/http/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "74ae3e38",
+      "Admin bridge A2.3: a principal reference may be an email address, never a phone number"
+    ],
+    "missingMainPaths": []
+  },
+  "dfb7b7db81c66fac5bf4c7b459fb66ff0553f477": {
+    "subject": "Admin bridge A2.3: the decision record is ADR 0068",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-access/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-access/internal/v1.openapi.json",
+      "services/platform-access/src/http/middleware.rs",
+      "services/platform-access/src/http/mod.rs",
+      "services/platform-access/src/http/operator_reads.rs",
+      "services/platform-access/tests/bridge_operator_reads.rs",
+      "services/platform-access/tests/common/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "6029afbb",
+      "Admin bridge A2.3: the decision record is ADR 0068"
+    ],
+    "missingMainPaths": []
+  },
+  "a1aef4158079de4b10c17dd349e8c7a94c9bd8e3": {
+    "subject": "Communications: operator reads for the admin bridge (A2.4 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a2-meeting",
+      "origin/claude/admin-bridge-a2-messaging",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/communications/internal/v1.openapi.json",
+      "packages/contracts/communications/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "services/communications/src/api.rs",
+      "services/communications/src/auth.rs",
+      "services/communications/src/lib.rs",
+      "services/communications/src/operator.rs",
+      "services/communications/tests/common/mod.rs",
+      "services/communications/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "36481ed3",
+      "Communications: operator reads for the admin bridge (A2.4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "ae9c3d54835683c24deb6e1fd23a6a699586111c": {
+    "subject": "Calling: tenant-scoped operator reads for the admin bridge (A2.7 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a2-calling",
+      "origin/claude/admin-bridge-a3-core",
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "infra/api-gateway/route-manifest.json",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/bundled/calling/http/v1.openapi.json",
+      "packages/contracts/bundled/public/aggregate/v1.openapi.json",
+      "packages/contracts/bundled/public/calling/v1.openapi.json",
+      "packages/contracts/calling/http/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "sdks/dart/lib/src/generated/contracts.dart",
+      "sdks/typescript/src/generated/contracts.ts",
+      "services/calling/src/internal_auth/middleware.rs",
+      "services/calling/src/lib.rs",
+      "services/calling/src/operator_reads.rs",
+      "services/calling/src/routes.rs",
+      "services/calling/tests/common/mod.rs",
+      "services/calling/tests/http_contract.rs",
+      "services/calling/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "c6537544",
+      "Calling: tenant-scoped operator reads for the admin bridge (A2.7 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "226660ab895a29df06f1ecaf779f0a475540b1a1": {
+    "subject": "Developer Platform: the verification queue and admin bridge decisions (A3 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access",
+      "origin/claude/admin-bridge-a4-wiring",
+      "origin/claude/admin-bridge-a7-a8-local",
+      "origin/claude/admin-bridge-local"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/migration/src/gap/m20261209_000004_admin_operations.rs",
+      "services/developer-platform/migration/src/gap/mod.rs",
+      "services/developer-platform/migration/src/lib.rs",
+      "services/developer-platform/src/apps/review.rs",
+      "services/developer-platform/src/control/bridge_command.rs",
+      "services/developer-platform/src/control/mod.rs",
+      "services/developer-platform/src/control/production.rs",
+      "services/developer-platform/src/control/verification.rs",
+      "services/developer-platform/src/http/apps.rs",
+      "services/developer-platform/src/http/operator.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/tests/admin_bridge_decisions.rs",
+      "services/developer-platform/tests/apps.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/retention.rs"
+    ],
+    "mainSubjectMatch": [
+      "b710041c",
+      "Developer Platform: the verification queue and admin bridge decisions (A3 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "300efba9c5f279e62a4a9c169b151d9034df8ab5": {
+    "subject": "Frontend endpoint reference: regenerate for the Calling 1.33.0 contract",
+    "branches": [
+      "origin/claude/admin-bridge-a3-verification",
+      "origin/claude/admin-bridge-a4-calling",
+      "origin/claude/admin-bridge-a4-communications",
+      "origin/claude/admin-bridge-a4-developer-platform",
+      "origin/claude/admin-bridge-a4-meeting",
+      "origin/claude/admin-bridge-a4-messaging",
+      "origin/claude/admin-bridge-a4-notifications",
+      "origin/claude/admin-bridge-a4-organizations",
+      "origin/claude/admin-bridge-a4-platform-access"
+    ],
+    "files": [
+      "docs/frontend/cfmeet-frontend-endpoint-reference.md"
+    ],
+    "mainSubjectMatch": [
+      "05a93b20",
+      "Frontend endpoint reference: regenerate for the Calling 1.33.0 contract"
+    ],
+    "missingMainPaths": []
+  },
+  "519185361bc25ba371e5fb3cc976c03dfbf7d8f5": {
+    "subject": "Calling: admin bridge A4 operator commands (owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-calling"
+    ],
+    "files": [
+      "infra/api-gateway/route-manifest.json",
+      "packages/contracts/bundled/calling/http/v1.openapi.json",
+      "packages/contracts/bundled/public/aggregate/v1.openapi.json",
+      "packages/contracts/bundled/public/calling/v1.openapi.json",
+      "packages/contracts/calling/http/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "services/calling/README.md",
+      "services/calling/migration/src/admin_operations/m20261210_000058_calling_admin_operations.rs",
+      "services/calling/migration/src/admin_operations/mod.rs",
+      "services/calling/migration/src/lib.rs",
+      "services/calling/migration/src/main.rs",
+      "services/calling/src/calls/app/abuse_reports.rs",
+      "services/calling/src/calls/app/blocks.rs",
+      "services/calling/src/calls/app/incidents.rs",
+      "services/calling/src/enterprise/policy.rs",
+      "services/calling/src/enterprise/recording.rs",
+      "services/calling/src/lib.rs",
+      "services/calling/src/operator_commands.rs",
+      "services/calling/src/operator_reads.rs",
+      "services/calling/src/platform/limits.rs",
+      "services/calling/src/platform/operator.rs",
+      "services/calling/src/retention/holds.rs",
+      "services/calling/src/routes.rs",
+      "services/calling/src/webhooks/keys.rs"
+    ],
+    "mainSubjectMatch": [
+      "020b300a",
+      "Calling: admin bridge A4 operator commands (owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "c01a738e540a218bc59d7dc8f2718f4e8db8b1ff": {
+    "subject": "Calling public API 1.34.0: manifest, SDK pins and frontend endpoint reference",
+    "branches": [
+      "origin/claude/admin-bridge-a4-calling"
+    ],
+    "files": [
+      "docs/frontend/cfmeet-frontend-endpoint-reference.md",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/manifest.json",
+      "sdks/dart/lib/src/generated/contracts.dart",
+      "sdks/typescript/src/generated/contracts.ts"
+    ],
+    "mainSubjectMatch": [
+      "31d8cabb",
+      "Contracts: Meeting Service public bundle at 1.7.0 in the manifest; SDK pins follow"
+    ],
+    "missingMainPaths": []
+  },
+  "745e065e391650d34c869af05a7497368296d6b7": {
+    "subject": "Communications: satisfy clippy nonminimal_bool in the contact notification check",
+    "branches": [
+      "origin/claude/admin-bridge-a4-communications"
+    ],
+    "files": [
+      "services/communications/src/relationships.rs"
+    ],
+    "mainSubjectMatch": [
+      "43d89c93",
+      "Notifications: clippy 1.95 nonminimal_bool fixes (no behavior change)"
+    ],
+    "missingMainPaths": []
+  },
+  "2e672055465bf05130babb3d517aff0b70ec01ec": {
+    "subject": "Admin bridge A4 (Communications owner side): profile suspend/restore, report review, backfill, replay",
+    "branches": [
+      "origin/claude/admin-bridge-a4-communications"
+    ],
+    "files": [
+      "packages/contracts/bundled/communications/internal/v1.openapi.json",
+      "packages/contracts/communications/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "services/communications/migration/sql/011_admin_operations.sql",
+      "services/communications/migration/src/lib.rs",
+      "services/communications/src/api.rs",
+      "services/communications/src/auth.rs",
+      "services/communications/src/events.rs",
+      "services/communications/src/internal.rs",
+      "services/communications/src/lib.rs",
+      "services/communications/src/operator.rs",
+      "services/communications/src/operator_commands.rs",
+      "services/communications/tests/migration_upgrade.rs",
+      "services/communications/tests/operator_commands.rs"
+    ],
+    "mainSubjectMatch": [
+      "3de72550",
+      "Admin bridge A4 (Communications owner side): profile suspend/restore, report review, backfill, replay"
+    ],
+    "missingMainPaths": []
+  },
+  "0d29abdd655eb5ba6fd0fdc11eae016b74525098": {
+    "subject": "Developer Platform: admin bridge partner and app commands (A4 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/migration/src/gap/m20261210_000005_admin_bridge_partners.rs",
+      "services/developer-platform/migration/src/gap/mod.rs",
+      "services/developer-platform/migration/src/lib.rs",
+      "services/developer-platform/src/apps/review.rs",
+      "services/developer-platform/src/control/bridge_command.rs",
+      "services/developer-platform/src/control/operator.rs",
+      "services/developer-platform/src/control/organizations.rs",
+      "services/developer-platform/src/control/push_credentials.rs",
+      "services/developer-platform/src/control/support.rs",
+      "services/developer-platform/src/http/apps.rs",
+      "services/developer-platform/src/http/operator.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/src/webhooks/mod.rs",
+      "services/developer-platform/tests/admin_bridge_partners.rs",
+      "services/developer-platform/tests/apps.rs",
+      "services/developer-platform/tests/platform_build.rs",
+      "services/developer-platform/tests/retention.rs",
+      "services/developer-platform/tests/webhooks.rs"
+    ],
+    "mainSubjectMatch": [
+      "5f2b51db",
+      "Developer Platform: admin bridge partner and app commands (A4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "91b56984babfa982a16bae50a4ec2a506a9f958c": {
+    "subject": "Developer Platform: pricing and plans for the admin bridge (A6 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/migration/src/gap/m20261211_000006_pricing.rs",
+      "services/developer-platform/migration/src/gap/mod.rs",
+      "services/developer-platform/migration/src/lib.rs",
+      "services/developer-platform/src/control/bridge_command.rs",
+      "services/developer-platform/src/http/mod.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/src/http/pricing.rs",
+      "services/developer-platform/src/lib.rs",
+      "services/developer-platform/src/pricing/mod.rs",
+      "services/developer-platform/src/pricing/rates.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/pricing.rs",
+      "services/developer-platform/tests/retention.rs"
+    ],
+    "mainSubjectMatch": [
+      "490e4297",
+      "Developer Platform: pricing and plans for the admin bridge (A6 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "beacc4aaa590b14667cf0ce54e7795e23128f892": {
+    "subject": "Developer Platform: first-party workspace registration from the admin bridge with an owner-delivered invitation (A4)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "apps/web/src/components/developer-portal/pages/AcceptInvitationPage.tsx",
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/common/v1.schema.json",
+      "packages/contracts/notifications/events/examples/workspace-owner-invitation-email.json",
+      "packages/contracts/notifications/events/v1.schema.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "packages/notification-client/src/catalogue.rs",
+      "packages/notification-client/src/lib.rs",
+      "packages/notification-client/tests/contract.rs",
+      "services/developer-platform/migration/src/gap/m20261212_000007_owner_deliveries.rs",
+      "services/developer-platform/migration/src/gap/mod.rs",
+      "services/developer-platform/migration/src/lib.rs",
+      "services/developer-platform/src/config/mod.rs",
+      "services/developer-platform/src/control/mod.rs",
+      "services/developer-platform/src/control/operator.rs",
+      "services/developer-platform/src/control/owner_delivery.rs",
+      "services/developer-platform/src/http/operator.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/src/main.rs",
+      "services/developer-platform/src/state.rs",
+      "services/developer-platform/src/worker.rs",
+      "services/developer-platform/tests/admin_bridge_first_party.rs",
+      "services/developer-platform/tests/retention.rs",
+      "services/notifications/src/catalogue.rs",
+      "services/notifications/src/templates/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "af37c0ad",
+      "Developer Platform: first-party workspace registration from the admin bridge with an owner-delivered invitation (A4)"
+    ],
+    "missingMainPaths": []
+  },
+  "f61efe9dfc90d5f5e71a5aafd72b01ffac57c06d": {
+    "subject": "Developer Platform: daily datasets for the admin bridge (A7)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "services/developer-platform/src/control/datasets.rs",
+      "services/developer-platform/src/control/mod.rs",
+      "services/developer-platform/src/http/operator_reads.rs",
+      "services/developer-platform/tests/admin_bridge_datasets.rs"
+    ],
+    "mainSubjectMatch": [
+      "e3b84045",
+      "Developer Platform: daily datasets for the admin bridge (A7)"
+    ],
+    "missingMainPaths": []
+  },
+  "a9e0c958267a4df03dda457ece510ccf2c2eec0b": {
+    "subject": "Developer Platform: a CF Meet plan holder's effective limits for plan enforcement (A6)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-developer/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/internal/v1.openapi.json",
+      "packages/service-auth/src/permissions.rs",
+      "services/developer-platform/src/http/internal.rs",
+      "services/developer-platform/src/pricing/mod.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/plan_limits.rs"
+    ],
+    "mainSubjectMatch": [
+      "d0277454",
+      "Developer Platform: a CF Meet plan holder's effective limits for plan enforcement (A6)"
+    ],
+    "missingMainPaths": []
+  },
+  "d022df2824e12e287784b36c75188ae88ba64059": {
+    "subject": "Developer Platform: partners retrieve owner-delivered API keys once in the console (A4)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "apps/web/src/components/developer-portal/pages/CredentialsPage.tsx",
+      "apps/web/src/lib/developer-platform/client.ts",
+      "apps/web/src/lib/developer-platform/types.ts",
+      "packages/contracts/bundled/platform-developer/http/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-developer/control/v1.schema.json",
+      "packages/contracts/platform-developer/http/v1.openapi.json",
+      "services/developer-platform/src/control/credentials.rs",
+      "services/developer-platform/src/http/public.rs",
+      "services/developer-platform/src/platform_access/mod.rs",
+      "services/developer-platform/tests/common/mod.rs",
+      "services/developer-platform/tests/credential_deliveries.rs"
+    ],
+    "mainSubjectMatch": [
+      "664876fa",
+      "Developer Platform: partners retrieve owner-delivered API keys once in the console (A4)"
+    ],
+    "missingMainPaths": []
+  },
+  "a8dd05409b0aa792a1123080a7987dacb1419d4b": {
+    "subject": "Developer Platform: classify the console API-key delivery routes as public customer routes",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "infra/api-gateway/public-routes.json",
+      "infra/api-gateway/route-manifest.json",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/bundled/public/aggregate/v1.openapi.json",
+      "packages/contracts/bundled/public/developer-platform/v1.openapi.json",
+      "sdks/dart/lib/src/generated/models/developer_platform.dart",
+      "sdks/dart/lib/src/generated/operations.dart",
+      "sdks/typescript/src/generated/models.ts",
+      "sdks/typescript/src/generated/operations.ts"
+    ],
+    "mainSubjectMatch": [
+      "eea4068b",
+      "Developer Platform: classify the console API-key delivery routes as public customer routes"
+    ],
+    "missingMainPaths": []
+  },
+  "2cfb2cfb12a90693d34aadc7935eab4f4e333d16": {
+    "subject": "Notification Service: organizations.organization.export_ready (#42) for owner-delivered exports (A4)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/common/v1.schema.json",
+      "packages/contracts/notifications/events/examples/organization-export-ready.json",
+      "packages/contracts/notifications/events/v1.schema.json",
+      "packages/notification-client/src/catalogue.rs",
+      "packages/notification-client/src/lib.rs",
+      "packages/notification-client/tests/contract.rs",
+      "services/notifications/migration/src/lib.rs",
+      "services/notifications/migration/src/m20261121_000001_organization_exports.rs",
+      "services/notifications/src/catalogue.rs",
+      "services/notifications/src/templates/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "4c7bc8f2",
+      "Notification Service: organizations.organization.export_ready (#42) for owner-delivered exports (A4)"
+    ],
+    "missingMainPaths": []
+  },
+  "a38905c9f5922c8258e2a501f65a54bb228a5c88": {
+    "subject": "Developer Platform A4: public API 1.10.0 pins, fixture-marked test tokens, pricing doc wording",
+    "branches": [
+      "origin/claude/admin-bridge-a4-developer-platform"
+    ],
+    "files": [
+      "docs/frontend/cfmeet-frontend-endpoint-reference.md",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/manifest.json",
+      "sdks/dart/lib/src/generated/contracts.dart",
+      "sdks/typescript/src/generated/contracts.ts",
+      "services/developer-platform/src/control/owner_delivery.rs",
+      "services/developer-platform/src/pricing/mod.rs",
+      "services/notifications/src/templates/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "18f58121",
+      "Developer Platform A4: public API 1.10.0 pins, fixture-marked test tokens, pricing doc wording"
+    ],
+    "missingMainPaths": []
+  },
+  "5043d6c1c3bcaf346b1d64f1288e118dae9c0b96": {
+    "subject": "Meeting Service: admin bridge A4-A7 owner side (commands, reads, operations ledger)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      ".github/workflows/backend.yml",
+      "packages/contracts/manifest.json",
+      "packages/contracts/meeting-service/admin-operator/v1.openapi.json",
+      "services/meeting-service/Dockerfile",
+      "services/meeting-service/migration/Cargo.toml",
+      "services/meeting-service/migration/src/admin-operations-main.rs",
+      "services/meeting-service/migration/src/lib.rs",
+      "services/meeting-service/migration/src/m20261120_000001_admin_operations.rs",
+      "services/meeting-service/migration/tests/destructive_guard.rs",
+      "services/meeting-service/src/main.rs",
+      "services/meeting-service/src/services/account_devices.rs",
+      "services/meeting-service/src/services/account_erasure.rs",
+      "services/meeting-service/src/services/admin_operations.rs",
+      "services/meeting-service/src/services/admin_operator.rs",
+      "services/meeting-service/src/services/admin_operator/commands.rs",
+      "services/meeting-service/src/services/admin_operator/reads.rs",
+      "services/meeting-service/src/services/artifacts/service.rs",
+      "services/meeting-service/src/services/conference.rs",
+      "services/meeting-service/src/services/critical_notifications.rs",
+      "services/meeting-service/src/services/email_change.rs",
+      "services/meeting-service/src/services/meeting_space.rs",
+      "services/meeting-service/src/services/mod.rs",
+      "services/meeting-service/src/services/passwordless.rs",
+      "services/meeting-service/src/services/unified_messaging/migration.rs",
+      "services/meeting-service/tests/admin_operator_commands.rs",
+      "services/meeting-service/tests/common/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "ac1a5513",
+      "Meeting Service: admin bridge A4-A7 owner side (commands, reads, operations ledger)"
+    ],
+    "missingMainPaths": []
+  },
+  "d7da3cccbe939db2527498991723dda4f7795176": {
+    "subject": "Certification: run the Meeting Service admin-operations migration",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "certification/src/personal_stack.rs",
+      "certification/src/stack.rs"
+    ],
+    "mainSubjectMatch": [
+      "c012f2bc",
+      "Certification: run the Meeting Service admin-operations migration"
+    ],
+    "missingMainPaths": []
+  },
+  "6549becae4e5ef56a94dfbdce2f9bc2158b60567": {
+    "subject": "Meeting Service: accounts.user.export, owner-delivered (A7)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "packages/contracts/manifest.json",
+      "packages/contracts/meeting-service/admin-operator/v1.openapi.json",
+      "packages/contracts/openapi/meeting-service.json",
+      "services/meeting-service/migration/src/lib.rs",
+      "services/meeting-service/migration/src/m20261121_000001_account_data_exports.rs",
+      "services/meeting-service/src/handlers/v2/account_identity.rs",
+      "services/meeting-service/src/main.rs",
+      "services/meeting-service/src/routes/mod.rs",
+      "services/meeting-service/src/services/account_export.rs",
+      "services/meeting-service/src/services/admin_operator.rs",
+      "services/meeting-service/src/services/admin_operator/commands.rs",
+      "services/meeting-service/src/services/admin_operator/reads.rs",
+      "services/meeting-service/src/services/mfa.rs",
+      "services/meeting-service/src/services/mod.rs",
+      "services/meeting-service/src/templates/email/account.rs",
+      "services/meeting-service/src/templates/email/mod.rs",
+      "services/meeting-service/tests/admin_operator_commands.rs"
+    ],
+    "mainSubjectMatch": [
+      "327c0843",
+      "Meeting Service: accounts.user.export, owner-delivered (A7)"
+    ],
+    "missingMainPaths": []
+  },
+  "b6432b5f9bc331e1fc9685a1a16801c9909a67cb": {
+    "subject": "Contracts: Meeting Service HTTP API 1.10.0 (owner-delivered data-export download)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "apps/web/src/types/generated/meeting-service.ts",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/bundled/public/aggregate/v1.openapi.json",
+      "packages/contracts/bundled/public/meetings/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/openapi/meeting-service.json",
+      "sdks/dart/lib/src/generated/contracts.dart",
+      "sdks/typescript/src/generated/contracts.ts",
+      "services/meeting-service/src/swagger/mod.rs"
+    ],
+    "mainSubjectMatch": [
+      "21a4f056",
+      "Contracts: Meeting Service HTTP API 1.10.0 (owner-delivered data-export download)"
+    ],
+    "missingMainPaths": []
+  },
+  "c68759c4a4ab9b8df2851ca948705eb64398d691": {
+    "subject": "Meeting Service: relays for owner-delivered Messaging and organization exports (HTTP API 1.11.0)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "apps/web/src/types/generated/meeting-service.ts",
+      "docs/architecture/first-party-direct-ingress-decision.md",
+      "infra/api-gateway/public-routes.json",
+      "infra/api-gateway/route-manifest.json",
+      "infra/api-gateway/sdk-discovery.json",
+      "packages/contracts/bundled/public/aggregate/v1.openapi.json",
+      "packages/contracts/bundled/public/meetings/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/openapi/meeting-service.json",
+      "sdks/dart/lib/src/generated/contracts.dart",
+      "sdks/typescript/src/generated/contracts.ts",
+      "sdks/typescript/src/generated/models.ts",
+      "services/meeting-service/src/error.rs",
+      "services/meeting-service/src/handlers/v2/organizations.rs",
+      "services/meeting-service/src/handlers/v2/unified_messaging.rs",
+      "services/meeting-service/src/routes/v2.rs",
+      "services/meeting-service/src/services/organizations_authority.rs",
+      "services/meeting-service/src/services/unified_messaging/relay.rs",
+      "services/meeting-service/src/swagger/mod.rs",
+      "services/meeting-service/tests/organizations_authority.rs",
+      "services/meeting-service/tests/unified_messaging_api.rs"
+    ],
+    "mainSubjectMatch": [
+      "10ee59e4",
+      "Meeting Service: relays for owner-delivered Messaging and organization exports (HTTP API 1.11.0)"
+    ],
+    "missingMainPaths": []
+  },
+  "2324e6851ff53181b3a4756d652493946457c8f4": {
+    "subject": "Web: pages that deliver owner-delivered exports to their recipients",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      ".github/workflows/frontend.yml",
+      "apps/web/src/app/dashboard/data-exports/page.tsx",
+      "apps/web/src/app/organizations/exports/download/page.tsx",
+      "apps/web/src/app/settings/data-export/download/page.tsx",
+      "apps/web/src/components/account/AccountExportDownload.tsx",
+      "apps/web/src/components/account/AccountProfileSettings.tsx",
+      "apps/web/src/components/account/MessagingExportDeliveries.tsx",
+      "apps/web/src/components/organizations/OrganizationExportDownload.tsx",
+      "apps/web/src/lib/account/account-core.ts",
+      "apps/web/src/lib/account/owner-exports.ts",
+      "apps/web/src/lib/account/save-file.ts",
+      "apps/web/src/lib/organizations/organization-core.ts",
+      "apps/web/src/services/owner-exports.service.ts",
+      "apps/web/src/services/v2/api.ts",
+      "apps/web/tests/owner-exports.test.mjs"
+    ],
+    "mainSubjectMatch": [
+      "f42a152b",
+      "Web: pages that deliver owner-delivered exports to their recipients"
+    ],
+    "missingMainPaths": []
+  },
+  "85556b3b63bb19b353e340f99ddc92cdeefc9b2f": {
+    "subject": "Frontend endpoint reference: regenerate for the Meeting Service HTTP API 1.11.0 contract",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "docs/frontend/cfmeet-frontend-endpoint-reference.md"
+    ],
+    "mainSubjectMatch": [
+      "05a93b20",
+      "Frontend endpoint reference: regenerate for the Calling 1.33.0 contract"
+    ],
+    "missingMainPaths": []
+  },
+  "86beb1209adeea6b36344313d915e1117f4d0507": {
+    "subject": "Mobile: regenerate the Meeting Service contract types for HTTP API 1.11.0",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "apps/mobile/lib/api/generated/meeting-service.ts"
+    ],
+    "mainSubjectMatch": [
+      "00f87ed9",
+      "Web: regenerate contract types for v2_restore_question"
+    ],
+    "missingMainPaths": []
+  },
+  "2a54ed8d917922b1d1614c07ece19820fda975e3": {
+    "subject": "Meeting Service: the admin-operations history adds the suspended account status",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "services/meeting-service/migration/src/lib.rs",
+      "services/meeting-service/migration/src/m20261121_000002_admin_account_suspension.rs"
+    ],
+    "mainSubjectMatch": [
+      "cc67e0e2",
+      "Meeting Service: the admin-operations history adds the suspended account status"
+    ],
+    "missingMainPaths": []
+  },
+  "63c6ae1759fae9a33afa9c9d11c883b52bf5597e": {
+    "subject": "Meeting Service tests: the three owner-delivered export operations, and artifact refusal at its current version",
+    "branches": [
+      "origin/claude/admin-bridge-a4-meeting"
+    ],
+    "files": [
+      "services/meeting-service/tests/admin_operator_commands.rs",
+      "services/meeting-service/tests/api_contract_matrix.rs",
+      "services/meeting-service/tests/openapi_contract.rs"
+    ],
+    "mainSubjectMatch": [
+      "6c25a384",
+      "Meeting Service tests: the three owner-delivered export operations, and artifact refusal at its current version"
+    ],
+    "missingMainPaths": []
+  },
+  "11e603f754ed2ff5fee7ed6a1a68bb47784d4d8c": {
+    "subject": "Messaging: authorization-matrix evidence for the admin bridge operator routes",
+    "branches": [
+      "origin/claude/admin-bridge-a4-messaging"
+    ],
+    "files": [
+      "services/messaging/tests/authorization_matrix.rs"
+    ],
+    "mainSubjectMatch": [
+      "0102d545",
+      "Messaging: authorization-matrix evidence for the admin bridge operator routes"
+    ],
+    "missingMainPaths": []
+  },
+  "12baae3f804b57850fa55cc012775c50f7ee526a": {
+    "subject": "Notifications A4: admin bridge commands and the operations ledger (owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-notifications"
+    ],
+    "files": [
+      "docs/operations/notification-service-runbook.md",
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/internal/v1.openapi.json",
+      "services/notifications/migration/src/lib.rs",
+      "services/notifications/migration/src/m20261120_000001_admin_operations.rs",
+      "services/notifications/src/http/internal.rs",
+      "services/notifications/src/http/mod.rs",
+      "services/notifications/src/http/operator.rs",
+      "services/notifications/src/http/operator_commands.rs",
+      "services/notifications/tests/admin_bridge_commands.rs",
+      "services/notifications/tests/foundation.rs"
+    ],
+    "mainSubjectMatch": [
+      "706e94d2",
+      "Notifications A4: admin bridge commands and the operations ledger (owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "c448d82ade2b57daeaab17534b74f171c147616a": {
+    "subject": "Notifications A7: the daily dataset pull (operations_health failed_deliveries)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-notifications"
+    ],
+    "files": [
+      "packages/contracts/manifest.json",
+      "packages/contracts/notifications/internal/v1.openapi.json",
+      "services/notifications/src/http/mod.rs",
+      "services/notifications/src/http/operator.rs",
+      "services/notifications/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "e567c09e",
+      "Notifications A7: the daily dataset pull (operations_health failed_deliveries)"
+    ],
+    "missingMainPaths": []
+  },
+  "88750f53044ae866348ea74d9dc4344a859143eb": {
+    "subject": "Organizations: admin bridge commands (A4 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-organizations"
+    ],
+    "files": [
+      "docs/api/organizations-internal-v1.md",
+      "packages/contracts/bundled/organizations/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/organizations/internal/v1.openapi.json",
+      "services/organizations/migration/src/lib.rs",
+      "services/organizations/migration/src/m20261120_000007_admin_operations.rs",
+      "services/organizations/src/error.rs",
+      "services/organizations/src/http/admin_bridge.rs",
+      "services/organizations/src/http/bindings.rs",
+      "services/organizations/src/http/members.rs",
+      "services/organizations/src/http/mod.rs",
+      "services/organizations/src/http/operator.rs",
+      "services/organizations/src/http/organizations.rs",
+      "services/organizations/src/http/outbox.rs",
+      "services/organizations/src/http/policies.rs",
+      "services/organizations/src/http/teams.rs",
+      "services/organizations/tests/admin_bridge_commands.rs",
+      "services/organizations/tests/common/mod.rs",
+      "services/organizations/tests/foundation.rs",
+      "services/organizations/tests/operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "c8d406d7",
+      "Organizations: admin bridge commands (A4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "41aae0d94d499c044d09f0f5be5aac591ab73a4a": {
+    "subject": "Organizations contract 1.11.0: owner-delivered exports",
+    "branches": [
+      "origin/claude/admin-bridge-a4-organizations"
+    ],
+    "files": [
+      "docs/api/organizations-internal-v1.md",
+      "packages/contracts/bundled/organizations/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/organizations/internal/v1.openapi.json"
+    ],
+    "mainSubjectMatch": [
+      "ea9451e7",
+      "Organizations contract 1.11.0: owner-delivered exports"
+    ],
+    "missingMainPaths": []
+  },
+  "97e12226c3eb1a6627bd39b199e1f8c2108e521b": {
+    "subject": "Platform Access: admin bridge identity commands (A4 owner side)",
+    "branches": [
+      "origin/claude/admin-bridge-a4-platform-access"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-access/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-access/identity/v1.schema.json",
+      "packages/contracts/platform-access/internal/v1.openapi.json",
+      "services/platform-access/migration/src/lib.rs",
+      "services/platform-access/migration/src/m20261127_000011_admin_operations.rs",
+      "services/platform-access/src/http/error.rs",
+      "services/platform-access/src/http/mod.rs",
+      "services/platform-access/src/http/operator_commands.rs",
+      "services/platform-access/src/http/operator_reads.rs",
+      "services/platform-access/src/identity/bridge.rs",
+      "services/platform-access/src/identity/credentials.rs",
+      "services/platform-access/src/identity/end_users.rs",
+      "services/platform-access/src/identity/environment_origins.rs",
+      "services/platform-access/src/identity/error.rs",
+      "services/platform-access/src/identity/mod.rs",
+      "services/platform-access/src/identity/oauth.rs",
+      "services/platform-access/src/identity/operator.rs",
+      "services/platform-access/tests/bridge_operator_commands.rs",
+      "services/platform-access/tests/contracts.rs"
+    ],
+    "mainSubjectMatch": [
+      "d4839a08",
+      "Platform Access: admin bridge identity commands (A4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "c43f6d7211ce623ec02ca49c1b253b789e713490": {
+    "subject": "Platform Access: owner-delivered API key issue and rotation for the admin bridge",
+    "branches": [
+      "origin/claude/admin-bridge-a4-platform-access"
+    ],
+    "files": [
+      "packages/contracts/bundled/platform-access/internal/v1.openapi.json",
+      "packages/contracts/manifest.json",
+      "packages/contracts/platform-access/internal/v1.openapi.json",
+      "services/platform-access/Cargo.lock",
+      "services/platform-access/Cargo.toml",
+      "services/platform-access/migration/src/lib.rs",
+      "services/platform-access/migration/src/m20261128_000012_credential_deliveries.rs",
+      "services/platform-access/src/http/delegation.rs",
+      "services/platform-access/src/http/operator_commands.rs",
+      "services/platform-access/src/http/operator_reads.rs",
+      "services/platform-access/src/identity/bridge.rs",
+      "services/platform-access/src/identity/credential_delivery.rs",
+      "services/platform-access/src/identity/mod.rs",
+      "services/platform-access/src/identity/operator.rs",
+      "services/platform-access/src/identity/verifier.rs",
+      "services/platform-access/src/main.rs",
+      "services/platform-access/tests/bridge_key_delivery.rs",
+      "services/platform-access/tests/bridge_operator_reads.rs"
+    ],
+    "mainSubjectMatch": [
+      "03b3daf3",
+      "Platform Access: owner-delivered API key issue and rotation for the admin bridge"
+    ],
+    "missingMainPaths": []
+  },
+  "e5cb2d7c939289330401114d259249ac22b3c250": {
+    "subject": "Admin bridge: dark deployment in the coordinated release (design section 14)",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      ".github/workflows/cfmeet-core-images.yml",
+      "docs/operations/admin-bridge-runbook.md",
+      "docs/operations/backup-and-restore.md",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/live_certification.py",
+      "infra/calling/production/test_coordinated_release.py",
+      "infra/calling/production/test_live_certification.py",
+      "infra/deployment/backup/catalog.conf",
+      "infra/deployment/backup/tests/unit.sh",
+      "services/admin-bridge/Dockerfile"
+    ],
+    "mainSubjectMatch": [
+      "3604672c",
+      "Admin bridge: dark deployment in the coordinated release (design section 14)"
+    ],
+    "missingMainPaths": []
+  },
+  "36035c6be4228f97ac4fc63b0fed7e2688e56d0b": {
+    "subject": "Admin bridge deploy: activate-admin-bridge-hq switches the bridge on for HQ, read-only",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      "docs/operations/admin-bridge-runbook.md",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/test_coordinated_release.py"
+    ],
+    "mainSubjectMatch": [
+      "20c7a55a",
+      "Admin bridge deploy: activate-admin-bridge-hq switches the bridge on for HQ, read-only"
+    ],
+    "missingMainPaths": []
+  },
+  "ef43662fba65d6257173c0095bfd4182a9daee16": {
+    "subject": "Admin bridge deploy: one activation per owner family",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      "docs/operations/admin-bridge-runbook.md",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/test_coordinated_release.py"
+    ],
+    "mainSubjectMatch": [
+      "b7e9cba9",
+      "Admin bridge deploy: one activation per owner family"
+    ],
+    "missingMainPaths": []
+  },
+  "e3328707de6d67f75c63c13c798855f4ec433aa5": {
+    "subject": "Admin bridge deploy: HQ commands (S6) and the operations ledger grant",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      "docs/operations/admin-bridge-runbook.md",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/test_coordinated_release.py"
+    ],
+    "mainSubjectMatch": [
+      "0eba08be",
+      "Admin bridge deploy: HQ commands (S6) and the operations ledger grant"
+    ],
+    "missingMainPaths": []
+  },
+  "aeb7a3b1b94e70334fbdee6e2eaf564b5a5cd6c4": {
+    "subject": "Admin bridge deploy: run the Meeting Service admin-operations migration",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      "infra/calling/production/communications_release.py",
+      "infra/calling/production/coordinated_release.py",
+      "infra/deployment/backend_runtime.py",
+      "infra/deployment/backup/tests/real-schema-drill.sh"
+    ],
+    "mainSubjectMatch": [
+      "92f71374",
+      "Admin bridge deploy: run the Meeting Service admin-operations migration"
+    ],
+    "missingMainPaths": []
+  },
+  "3e67f9cd21a21cc36eef7c90017ccd8927ea8a64": {
+    "subject": "Admin bridge deploy: owner events, plan enforcement and owner-delivered links",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/live_certification.py",
+      "infra/calling/production/test_coordinated_release.py"
+    ],
+    "mainSubjectMatch": [
+      "a30431df",
+      "Admin bridge deploy: owner events, plan enforcement and owner-delivered links"
+    ],
+    "missingMainPaths": []
+  },
+  "11211f70a3416d48dd7f073aa2bc170b12a97dd1": {
+    "subject": "Backup catalog: the additive migration histories added since",
+    "branches": [
+      "origin/claude/admin-bridge-deploy"
+    ],
+    "files": [
+      "infra/deployment/backup/catalog.conf",
+      "infra/deployment/backup/tests/unit.sh"
+    ],
+    "mainSubjectMatch": [
+      "86d85539",
+      "Backup catalog: the additive migration histories added since"
+    ],
+    "missingMainPaths": []
+  },
+  "bbd68e7cec596297d2b8731cc6a35c7389f26865": {
+    "subject": "ops: bootstrap Admin Bridge as a dark, private, off-by-default production container",
+    "branches": [
+      "origin/ops/admin-bridge-dark-bootstrap-20261121"
+    ],
+    "files": [
+      ".github/workflows/cfmeet-coordinated-release.yml",
+      ".github/workflows/cfmeet-core-images.yml",
+      "infra/calling/production/coordinated_release.py",
+      "infra/calling/production/live_certification.py",
+      "infra/calling/production/test_coordinated_release.py",
+      "services/admin-bridge/Dockerfile"
+    ],
+    "mainSubjectMatch": [
+      "130a4b6f",
+      "Reconcile Admin Bridge activation with current production release"
+    ],
+    "missingMainPaths": []
+  },
+  "ef195fc6903f6660378769f97a1c36f6841d0769": {
+    "subject": "test: account for dark Admin Bridge resource and anonymous ops response",
+    "branches": [
+      "origin/ops/admin-bridge-dark-bootstrap-20261121"
+    ],
+    "files": [
+      "infra/calling/production/test_coordinated_release.py"
+    ],
+    "mainSubjectMatch": [
+      "5f2b51db",
+      "Developer Platform: admin bridge partner and app commands (A4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "0c24b977a30aa4962dabc810d2a7e69cd0c6baaa": {
+    "subject": "test: account for dark Admin Bridge resource and anonymous ops response",
+    "branches": [
+      "origin/ops/admin-bridge-dark-bootstrap-20261121"
+    ],
+    "files": [
+      "infra/calling/production/test_live_certification.py"
+    ],
+    "mainSubjectMatch": [
+      "5f2b51db",
+      "Developer Platform: admin bridge partner and app commands (A4 owner side)"
+    ],
+    "missingMainPaths": []
+  },
+  "9a9ee5d49a40bcba76d07b61fc36d6122fdbf2e6": {
+    "subject": "docs: distinguish dark Admin Bridge VPS bootstrap from gated HQ activation",
+    "branches": [
+      "origin/ops/admin-bridge-dark-bootstrap-20261121"
+    ],
+    "files": [
+      "docs/operations/admin-bridge-dark-bootstrap.md",
+      "services/admin-bridge/Dockerfile",
+      "services/admin-bridge/README.md"
+    ],
+    "mainSubjectMatch": [
+      "f8b67e3b",
+      "Admin bridge A1: contract tests for HQ's read classification rules"
+    ],
+    "missingMainPaths": [
+      "docs/operations/admin-bridge-dark-bootstrap.md"
+    ]
+  }
+}

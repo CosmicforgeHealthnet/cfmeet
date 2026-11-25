@@ -713,6 +713,7 @@ export class MessagingEngine {
       await this.checkWelcomes();
       await this.checkIncomingTransfers();
       await this.checkIncomingLinks();
+      await this.recoverHistoryInBackground();
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
       for (const id of this.server.keys()) this.scheduleSync(id);
@@ -732,10 +733,24 @@ export class MessagingEngine {
 
   private async ownDevices(): Promise<ServerDevice[]> {
     const me = this.snapshot.identity!.principalId;
-    const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${me}/devices`);
-    const self = r.devices.find((d) => d.deviceId === this.snapshot.deviceId);
+    const devices = await this.loadDeviceDirectory(me);
+    const self = devices.find((d) => d.deviceId === this.snapshot.deviceId);
     if (self?.registeredAt && self.registeredAt !== this.snapshot.deviceRegisteredAt) this.set({ deviceRegisteredAt: self.registeredAt });
-    return r.devices;
+    return devices;
+  }
+
+  private async loadDeviceDirectory(principalId: string): Promise<ServerDevice[]> {
+    const devices = new Map<string, ServerDevice>();
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    for (;;) {
+      const page: { devices: ServerDevice[]; nextCursor?: string | null } = await relay("GET", `v1/messaging/principals/${principalId}/devices?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      for (const device of page.devices) devices.set(device.deviceId, device);
+      if (page.nextCursor == null) return [...devices.values()];
+      if (!page.devices.length || seen.has(page.nextCursor)) throw new MessagingApiError(0, "DEVICE_DIRECTORY_PAGE_INVALID", null);
+      cursor = page.nextCursor;
+      seen.add(cursor);
+    }
   }
 
   private async deviceIsActive(deviceId: string): Promise<boolean> {
@@ -826,7 +841,16 @@ export class MessagingEngine {
 
   /** Group changes of this device's worker (snapshot / confirm / rollback) never interleave. */
   private withMlsLock<T>(job: () => Promise<T>): Promise<T> {
-    const run = this.mlsChain.then(job, job);
+    // A group mutation spans local RPCs and the delivery service's acceptance. The
+    // shared worker serializes RPCs; this separate lock serializes whole mutations
+    // across tabs so another port cannot mutate a pending snapshot before confirm.
+    const execute = async (): Promise<T> => {
+      const account = this.snapshot.identity?.principalId;
+      if (this.stopped || !account || !this.crypto) return Promise.reject<T>(new MessagingApiError(0, "HISTORY_LOCKED", null));
+      if (typeof navigator !== "undefined" && navigator.locks) return await navigator.locks.request(`cfmeet-messaging-transaction:${account}`, job);
+      return job();
+    };
+    const run = this.mlsChain.then(execute, execute);
     this.mlsChain = run.catch(() => {});
     return run;
   }
@@ -895,9 +919,9 @@ export class MessagingEngine {
   private async principalDevices(principalId: string, maxAgeMs: number): Promise<ServerDevice[]> {
     const hit = this.deviceLists.get(principalId);
     if (hit && Date.now() - hit.at < maxAgeMs) return hit.devices;
-    const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${principalId}/devices`);
-    this.deviceLists.set(principalId, { at: Date.now(), devices: r.devices });
-    return r.devices;
+    const devices = await this.loadDeviceDirectory(principalId);
+    this.deviceLists.set(principalId, { at: Date.now(), devices });
+    return devices;
   }
 
   private conversationMembers(conversationId: string): Promise<{ principalId: string; role?: string; state?: string }[]> {
@@ -1313,7 +1337,8 @@ export class MessagingEngine {
   async refreshConversations(): Promise<void> {
     const out: ServerConversation[] = [];
     let cursor: string | null = null;
-    for (let i = 0; i < 10; i++) {
+    const seenCursors = new Set<string>();
+    for (;;) {
       const page: { conversations: ServerConversation[]; nextCursor: string | null } = await relay(
         "GET",
         `v1/conversations?limit=${PAGE}&orderBy=lastActivity${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
@@ -1321,6 +1346,8 @@ export class MessagingEngine {
       out.push(...page.conversations);
       cursor = page.nextCursor;
       if (!cursor) break;
+      if (seenCursors.has(cursor)) throw new MessagingApiError(0, "CONVERSATION_PAGE_INVALID", null);
+      seenCursors.add(cursor);
     }
     // The list carries at most two members; groups are read in full.
     for (const c of out) {
@@ -2018,6 +2045,7 @@ export class MessagingEngine {
             sequence: m.sequence,
             messageId: m.messageId,
             kind: m.kind,
+            replyToMessageId: m.replyToMessageId, targetMessageId: m.targetMessageId,
             lifecycle: m.lifecycle,
             senderPrincipalId: m.senderPrincipalId,
             senderDeviceId: m.senderDeviceId ?? null,
@@ -2084,7 +2112,7 @@ export class MessagingEngine {
     // Edits are encrypted messages that point at the original (the link is server metadata).
     const edits = new Map<string, string>();
     for (const r of records) {
-      const target = r.messageId ? meta.get(r.messageId)?.target : null;
+      const target = r.messageId ? meta.get(r.messageId)?.target ?? r.targetMessageId : null;
       if (r.kind === "EDIT" && target && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text") edits.set(target, r.payload.text);
     }
     // A private group's name travels as an encrypted control message: it renames the chat and
@@ -2110,7 +2138,7 @@ export class MessagingEngine {
         }
         continue;
       }
-      const m = r.messageId ? meta.get(r.messageId) : undefined;
+      const m = r.messageId ? meta.get(r.messageId) ?? { lifecycle: r.lifecycle ?? "ACTIVE", replyTo: r.replyToMessageId ?? null, target: r.targetMessageId ?? null } : undefined;
       const base: MessageView = {
         key: `s${r.sequence}`,
         sequence: r.sequence,
@@ -2943,6 +2971,127 @@ export class MessagingEngine {
     return (await this.ownDevices()).filter((d) => d.status === "ACTIVE" && d.deviceId !== this.snapshot.deviceId);
   }
 
+  private historyV2Ids = new Set<string>();
+  private historyRecoveryBusy = false;
+  private historyDiscoveryAt = 0;
+  private historySourceIndex = 0;
+
+  private async supportsHistoryV2(): Promise<boolean> {
+    const caps = await relay<{ historyTransferVersions: number[] }>("GET", "v1/messaging/history-transfer-capabilities").catch(() => null);
+    return caps?.historyTransferVersions.includes(2) ?? false;
+  }
+
+  /** Authoritative visibility and tombstones are reconciled before any plaintext copy. */
+  private async historyVisibility(): Promise<{ conversationId: string; firstSequence: number; lastSequence: number }[]> {
+    const windows = [];
+    for (const [conversationId, conv] of this.server) {
+      if (conv.securityProfile !== "PRIVATE_E2EE") continue;
+      let after = 0, firstSequence = 1, lastSequence = 0;
+      for (;;) {
+        const page = await relay<{ messages: ServerMessage[]; visibleFromSequence?: number; nextAfterSequence: number | null }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=500`);
+        if (page.visibleFromSequence === undefined) throw new MessagingApiError(0, "HISTORY_VISIBILITY_REQUIRED", null);
+        firstSequence = page.visibleFromSequence;
+        this.noteMeta(conversationId, page.messages);
+        await this.crypto!.call("reconcileHistoryMetadata", { conversationId, messages: page.messages.map(m => ({ sequence: m.sequence, messageId: m.messageId, lifecycle: m.lifecycle, replyToMessageId: m.replyToMessageId, targetMessageId: m.targetMessageId })) });
+        for (const m of page.messages) lastSequence = Math.max(lastSequence, m.sequence);
+        if (page.nextAfterSequence == null) break;
+        if (page.nextAfterSequence <= after) throw new MessagingApiError(0, "HISTORY_PAGE_INVALID", null);
+        after = page.nextAfterSequence;
+      }
+      windows.push({ conversationId, firstSequence, lastSequence: Math.max(firstSequence - 1, lastSequence) });
+    }
+    return windows;
+  }
+
+  private async uploadHistoryV2(transferId: string): Promise<void> {
+    const t = await relay<{ status: string; sourceDeviceId: string; targetDeviceId: string; transferPublicKey: string; requestSignature: string; expiresAt: string }>("GET", `v1/messaging/history-transfers-v2/${transferId}`);
+    if (!["REQUESTED", "SEALED"].includes(t.status)) {
+      if (["CANCELLED", "COMPLETED", "EXPIRED"].includes(t.status)) await this.crypto!.call("forgetHistoryTransferV2", { transferId });
+      return;
+    }
+    const context = this.transferContext(transferId, t.sourceDeviceId, t.targetDeviceId);
+    const target = (await this.ownDevices()).find(d => d.deviceId === t.targetDeviceId && d.status === "ACTIVE");
+    if (!target || t.sourceDeviceId !== this.snapshot.deviceId) throw new MessagingApiError(0, "DEVICE_NOT_ACTIVE", null);
+    await this.verifyTransparency(target.deviceId, b64u.dec(target.signaturePublicKey));
+    if (!(await this.crypto!.call<boolean>("verifyTransferRequestV2", { targetKey: b64u.dec(target.signaturePublicKey), context, transferKey: b64u.dec(t.transferPublicKey), expiresAt: Math.floor(Date.parse(t.expiresAt) / 1000), signature: b64u.dec(t.requestSignature) }))) throw new MessagingApiError(0, "TRANSFER_REQUEST_REFUSED", null);
+    const snapshot = await this.crypto!.call<{ descriptor: { snapshotId: string; expiresAt: number; manifestDigest: string; chunkCount: number; totalPlaintextBytes: number }; coverage: string }>("prepareHistoryV2", { context, transferKey: b64u.dec(t.transferPublicKey), expiresAt: Math.floor(Date.parse(t.expiresAt) / 1000), eligibleConversations: await this.historyVisibility() });
+    const manifest = await this.crypto!.call<Uint8Array>("historyObjectV2", { transferId, index: 0xffffffff });
+    const digest = Array.from(b64u.dec(snapshot.descriptor.manifestDigest), b => b.toString(16).padStart(2, "0")).join("");
+    await relay("PUT", `v1/messaging/history-transfers-v2/${transferId}/manifest`, { snapshotId: snapshot.descriptor.snapshotId, manifestDigest: digest, chunkCount: snapshot.descriptor.chunkCount, totalPlaintextBytes: snapshot.descriptor.totalPlaintextBytes, sealedManifest: b64u.enc(manifest) });
+    for (let index = 0; index < snapshot.descriptor.chunkCount; index++) {
+      if (this.stopped || !this.crypto) return;
+      const sealed = await this.crypto.call<Uint8Array>("historyObjectV2", { transferId, index });
+      await relay("PUT", `v1/messaging/history-transfers-v2/${transferId}/chunks/${index}`, { sealedChunk: b64u.enc(sealed) });
+    }
+    if (snapshot.coverage === "PARTIAL") this.set({ detail: "Available history was shared, but this device does not have a complete history copy." });
+  }
+
+  private async receiveHistoryV2(transferId: string, timeoutMs: number): Promise<number> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (this.stopped || !this.crypto) throw new MessagingApiError(0, "HISTORY_LOCKED", null);
+      const t = await relay<{ status: string; sourceDeviceId: string; targetDeviceId: string; snapshotId: string; expiresAt: string; manifestDigest: string; chunkCount: number; totalPlaintextBytes: number }>("GET", `v1/messaging/history-transfers-v2/${transferId}`);
+      const progress = await this.crypto.call<{ nextIndex: number; records: number; coverage: string | null }>("historyProgressV2", { transferId });
+      if (t.status === "COMPLETED" && progress.nextIndex === t.chunkCount) { await this.crypto.call("forgetHistoryTransferV2", { transferId }); return progress.records; }
+      if (["CANCELLED", "EXPIRED"].includes(t.status)) {
+        await this.crypto.call("forgetHistoryTransferV2", { transferId });
+        throw new MessagingApiError(0, `TRANSFER_${t.status}`, null);
+      }
+      if (t.status === "SEALED") {
+        const devices = await this.ownDevices();
+        const source = devices.find(d => d.deviceId === t.sourceDeviceId && d.status === "ACTIVE");
+        const target = devices.find(d => d.deviceId === t.targetDeviceId && d.status === "ACTIVE");
+        if (!source || !target || target.deviceId !== this.snapshot.deviceId) throw new MessagingApiError(0, "DEVICE_NOT_ACTIVE", null);
+        await this.verifyTransparency(source.deviceId, b64u.dec(source.signaturePublicKey));
+        const manifest = await relay<{ sealedObject: string }>("GET", `v1/messaging/history-transfers-v2/${transferId}/manifest`);
+        const manifestDigest = b64u.enc(Uint8Array.from(t.manifestDigest.match(/../g) ?? [], h => Number.parseInt(h, 16)));
+        await this.crypto.call("acceptHistoryManifestV2", { context: this.transferContext(transferId, source.deviceId, target.deviceId), descriptor: { snapshotId: t.snapshotId, expiresAt: Math.floor(Date.parse(t.expiresAt) / 1000), manifestDigest, chunkCount: t.chunkCount, totalPlaintextBytes: t.totalPlaintextBytes }, sourceKey: b64u.dec(source.signaturePublicKey), sealed: b64u.dec(manifest.sealedObject) });
+        const eligibleConversations = await this.historyVisibility();
+        let missing = false;
+        for (let index = progress.nextIndex; index < t.chunkCount; index++) {
+          const object = await relay<{ sealedObject: string }>("GET", `v1/messaging/history-transfers-v2/${transferId}/chunks/${index}`).catch(e => { if (e instanceof MessagingApiError && e.status === 404) return null; throw e; });
+          if (!object) { missing = true; break; }
+          const received = await this.crypto.call<{ nextIndex: number; records: number; signature: Uint8Array; coverage: string }>("importHistoryChunkV2", { transferId, index, sealed: b64u.dec(object.sealedObject), eligibleConversations });
+          await relay("POST", `v1/messaging/history-transfers-v2/${transferId}/checkpoint`, { nextIndex: received.nextIndex, signature: b64u.enc(received.signature) });
+        }
+        if (!missing) {
+          // A lost network receipt is repaired from the worker's durable checkpoint.
+          const done = await this.crypto.call<{ nextIndex: number; records: number; signature: Uint8Array; coverage: string }>("historyProgressV2", { transferId });
+          await relay("POST", `v1/messaging/history-transfers-v2/${transferId}/checkpoint`, { nextIndex: done.nextIndex, signature: b64u.enc(done.signature) });
+          await this.historyVisibility();
+          for (const id of this.server.keys()) { await this.renderOrSync(id); await this.loadReactions(id, (this.snapshot.messages[id] ?? []).flatMap(m => m.messageId ? [m.messageId] : [])); }
+          await relay("POST", `v1/messaging/history-transfers-v2/${transferId}/complete`, {});
+          await this.crypto.call("forgetHistoryTransferV2", { transferId });
+          if (done.coverage === "PARTIAL") this.set({ detail: "Available history recovered. The source reported incomplete history coverage." });
+          return done.records;
+        }
+      }
+      if (Date.now() >= deadline) throw new MessagingApiError(0, "TRANSFER_TIMEOUT", null);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  /** Automatically resumes already approved transfers; first approval remains explicit. */
+  private async recoverHistoryInBackground(): Promise<void> {
+    if (this.historyRecoveryBusy || this.snapshot.phase !== "ready" || !this.crypto || !(await this.supportsHistoryV2())) return;
+    this.historyRecoveryBusy = true;
+    try {
+      const transfers = await this.crypto.call<{ transferId: string; role: string }[]>("listHistoryTransfersV2");
+      for (const t of transfers) {
+        this.historyV2Ids.add(t.transferId);
+        if (t.role === "source") await this.uploadHistoryV2(t.transferId);
+        else await this.receiveHistoryV2(t.transferId, 1).catch(e => { if (!(e instanceof MessagingApiError && e.code === "TRANSFER_TIMEOUT")) throw e; });
+      }
+      const unreadable = Object.values(this.snapshot.messages).some(messages => messages.some(m => m.state === "unreadable" || m.state === "before-join")) || await this.crypto.call<boolean>("historyRecoveryNeeded");
+      if (unreadable && !transfers.some(t => t.role === "target") && Date.now() > this.historyDiscoveryAt) {
+        this.historyDiscoveryAt = Date.now() + 60_000;
+        const sources = await this.otherDevices();
+        const source = sources.length ? sources[this.historySourceIndex++ % sources.length] : undefined;
+        if (source) { const request = await this.requestHistory(source.deviceId); this.set({ detail: `History synchronization requested. Compare ${request.comparisonCode} on your existing device to authorize recovery.` }); }
+      }
+    } finally { this.historyRecoveryBusy = false; }
+  }
+
   /** TARGET: asks `sourceDeviceId` for its history. Returns the comparison code to show. */
   async requestHistory(sourceDeviceId: string): Promise<{ transferId: string; comparisonCode: string }> {
     const c = this.crypto!;
@@ -2953,10 +3102,12 @@ export class MessagingEngine {
     if (!source || !me) throw new MessagingApiError(0, "DEVICE_NOT_ACTIVE", null);
     const transferId = uuid();
     const ctx = this.transferContext(transferId, sourceDeviceId, target);
-    const transferKey = await c.call<Uint8Array>("beginTransfer");
+    const v2 = await this.supportsHistoryV2();
     const expires = Math.floor(Date.now() / 1000) + 10 * 60;
-    const signature = await c.call<Uint8Array>("signTransferRequest", { context: ctx, expiresAt: expires });
-    await relay("POST", "v1/messaging/history-transfers", {
+    const transferKey = await c.call<Uint8Array>(v2 ? "beginTransferV2" : "beginTransfer", { context: ctx, expiresAt: expires });
+    const signature = await c.call<Uint8Array>(v2 ? "signTransferRequestV2" : "signTransferRequest", { context: ctx, expiresAt: expires });
+    if (v2) this.historyV2Ids.add(transferId);
+    await relay("POST", v2 ? "v1/messaging/history-transfers-v2" : "v1/messaging/history-transfers", {
       transferId,
       sourceDeviceId,
       targetDeviceId: target,
@@ -2970,6 +3121,7 @@ export class MessagingEngine {
 
   /** TARGET: waits for the sealed history, verifies the source and stores it. */
   async receiveHistory(transferId: string, timeoutMs = 120_000): Promise<number> {
+    if (this.historyV2Ids.has(transferId)) return this.receiveHistoryV2(transferId, timeoutMs);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const t = await relay<{ status: string; sourceDeviceId: string }>("GET", `v1/messaging/history-transfers/${transferId}`);
@@ -3070,6 +3222,11 @@ export class MessagingEngine {
       "GET",
       `v1/messaging/history-transfers?deviceId=${me}`,
     );
+    const v2 = await this.supportsHistoryV2();
+    if (v2) {
+      const next = await relay<{ transfers: typeof page.transfers }>("GET", `v1/messaging/history-transfers-v2?deviceId=${me}`);
+      for (const t of next.transfers) { this.historyV2Ids.add(t.transferId); page.transfers.push(t); }
+    }
     const devices = await this.ownDevices();
     const incoming: IncomingTransfer[] = [];
     for (const t of page.transfers ?? []) {
@@ -3079,7 +3236,7 @@ export class MessagingEngine {
       if (!target || !self) continue;
       const ctx = this.transferContext(t.transferId, me, t.targetDeviceId);
       const expires = Math.floor(Date.parse(t.expiresAt) / 1000);
-      const ok = await this.crypto.call<boolean>("verifyTransferRequest", { targetKey: b64u.dec(target.signaturePublicKey), context: ctx, transferKey: b64u.dec(t.transferPublicKey), expiresAt: expires, signature: b64u.dec(t.requestSignature) });
+      const ok = await this.crypto.call<boolean>(this.historyV2Ids.has(t.transferId) ? "verifyTransferRequestV2" : "verifyTransferRequest", { targetKey: b64u.dec(target.signaturePublicKey), context: ctx, transferKey: b64u.dec(t.transferPublicKey), expiresAt: expires, signature: b64u.dec(t.requestSignature) });
       if (!ok) continue;
       const code = await this.crypto.call<string>("comparisonCode", { context: ctx, transferKey: b64u.dec(t.transferPublicKey), sourceKey: b64u.dec(self.signaturePublicKey), targetKey: b64u.dec(target.signaturePublicKey) });
       incoming.push({ transferId: t.transferId, targetDeviceId: t.targetDeviceId, comparisonCode: code, expiresAt: t.expiresAt });
@@ -3089,6 +3246,7 @@ export class MessagingEngine {
 
   /** SOURCE: the user confirmed the codes match — seal this device's history to the target. */
   async approveTransfer(transferId: string): Promise<void> {
+    if (this.historyV2Ids.has(transferId)) { await this.uploadHistoryV2(transferId); this.set({ incomingTransfers: this.snapshot.incomingTransfers.filter(x => x.transferId !== transferId) }); return; }
     const me = this.snapshot.deviceId!;
     const t = await relay<{ transferId: string; targetDeviceId: string; transferPublicKey: string; status: string }>("GET", `v1/messaging/history-transfers/${transferId}`);
     if (t.status !== "REQUESTED") throw new MessagingApiError(0, `TRANSFER_${t.status}`, null);
@@ -3099,7 +3257,8 @@ export class MessagingEngine {
   }
 
   async declineTransfer(transferId: string): Promise<void> {
-    await relay("POST", `v1/messaging/history-transfers/${transferId}/cancel`, {});
+    await relay("POST", `v1/messaging/${this.historyV2Ids.has(transferId) ? "history-transfers-v2" : "history-transfers"}/${transferId}/cancel`, {});
+    if (this.historyV2Ids.has(transferId)) await this.crypto!.call("forgetHistoryTransferV2", { transferId });
     this.set({ incomingTransfers: this.snapshot.incomingTransfers.filter((x) => x.transferId !== transferId) });
   }
 }

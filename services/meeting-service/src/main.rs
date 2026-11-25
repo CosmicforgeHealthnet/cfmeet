@@ -205,6 +205,12 @@ async fn main() -> anyhow::Result<()> {
     {
         panic!("Account security migration is required (account-security-migration up)");
     }
+    if !migration::concurrent_devices_ready(&state.db)
+        .await
+        .expect("Concurrent-device migration readiness")
+    {
+        panic!("Concurrent-device migration is required (meeting-concurrent-devices-migration up)");
+    }
 
     // Blueprint Section 10: idempotency records and agenda indexes live in their own
     // additive history (`meetings-calendar-migration up`).

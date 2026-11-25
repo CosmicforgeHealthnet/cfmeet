@@ -665,6 +665,14 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         self.assertEqual(cr.safe_default_violations(envs), [])
         self.assertEqual(cr.ACTIVATIONS['activate-first-party-features'][0], ())
 
+    def test_messaging_concurrency_only_changes_per_device_and_principal_count_quotas(self):
+        with patch.object(cr, 'apply_activation') as apply:
+            cr.activate_messaging_concurrency('a' * 40, 'test', '')
+        apply.assert_called_once_with('activate-messaging-concurrency', 'a' * 40, 'test', [
+            ('messaging', {'MESSAGING_MAX_ACTIVE_DEVICES': '0',
+                           'MESSAGING_REALTIME_PER_PRINCIPAL_CONNECTIONS': '0',
+                           'MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS': '0'})])
+
     def test_workflow_offers_exactly_these_operations(self):
         try:
             import yaml

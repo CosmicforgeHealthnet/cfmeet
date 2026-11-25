@@ -515,6 +515,28 @@
             "schema": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "description": "Maximum devices in this page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Previous page nextCursor; devices are ordered by UUID."
           }
         ],
         "responses": {
@@ -11945,6 +11967,14 @@
           },
           "treeHead": {
             "$ref": "#/components/schemas/messaging.common.v1.TreeHead"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Last device UUID of this page; pass as cursor to continue. Null when complete."
           }
         }
       },

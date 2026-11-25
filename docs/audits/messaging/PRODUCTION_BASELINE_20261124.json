@@ -1,0 +1,103 @@
+{
+  "observedAt": "2026-11-24",
+  "inspectRun": 45489502198,
+  "containers": [
+    {
+      "name": "cfmeet-admin-bridge",
+      "imageId": "sha256:e6c0a4339d8e7d7da09bbf31f84df66c62b431a2c726ebc0c1dce9fa666da374",
+      "revision": "3ff1d51d1a2eb4d125485223f49b28c7af2d7063",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-organizations",
+      "imageId": "sha256:c1b1ce85f95a037040a9b5319fc35d090e3e8a8f2118b9324210396cfbaafbd7",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-notifications-2",
+      "imageId": "sha256:2c859e5f988e9e92a978e74991ccbce9a8fb261e62b715d2c46cd8708a8e1814",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-notifications",
+      "imageId": "sha256:2c859e5f988e9e92a978e74991ccbce9a8fb261e62b715d2c46cd8708a8e1814",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-production-backend",
+      "imageId": "sha256:13fa9ee9cd64e01d4435cdd672baad813c95fcf9c87cc616d4726fa8b8442f54",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-calling",
+      "imageId": "sha256:a703a478bd1013581dccd0d045b057b72c999ebe4d4599069d1b7d9c461ba80f",
+      "revision": "0f652ec88c8b51ee16d40352bc5bc7bfe113920f",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-messaging",
+      "imageId": "sha256:bba1233efe6f56c342a657f26ae57404922098c0fd79e0b0f56de1ec48363f9f",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-api-gateway",
+      "imageId": "sha256:6385f629386bb76f957f3a001ae672538faeedf79c89b37d8ce42d10ad39f1d7",
+      "revision": "142030cb5fc4d73e18e1e7e97a6ba0125a9b8837",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-communications",
+      "imageId": "sha256:c1e9f305b226b274f8b232fcc3cd2daaa06ace0e5c05db220d22a11efd43378b",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-developer-platform-worker",
+      "imageId": "sha256:ab6d8d991222af26ab89fd368d92ef206c295547b3061af096829bf23bb86d49",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-developer-platform",
+      "imageId": "sha256:ab6d8d991222af26ab89fd368d92ef206c295547b3061af096829bf23bb86d49",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-telephony",
+      "imageId": "sha256:8f234697ce7a35c868bd4086743ec59fcb5cc385c35cf5eab73f2fc2fcd92d8f",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-sms-gateway",
+      "imageId": "sha256:f7a7ce43a41253855a6c65f5075f6fe5b48eb034ca857c1c4821e6f1d8c750f7",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-privacy-relay",
+      "imageId": "sha256:b97bfaf72963cd1c1fdea47e43fd705944dcd79d265103914efd247756f3fb3f",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-numbering",
+      "imageId": "sha256:9ca29acf3d6ee18653f85270281157ad47419001c2f71219b5f94fe0e8141a71",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    },
+    {
+      "name": "cfmeet-platform-access",
+      "imageId": "sha256:eecd99690523420af26acb9dc8ba068d82f01cf084db43e540be254197958fa0",
+      "revision": "f00516b2cbe34c3194d74dcd9c68498bf94cc618",
+      "state": "running"
+    }
+  ],
+  "newMessagingWorkDeployed": false
+}

@@ -179,6 +179,7 @@ async function discardLocalStages(account) {
 
 /** The open account: its device, wrapping key, scope and non-secret metadata. */
 let ctx = null;
+let lockedAccount = null;
 const handles = new Map(); // attachment descriptors awaiting their message (never posted out)
 
 function requireDevice() {
@@ -203,9 +204,12 @@ function acquireLock(account) {
 async function persistDevice(extraPuts = [], extraDeletes = []) {
   const device = requireDevice();
   if (!ctx.persistent) return;
-  const envelope = enc.encode(
-    JSON.stringify({ deviceId: ctx.deviceId, meta: ctx.meta, state: b64u.enc(device.exportState()) }),
-  );
+  // Metadata RPCs from another port may run while a group change awaits HTTP
+  // acceptance. Never checkpoint that unconfirmed candidate as durable MLS state.
+  const state = ctx.snapshot ?? device.exportState();
+  const meta = ctx.snapshot && ctx.membershipSnapshot ? { ...ctx.meta, membership: ctx.membershipSnapshot } : ctx.meta;
+  const envelope = enc.encode(JSON.stringify({ deviceId: ctx.deviceId, meta, state: b64u.enc(state) }));
+  if (!ctx.snapshot) state.fill(0);
   const sealed = await seal(ctx.key, deviceAad(ctx.account), envelope);
   envelope.fill(0);
   const d = await db();
@@ -410,6 +414,9 @@ function historyRecord(record) {
     if (out.lifecycle === "ACTIVE") fail("ARCHIVE_INVALID");
     return out;
   }
+  out.lifecycle = "ACTIVE";
+  out.replyToMessageId = record.replyToMessageId ? uuid(record.replyToMessageId, "ARCHIVE_INVALID") : null;
+  out.targetMessageId = record.targetMessageId ? uuid(record.targetMessageId, "ARCHIVE_INVALID") : null;
   out.payload = parsePayload(enc.encode(JSON.stringify({ v: 1, ...record.payload })));
   if (record.clientMessageId) out.clientMessageId = uuid(record.clientMessageId, "ARCHIVE_INVALID");
   if (out.payload.t === "file") {
@@ -436,7 +443,13 @@ const ops = {
     for (const k of ["tenantId", "applicationId", "environmentId"]) uuid(scope?.[k]);
     await loadCore();
     if (ctx && ctx.account !== account) fail("ANOTHER_ACCOUNT_OPEN");
-    if (!(await acquireLock(account))) return { status: "LOCKED" };
+    if (ctx && JSON.stringify(ctx.scope) !== JSON.stringify(scope)) fail("LOCAL_BINDING_MISMATCH");
+    if (ctx?.device) return ops.status();
+    if (ctx?.localProtection && !ctx.key) return { status: "AUTHENTICATOR_REQUIRED", descriptor: ctx.localProtection.descriptor };
+    if (lockedAccount !== account) {
+      if (!(await acquireLock(account))) return { status: "LOCKED" };
+      lockedAccount = account;
+    }
     const d = await db();
     let key = await req(d.transaction("keys").objectStore("keys").get(account));
     if (!key) {
@@ -569,6 +582,7 @@ const ops = {
   },
 
   async registrationKeyPackage({ challengeId, nonce }) {
+    if (ctx?.snapshot) fail("MLS_CHANGE_PENDING");
     const keyPackage = requireDevice().registrationKeyPackage(uuid(challengeId), bytes(nonce));
     await persistDevice();
     return keyPackage;
@@ -585,6 +599,7 @@ const ops = {
   /** Fresh KeyPackages; their private keys are stored BEFORE the page may publish them. */
   async keyPackages({ count }) {
     const device = requireDevice();
+    if (ctx.snapshot) fail("MLS_CHANGE_PENDING");
     if (!ctx.persistent) fail("DEVICE_NOT_ADOPTED");
     if (!Number.isInteger(count) || count < 1 || count > 20) fail("BAD_COUNT");
     const out = [];
@@ -754,6 +769,7 @@ const ops = {
   /** Encrypts one message (text, or a prepared attachment) for the conversation's group. */
   async encrypt({ conversationId, groupId, clientMessageId, payload }) {
     const device = requireDevice();
+    if (ctx.snapshot) fail("MLS_CHANGE_PENDING");
     uuid(conversationId);
     uuid(clientMessageId);
     let p;
@@ -794,6 +810,7 @@ const ops = {
    */
   async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [], visibleFromSequence }) {
     let device = requireDevice();
+    if (ctx.snapshot) fail("MLS_CHANGE_PENDING");
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
@@ -826,19 +843,24 @@ const ops = {
       if (!Number.isSafeInteger(m.sequence) || m.sequence < 1) fail("BAD_SEQUENCE");
       if (m.sequence < visibleFrom) fail("HISTORY_VISIBILITY_CHANGED");
       const reference = await req((await db()).transaction("pending").objectStore("pending").getKey([ctx.account, retryKey(conversationId, m.sequence)]));
-      if (m.sequence <= last && reference === undefined) continue;
+      if (m.sequence <= last && reference === undefined && (!m.lifecycle || m.lifecycle === "ACTIVE")) continue;
       // The authoritative endpoint returns every visible row, including tombstones.
       // Initial visibility may begin after 1; thereafter never cross a hole/commit.
       if (last > 0 && m.sequence > last + 1) { blocked = "SYNC_GAP"; break; }
       if (pendingCommit && pendingCommit < m.sequence && !resolved.has(pendingCommit)) { blocked = "COMMIT_PENDING"; break; }
       const existing = await loadRecord(conversationId, m.sequence);
       if (existing && ["DECRYPTED", "SENT", "REMOVED", "COMMIT"].includes(existing.status)) {
+        if (m.lifecycle && m.lifecycle !== "ACTIVE") {
+          const tombstone = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind, status: "REMOVED", lifecycle: m.lifecycle };
+          puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(tombstone)))]);
+          out.push(view(tombstone));
+        }
         resolved.add(m.sequence);
         if (ctx.meta.pendingCommit?.[conversationId] === m.sequence) delete ctx.meta.pendingCommit[conversationId];
         deletes.push(["pending", [ctx.account, retryKey(conversationId, m.sequence)]]);
         last = Math.max(last, m.sequence); continue;
       }
-      const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
+      const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind, replyToMessageId: m.replyToMessageId ?? null, targetMessageId: m.targetMessageId ?? null };
       let record;
       // MLS can consume a sender generation before application-level AAD/payload
       // validation rejects it. A failed attempt must leave that generation retryable.
@@ -1033,6 +1055,24 @@ const ops = {
     return out;
   },
 
+  /** Scan durable outcomes, including EDIT/control records hidden by the timeline. */
+  async historyRecoveryNeeded() {
+    requireDevice();
+    const { keys, values } = await storagePage("records", ctx.account, ctx.meta.historyRecoveryScan ?? null);
+    let needed = false;
+    for (let i = 0; i < keys.length; i++) {
+      const [, conversationId, sequence] = keys[i];
+      if (sequence < (ctx.meta.visibleFrom?.[conversationId] ?? 1)) continue;
+      const plain = await unseal(ctx.key, recordAad(ctx.account, conversationId, sequence), values[i]);
+      let record;
+      try { record = JSON.parse(dec.decode(plain)); } finally { plain.fill(0); }
+      if (record.kind !== "MLS_COMMIT" && ["FAILED", "BEFORE_JOIN", "SENT_ELSEWHERE"].includes(record.status)) needed = true;
+    }
+    ctx.meta.historyRecoveryScan = keys.length === 128 ? keys[keys.length - 1] : null;
+    await persistDevice();
+    return needed;
+  },
+
   /** Encrypts a file for upload; its content key stays here (a handle is returned). */
   async encryptFile({ data, mediaType, fileName }) {
     requireDevice();
@@ -1054,6 +1094,24 @@ const ops = {
   },
 
   // --------------------------------------------------- history transfer (AD-07)
+
+  async reconcileHistoryMetadata({ conversationId, messages }) {
+    requireDevice(); uuid(conversationId);
+    if (!Array.isArray(messages) || messages.length > 500) fail("BAD_MESSAGES");
+    const puts = [];
+    for (const message of messages) {
+      if (!Number.isSafeInteger(message.sequence) || message.sequence < 1) fail("BAD_SEQUENCE");
+      const existing = await loadRecord(conversationId, message.sequence);
+      if (!existing) continue;
+      if (existing.messageId !== uuid(message.messageId)) fail("HISTORY_RECORD_CONFLICT");
+      let updated = { ...existing, lifecycle: message.lifecycle, replyToMessageId: message.replyToMessageId ? uuid(message.replyToMessageId) : null, targetMessageId: message.targetMessageId ? uuid(message.targetMessageId) : null };
+      if (message.lifecycle !== "ACTIVE") updated = { sequence: existing.sequence, messageId: existing.messageId, kind: existing.kind, senderPrincipalId: existing.senderPrincipalId, senderDeviceId: existing.senderDeviceId, createdAt: existing.createdAt, status: "REMOVED", lifecycle: str(message.lifecycle, 40, 1) };
+      const plain = enc.encode(JSON.stringify(updated));
+      try { puts.push(["records", [ctx.account, conversationId, message.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, message.sequence), plain)]); } finally { plain.fill(0); }
+    }
+    await persistDevice(puts);
+    return true;
+  },
 
   async beginTransferV2({ context, expiresAt }) {
     const device = requireDevice();
@@ -1093,9 +1151,13 @@ const ops = {
     const key = historyStateKey(context[0], "source");
     const existing = await pendingJson(key);
     if (existing) {
-      if (JSON.stringify(existing.context) !== JSON.stringify(context) || existing.transferKey !== b64u.enc(transferKey) || existing.descriptor.expiresAt !== expiresAt) fail("TRANSFER_CONTEXT_INVALID");
-      return { descriptor: existing.descriptor, coverage: existing.coverage, records: existing.records };
+      if (JSON.stringify(existing.context) !== JSON.stringify(context) || existing.transferKey !== b64u.enc(transferKey) || (existing.descriptor?.expiresAt ?? existing.expiresAt) !== expiresAt) fail("TRANSFER_CONTEXT_INVALID");
+      if (existing.descriptor) return { descriptor: existing.descriptor, coverage: existing.coverage, records: existing.records };
+      // A crash before manifest publication may restart snapshot generation. Its
+      // preparing checkpoint owns every orphan page and supplies their finite TTL.
+      await ops.forgetHistoryTransferV2({ transferId: context[0] });
     }
+    await persistDevice([await jsonPut(key, { v: 2, role: "source", context, expiresAt, transferKey: b64u.enc(transferKey), preparing: true })]);
     const snapshotId = crypto.randomUUID();
     const chunks = [], coverage = new Map();
     let chunkRecords = [], chunkSize = enc.encode('{"v":2,"records":[]}').length, total = 0, recordCount = 0, readableCount = 0;
@@ -1267,6 +1329,7 @@ const ops = {
         const state = await pendingJson(key);
         const expiry = state.expiresAt ?? state.descriptor?.expiresAt;
         if (expiry > Math.floor(Date.now() / 1000)) out.push({ transferId: state.context[0], context: state.context, role: state.role, expiresAt: expiry, nextIndex: state.nextIndex ?? 0 });
+        else await ops.forgetHistoryTransferV2({ transferId: state.context[0] });
       }
       after = keys[keys.length - 1];
     }
@@ -1414,18 +1477,26 @@ const ops = {
 };
 
 let operations = Promise.resolve();
-self.onmessage = ({ data }) => {
+function dispatch({ data }, reply) {
+  const respond = (message) => { try { reply.postMessage(message); } catch { /* A closed tab must not break other ports' queue. */ } };
   operations = operations.then(async () => {
   const { id, op, args } = data ?? {};
   try {
     if (typeof op !== "string" || !Object.hasOwn(ops, op)) fail("UNKNOWN_OP");
     if (op !== "open" && op !== "wipe") await loadCore();
     const result = await ops[op](args ?? {});
-    self.postMessage({ id, ok: true, result });
+    respond({ id, ok: true, result });
   } catch (e) {
     // Stable codes only: never key material, never a stack.
     const code = e instanceof CodedError || (e instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(e.message)) ? e.message : "CRYPTO_ERROR";
-    self.postMessage({ id, ok: false, error: code });
+    respond({ id, ok: false, error: code });
   }
   });
+}
+self.onmessage = (event) => dispatch(event, self);
+self.onconnect = (event) => {
+  for (const port of event.ports) {
+    port.onmessage = (message) => dispatch(message, port);
+    port.start();
+  }
 };

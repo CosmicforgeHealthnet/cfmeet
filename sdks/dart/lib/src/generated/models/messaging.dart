@@ -1465,9 +1465,10 @@ class DeviceDirectory {
   const DeviceDirectory.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory DeviceDirectory.create({required List<Device> devices, required Uuid principalId, required TreeHead treeHead}) =>
+  factory DeviceDirectory.create({required List<Device> devices, String? nextCursor, required Uuid principalId, required TreeHead treeHead}) =>
       DeviceDirectory.fromJson(<String, Object?>{
         'devices': devices.map((e) => e.toJson()).toList(),
+        if (nextCursor != null) 'nextCursor': nextCursor,
         'principalId': principalId,
         'treeHead': treeHead.toJson(),
       });
@@ -1476,6 +1477,9 @@ class DeviceDirectory {
   final Map<String, Object?> json;
 
   List<Device> get devices => (json['devices']! as List<Object?>).map((e) => Device.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Last device UUID of this page; pass as cursor to continue. Null when complete.
+  String? get nextCursor => json['nextCursor'] as String?;
 
   Uuid get principalId => json['principalId']! as String;
 

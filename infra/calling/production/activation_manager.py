@@ -12,6 +12,11 @@ import coordinated_release as cr
 
 # Strict, runtime-attested allowlist: separate, explicit approval still required.
 PROBES = {
+    "activate-messaging-concurrency": (
+        ("messaging", "MESSAGING_MAX_ACTIVE_DEVICES", "0"),
+        ("messaging", "MESSAGING_REALTIME_PER_PRINCIPAL_CONNECTIONS", "0"),
+        ("messaging", "MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS", "0"),
+    ),
     "activate-provisioning": (("organizations", "ORGANIZATIONS_PROVISIONING_ENABLED", "true"),),
     "activate-organization-bindings": (("organizations", "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "true"),),
     "activate-org-events": (

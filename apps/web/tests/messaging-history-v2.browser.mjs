@@ -139,6 +139,12 @@ try {
   assert.equal(snapshot.coverage, 'SOURCE_AVAILABLE'); confirmed('more than 1 MiB and two conversations form a complete bounded snapshot');
   const sourceKey = (await call(source, 'status')).signaturePublicKey;
   const sealedManifest = await call(source, 'historyObjectV2', { transferId: context[0], index: 0xffffffff });
+  // These attacker-controlled lengths overflowed unchecked usize arithmetic on
+  // wasm32. Refusal must leave the runtime and the reusable target key functional.
+  const hostileLength = new Uint8Array(73); hostileLength[0] = 2; hostileLength.set([255,255,255,255],1);
+  await assert.rejects(call(target, 'acceptHistoryManifestV2', { context, descriptor: snapshot.descriptor, sourceKey, sealed: hostileLength }));
+  assert.equal((await call(target, 'historyProgressV2', { transferId: context[0] })).nextIndex, 0);
+  confirmed('malformed wasm32 frame lengths are refused without losing the runtime');
   const damagedManifest = sealedManifest.slice(); damagedManifest[damagedManifest.length - 1] ^= 1;
   await assert.rejects(call(target, 'acceptHistoryManifestV2', { context, descriptor: snapshot.descriptor, sourceKey, sealed: damagedManifest }));
   assert.equal((await call(target, 'historyProgressV2', { transferId: context[0] })).nextIndex, 0);
@@ -185,6 +191,14 @@ try {
   await assert.rejects(call(target, 'historyProgressV2', { transferId: context[0] }));
   assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 41);
   confirmed('transfer cleanup removes checkpoint secrets while retaining authorized history');
+  const expiringContext = [...context]; expiringContext[0] = id(99);
+  await call(target, 'beginTransferV2', { context: expiringContext, expiresAt: Math.floor(Date.now() / 1000) + 2 });
+  await new Promise(resolve => setTimeout(resolve, 2200));
+  const remaining = await call(target, 'listHistoryTransfersV2');
+  assert.equal(remaining.some(t => t.transferId === expiringContext[0]), false);
+  await assert.rejects(call(target, 'historyProgressV2', { transferId: expiringContext[0] }), /NO_TRANSFER/);
+  assert.equal((await call(target, 'history', { conversationId: conversations[0] })).length, 41);
+  confirmed('runtime expiry removes private transfer checkpoints without deleting recovered history');
   const evidence = { at: new Date().toISOString(), boundary: 'real shipped worker/WASM, two independent Chromium profiles, IndexedDB; server relay and authentication tested separately', events };
   if (output) await writeFile(output, JSON.stringify(evidence, null, 2));
   process.stdout.write(JSON.stringify(evidence, null, 2) + '\n');

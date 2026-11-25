@@ -778,6 +778,58 @@ async fn key_package_claims_are_single_use_under_concurrency() {
 }
 
 #[tokio::test]
+async fn device_directory_pages_cover_all_registered_devices_without_duplicates() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(&[SEND, READ]);
+    let alice = h.principal(&c);
+    for _ in 0..3 {
+        h.active_device(&c, alice).await;
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut cursor = None::<String>;
+    loop {
+        let path = format!(
+            "/v1/messaging/principals/{alice}/devices?limit=1{}",
+            cursor
+                .as_ref()
+                .map(|v| format!("&cursor={v}"))
+                .unwrap_or_default()
+        );
+        let page = h.get(&c, Some(alice), &path).await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.text);
+        conforms(
+            "messaging/common/v1.schema.json#/$defs/DeviceDirectory",
+            &page.json,
+        );
+        assert_eq!(page.json["devices"].as_array().unwrap().len(), 1);
+        assert!(seen.insert(
+            page.json["devices"][0]["deviceId"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        ));
+        cursor = page.json["nextCursor"].as_str().map(str::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+        assert!(seen.len() < 4, "directory pagination must terminate");
+    }
+    assert_eq!(seen.len(), 3);
+    assert_eq!(
+        h.get(
+            &c,
+            Some(alice),
+            &format!("/v1/messaging/principals/{alice}/devices?limit=501")
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
 async fn e2ee_device_operations_can_be_disabled_by_deployment() {
     let Some(h) = Harness::build(|s| {
         s.devices.enabled = false;

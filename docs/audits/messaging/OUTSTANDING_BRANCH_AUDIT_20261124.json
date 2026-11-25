@@ -1,0 +1,588 @@
+{
+  "main": "4304ed656adf96756dc0fa8f974dbc8a2ee22861",
+  "branches": [
+    {
+      "branch": "origin",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Chat: preview with caption before sending a file, instant photos, WhatsApp-style file previews",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/automation/green-main-auto-release-20261121",
+      "ahead": 1,
+      "changedFiles": 1,
+      "purpose": "ci: expose coordinated release as reusable workflow and overlap CI with image build",
+      "equivalentPatches": 0,
+      "nonEquivalentPatches": 1,
+      "assessment": "Review required; compare final implementation and CI before integration."
+    },
+    {
+      "branch": "origin/ccr-a48695ce-yy5erg",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Contracts: cfmeet.messaging.event 1.13.0 \u00e2\u20ac\u201d optional internal first_party on messaging.message.created (gap audit S1)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a0",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge A0: cfmeet.platform.common is 1.24.0 in the contracts README",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a1",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge A1: record A0's pinnable commit on main",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-calling",
+      "ahead": 29,
+      "changedFiles": 267,
+      "purpose": "Admin bridge A2.7: Calling reads (bridge side)",
+      "equivalentPatches": 15,
+      "nonEquivalentPatches": 14,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-communications",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Communications: the bundled internal contract is also 1.10.0",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-developer-platform",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge A2.1: Developer Platform operator routes name ADR 0068",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-meeting",
+      "ahead": 24,
+      "changedFiles": 191,
+      "purpose": "Admin bridge A2.5: email_masked carries a pattern only a masked value matches",
+      "equivalentPatches": 11,
+      "nonEquivalentPatches": 13,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-messaging",
+      "ahead": 27,
+      "changedFiles": 220,
+      "purpose": "Admin bridge A2.6: the discovery test's blocked example is meetings.reports.list",
+      "equivalentPatches": 14,
+      "nonEquivalentPatches": 13,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-notifications",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge: HMAC key files are base64url text, the same file HQ reads",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-organizations",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Organizations: the operator console keeps its legacy X-CF-Operator",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a2-platform-access",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge A2.3: the decision record is ADR 0068",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a3-core",
+      "ahead": 31,
+      "changedFiles": 279,
+      "purpose": "Admin bridge A3.0: expected_version may be the owner's integer row version",
+      "equivalentPatches": 17,
+      "nonEquivalentPatches": 14,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a3-verification",
+      "ahead": 36,
+      "changedFiles": 304,
+      "purpose": "Frontend endpoint reference: regenerate for the Calling 1.33.0 contract",
+      "equivalentPatches": 20,
+      "nonEquivalentPatches": 16,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-calling",
+      "ahead": 41,
+      "changedFiles": 333,
+      "purpose": "Calling A4/A7 CI: command routes in the contract check, bounded event metric label, table ownership",
+      "equivalentPatches": 23,
+      "nonEquivalentPatches": 18,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-communications",
+      "ahead": 39,
+      "changedFiles": 319,
+      "purpose": "Communications A7: abuse.report.changed.v1 owner events to the admin bridge",
+      "equivalentPatches": 21,
+      "nonEquivalentPatches": 18,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-developer-platform",
+      "ahead": 47,
+      "changedFiles": 364,
+      "purpose": "Developer Platform A4: public API 1.10.0 pins, fixture-marked test tokens, pricing doc wording",
+      "equivalentPatches": 22,
+      "nonEquivalentPatches": 25,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-meeting",
+      "ahead": 50,
+      "changedFiles": 375,
+      "purpose": "Meeting Service tests: the three owner-delivered export operations, and artifact refusal at its current version",
+      "equivalentPatches": 24,
+      "nonEquivalentPatches": 26,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-messaging",
+      "ahead": 43,
+      "changedFiles": 342,
+      "purpose": "Messaging tests: read the message envelope's lifecycle; enable attachments in the partner environment",
+      "equivalentPatches": 26,
+      "nonEquivalentPatches": 17,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-notifications",
+      "ahead": 42,
+      "changedFiles": 314,
+      "purpose": "Notifications A4/A7: test the real settlement refusal and a seeded failed-delivery day",
+      "equivalentPatches": 24,
+      "nonEquivalentPatches": 18,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-organizations",
+      "ahead": 40,
+      "changedFiles": 326,
+      "purpose": "Organizations: the export download test expects invitations in creation order",
+      "equivalentPatches": 22,
+      "nonEquivalentPatches": 18,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-platform-access",
+      "ahead": 39,
+      "changedFiles": 328,
+      "purpose": "Platform Access: CI expectations for the A4 admin bridge migrations",
+      "equivalentPatches": 21,
+      "nonEquivalentPatches": 18,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a4-wiring",
+      "ahead": 47,
+      "changedFiles": 519,
+      "purpose": "Admin bridge 1.16.0: id-addressed reads, and commands that say their real target",
+      "equivalentPatches": 32,
+      "nonEquivalentPatches": 15,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-a7-a8-local",
+      "ahead": 55,
+      "changedFiles": 564,
+      "purpose": "Admin bridge A7: Meeting Service user export and dataset pulls",
+      "equivalentPatches": 40,
+      "nonEquivalentPatches": 15,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-batch-1",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Contracts: regenerate the public catalogue and SDK pins for Calling 1.34.0",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-batch-2",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Admin bridge: contract 2.0.0, agreed with HQ",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-deploy",
+      "ahead": 21,
+      "changedFiles": 66,
+      "purpose": "Backup catalog: the additive migration histories added since",
+      "equivalentPatches": 12,
+      "nonEquivalentPatches": 9,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/admin-bridge-local",
+      "ahead": 37,
+      "changedFiles": 312,
+      "purpose": "Admin bridge: no schema property may be named like a secret, link or sealed blob",
+      "equivalentPatches": 22,
+      "nonEquivalentPatches": 15,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/claude/cfmeet-consolidation-closure-vk2pe3",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Release: staging -> main \u00e2\u20ac\u201d closure report production verdict (#47)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/intelligent-cray-gghkjf",
+      "ahead": 1,
+      "changedFiles": 5,
+      "purpose": "fix: create acceptance accounts once per campaign and reuse their sessions; bounded 429 waits",
+      "equivalentPatches": 1,
+      "nonEquivalentPatches": 0,
+      "assessment": "Review required; compare final implementation and CI before integration."
+    },
+    {
+      "branch": "origin/claude/practical-babbage-bru9w0",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Messaging: read Platform Access refusals as answers, not outages",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Meeting Service test: read the reset code from its own line, not the first 6-digit run",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-activation",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Organizations: dedicated public Swagger document; backup drill covers every catalog service",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-activation-docs",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "docs: closure report evidence (release 43967106423, organization acceptance 43977766389, certify 43978199476)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-c7-governed",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Calling: device evidence applies only to its owner's pairs (C7 in governed scopes)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-calling-features",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge remote-tracking branch 'origin/main' into claude/sharp-dijkstra-qgnwtn-calling-features",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-calls",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Calls: contact calls from Contacts are placed, \"on another call\", faster hang-up",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-chat-ux",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Chats: no browser verification, silent setup, accurate older-message labels (ADR 0067)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-contacts",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Communications contacts audit: K1-K11, KF1-KF3",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-e2ee",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge remote-tracking branch 'origin/main' into claude/sharp-dijkstra-qgnwtn-e2ee",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-gaps",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge remote-tracking branch 'origin/main' into claude/sharp-dijkstra-qgnwtn-gaps",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-gaps7",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "CI fixes for the last 7 gaps: Telephony table count, boundary guard, Organizations clippy",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-hotfix",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Messaging: never serve one-to-one send decisions from the B2 cache",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-ids",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge remote-tracking branch 'origin/main' into claude/sharp-dijkstra-qgnwtn-ids",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-meeting-fixes",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "feat(web, mobile): map VALIDATION_ERROR details onto form fields",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-meetings",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Meetings server audit: production CORS, legacy grace, waiting rooms, in-app notices, iTIP invites, registrations, extend and calendar feed",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-messaging",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Messaging server audit: send-policy cache, archive/pin, disappearing messages, request logs, private mentions, rich private messages",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-messaging-wip",
+      "ahead": 1,
+      "changedFiles": 45,
+      "purpose": "WIP messaging audit (interrupted by container restart): send cache, inbox archive/pin, retention, request logs",
+      "equivalentPatches": 0,
+      "nonEquivalentPatches": 1,
+      "assessment": "Review required; compare final implementation and CI before integration."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-notifications",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Notifications: every user-facing notice reaches the bell",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-rtcflake",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Calling RTC certification: a publish only succeeds once the media server receives it",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-settings-dev",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Apply the account-privacy migration wherever the Meeting Service is started",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-train",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Meeting-service swagger: served Messaging pin is 107 operations, 74 native",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-verification",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "diagnose: count email-ledger purge failures (A2 evidence)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-verification-2",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Verification journey: request only scopes the application is allowed",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/sharp-dijkstra-qgnwtn-verification-3",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Verification journey: check C6 on the effective LiveKit permission",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/claude/zealous-dijkstra-e7kr7w",
+      "ahead": 1,
+      "changedFiles": 1,
+      "purpose": "Docs: Session 3 completion report (draft, production evidence pending)",
+      "equivalentPatches": 0,
+      "nonEquivalentPatches": 1,
+      "assessment": "Review required; compare final implementation and CI before integration."
+    },
+    {
+      "branch": "origin/codex/admin-bridge-backup-drill",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Include Admin Bridge in the real-schema backup drill",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/admin-bridge-integration",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Synchronize bridge release operations with workflow",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/audit-production-followup",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Gracefully stop a failed media replacement before restoring its predecessor",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/calling-recording-consent",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Allow admitted app calls to exchange recording consent",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/device-local-recording",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Revert frontend recording changes at owner's request",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/messaging-reliability-phase3",
+      "ahead": 11,
+      "changedFiles": 89,
+      "purpose": "Checkpoint authenticator-protected storage and resumable history architecture in draft",
+      "assessment": "Active Messaging completion in PR175."
+    },
+    {
+      "branch": "origin/codex/notification-production-logout-check",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "test(production): observe Calling revocation through the web adapter",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/notification-release-messaging-journey",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "test(web): verify encrypted chat profile through Chat info",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/recording-callback-preparation",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge remote-tracking branch 'origin/main' into codex/recording-callback-preparation",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/recording-provider-activation",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Include witness origin correction in activation batch",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/recording-receipt-diagnostics",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Prepare the Meeting provider callback with idle-media and rollback guards",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/release-avatar-check",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Keep avatar compression wiring check independent of parameter names",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/runtime-audit-activation",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Patch URL stack-overflow advisory across all affected lockfiles and cover log dependencies",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/server-audit-closure",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Give the block projection migration a dated history name",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/swagger-reachability-dark",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Restore Swagger address and darken API reference",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/codex/witness-endpoint-fix",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Configure the witness base URL before Messaging appends its protocol path",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/docs/notification-n0-n1-n4-closure",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "docs(notification): record N0/N1/N4 production closure",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/feat/landing-redesign",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Web: keep the security source scan clean (comment wording in the CSP builder)",
+      "assessment": "Already in main by ancestry."
+    },
+    {
+      "branch": "origin/ops/admin-bridge-dark-bootstrap-20261121",
+      "ahead": 4,
+      "changedFiles": 9,
+      "purpose": "docs: distinguish dark Admin Bridge VPS bootstrap from gated HQ activation",
+      "equivalentPatches": 0,
+      "nonEquivalentPatches": 4,
+      "assessment": "Review required: overlapping historical Admin Bridge chain; patch-equivalent commits already exist in main; do not import stale release gates."
+    },
+    {
+      "branch": "origin/staging",
+      "ahead": 0,
+      "changedFiles": 0,
+      "purpose": "Merge pull request #69 from CosmicforgeHealthnet/claude/sharp-dijkstra-qgnwtn",
+      "assessment": "Already in main by ancestry."
+    }
+  ]
+}

@@ -7080,6 +7080,8 @@ export namespace Messaging {
     principalId: Uuid;
     devices: Array<Device>;
     treeHead: TreeHead;
+    /** Last device UUID of this page; pass as cursor to continue. Null when complete. */
+    nextCursor?: string | null;
   };
   export type DeviceStatus = "ACTIVE" | "REVOKED";
   export type EditMessageRequest = {
@@ -8488,8 +8490,9 @@ export namespace Messaging {
     };
     /** GET /v1/messaging/principals/{principalId}/devices — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     listPrincipalDevices: {
-      params: { path: { principalId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      params: { path: { principalId: Uuid }; query?: { limit?: number; cursor?: string }; headers: { "cf-acting-principal": Uuid } };
       response: DeviceDirectory;
+      item: NonNullable<(DeviceDirectory)["devices"]>[number];
     };
     /** GET /v1/conversations/{conversationId}/messages/{messageId}/reactions — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry SAFE */
     listReactions: {

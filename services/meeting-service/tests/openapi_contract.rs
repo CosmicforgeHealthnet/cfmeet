@@ -108,6 +108,12 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/messaging/devices"),
         ("post", "/api/v2/messaging/devices/{deviceId}/key-packages"),
         ("post", "/api/v2/messaging/devices/{deviceId}/revoke"),
+        (
+            "post",
+            "/api/v2/messaging/devices/{deviceId}/installation-challenges",
+        ),
+        ("post", "/api/v2/messaging/devices/{deviceId}/installation"),
+        ("get", "/api/v2/messaging/devices/{deviceId}/installation"),
         ("post", "/api/v2/messaging/client-tokens"),
         ("post", "/api/v2/messaging/session-tokens"),
         ("post", "/api/v2/messaging/client-sessions/revoke-all"),

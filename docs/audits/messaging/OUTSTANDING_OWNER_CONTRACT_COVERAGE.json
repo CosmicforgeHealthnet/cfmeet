@@ -1,0 +1,58 @@
+[
+  {
+    "branch": "origin/claude/admin-bridge-a4-communications",
+    "contract": "packages/contracts/communications/internal/v1.openapi.json",
+    "branchOperations": 24,
+    "mainOperations": 24,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-meeting",
+    "contract": "packages/contracts/meeting-service/admin-operator/v1.openapi.json",
+    "branchOperations": 42,
+    "mainOperations": 42,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-messaging",
+    "contract": "packages/contracts/messaging/internal/v1.openapi.json",
+    "branchOperations": 44,
+    "mainOperations": 44,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-notifications",
+    "contract": "packages/contracts/notifications/internal/v1.openapi.json",
+    "branchOperations": 28,
+    "mainOperations": 28,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-organizations",
+    "contract": "packages/contracts/organizations/internal/v1.openapi.json",
+    "branchOperations": 75,
+    "mainOperations": 75,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-platform-access",
+    "contract": "packages/contracts/platform-access/internal/v1.openapi.json",
+    "branchOperations": 137,
+    "mainOperations": 137,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-calling",
+    "contract": "packages/contracts/calling/http/v1.openapi.json",
+    "branchOperations": 200,
+    "mainOperations": 200,
+    "missingOperations": []
+  },
+  {
+    "branch": "origin/claude/admin-bridge-a4-developer-platform",
+    "contract": "packages/contracts/platform-developer/internal/v1.openapi.json",
+    "branchOperations": 98,
+    "mainOperations": 98,
+    "missingOperations": []
+  }
+]

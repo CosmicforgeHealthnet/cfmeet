@@ -12,7 +12,7 @@
 //! | `MESSAGING_DEVICE_CHALLENGE_TTL_SECONDS` | no | registration challenge validity (60–3600, default 300) |
 //! | `MESSAGING_HISTORY_TRANSFER_MAX_BYTES` | no | largest sealed history a device-to-device transfer relays (64 KiB–64 MiB, default 8 MiB) |
 //! | `MESSAGING_DEVICE_CHALLENGES_PER_HOUR` | no | challenges per principal per hour (1–1000, default 20) |
-//! | `MESSAGING_MAX_ACTIVE_DEVICES` | no | active devices per principal (1–100, default 10) |
+//! | `MESSAGING_MAX_ACTIVE_DEVICES` | no | optional operator abuse quota per principal (0 disables, default 0) |
 //! | `MESSAGING_MAX_KEY_PACKAGES_PER_DEVICE` | no | AVAILABLE KeyPackages per device (1–1000, default 100) |
 //! | `MESSAGING_KEY_PACKAGE_MAX_LIFETIME_DAYS` | no | longest accepted KeyPackage lifetime (1–90, default 90) |
 //! | `MESSAGING_KEY_PACKAGE_LOW_WATERMARK` | no | usable KeyPackages below which a device gets one low-stock alert (0–1000, default 10; 0 = off) |
@@ -43,7 +43,7 @@
 //! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |
 //! | `MESSAGING_REALTIME_HEARTBEAT_SECONDS` / `_IDLE_TIMEOUT_SECONDS` / `_REVALIDATE_SECONDS` | no | defaults 20 / 60 / 30 |
 //! | `MESSAGING_REALTIME_MAX_FRAME_BYTES` / `_SEND_QUEUE` / `_MAX_SUBSCRIPTIONS` / `_MAX_REPLAY` | no | defaults 65536 / 512 / 200 / 500 |
-//! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
+//! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 0 / 0 (zero disables the per-principal/device count quota) |
 //! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
 //! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only): the explicitly local adapter |
 //! | `MESSAGING_PUSH_REGISTRATION_MIRROR` | no | `off` (default: unchanged behaviour) or `on`: the N9 facade mirrors CF Meet first-party push registrations to the Notification Service (I13; needs `CF_NOTIFICATIONS_BASE_URL` and `CF_COMMUNICATIONS_PERSONAL_*`), see `push_mirror` |
@@ -220,7 +220,7 @@ impl Default for DeviceSettings {
             enabled: true,
             challenge_ttl: chrono::Duration::seconds(300),
             challenges_per_hour: 20,
-            max_active_devices: 10,
+            max_active_devices: 0,
             max_key_packages_per_device: 100,
             key_package_max_lifetime_days: 90,
             key_package_low_watermark: 10,
@@ -600,7 +600,7 @@ impl MessagingConfig {
                 1,
                 1_000,
             )?,
-            max_active_devices: bounded(&get, "MESSAGING_MAX_ACTIVE_DEVICES", 10, 1, 100)?,
+            max_active_devices: bounded(&get, "MESSAGING_MAX_ACTIVE_DEVICES", 0, 0, 100000)?,
             max_key_packages_per_device: bounded(
                 &get,
                 "MESSAGING_MAX_KEY_PACKAGES_PER_DEVICE",
@@ -873,11 +873,16 @@ impl MessagingConfig {
             )?,
             per_principal_connections: count(
                 "MESSAGING_REALTIME_PER_PRINCIPAL_CONNECTIONS",
-                20,
-                1,
+                0,
+                0,
                 1_000,
             )?,
-            per_device_connections: count("MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS", 5, 1, 100)?,
+            per_device_connections: count(
+                "MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS",
+                0,
+                0,
+                100000,
+            )?,
             inbound_frames_per_second: bounded(
                 &get,
                 "MESSAGING_REALTIME_FRAMES_PER_SECOND",

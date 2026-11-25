@@ -194,6 +194,9 @@ async fn template(admin: &str) -> String {
             migration::MessagingInstallationsMigrator::up(&tmpl, None)
                 .await
                 .expect("protected Messaging installation migrations apply");
+            migration::ConcurrentDevicesMigrator::up(&tmpl, None)
+                .await
+                .expect("concurrent-device migrations apply");
             migration::AdminOperationsMigrator::up(&tmpl, None)
                 .await
                 .expect("admin-operations migrations apply");

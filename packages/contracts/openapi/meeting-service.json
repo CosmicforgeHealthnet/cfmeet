@@ -12971,7 +12971,7 @@
           "Account devices (v2)"
         ],
         "summary": "Complete my link",
-        "description": "The requesting device finishes its link after approval (or with `emailCode`), proving\npossession of its key (purpose `LINK_COMPLETE`, context = `{linkId}`). A web device\nbecomes trusted. A pending mobile becomes the primary mobile atomically: the previous\nprimary mobile is revoked (its sign-ins, Messaging device, Calling endpoint, push and\nmeeting media end) and trusted web devices stay signed in. The account's email gets a\nnotice and the security log records it.",
+        "description": "The requesting device finishes its link after approval (or with `emailCode`), proving\npossession of its key (purpose `LINK_COMPLETE`, context = `{linkId}`). A web device\nbecomes trusted. A pending mobile becomes active after approval without revoking\nanother phone or sign-in, or ending any existing meeting media. The account's email gets a\nnotice and the security log records it.",
         "operationId": "v2_complete_device_link",
         "parameters": [
           {
@@ -13178,7 +13178,7 @@
           "Account devices (v2)"
         ],
         "summary": "Read my device policy and state",
-        "description": "The account's multi-device state (`WEB_ONLY`, `MOBILE_PRIMARY`,\n`DEVICE_REPLACEMENT_PENDING`), the backend limits (one primary mobile,\n`maxWebDevices` web devices), the linking methods available to a new device and the\nstatus of the calling sign-in's device. Accepts a pending mobile's sign-in.",
+        "description": "The account's multi-device state (`WEB_ONLY`, `MOBILE_PRIMARY`,\n`DEVICE_REPLACEMENT_PENDING`, retained as compatibility labels), unlimited approved\nmobile and web installations (`maxPrimaryMobiles: 0`, `maxWebDevices: 0`), linking methods available to a new device and the\nstatus of the calling sign-in's device. Accepts a pending mobile's sign-in.",
         "operationId": "v2_get_my_device_policy",
         "responses": {
           "200": {
@@ -13263,7 +13263,7 @@
           "Account devices (v2)"
         ],
         "summary": "Declare this sign-in's device",
-        "description": "Binds the calling sign-in to a device right after signing in on it (within the\nre-authentication window). The device proves possession of its Ed25519 key (purpose\n`DECLARE`, context = the session id). The same installation signing in again reuses\nits device (older sign-ins of it end: `SUPERSEDED`), never a new one.\n\n* WEB: trusted and active right away (`BOOTSTRAP`: the fresh sign-in is the proof; no\nverification step, ADR 0067). An existing untrusted browser declaring again is\ntrusted the same way. Beyond `maxWebDevices` active web devices, the least recently\nused browser of the account is revoked (its sign-ins end) instead of refusing.\n* The first device of an account that never had a trusted device is trusted\n(`BOOTSTRAP`); a first mobile then becomes the primary mobile.\n* Any other new MOBILE is `UNTRUSTED` and `REPLACEMENT_PENDING` (its sign-in is refused\nelsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a link: approval by a\ntrusted device or an email step-up.",
+        "description": "Binds the calling sign-in to a device right after signing in on it (within the\nre-authentication window). The device proves possession of its Ed25519 key (purpose\n`DECLARE`, context = the session id). The same installation signing in again reuses\nits device (older sign-ins of it end: `SUPERSEDED`), never a new one.\n\n* WEB: trusted and active right away (`BOOTSTRAP`: the fresh sign-in is the proof; no\nverification step, ADR 0067). An existing untrusted browser declaring again is\ntrusted the same way. Independent browser sign-ins never evict another browser;\n`maxWebDevices: 0` denotes no fixed concurrency restriction.\n* The first device of an account that never had a trusted device is trusted\n(`BOOTSTRAP`); a first mobile then becomes the primary mobile.\n* Any other new MOBILE is `UNTRUSTED` and `REPLACEMENT_PENDING` (its sign-in is refused\nelsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a link: approval by a\ntrusted device or an email step-up.",
         "operationId": "v2_declare_my_device",
         "requestBody": {
           "content": {
@@ -17272,6 +17272,225 @@
           },
           "503": {
             "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices/{deviceId}/installation": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "operationId": "v2_messaging_installation_status",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Existing Messaging identity",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding matches this trusted Account installation; fresh MLS proof is still required for token issuance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBinding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Capability unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "operationId": "v2_messaging_bind_installation",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Existing active Messaging identity",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallationProof"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Identity is bound to the proved protected installation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBinding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Capability unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices/{deviceId}/installation-challenges": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "operationId": "v2_messaging_installation_challenge",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Existing active Messaging identity",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Fresh proof bound to this trusted Account installation and sign-in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationChallenge"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID / AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Capability unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -29082,12 +29301,12 @@
           "endedSessions": {
             "type": "integer",
             "format": "int64",
-            "description": "Sign-ins ended by this operation (replaced mobile, superseded sign-ins)."
+            "description": "Sign-ins explicitly ended by this operation; additional-device approval returns zero."
           },
           "replacedDeviceId": {
             "type": "string",
             "format": "uuid",
-            "description": "The primary mobile this completion replaced (revoked), if any.",
+            "description": "Legacy compatibility field; additional-device approval never replaces a device.",
             "nullable": true
           }
         }
@@ -29145,7 +29364,7 @@
           "maxPrimaryMobiles": {
             "type": "integer",
             "format": "int64",
-            "description": "Always 1: at most one primary mobile."
+            "description": "Zero means no product cap on approved mobile installations."
           },
           "maxWebDevices": {
             "type": "integer",
@@ -29161,6 +29380,7 @@
           "primaryMobileDeviceId": {
             "type": "string",
             "format": "uuid",
+            "description": "Legacy summary of an active mobile, not exclusive device authority.",
             "nullable": true
           },
           "proofWindowSecs": {
@@ -29251,7 +29471,7 @@
           },
           "primary": {
             "type": "boolean",
-            "description": "True for the account's ACTIVE mobile."
+            "description": "Legacy field: true for an ACTIVE approved mobile; several may be true."
           },
           "promotedAt": {
             "type": "string",
@@ -29818,6 +30038,81 @@
             "description": "True when the database enforces it (the unique index exists)."
           }
         }
+      },
+      "InstallationBinding": {
+        "type": "object",
+        "required": [
+          "persistentIdentity",
+          "deviceId",
+          "accountDeviceId",
+          "protocolVersion"
+        ],
+        "properties": {
+          "accountDeviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "persistentIdentity": {
+            "type": "boolean"
+          },
+          "protocolVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "InstallationChallenge": {
+        "type": "object",
+        "required": [
+          "challengeId",
+          "deviceId",
+          "accountDeviceId",
+          "nonce",
+          "expiresAt"
+        ],
+        "properties": {
+          "accountDeviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "challengeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          }
+        }
+      },
+      "InstallationProof": {
+        "type": "object",
+        "required": [
+          "challengeId",
+          "keyPackage"
+        ],
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "keyPackage": {
+            "type": "string",
+            "description": "Base64url RFC 9420 registration-bound KeyPackage, signed by this existing device."
+          }
+        },
+        "additionalProperties": false
       },
       "InstantMeetingApiResponse": {
         "type": "object",

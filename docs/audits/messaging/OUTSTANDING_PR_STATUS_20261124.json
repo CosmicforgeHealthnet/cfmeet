@@ -1,0 +1,207 @@
+[
+  {
+    "baseRefName": "main",
+    "headRefName": "codex/messaging-reliability-phase3",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 175,
+    "title": "Messaging reliability: multi-device regressions, safe retries and bounded epoch recovery",
+    "failedChecks": [],
+    "pendingChecks": 93
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "ops/admin-bridge-dark-bootstrap-20261121",
+    "isDraft": false,
+    "mergeable": "CONFLICTING",
+    "number": 156,
+    "title": "ops: first-time dark Admin Bridge service in coordinated VPS release",
+    "failedChecks": [],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "automation/green-main-auto-release-20261121",
+    "isDraft": false,
+    "mergeable": "CONFLICTING",
+    "number": 155,
+    "title": "ci: expose coordinated release as reusable workflow and overlap CI wi\u2026",
+    "failedChecks": [],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-meeting",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 154,
+    "title": "Meeting Service: admin bridge account and meeting commands and reads (A4-A7 owner side)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-calling",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 153,
+    "title": "Calling: admin bridge operator commands (A4/A5 owner side)",
+    "failedChecks": [
+      "test (PostgreSQL)",
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-messaging",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 152,
+    "title": "Messaging: admin bridge moderation and operations commands (A4/A5/A7 owner side)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-developer-platform",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 150,
+    "title": "Developer Platform: admin bridge partner/app commands and pricing (A4/A6 owner side)",
+    "failedChecks": [
+      "test (PostgreSQL)",
+      "test (PostgreSQL)",
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-platform-access",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 149,
+    "title": "Platform Access: admin bridge identity and partner commands (A4 owner side)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a4-wiring",
+    "headRefName": "claude/admin-bridge-a7-a8-local",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 148,
+    "title": "Admin bridge A7/A8: owner events and HQ feed; activation requests and release history",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)",
+      "Vercel"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-local",
+    "headRefName": "claude/admin-bridge-a4-wiring",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 147,
+    "title": "Admin bridge A4/A5: owner commands as data (Communications, Notifications, Organizations)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)",
+      "Vercel"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-local",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 146,
+    "title": "Admin bridge: audit search, operations health, privacy requests",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)",
+      "Vercel"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-notifications",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 145,
+    "title": "Notifications: admin bridge commands (A5 owner side)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-organizations",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 144,
+    "title": "Organizations: admin bridge commands (A4/A5 owner side)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-verification",
+    "headRefName": "claude/admin-bridge-a4-communications",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 143,
+    "title": "Communications: admin bridge commands (A4/A5 owner side)",
+    "failedChecks": [
+      "Pre-deploy tests",
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a3-core",
+    "headRefName": "claude/admin-bridge-a3-verification",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 141,
+    "title": "Admin bridge A3.1-A3.3: verification queue and decisions from HQ",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a2-calling",
+    "headRefName": "claude/admin-bridge-a3-core",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "number": 140,
+    "title": "Admin bridge A3.0: the command core (operations ledger, send once, readback)",
+    "failedChecks": [
+      "journeys (real processes, real service auth, Postgres, Redis)"
+    ],
+    "pendingChecks": 0
+  },
+  {
+    "baseRefName": "claude/admin-bridge-a2-organizations",
+    "headRefName": "claude/admin-bridge-deploy",
+    "isDraft": false,
+    "mergeable": "CONFLICTING",
+    "number": 133,
+    "title": "Admin bridge: dark deployment in the coordinated release (design \u00a714)",
+    "failedChecks": [
+      "ingress"
+    ],
+    "pendingChecks": 0
+  }
+]

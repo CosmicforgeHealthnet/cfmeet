@@ -228,7 +228,8 @@ SERVICES = {
         env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-2')),
     'messaging': _service('cfmeet-messaging', 8097, '/ready', tls=8444, db='cfmeet_messaging',
         role='messaging', migrations=['messaging-migration', 'messaging-communications-migration',
-                                      'messaging-notification-fence-migration', 'messaging-send-policy-projection-migration'],
+                                      'messaging-notification-fence-migration', 'messaging-send-policy-projection-migration',
+                                      'messaging-history-transfer-v2-migration'],
         history=['messaging_seaql_migrations'], existing=True),
     'calling': _service('cfmeet-calling', 8090, '/health', tls=8445, db='cfmeet_calling', role='calling',
         migrations=['calling-migration', 'calling-communications-migration'],
@@ -260,7 +261,8 @@ SERVICES = {
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
                     'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
-                    'account-privacy-migration','account-phone-migration','admin-operations-migration'],
+                    'account-privacy-migration','account-phone-migration','admin-operations-migration',
+                    'messaging-installations-migration', 'meeting-concurrent-devices-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -2950,6 +2952,14 @@ def activate_first_party_features(sha, run_id, confirm):
     apply_activation('activate-first-party-features', sha, run_id, changes)
 
 
+def activate_messaging_concurrency(sha, run_id, confirm):
+    """Owner-approved concurrent Messaging; tenant/instance/rate budgets remain intact."""
+    changes = [('messaging', {'MESSAGING_MAX_ACTIVE_DEVICES': '0',
+                             'MESSAGING_REALTIME_PER_PRINCIPAL_CONNECTIONS': '0',
+                             'MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS': '0'})]
+    apply_activation('activate-messaging-concurrency', sha, run_id, changes)
+
+
 def web_origin_checks():
     """Every production web origin passes the gateway's CORS preflight; a foreign origin does not."""
     checks = {}
@@ -3723,6 +3733,7 @@ ACTIVATIONS = {
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
+    'activate-messaging-concurrency': ((), activate_messaging_concurrency),
     # Owner decision 2026-11-15: personal E2EE without an independent assessment (recorded).
     'activate-personal-encryption': (('activate-first-party-features',), activate_personal_e2ee),
     # Section 4 of the backend closure: Web Push with a VAPID key generated on the VPS.

@@ -241,12 +241,19 @@ async function journey() {
   pages.bob = bob.page;
   await register(alice.page);
   await register(bob.page);
-  // Five independent profiles and account sign-ins; no storage/token sharing.
+  // Ten independent profiles and account sign-ins; no storage/token sharing.
   const alicePhone = await open("alice", { mobile: true });
   const aliceOther = await open("alice");
   const bobPhone = await open("bob", { mobile: true });
   const otherDevices = [["alice", alicePhone], ["alice", aliceOther], ["bob", bobPhone]];
   Object.assign(pages, { alicePhone: alicePhone.page, aliceOther: aliceOther.page, bobPhone: bobPhone.page });
+  for (const [user, count] of [["alice", 2], ["bob", 3]]) {
+    for (let i = 0; i < count; i++) {
+      const device = await open(user, { mobile: i % 2 === 0 });
+      otherDevices.push([user, device]);
+      pages[`${user}Extra${i}`] = device.page;
+    }
+  }
   for (const [, device] of otherDevices) await register(device.page);
 
   const pageCsp = (await alice.page.request.get(`${BASE}/dashboard/messages`)).headers()["content-security-policy"];
@@ -282,7 +289,7 @@ async function journey() {
     await openConversation(device.page, "PRIVATE_E2EE");
     await shown(device.page, hello);
   }
-  step("three Account A devices and two Account B devices receive desktop message", { accountADevices: 3, accountBDevices: 2, mobileBrowserContexts: 2 });
+  step("five Account A devices and five Account B devices receive desktop message", { accountADevices: 5, accountBDevices: 5, mobileBrowserContexts: 5 });
   step("recipient offline at creation reads without the original sending device", {});
   const reply = `${SECRET} hi alice`;
   await send(bobPhone.page, reply);
@@ -293,6 +300,27 @@ async function journey() {
   await openConversation(alice.page, "PRIVATE_E2EE");
   await shown(alice.page, reply);
   step("encrypted send / receive", { messages: 2 });
+  const simultaneous = [`${SECRET} concurrent A`, `${SECRET} concurrent B`];
+  await Promise.all([send(aliceOther.page, simultaneous[0]), send(bobPhone.page, simultaneous[1])]);
+  for (const page of [alice.page, bob.page, ...otherDevices.map(([, d]) => d.page)]) {
+    for (const text of simultaneous) await shown(page, text);
+  }
+  step("ten authorized devices receive simultaneous encrypted sends", { devices: 10 });
+  const aliceTab = await alice.ctx.newPage();
+  pages.aliceTab = aliceTab;
+  await aliceTab.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
+  await register(aliceTab);
+  await openConversation(aliceTab, "PRIVATE_E2EE");
+  await shown(aliceTab, reply);
+  const tabMessage = `${SECRET} shared browser tab send`;
+  await send(aliceTab, tabMessage);
+  for (const page of [alice.page, bob.page, ...otherDevices.map(([, d]) => d.page)]) await shown(page, tabMessage);
+  await aliceTab.close();
+  await send(alice.page, `${SECRET} original tab remains active`);
+  await shown(bob.page, `${SECRET} original tab remains active`);
+  step("two real application tabs coordinate one cryptographic identity", {});
+
+
 
   // Fault injection at the untrusted delivery boundary. Services and ciphertext in
   // the database remain real and unchanged; only one browser response is corrupted.

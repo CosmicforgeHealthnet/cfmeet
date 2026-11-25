@@ -5,6 +5,10 @@ edition = "2021"
 publish = false
 default-run = "migration"
 
+[[bin]]
+name = "meeting-concurrent-devices-migration"
+path = "src/concurrent-devices-main.rs"
+
 [lib]
 name = "migration"
 path = "src/lib.rs"

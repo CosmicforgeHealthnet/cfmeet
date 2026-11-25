@@ -1344,9 +1344,9 @@ export interface DeviceListResponse {
 /** Result of a completed link or declaration. */
 export interface DeviceOutcome {
   device: DeviceView;
-  /** Sign-ins ended by this operation (replaced mobile, superseded sign-ins). */
+  /** Sign-ins explicitly ended by this operation; additional-device approval returns zero. */
   endedSessions: number;
-  /** The primary mobile this completion replaced (revoked), if any. */
+  /** Legacy compatibility field; additional-device approval never replaces a device. */
   replacedDeviceId?: string | null;
 }
 
@@ -1370,10 +1370,11 @@ export interface DevicePolicyView {
    * and `EMAIL_STEP_UP` (when enabled).
    */
   linkingMethods: Array<string>;
-  /** Always 1: at most one primary mobile. */
+  /** Zero means no product cap on approved mobile installations. */
   maxPrimaryMobiles: number;
   maxWebDevices: number;
   pendingMobileDeviceIds: Array<string>;
+  /** Legacy summary of an active mobile, not exclusive device authority. */
   primaryMobileDeviceId?: string | null;
   proofWindowSecs: number;
   trustedDevices: number;
@@ -1409,7 +1410,7 @@ export interface DeviceView {
   openSessions: number;
   /** `WEB`, `IOS` or `ANDROID`. */
   platform: string;
-  /** True for the account's ACTIVE mobile. */
+  /** Legacy field: true for an ACTIVE approved mobile; several may be true. */
   primary: boolean;
   promotedAt?: string | null;
   replacedByDeviceId?: string | null;
@@ -1583,6 +1584,30 @@ export interface IdentityUniqueness {
   duplicateGroups: Array<Array<string>>;
   /** True when the database enforces it (the unique index exists). */
   enforced: boolean;
+}
+
+
+export interface InstallationBinding {
+  accountDeviceId: string;
+  deviceId: string;
+  persistentIdentity: boolean;
+  protocolVersion: number;
+}
+
+
+export interface InstallationChallenge {
+  accountDeviceId: string;
+  challengeId: string;
+  deviceId: string;
+  expiresAt: string;
+  nonce: string;
+}
+
+
+export interface InstallationProof {
+  challengeId: string;
+  /** Base64url RFC 9420 registration-bound KeyPackage, signed by this existing device. */
+  keyPackage: string;
 }
 
 /** API response wrapper for instant meeting */
@@ -4278,6 +4303,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_list_recurrence_exceptions",
   "GET /api/v2/meeting-spaces/{id}/registrations": "v2_list_registrations",
   "GET /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_get_registration",
+  "GET /api/v2/messaging/devices/{deviceId}/installation": "v2_messaging_installation_status",
   "GET /api/v2/messaging/directory": "v2_messaging_directory",
   "GET /api/v2/messaging/export-deliveries": "v2_messaging_export_deliveries",
   "GET /api/v2/messaging/me": "v2_messaging_me",
@@ -4468,6 +4494,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/messaging/client-tokens": "v2_messaging_client_token",
   "POST /api/v2/messaging/devices": "v2_messaging_register_device",
   "POST /api/v2/messaging/devices/registration-challenges": "v2_messaging_registration_challenge",
+  "POST /api/v2/messaging/devices/{deviceId}/installation": "v2_messaging_bind_installation",
+  "POST /api/v2/messaging/devices/{deviceId}/installation-challenges": "v2_messaging_installation_challenge",
   "POST /api/v2/messaging/devices/{deviceId}/key-packages": "v2_messaging_publish_key_packages",
   "POST /api/v2/messaging/devices/{deviceId}/revoke": "v2_messaging_revoke_device",
   "POST /api/v2/messaging/directory/resolve": "v2_messaging_directory_resolve",

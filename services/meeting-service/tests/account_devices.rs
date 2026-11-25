@@ -3,11 +3,11 @@
 //!
 //! Covers the Account-authority rows of the backend acceptance matrix: web-only accounts,
 //! browsers trusted by their own fresh sign-in (ADR 0067), four web browser profiles (one
-//! logical device per profile; a fifth signs out the least recently used), the first mobile, mobile
-//! replacement (device approval and email step-up), web kept signed in, concurrent mobile
-//! replacements (exactly one primary), replayed proofs and old credentials refused, forged
+//! logical device per profile; independent browsers coexist), the first mobile, mobile
+//! approval (device proof and email step-up), independent browsers, concurrent mobile
+//! approvals (every approved installation remains active), replayed proofs refused, forged
 //! and cross-account links refused, device revocation, removing the primary mobile,
-//! sign-out everywhere, and replacing a mobile during a live meeting (only its media end).
+//! sign-out everywhere, and additional mobile approval preserving live meeting media.
 mod common;
 
 use axum::http::StatusCode;
@@ -264,8 +264,8 @@ async fn web_only_account_bootstraps_a_trusted_browser_and_stays_fully_usable() 
     assert_eq!(v["device"]["primary"], false);
     let p = policy(&app, &web).await;
     assert_eq!(p["accountState"], "WEB_ONLY");
-    assert_eq!(p["maxWebDevices"], 4);
-    assert_eq!(p["maxPrimaryMobiles"], 1);
+    assert_eq!(p["maxWebDevices"], 0);
+    assert_eq!(p["maxPrimaryMobiles"], 0);
     assert_eq!(p["currentDeviceStatus"], "TRUSTED");
     // No phone, SMS or QR needed; the account works (v1 and v2, meetings included).
     assert_eq!(me(&app, &web).await, StatusCode::OK);
@@ -295,94 +295,41 @@ async fn backend_user(_app: &TestApp, email: &str, token: &str) -> User {
 }
 
 #[tokio::test]
-async fn four_browser_profiles_are_trusted_by_sign_in_and_the_fifth_signs_out_the_least_recent() {
+async fn ten_browser_profiles_remain_active_without_automatic_eviction() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
     let mut first = Device::web();
     assert_eq!(sign_in(&app, &e, &mut first).await.0, StatusCode::OK);
     let mut others = vec![];
-    for _ in 0..3 {
+    for _ in 0..8 {
         let mut d = Device::web();
-        let (s, v) = sign_in(&app, &e, &mut d).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        // ADR 0067: the fresh sign-in is the proof; no verification step for a browser.
-        assert_eq!(v["device"]["trust"], "TRUSTED", "{v}");
-        assert_eq!(v["device"]["state"], "ACTIVE", "{v}");
-        assert_eq!(v["device"]["trustedVia"], "BOOTSTRAP", "{v}");
-        assert_eq!(policy(&app, &d).await["currentDeviceStatus"], "TRUSTED");
-        assert_eq!(me(&app, &d).await, StatusCode::OK);
+        let (status, value) = sign_in(&app, &e, &mut d).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["device"]["state"], "ACTIVE");
+        assert_eq!(value["endedSessions"], 0);
         others.push(d);
     }
-    assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
-    // The security log says why each browser is trusted.
-    assert!(
-        app.scalar(
-            "SELECT count(*) FROM account_security_events WHERE event_type = 'DEVICE_DECLARED' \
-             AND detail->>'trustedBy' = 'SIGN_IN'"
-        )
-        .await
-            >= 3
-    );
-
-    // The same browser profile signing in again (another tab, or after sign-out) is the
-    // same logical device: no extra slot, the previous sign-in is superseded.
-    let old_access = others[0].access.clone();
-    let before = others[0].id;
-    let (s, v) = sign_in(&app, &e, &mut others[0]).await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(others[0].id, before);
-    assert_eq!(v["endedSessions"], 1);
-    assert_eq!(
-        app.get("/api/v1/users/me", Auth::Bearer(&old_access))
-            .await
-            .0,
-        StatusCode::UNAUTHORIZED
-    );
-    assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
-
-    // A fifth browser is never refused: the least recently used browser (`first`) is
-    // signed out and revoked to make room; the others keep working.
     let mut fifth = Device::web();
-    let (s, v) = sign_in(&app, &e, &mut fifth).await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["device"]["trust"], "TRUSTED");
-    assert_eq!(v["endedSessions"], 1, "{v}");
-    assert_eq!(me(&app, &first).await, StatusCode::UNAUTHORIZED);
-    for d in &others {
+    assert_eq!(sign_in(&app, &e, &mut fifth).await.0, StatusCode::OK);
+    assert_eq!(policy(&app, &fifth).await["activeWebDevices"], 10);
+    for d in others.iter().chain([&first, &fifth]) {
         assert_eq!(me(&app, d).await, StatusCode::OK);
     }
-    assert_eq!(policy(&app, &fifth).await["activeWebDevices"], 4);
-    let first_id = first.id.unwrap();
-    assert_eq!(
-        app.scalar(&format!(
-            "SELECT count(*) FROM account_devices WHERE id = '{first_id}' AND state = 'REVOKED'"
-        ))
-        .await,
-        1
-    );
-    assert!(
-        app.scalar(
-            "SELECT count(*) FROM account_security_events WHERE event_type = 'DEVICE_REVOKED' \
-             AND detail->>'reason' = 'WEB_DEVICE_LIMIT_REACHED'"
-        )
-        .await
-            >= 1
-    );
+    assert_eq!(app.scalar("SELECT count(*) FROM account_security_events WHERE event_type = 'DEVICE_REVOKED' AND detail->>'reason' = 'WEB_DEVICE_LIMIT_REACHED'").await, 0);
 
-    // Revocation stays terminal: the revoked browser signing in again is a NEW device (the
-    // old row stays revoked), and it makes room the same way.
-    let (s, v) = sign_in(&app, &e, &mut first).await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    assert_ne!(first.id.unwrap(), first_id);
+    let earlier_access = first.access.clone();
+    let same_device_id = first.id;
+    let (status, value) = sign_in(&app, &e, &mut first).await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["endedSessions"], 0);
+    assert_eq!(first.id, same_device_id);
     assert_eq!(
-        app.scalar(&format!(
-            "SELECT count(*) FROM account_devices WHERE id = '{first_id}' AND state = 'REVOKED'"
-        ))
-        .await,
-        1
+        app.get("/api/v1/users/me", Auth::Bearer(&earlier_access))
+            .await
+            .0,
+        StatusCode::OK
     );
-    assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
 
     // Revoking a web device from a trusted device still works; the others keep working.
     let victim = others.pop().unwrap();
@@ -488,7 +435,7 @@ async fn an_untrusted_browser_from_before_is_trusted_by_its_sign_in() {
 }
 
 #[tokio::test]
-async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touching_web() {
+async fn approved_android_and_ios_mobiles_coexist_without_touching_web() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
@@ -581,11 +528,11 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["device"]["primary"], true);
     assert_eq!(v["device"]["trustedVia"], "EMAIL_STEP_UP");
-    assert_eq!(v["replacedDeviceId"], json!(mobile_a.id.unwrap()));
-    assert_eq!(v["endedSessions"], 1);
+    assert_eq!(v["replacedDeviceId"], Value::Null);
+    assert_eq!(v["endedSessions"], 0);
 
-    // Mobile A is refused everywhere, including its refresh token; web stays connected.
-    assert_eq!(me(&app, &mobile_a).await, StatusCode::UNAUTHORIZED);
+    // Mobile A retains both authenticated access and refresh authority.
+    assert_eq!(me(&app, &mobile_a).await, StatusCode::OK);
     let proof = mobile_a.proof(P::Refresh, &mobile_a.session.to_string());
     let (s, _) = app
         .post(
@@ -594,7 +541,7 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
             json!({ "refresh_token": old_refresh_a, "deviceProof": proof }),
         )
         .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(s, StatusCode::OK);
     assert_eq!(me(&app, &web_a).await, StatusCode::OK);
     assert_eq!(me(&app, &web_b).await, StatusCode::OK);
     assert_eq!(me(&app, &mobile_b).await, StatusCode::OK);
@@ -611,10 +558,10 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
         .find(|d| d["deviceId"] == json!(mobile_a.id.unwrap()))
         .unwrap()
         .clone();
-    assert_eq!(a["state"], "REVOKED");
-    assert_eq!(a["revokeReason"], "DEVICE_REPLACED");
-    assert_eq!(a["replacedByDeviceId"], json!(mobile_b.id.unwrap()));
-    // Audit and notice: the surviving devices can read the replacement.
+    assert_eq!(a["state"], "ACTIVE");
+    assert_eq!(a["revokeReason"], Value::Null);
+    assert_eq!(a["replacedByDeviceId"], Value::Null);
+    // Audit and notice record the additional approved installation.
     let (_, ev) = app
         .get("/api/v2/me/security-events", Auth::Bearer(&web_b.access))
         .await;
@@ -622,19 +569,21 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
         .as_array()
         .unwrap()
         .iter()
-        .any(|e| e["eventType"] == "PRIMARY_MOBILE_REPLACED"));
+        .any(|e| e["eventType"] == "MOBILE_DEVICE_APPROVED"));
     assert!(
-        app.scalar("SELECT count(*) FROM email_deliveries WHERE subject LIKE 'A new phone%'")
-            .await
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE subject LIKE 'An additional phone%'"
+        )
+        .await
             >= 1
     );
-    // The Account authority still holds exactly one primary mobile.
+    // Both explicitly approved mobile installations remain active.
     assert_eq!(
         app.scalar(
             "SELECT count(*) FROM account_devices WHERE device_class='MOBILE' AND state='ACTIVE'"
         )
         .await,
-        1
+        2
     );
 
     // The same installed app signing in again rotates, it is not a new phone.
@@ -645,7 +594,7 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
     assert_eq!(v["device"]["primary"], true);
     assert_eq!(me(&app, &web_a).await, StatusCode::OK);
 
-    // Removing the primary mobile leaves a working web-only account.
+    // Explicitly removing B leaves A and both browsers active.
     let target = mobile_b.id.unwrap();
     let (s, v) = app
         .post(
@@ -656,12 +605,12 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(me(&app, &mobile_b).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(policy(&app, &web_a).await["accountState"], "WEB_ONLY");
+    assert_eq!(policy(&app, &web_a).await["accountState"], "MOBILE_PRIMARY");
     assert_eq!(me(&app, &web_b).await, StatusCode::OK);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_mobile_replacements_leave_exactly_one_primary() {
+async fn concurrent_mobile_approvals_preserve_every_authorized_installation() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
@@ -688,7 +637,7 @@ async fn concurrent_mobile_replacements_leave_exactly_one_primary() {
             "SELECT count(*) FROM account_devices WHERE device_class='MOBILE' AND state='ACTIVE'"
         )
         .await,
-        1
+        3
     );
     let mut ok = 0;
     for (m, _) in &phones {
@@ -696,7 +645,7 @@ async fn concurrent_mobile_replacements_leave_exactly_one_primary() {
             ok += 1;
         }
     }
-    assert_eq!(ok, 1, "exactly one phone keeps authority");
+    assert_eq!(ok, 3, "every approved phone keeps authority");
     assert_eq!(me(&app, &web).await, StatusCode::OK);
 }
 
@@ -1007,11 +956,10 @@ async fn legacy_sign_in(app: &TestApp, email: &str) -> (String, String, Uuid) {
     (access, refresh, session)
 }
 
-/// Section 5 migration: a legacy (unclassified) sign-in, e.g. on the old phone, cannot
-/// outlive a primary-mobile replacement or a device revocation. Classified web devices
-/// stay connected; the ended sign-ins are audited with the replacement.
+/// Adding an approved mobile preserves other sign-ins. Explicit security revocation
+/// still terminates targeted devices and unclassified credentials.
 #[tokio::test]
-async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_devices() {
+async fn mobile_approval_preserves_other_sign_ins_but_explicit_revocation_remains_terminal() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
@@ -1031,21 +979,21 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
         StatusCode::OK
     );
 
-    // A new phone replaces phone A.
+    // A second approved phone coexists with phone A.
     let mut phone_b = Device::mobile("IOS");
     let (s, v) = sign_in(&app, &e, &mut phone_b).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["device"]["state"], "REPLACEMENT_PENDING");
     let done = link_by_approval(&app, &web, &phone_b).await;
-    assert!(done["replacedDeviceId"].is_string(), "{done}");
+    assert!(done["replacedDeviceId"].is_null(), "{done}");
 
-    assert_eq!(me(&app, &phone_a).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(me(&app, &phone_a).await, StatusCode::OK);
     assert_eq!(
         app.get("/api/v1/users/me", Auth::Bearer(&legacy_access))
             .await
             .0,
-        StatusCode::UNAUTHORIZED,
-        "the legacy sign-in ends with the replacement"
+        StatusCode::OK,
+        "an additional approved mobile does not end another sign-in"
     );
     let (s, _) = app
         .post(
@@ -1054,14 +1002,18 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
             json!({ "refresh_token": legacy_refresh }),
         )
         .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED, "and cannot be refreshed");
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "independent legacy authentication remains refreshable"
+    );
     assert_eq!(
         app.scalar(&format!(
             "SELECT count(*) FROM account_sessions WHERE id = '{legacy_session}' \
              AND revoke_reason = 'DEVICE_REPLACED'"
         ))
         .await,
-        1
+        0
     );
     // Both web devices and the new primary keep working.
     assert_eq!(me(&app, &web).await, StatusCode::OK);
@@ -1072,7 +1024,7 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
             "SELECT count(*) FROM account_devices WHERE device_class = 'MOBILE' AND state = 'ACTIVE'"
         )
         .await,
-        1
+        2
     );
 
     // Revoking a web device ends the legacy sign-ins too, never the other devices.
@@ -1177,7 +1129,7 @@ async fn declaration_enforcement_ends_legacy_sign_ins_after_the_owner_date() {
 }
 
 #[tokio::test]
-async fn replacing_a_mobile_during_a_meeting_ends_only_its_media() {
+async fn approving_another_mobile_preserves_existing_meeting_media() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
@@ -1216,32 +1168,28 @@ async fn replacing_a_mobile_during_a_meeting_ends_only_its_media() {
     let mut phone_b = Device::mobile("IOS");
     sign_in(&app, &e, &mut phone_b).await;
     let v = link_by_approval(&app, &web, &phone_b).await;
-    assert_eq!(v["replacedDeviceId"], json!(phone_a.id.unwrap()));
+    assert_eq!(v["replacedDeviceId"], Value::Null);
     assert_eq!(
         app.scalar(&live).await,
-        1,
-        "only the old phone's media ended"
+        2,
+        "both existing media sessions remain active"
     );
     assert_eq!(
         app.scalar(&format!(
             "SELECT count(*) FROM participant_sessions WHERE conference_id='{cid}' AND end_reason='ACCOUNT_SESSION_ENDED'"
         ))
         .await,
-        1
+        0
     );
     assert_eq!(
         app.scalar(&format!(
             "SELECT count(*) FROM outbox_events WHERE conference_id='{cid}' AND event_type='rtc.participant_remove_requested' AND payload->>'reason'='ACCOUNT_SESSION_ENDED'"
         ))
         .await,
-        1,
-        "provider removal queued for the old phone only"
+        0,
+        "approval queues no provider removal"
     );
-    // The old phone cannot rejoin; the web device's session continues.
-    let (s, _) = app
-        .join(cid, Auth::Bearer(&phone_a.access), json!({}))
-        .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(me(&app, &phone_a).await, StatusCode::OK);
     assert_eq!(me(&app, &web).await, StatusCode::OK);
 }
 
@@ -1473,10 +1421,9 @@ async fn gap_sign_out_other_sessions_and_admin_session_revocation() {
     let (_again, _, _) = legacy_sign_in(&app, &e).await;
 }
 
-/// Gap audit A21: an account keeps at most 50 open sign-ins; signing in past the cap ends
-/// the least recently used ones, and a revoke finds sessions older than the newest 100.
+/// Independent sign-ins remain active; explicit revoke finds sessions older than the newest 100.
 #[tokio::test]
-async fn gap_open_sign_ins_are_capped_and_old_sessions_stay_revocable() {
+async fn concurrent_sign_ins_coexist_and_old_sessions_stay_revocable() {
     let app = app_with_redis!();
     let e = email();
     let user_id = password_user(&app, &e).await;
@@ -1509,20 +1456,20 @@ async fn gap_open_sign_ins_are_capped_and_old_sessions_stay_revocable() {
     );
     assert_eq!(app.scalar(&open).await, 61);
     let (latest, _, _) = legacy_sign_in(&app, &e).await;
-    assert_eq!(app.scalar(&open).await, 50);
+    assert_eq!(app.scalar(&open).await, 62);
     assert_eq!(
         app.get("/api/v1/users/me", Auth::Bearer(&first)).await.0,
-        StatusCode::UNAUTHORIZED,
-        "the least recently used sign-in ended"
+        StatusCode::OK,
+        "a fresh sign-in does not evict an existing session"
     );
     assert_eq!(
         app.scalar(&format!(
             "SELECT count(*) FROM account_sessions WHERE user_id = '{user_id}' AND revoke_reason = 'SUPERSEDED'"
         ))
         .await,
-        12
+        0
     );
-    // The oldest ended session is still found (beyond the newest 100).
+    // The oldest session is still found (beyond the newest 100).
     let oldest: Uuid = {
         use sea_orm::QueryResult;
         let row: QueryResult = app
