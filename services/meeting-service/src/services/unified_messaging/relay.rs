@@ -576,7 +576,13 @@ pub static ROUTES: &[RelayRoute] = &[
     // membership of both).
     r(
         Method::POST,
-        &[Lit("conversations"), Id, Lit("messages"), Id, Lit("forward")],
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("forward"),
+        ],
         &[],
         false,
     ),
@@ -595,7 +601,13 @@ pub static ROUTES: &[RelayRoute] = &[
     ),
     r(
         Method::POST,
-        &[Lit("conversations"), Id, Lit("invite-links"), Id, Lit("revoke")],
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("invite-links"),
+            Id,
+            Lit("revoke"),
+        ],
         &[],
         false,
     ),
