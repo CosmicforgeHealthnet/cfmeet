@@ -2552,6 +2552,27 @@ export class MessagingEngine {
     return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
   }
 
+  /** Groups someone added you to that wait for your answer (newest first). */
+  async groupInvitations(): Promise<{ conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[]> {
+    const r = await relay<{ invitations: { conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[] }>("GET", "v1/messaging/invitations");
+    const missing = [...new Set(r.invitations.map((i) => i.invitedByPrincipalId).filter((p): p is string => !!p && !this.snapshot.names[p]))];
+    if (missing.length) {
+      try {
+        const n = await identityApi.names(missing.slice(0, 256));
+        const names = { ...this.snapshot.names };
+        for (const p of n.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        this.set({ names });
+      } catch { /* names are cosmetic */ }
+    }
+    return r.invitations;
+  }
+
+  /** Join (or turn down) a group you were invited to; joined chats appear in the list. */
+  async answerGroupInvitation(conversationId: string, accept: boolean): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/invitation/${accept ? "accept" : "decline"}`, {});
+    await this.refreshConversations();
+  }
+
   /** MANAGED server search; PRIVATE_E2EE content is searched on this device only. */
   async search(conversationId: string, q: string): Promise<SearchHit[]> {
     const conv = this.server.get(conversationId);

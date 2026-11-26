@@ -1131,6 +1131,41 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 
 /* ─── Open chat ───────────────────────────────────────────────────────── */
 
+/** Groups someone added you to that wait for your answer: join or decline here. */
+function GroupInvitations({ engine, names, onOpen }: { engine: MessagingEngine; names: Record<string, string>; onOpen: (id: string) => void }) {
+  const client = useQueryClient();
+  const list = useQuery({ queryKey: ["messaging", "group-invitations"], queryFn: () => engine.groupInvitations(), refetchInterval: 60_000, retry: false });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const items = list.data ?? [];
+  if (!items.length) return null;
+  const answer = (id: string, accept: boolean) => {
+    setBusy(id);
+    setError(null);
+    void engine.answerGroupInvitation(id, accept)
+      .then(() => { if (accept) onOpen(id); })
+      .catch((e) => setError(messagingErrorMessage(e)))
+      .finally(() => { setBusy(null); void client.invalidateQueries({ queryKey: ["messaging", "group-invitations"] }); });
+  };
+  return (
+    <section className="space-y-1.5 rounded-2xl bg-primary/5 p-2.5" data-testid="group-invitations" aria-label="Group invitations">
+      <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Group invitations</p>
+      {error ? <p role="alert" className="px-1 text-xs text-destructive">{error}</p> : null}
+      {items.map((inv) => {
+        const who = inv.invitedByPrincipalId ? names[inv.invitedByPrincipalId] ?? "Someone" : "Someone";
+        return (
+          <div key={inv.conversationId} className="flex items-center gap-2 rounded-xl bg-background px-2.5 py-2 ring-1 ring-border" data-testid="group-invitation">
+            <Users className="size-5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 text-sm"><span className="font-medium">{who}</span> added you to a group</span>
+            <button type="button" disabled={busy === inv.conversationId} onClick={() => answer(inv.conversationId, false)} className="h-8 rounded-full px-3 text-xs font-semibold ring-1 ring-border hover:bg-muted disabled:opacity-60" data-testid="decline-group-invitation">Decline</button>
+            <button type="button" disabled={busy === inv.conversationId} onClick={() => answer(inv.conversationId, true)} className="h-8 rounded-full bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60" data-testid="accept-group-invitation">Join</button>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 /** The chat list search's "Messages" section: matches in every chat (WhatsApp). */
 function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engine: MessagingEngine; q: string; conversations: ConversationView[]; names: Record<string, string>; me: string | null; onOpen: (id: string) => void }) {
   const [hits, setHits] = useState<Awaited<ReturnType<MessagingEngine["searchAll"]>> | null>(null);
@@ -1797,6 +1832,7 @@ function PersonalMessages() {
               <input type="search" aria-label="Search conversations" data-testid="conversation-search" placeholder="Search chats" value={search} onChange={(event) => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
             </label>
             <NotifyPrompt />
+            <GroupInvitations engine={engine} names={s.names} onOpen={setSelected} />
             <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4" role="group" aria-label="Filter conversations">
               {filters.map(([value, label]) => (
                 <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}
