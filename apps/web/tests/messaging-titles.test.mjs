@@ -133,6 +133,7 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
         case "addDevices": return { commit: new Uint8Array([2]), welcome: new Uint8Array([3]), epoch: 1 };
         case "encrypt": return { ciphertext: new Uint8Array([9, 9]), epoch: 1 };
         case "history": return history;
+        case "historyPage": return { records: history, nextBeforeSequence: null };
         case "drafts": return [];
         case "cursor": return 0;
         case "knownTreeSize": return null;
@@ -163,6 +164,7 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "./member-pages": load("../src/lib/messaging/member-pages.ts"),
     "./chat-list": load("../src/lib/messaging/chat-list.ts"),
     "./rich-content": load("../src/lib/messaging/rich-content.ts"),
+    "./private-history": load("../src/lib/messaging/private-history.ts"),
   });
   const engine = new mod.MessagingEngine();
   engine.crypto = fakeCrypto;

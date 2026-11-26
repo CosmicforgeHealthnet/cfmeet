@@ -48,6 +48,17 @@ import { PrivateHistoryWindow, type PrivateHistoryPage } from "./private-history
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
+const START_BACKOFF_MS = 2_000;
+const START_BACKOFF_MAX_MS = 60_000;
+
+/** Errors worth retrying on their own: offline, timeouts, rate limits, server unavailable. */
+export function isTransientStartError(e: unknown): boolean {
+  if (e instanceof TypeError) return true;
+  if (!(e instanceof MessagingApiError)) return false;
+  if (e.code === "RATE_LIMITED" || e.code === "SERVICE_UNAVAILABLE") return true;
+  return e.status === 0 ? e.code === "NETWORK_UNAVAILABLE" : e.status === 408 || e.status === 429 || e.status >= 500;
+}
+
 export type Phase = "loading" | "needs-device" | "registering" | "needs-signin" | "needs-unlock" | "ready" | "locked" | "revoked" | "unavailable" | "error";
 export type Connection = "connected" | "connecting" | "disconnected" | "auth-required" | "offline";
 /** How live updates arrive: an E2EE device token, a MANAGED-only session device, or polling. */
@@ -405,6 +416,10 @@ export class MessagingEngine {
   private lastTypingSent = new Map<string, number>();
   private typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private authTimer: ReturnType<typeof setTimeout> | null = null;
+  // A transient failure while starting (429, 5xx, network) restarts on its own with backoff
+  // instead of stranding the page in "error"; server rate limits are unchanged.
+  private startRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private startBackoff = START_BACKOFF_MS;
   /** Session devices are switched off (FEATURE_DISABLED): MANAGED falls back to polling. */
   private sessionDevicesUnavailable = false;
   private syncing = new Map<string, Promise<void>>();
@@ -601,9 +616,32 @@ export class MessagingEngine {
       // No manual step: this browser's encryption device is set up on its own (account
       // device trusted by the sign-in, MLS enrollment, KeyPackages, realtime).
       if (this.snapshot.phase === "needs-device") void this.autoEnroll();
+      this.startBackoff = START_BACKOFF_MS;
     } catch (e) {
+      if (stale()) return;
+      if (isTransientStartError(e)) {
+        this.retryStart(cryptoFactory, generation);
+        return;
+      }
       this.fail(e);
     }
+  }
+
+  /** Tears down the partial start and starts again after a jittered, capped backoff. */
+  private retryStart(cryptoFactory: (() => CryptoClient) | undefined, generation: number): void {
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+    this.detachTransport();
+    this.crypto?.terminate();
+    this.crypto = null;
+    const delay = this.startBackoff / 2 + Math.random() * (this.startBackoff / 2);
+    this.startBackoff = Math.min(this.startBackoff * 2, START_BACKOFF_MAX_MS);
+    this.set({ phase: "loading", detail: null });
+    if (this.startRetryTimer) clearTimeout(this.startRetryTimer);
+    this.startRetryTimer = setTimeout(() => {
+      this.startRetryTimer = null;
+      if (!this.stopped && generation === this.generation) void this.start(cryptoFactory);
+    }, delay);
   }
 
   stop(): void {
@@ -618,6 +656,9 @@ export class MessagingEngine {
     this.timers = [];
     if (this.authTimer) clearTimeout(this.authTimer);
     this.authTimer = null;
+    if (this.startRetryTimer) clearTimeout(this.startRetryTimer);
+    this.startRetryTimer = null;
+    this.startBackoff = START_BACKOFF_MS;
     for (const t of this.typingTimers.values()) clearTimeout(t);
     this.typingTimers.clear();
     this.detachTransport();

@@ -117,6 +117,13 @@ async function open(who, { route, mobile = false, authenticator = false } = {}) 
   }
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  // Every 429 on any page of this browser (reopened pages included) is named in the log, so a
+  // rate-limited run says which request hit the limit. Paths only: no query, no bodies.
+  ctx.on("response", (r) => {
+    if (r.status() !== 429) return;
+    const u = new URL(r.url());
+    console.log(`[${who} 429] ${r.request().method()} ${u.origin}${u.pathname} retry-after=${r.headers()["retry-after"] ?? "-"}`);
+  });
   if (process.env.E2E_DEBUG) {
     page.on("console", (m) => console.log(`[${who} console.${m.type()}] ${m.text()}`));
     page.on("requestfailed", (r) => console.log(`[${who} failed] ${r.method()} ${r.url()} ${r.failure()?.errorText}`));
