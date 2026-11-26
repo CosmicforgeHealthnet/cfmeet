@@ -24,11 +24,10 @@ import OrganizationMembers from "./OrganizationMembers";
 import OrganizationInvitations from "./OrganizationInvitations";
 import OrganizationSettings from "./OrganizationSettings";
 import OrganizationModeration, { canModerate } from "./OrganizationModeration";
-import { OrganizationApps } from "./OrganizationExtras";
 import OrganizationAudit from "./OrganizationAudit";
 import { ORGANIZATION_CALLING_CAPABILITY, OrganizationCallingPanel } from "@/components/calling/OrganizationCallingAdmin";
 
-type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "apps" | "audit" | "calling" | "moderation";
+type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "audit" | "calling" | "moderation";
 
 const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) => boolean }> = [
   { id: "overview", label: "Overview", visible: (s) => s.overview },
@@ -36,7 +35,6 @@ const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) =
   { id: "teams", label: "Teams", visible: (s) => s.overview },
   { id: "invitations", label: "Invitations", visible: (s) => s.invitations },
   { id: "settings", label: "Settings", visible: (s) => s.settings || s.lifecycle || s.ownership },
-  { id: "apps", label: "Apps", visible: (s) => s.settings || s.audit },
   { id: "audit", label: "Audit log", visible: (s) => s.audit },
 ];
 
@@ -110,7 +108,6 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
       {active === "teams" && <OrganizationTeams org={data} />}
       {active === "invitations" && <OrganizationInvitations org={data} />}
       {active === "settings" && <OrganizationSettings org={data} />}
-      {active === "apps" && <OrganizationApps organization={data} canManage={orgCan(data, ORG_CAPABILITIES.policiesManage)} />}
       {active === "audit" && <OrganizationAudit organizationId={data.id} />}
       {active === "moderation" && <OrganizationModeration org={data} />}
       {active === "calling" && <OrganizationCallingPanel organizationId={data.id} name={data.name} embedded />}

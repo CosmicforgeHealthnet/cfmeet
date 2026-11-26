@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Plug } from "lucide-react";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NiceSelect } from "@/components/ui/nice-select";
 import apiV2 from "@/services/v2/api";
@@ -95,50 +95,6 @@ export function OrganizationPolicies({ organization, owner }: { organization: Bu
         ) : null}
       </div>
       {save.isError ? <OrgError error={save.error} /> : null}
-    </Section>
-  );
-}
-
-/* ─── Apps ─────────────────────────────────────────────────────────────── */
-
-type OrgApp = { grantId: string; appId: string; name: string | null; developerName: string | null; logoUrl: string | null; scopes: string[]; createdAt: string | null; hasMeetingSurface: boolean };
-
-/** Apps installed for the organization (GET /organizations/:id/apps), with Uninstall. */
-export function OrganizationApps({ organization, canManage }: { organization: BusinessOrganization; canManage: boolean }) {
-  const client = useQueryClient();
-  const key = ["v2", "organizations", organization.id, "apps"];
-  const apps = useQuery({ queryKey: key, queryFn: async () => (await apiV2.get<{ items: OrgApp[] }>(`${org(organization.id)}/apps`)).data.items ?? [], retry: false });
-  const [confirm, setConfirm] = useState<string | null>(null);
-  const remove = useMutation({
-    mutationFn: async (grantId: string) => { await apiV2.delete(`${org(organization.id)}/apps/${encodeURIComponent(grantId)}`); },
-    onSettled: () => client.invalidateQueries({ queryKey: key }),
-  });
-  return (
-    <Section title="Apps" description="Apps installed for everyone in this organization.">
-      {apps.isPending ? <div className="h-16 animate-pulse rounded-xl bg-muted" /> : null}
-      {apps.isError ? <OrgError error={apps.error} retry={() => void apps.refetch()} /> : null}
-      {apps.data && !apps.data.length ? <p className="text-sm text-muted-foreground">No apps are installed for this organization.</p> : null}
-      <ul className="space-y-2" data-testid="org-apps">
-        {(apps.data ?? []).map((a) => (
-          <li key={a.grantId} className="flex items-center gap-3 rounded-xl p-3 ring-1 ring-border">
-            {a.logoUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={a.logoUrl} alt="" className="size-10 rounded-xl object-cover" />
-              : <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><Plug className="size-5" /></span>}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{a.name ?? "Unnamed app"}</span>
-              <span className="block truncate text-xs text-muted-foreground">{a.developerName ? `By ${a.developerName} · ` : ""}{a.scopes.length} permission{a.scopes.length === 1 ? "" : "s"}{a.hasMeetingSurface ? " · in meetings" : ""}</span>
-            </span>
-            {canManage ? (confirm === a.grantId ? (
-              <span className="flex gap-1.5">
-                <Button size="sm" variant="outline" onClick={() => setConfirm(null)}>Cancel</Button>
-                <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(a.grantId, { onSettled: () => setConfirm(null) })}>Uninstall</Button>
-              </span>
-            ) : <Button size="sm" variant="outline" onClick={() => setConfirm(a.grantId)}>Uninstall</Button>) : null}
-          </li>
-        ))}
-      </ul>
-      {remove.isError ? <OrgError error={remove.error} /> : null}
     </Section>
   );
 }
