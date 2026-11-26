@@ -6,7 +6,7 @@
  * device in private chats) and only plain raster types are rendered.
  */
 import { Fragment, useEffect, useState } from "react";
-import { Download, ImageOff, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ImageOff, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +57,57 @@ export function ChatVideo({ load, name, onDownload, initial = null }: { load: ()
   );
 }
 
-export function ChatImage({ load, name, onDownload, initial = null }: { load: () => Promise<string | null>; name: string; onDownload: () => void; initial?: string | null }) {
+/**
+ * WhatsApp's photo viewer for a chat: every photo of the chat, with previous / next
+ * (buttons and ← →), download and close (Esc).
+ */
+export function PhotoViewer({ items, index, onIndex, onClose }: {
+  items: { key: string; name: string; load: () => Promise<string | null>; download: () => void }[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const item = items[index];
+  // The loaded photo, remembered with its key: a stale one never shows for the next item.
+  const [loaded, setLoaded] = useState<{ key: string; url: string | null } | null>(null);
+  const url = loaded && item && loaded.key === item.key ? loaded.url : null;
+  useEffect(() => {
+    if (!item) return;
+    let active = true;
+    item.load().then((u) => { if (active) setLoaded({ key: item.key, url: u }); }, () => {});
+    return () => { active = false; };
+  }, [item]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
+      if (e.key === "ArrowRight" && index < items.length - 1) onIndex(index + 1);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [index, items.length, onIndex]);
+  if (!item) return null;
+  const nav = "absolute top-1/2 z-10 flex size-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 disabled:opacity-0";
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent showCloseButton={false} className="flex h-[100dvh] max-w-none flex-col items-center justify-center gap-0 rounded-none border-0 bg-black/95 p-0 sm:max-w-none" data-testid="photo-viewer">
+        <DialogTitle className="sr-only">{item.name}</DialogTitle>
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3 text-white">
+          <span className="truncate px-2 text-sm opacity-80">{item.name} · {index + 1} of {items.length}</span>
+          <span className="flex gap-1">
+            <button type="button" aria-label="Download photo" onClick={item.download} className="flex size-10 items-center justify-center rounded-full hover:bg-white/10"><Download className="size-5" /></button>
+            <button type="button" aria-label="Close" onClick={onClose} className="flex size-10 items-center justify-center rounded-full hover:bg-white/10"><X className="size-5" /></button>
+          </span>
+        </div>
+        <button type="button" aria-label="Previous photo" disabled={index === 0} onClick={() => onIndex(index - 1)} className={cn(nav, "left-3")}><ChevronLeft className="size-6" /></button>
+        <button type="button" aria-label="Next photo" disabled={index === items.length - 1} onClick={() => onIndex(index + 1)} className={cn(nav, "right-3")}><ChevronRight className="size-6" /></button>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {url ? <img src={url} alt={item.name} className="max-h-[100dvh] max-w-full object-contain" /> : <span className="size-10 animate-pulse rounded-full bg-white/20" />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ChatImage({ load, name, onDownload, initial = null, onOpen }: { load: () => Promise<string | null>; name: string; onDownload: () => void; initial?: string | null; onOpen?: () => void }) {
   const [url, setUrl] = useState<string | null>(initial);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -77,7 +127,7 @@ export function ChatImage({ load, name, onDownload, initial = null }: { load: ()
   }
   return (
     <>
-      <button type="button" aria-label={`Open photo ${name}`} disabled={!url} onClick={() => setOpen(true)} data-testid="chat-image"
+      <button type="button" aria-label={`Open photo ${name}`} disabled={!url} onClick={() => (onOpen ? onOpen() : setOpen(true))} data-testid="chat-image"
         className="-mx-2 -mt-0.5 mb-1 block overflow-hidden rounded-[14px] bg-black/10">
         {url
           // eslint-disable-next-line @next/next/no-img-element

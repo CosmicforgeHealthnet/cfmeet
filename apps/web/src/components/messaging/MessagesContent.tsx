@@ -14,7 +14,7 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
 import { AttachMenu, RichContentView } from "./RichMessages";
-import { ChatImage, ChatVideo, LinkifiedText } from "./BubbleParts";
+import { ChatImage, ChatVideo, LinkifiedText, PhotoViewer } from "./BubbleParts";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isInlineImage, isPlayableAudio, isPlayableVideo } from "@/lib/messaging/engine";
 import { SecurityCode } from "./SecurityCode";
@@ -665,8 +665,9 @@ type BubbleActions = {
 /** The chat list's icon for a file message (WhatsApp: camera for a photo, mic for a voice message). */
 const FILE_ICONS = { photo: Camera, video: Video, voice: Mic, audio: Headphones, document: FileText, file: Paperclip } as const;
 
-function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJump, highlight, actions, first, last, group }: {
+function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJump, highlight, actions, first, last, group, onOpenPhoto }: {
   m: MessageView; name: string; names: Record<string, string>; onDownload: () => void; actions: BubbleActions; managed: boolean;
+  /** Opens the chat's photo viewer at this photo. */ onOpenPhoto?: () => void;
   /** A photo shown in the chat (null: not an inline photo). */ loadImage: (() => Promise<string | null>) | null;
   /** That photo or voice note, if it was already loaded on this visit. */ cachedMedia: string | null;
   /** Scroll to the quoted message. */ onJump: (messageId: string) => void;
@@ -756,7 +757,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
               m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
-            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file ? (
+            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} onOpen={onOpenPhoto} /> : m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
                 <span className="min-w-0"><span className="block truncate text-sm font-medium">{m.file.name}</span>{m.file.size ? <span className="block text-xs opacity-70">{Math.ceil(m.file.size / 1024)} KB · Download</span> : null}</span>
@@ -1218,6 +1219,16 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
   const [forwarding, setForwarding] = useState<{ messageId: string | null; text: string | null } | null>(null);
   const [infoFor, setInfoFor] = useState<MessageView | null>(null);
+  // The chat's photos, in order, for the viewer's previous / next.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const photos = useMemo(() => messages
+    .filter((m) => m.file?.attachmentId && isInlineImage(m.file.mediaType) && m.state !== "removed")
+    .map((m) => ({
+      key: m.key,
+      name: m.file!.name,
+      load: () => engine.imageUrl(conversation.id, m),
+      download: () => { void download(m).catch(fail); },
+    })), [messages, engine, conversation.id, download]);
   const [reporting, setReporting] = useState<{ messageId: string; text: string | null } | null>(null);
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
@@ -1293,6 +1304,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
 
   return (
     <div className="relative flex h-full min-w-0">
+      {viewing !== null && viewing >= 0 ? <PhotoViewer items={photos} index={Math.min(viewing, photos.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} /> : null}
       {infoFor ? <MessageInfo engine={engine} conversationId={conversation.id} message={infoFor} names={s.names} onClose={() => setInfoFor(null)} /> : null}
       {forwarding ? <ForwardDialog engine={engine} conversations={s.conversations} sourceId={conversation.id} message={forwarding} onClose={() => setForwarding(null)} /> : null}
       {reporting ? <ReportDialog engine={engine} conversationId={conversation.id} message={reporting} privateChat={e2ee} onClose={() => setReporting(null)} /> : null}
@@ -1367,6 +1379,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                     onDownload={() => { setError(null); void download(m).catch(fail); }}
                     loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType) || isPlayableVideo(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
                     cachedMedia={engine.cachedMediaUrl(m)}
+                    onOpenPhoto={m.file && isInlineImage(m.file.mediaType) ? () => setViewing(photos.findIndex((p) => p.key === m.key)) : undefined}
                     onJump={jump} highlight={!!m.messageId && highlight === m.messageId} />
                 </Fragment>
               );
