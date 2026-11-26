@@ -7,6 +7,7 @@ import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsService as hub, type NotificationPreferences } from "@/services/v2/communications.service";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
 import { cn } from "@/lib/utils";
+import { hubKeys } from "@/hooks/v2/useCommunications";
 import { useEffect, useState } from "react";
 import { MessagingEngine } from "@/lib/messaging/engine";
 import { disableWebPush, enableWebPush, webPushAvailable, webPushEnabled, webPushSupported } from "@/lib/messaging/web-push";
@@ -24,13 +25,16 @@ const ROWS: { key: keyof Omit<NotificationPreferences, "version">; label: string
 /** "Anyone with my CF Meet ID can add me" (privacy contactApproval: AUTOMATIC / MANUAL). */
 function DirectContact() {
   const client = useQueryClient();
-  const privacy = useQuery({ queryKey: ["me", "privacy"], queryFn: () => hub.privacy(), retry: false });
+  // The same cache as the Communications hub's privacy settings: a change in either shows in both.
+  const privacy = useQuery({ queryKey: hubKeys.privacy, queryFn: () => hub.privacy(), retry: false });
   const save = useMutation({
     mutationFn: (automatic: boolean) => {
       const v = privacy.data!;
       return hub.updatePrivacy(v.version, { ...v.privacy, contactApproval: automatic ? "AUTOMATIC" : "MANUAL" });
     },
-    onSuccess: (v) => client.setQueryData(["me", "privacy"], v),
+    onSuccess: (v) => client.setQueryData(hubKeys.privacy, v),
+    // Changed elsewhere meanwhile: take the current version so the next tap succeeds.
+    onError: () => void privacy.refetch(),
   });
   if (!privacy.data) return privacy.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(privacy.error)}</p> : null;
   const on = (privacy.data.privacy.contactApproval ?? "AUTOMATIC") === "AUTOMATIC";
