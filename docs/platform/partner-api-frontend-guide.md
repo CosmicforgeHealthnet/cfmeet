@@ -119,7 +119,7 @@ The grants inside a user token (`UserTokenGrants`: `msg`, `call`, `mtg`) only wo
 ### F1. Partner onboarding (console)
 
 1. Workspace, project and environment (`SANDBOX` first), using existing screens.
-2. Grant the project the scopes for the features it uses (Part 2.3).
+2. Grant the project the scopes for the features it uses (B3).
 3. Create a service account and a platform credential with those scopes (existing screens). The partner copies `cfmk_…` to its server.
 4. **Allowed websites:** add the partner web app's exact origins (`https://app.partner.com`; `http://localhost:3000` allowed in SANDBOX/TEST; wildcards are refused). Without this, browsers can't call the device routes.
 5. **Push credentials** (optional): upload APNs (`.p8` key; VoIP keys are separate entries) and/or FCM (service account) credentials, then **Verify**. The key file is sent once and sealed to the Notification Service. The console only ever gets metadata back (`provider`, `voip`, `teamId`, `keyId`, `bundleId`, `apnsHost`, `projectId`, `fingerprint`, `status`, `lastVerifiedAt`, `lastError`). Never echo or cache the uploaded file.
