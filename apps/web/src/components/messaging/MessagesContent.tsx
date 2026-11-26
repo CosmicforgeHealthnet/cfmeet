@@ -1080,6 +1080,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  const mediaInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
@@ -1444,6 +1445,22 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                   e.target.value = "";
                 }}
               />
+              <input
+                ref={mediaInput}
+                type="file"
+                className="hidden"
+                data-testid="media-input"
+                accept="image/*,video/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    const tooLarge = attachmentSizeRefusal(f.size, attachments);
+                    setError(tooLarge);
+                    if (!tooLarge) setStaged(f);
+                  }
+                  e.target.value = "";
+                }}
+              />
               <EmojiPicker disabled={!canSend} onPick={(emoji) => {
                 // At the cursor, as WhatsApp does; the composer keeps focus.
                 const el = composer.current;
@@ -1453,7 +1470,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                 setText(next);
                 requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + emoji.length, at + emoji.length); });
               }} />
-              <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
+              <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
                 fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
                 ref={composer}
