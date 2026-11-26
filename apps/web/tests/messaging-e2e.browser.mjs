@@ -509,15 +509,22 @@ async function journey() {
   const bulkPrefix = `${SECRET} large-history block `;
   const bulkHistory = Array.from({ length: 205 }, (_, i) => `${bulkPrefix}${String(i).padStart(3, "0")} ${"x".repeat(4000)}`);
   assert.ok(bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) > 512 * 1024);
-  for (const text of bulkHistory) {
+  // Progress timing: the log shows where this step spends its time (sends vs. each source).
+  const bulkStarted = Date.now();
+  const elapsed = () => `${((Date.now() - bulkStarted) / 1000).toFixed(1)}s`;
+  for (const [i, text] of bulkHistory.entries()) {
     await send(alice.page, text);
     await alice.page.locator("[data-testid=message][data-state=sent]", { hasText: text }).waitFor({ timeout: T });
+    if ((i + 1) % 25 === 0 || i + 1 === bulkHistory.length) console.log(`BULK sent ${i + 1}/${bulkHistory.length} at ${elapsed()}`);
   }
-  for (const page of [bob.page, ...otherDevices.filter(([who]) => who === "bob").map(([, device]) => device.page)]) {
+  const bobSources = [["bob", bob.page], ...otherDevices.filter(([who]) => who === "bob").map(([who, device], n) => [`${who}#${n + 1}`, device.page])];
+  for (const [label, page] of bobSources) {
     await shown(page, bulkHistory.at(-1));
+    console.log(`BULK ${label} shows newest at ${elapsed()}`);
     await loadAllPrivateHistory(page);
     await shown(page, bulkHistory[0]);
     assert.equal(await page.locator("[data-testid=message-text]", { hasText: bulkPrefix }).count(), bulkHistory.length);
+    console.log(`BULK ${label} has full history at ${elapsed()}`);
   }
   step("large encrypted history accepted and available on every source", { messages: bulkHistory.length, plaintextBytes: bulkHistory.reduce((bytes, text) => bytes + Buffer.byteLength(text, "utf8"), 0) });
 
