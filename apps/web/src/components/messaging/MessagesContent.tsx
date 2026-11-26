@@ -67,6 +67,7 @@ import {
 import type { TimelineCallCard, TimelineMeetingCard } from "@/types/communications";
 import MessagingDevicesPanel from "./MessagingDevicesPanel";
 import { useSharedMessagingEngine } from "./MessagingEngineProvider";
+import { EmojiPicker } from "./EmojiPicker";
 import { authService } from "@/services/auth.service";
 
 function useEngine(): MessagingEngine {
@@ -743,7 +744,6 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             ))}
           </div>
         ) : null}
-        {m.seenBy?.length ? <p className="mt-0.5 px-2 text-[11px] text-muted-foreground" data-testid="seen-by">Seen by {m.seenBy.map((p) => names[p] ?? "CF Meet user").join(", ")}</p> : null}
         {actions.canRetry && m.state === "failed" ? (
           <span className="mt-1 flex gap-1 text-xs font-semibold">
             <button type="button" className="rounded-full px-2.5 py-1 text-destructive hover:bg-destructive/10" data-testid="retry-send" onClick={actions.retry}>Try again</button>
@@ -1326,6 +1326,15 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                   e.target.value = "";
                 }}
               />
+              <EmojiPicker disabled={!canSend} onPick={(emoji) => {
+                // At the cursor, as WhatsApp does; the composer keeps focus.
+                const el = composer.current;
+                const at = el ? el.selectionStart ?? text.length : text.length;
+                const end = el ? el.selectionEnd ?? at : at;
+                const next = text.slice(0, at) + emoji + text.slice(end);
+                setText(next);
+                requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + emoji.length, at + emoji.length); });
+              }} />
               <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
                 fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
@@ -1335,9 +1344,13 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                 value={text}
                 maxLength={16384}
                 disabled={!canSend}
-                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
+                placeholder={canSend ? "Type a message" : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
                 onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+                  // Esc cancels a reply first (WhatsApp).
+                  else if (e.key === "Escape" && replyTo) { e.preventDefault(); setReplyTo(null); }
+                }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
               {!text.trim() && canAttach && canRecord ? <MicButton disabled={!canSend} onClick={() => { setError(null); setRecording(true); }} /> : (
