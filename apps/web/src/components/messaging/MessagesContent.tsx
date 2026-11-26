@@ -923,7 +923,37 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 
 /* ─── Open chat ───────────────────────────────────────────────────────── */
 
-function ConversationPane({ engine, conversation, onBack }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void }) {
+/**
+ * An older end-to-end encrypted chat: it only works on the devices that hold its keys, and
+ * messages to someone who has never opened CF Meet wait. It continues as a chat that syncs
+ * on every device (same people, same group name); this one stays readable here.
+ */
+function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onOpenChat?: (id: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
+      <Lock className="size-4 shrink-0 text-muted-foreground" />
+      <p className="min-w-0 flex-1 text-muted-foreground">
+        {error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}
+      </p>
+      <button type="button" disabled={busy} data-testid="continue-chat-button"
+        className="h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+        onClick={() => {
+          setBusy(true);
+          setError(null);
+          void engine.continueAsManaged(conversation.id)
+            .then((id) => onOpenChat?.(id))
+            .catch((e) => setError(messagingErrorMessage(e)))
+            .finally(() => setBusy(false));
+        }}>
+        {busy ? "Opening…" : "Continue chat"}
+      </button>
+    </div>
+  );
+}
+
+function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void; onOpenChat?: (id: string) => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const client = useQueryClient();
   const [text, setText] = useState("");
@@ -1221,6 +1251,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
         {error ? <p role="alert" className="mx-3 mb-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-6">{error}</p> : null}
         <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
           <div className="mx-auto max-w-3xl">
+            {e2ee ? <ContinueChat engine={engine} conversation={conversation} onOpenChat={onOpenChat} /> : null}
             {replyTo ? (
               <div className="mb-2 flex items-center gap-3 rounded-2xl bg-muted/60 py-2 pl-3 pr-1.5 text-sm" data-testid="reply-banner">
                 <CornerUpLeft className="size-4 shrink-0 text-primary" />
@@ -1474,7 +1505,7 @@ function PersonalMessages() {
         </aside>
         <main className={cn("min-w-0 min-h-0 flex-1", !current && "hidden md:flex md:items-center md:justify-center")} data-testid="conversation-pane">
           {current ? (
-            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} />
+            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} onOpenChat={setSelected} />
           ) : (
             <div className="max-w-sm px-6 text-center">
               <div className="relative mx-auto flex size-24 items-center justify-center">

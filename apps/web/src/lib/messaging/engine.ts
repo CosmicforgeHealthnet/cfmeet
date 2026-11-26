@@ -1343,6 +1343,26 @@ export class MessagingEngine {
   }
 
   /**
+   * An older PRIVATE_E2EE chat continues as a server-stored (MANAGED) chat with the same
+   * people (and the same name for a group): readable on every device the user signs in
+   * on. Opens the server-stored chat when it already exists; the encrypted chat stays
+   * readable where it is. Returns the server-stored chat's id.
+   */
+  async continueAsManaged(conversationId: string): Promise<string> {
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (view.securityProfile === "MANAGED") return view.id;
+    const others = view.members.filter((m) => m !== me);
+    const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
+      && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
+    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? undefined;
+    const twin = this.snapshot.conversations.find((c) => same(c) && (view.contextClass === "DIRECT" || (c.serverTitle ?? null) === (name ?? null)));
+    if (twin) return twin.id;
+    return this.createConversation([], "MANAGED", { principalIds: others, title: view.contextClass === "DIRECT" ? undefined : name ?? view.title });
+  }
+
+  /**
    * Starts a conversation with colleagues. PRIVATE_E2EE builds the MLS group on this
    * device and adds every verified device of the others; MANAGED is server-readable
    * (the UI says so before it is chosen).
@@ -1350,9 +1370,12 @@ export class MessagingEngine {
   async createConversation(
     userIds: string[],
     profile: SecurityProfile,
-    options: { cfMeetIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
+    options: { cfMeetIds?: string[]; principalIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
   ): Promise<string> {
-    const people = userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : [];
+    const people = [
+      ...(userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : []),
+      ...(options.principalIds ?? []),
+    ];
     const contacts = options.cfMeetIds ?? [];
     if (profile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready") throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const title = options.title?.trim() || undefined;
