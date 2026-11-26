@@ -31,6 +31,14 @@ const USERS = JSON.parse(process.env.E2E_USERS ?? "{}");
 const API = (process.env.E2E_API_URL ?? "http://127.0.0.1:18080/api/v1").replace(/\/+$/, "");
 const SECRET = process.env.E2E_SECRET ?? `secret-${Date.now()}`;
 const EVIDENCE = process.env.E2E_EVIDENCE;
+// Where screenshots of the real chat UI go (uploaded by CI for review); unset: none.
+const SCREENS = process.env.E2E_SCREENSHOTS;
+async function shot(page, name) {
+  if (!SCREENS) return;
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(SCREENS, { recursive: true });
+  await page.screenshot({ path: `${SCREENS}/${name}.png` }).catch(() => {});
+}
 const T = 30_000;
 const BURST = 60;
 const log = [];
@@ -178,6 +186,10 @@ test("the CF Meet web app runs real server-stored messaging", { timeout: 15 * 60
     await journey();
   } catch (e) {
     for (const [who, p] of Object.entries(pages)) {
+      await shot(p, `failure-${who}`);
+      const dialogs = await p.evaluate(() => [...document.querySelectorAll("[role=dialog], [data-slot=dialog-overlay]")]
+        .map((d) => `${d.getAttribute("data-slot") ?? d.getAttribute("role")} [${d.getAttribute("data-testid") ?? ""}] ${(d.textContent ?? "").slice(0, 200)}`)).catch(() => []);
+      if (dialogs.length) console.log(`--- ${who} open dialogs ---\n${dialogs.join("\n")}`);
       const text = await p.locator("[data-testid=messages-page]").innerText().catch(() => "(closed)");
       console.log(`--- ${who} page at failure ---\n${text.length > 12000 ? text.slice(-12000) : text}`);
     }
@@ -220,6 +232,22 @@ async function journey() {
     await exchange(alice.page, bob.page, `${SECRET} alice says ${i}`);
   }
   step("real-time send and receive", { messages: 6 });
+
+  // ---- 3b. Ticks as on WhatsApp: ✓✓ as soon as Bob's browser has the message, wherever
+  //          he is in CF Meet (his chat closed), and read only once he opens the chat.
+  await bob.page.goto(`${BASE}/dashboard`, { waitUntil: "load" });
+  await bob.page.waitForTimeout(1500);
+  const away = `${SECRET} while bob is on another page`;
+  await type(alice.page, away);
+  const awayBubble = alice.page.locator("[data-testid=message]", { hasText: away }).first();
+  await timed("delivered-tick", () => alice.page.locator("[data-testid=message][data-receipt=delivered]", { hasText: away }).first().waitFor({ timeout: T }));
+  assert.equal(await awayBubble.getAttribute("data-receipt"), "delivered", "delivered, not read, while Bob has not opened the chat");
+  await bob.page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
+  await ready(bob.page);
+  await openChat(bob.page);
+  await shown(bob.page, away);
+  await timed("read-tick", () => alice.page.locator("[data-testid=message][data-receipt=read]", { hasText: away }).first().waitFor({ timeout: T }));
+  step("ticks: delivered away from the chat, read when opened", {});
 
   // ---- 4. A burst: written quickly, delivered in order, and each message no slower
   //         late in the chat than early on.
@@ -327,4 +355,36 @@ async function journey() {
   for (const p of payloads) await shown(bob.page, p);
   assert.equal(await bob.page.evaluate(() => window.__xss ?? null), null, "no payload executed");
   step("xss payloads inert", { payloads: payloads.length });
+  await shot(alice.page, "01-direct-chat-alice");
+  await shot(bob.page, "02-direct-chat-bob");
+
+  // ---- 12. A group, as on WhatsApp: named at creation, the name everywhere, members under
+  //          the name, and the sender's name in the chat list preview.
+  await alice.page.click("[data-testid=new-conversation]");
+  await alice.page.click("[data-testid=new-group]");
+  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).click();
+  await alice.page.click("[data-testid=group-next]");
+  await alice.page.fill("input[aria-label='Group name']", "Weekend plans");
+  await alice.page.click("[data-testid=create-conversation]");
+  // The New chat dialog closes once the group exists, and the group opens.
+  await alice.page.locator("[data-testid=new-conversation-form]").waitFor({ state: "detached", timeout: T });
+  await alice.page.locator("[data-testid=conversation] [data-testid=group-members]").waitFor({ timeout: T });
+  const groupHello = `${SECRET} hello group`;
+  await type(alice.page, groupHello);
+  const groupItem = bob.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+  await groupItem.waitFor({ timeout: T });
+  await groupItem.click();
+  await shown(bob.page, groupHello);
+  assert.ok((await bob.page.locator("[data-testid=group-members]").innerText()).includes("You"), "the group header lists its members");
+  const fromBob = `${SECRET} bob in the group`;
+  await type(bob.page, fromBob);
+  await shown(alice.page, fromBob);
+  const aliceItem = alice.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+  await aliceItem.waitFor({ timeout: T });
+  const firstName = USERS.bob.name.split(" ")[0];
+  await alice.page.waitForFunction((name) => [...document.querySelectorAll("[data-testid=conversation-item]")]
+    .some((el) => el.textContent.includes("Weekend plans") && el.textContent.includes(`${name}: `)), firstName, { timeout: T });
+  await shot(alice.page, "03-group-alice");
+  await shot(bob.page, "04-group-bob");
+  step("group: named, members in the header, sender in the preview", {});
 }

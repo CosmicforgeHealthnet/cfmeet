@@ -117,6 +117,8 @@ export type MessageView = {
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
+  /** Forwarded from another chat (WhatsApp's "Forwarded" label). */
+  forwarded?: boolean;
   /** F4-F7: a private chat's poll, location, contact card or link preview (encrypted content). */
   rich?: RichContent | null;
 };
@@ -264,6 +266,11 @@ export function isInlineImage(mediaType: string | null | undefined): boolean {
   return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp" || mediaType === "image/gif";
 }
 
+/** Videos the chat plays inline (WhatsApp); other video types stay a download. */
+export function isPlayableVideo(mediaType: string | null | undefined): boolean {
+  return mediaType === "video/mp4" || mediaType === "video/webm";
+}
+
 /** Voice notes and audio files the chat plays inline. */
 export function isPlayableAudio(mediaType: string | null | undefined): boolean {
   return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
@@ -277,7 +284,7 @@ const mediaUrls = new Map<string, string>();
 
 /** Remembers a file this device just sent, so its own photo shows without downloading it back. */
 function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
-  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
+  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType) || isPlayableVideo(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
 }
 
 /** Length of an audio or video file, read by the browser (null: it can't tell). */
@@ -1113,6 +1120,34 @@ export class MessagingEngine {
     this.presenceTimer = setInterval(ask, 20_000);
   }
 
+  /** WhatsApp's Message info: each other member's state for one of your messages. */
+  messageInfo(conversationId: string, sequence: number): { principalId: string; state: "read" | "delivered" | "sent" }[] {
+    const me = this.snapshot.identity?.principalId;
+    const byMember = this.receipts.get(conversationId);
+    return (this.server.get(conversationId)?.members ?? [])
+      .map((m) => m.principalId)
+      .filter((p) => p !== me)
+      .map((p) => {
+        const r = byMember?.get(p);
+        return { principalId: p, state: (r && r.read >= sequence ? "read" : r && r.delivered >= sequence ? "delivered" : "sent") as "read" | "delivered" | "sent" };
+      });
+  }
+
+  /** Applies read / delivery receipts among `events`; whether any was found. */
+  private noteReceiptEvents(conversationId: string, events: readonly ConversationEvent[]): boolean {
+    let any = false;
+    for (const e of events) {
+      if (e.type !== "read.cursor.updated" && e.type !== "delivery.cursor.updated") continue;
+      const d = (e.data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId !== "string") continue;
+      this.noteReceipt(conversationId, d.principalId,
+        typeof d.readSequence === "number" ? d.readSequence : undefined,
+        typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+      any = true;
+    }
+    return any;
+  }
+
   private noteReceipt(conversationId: string, principalId: string, read?: number, delivered?: number): void {
     let byMember = this.receipts.get(conversationId);
     if (!byMember) this.receipts.set(conversationId, (byMember = new Map()));
@@ -1343,6 +1378,35 @@ export class MessagingEngine {
   }
 
   /**
+   * An older PRIVATE_E2EE chat continues as a server-stored (MANAGED) chat with the same
+   * people (and the same name for a group): readable on every device the user signs in
+   * on. Opens the server-stored chat when it already exists; the encrypted chat stays
+   * readable where it is. Returns the server-stored chat's id.
+   */
+  /** The group name "Continue chat" can carry over (null: the user must name it). */
+  knownGroupName(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.contextClass === "DIRECT") return null;
+    return view.groupTitle ?? view.serverTitle ?? null;
+  }
+
+  async continueAsManaged(conversationId: string, groupName?: string): Promise<string> {
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (view.securityProfile === "MANAGED") return view.id;
+    const others = view.members.filter((m) => m !== me);
+    const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
+      && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
+    // Never the member list shown when a group's name is unknown: that is not its name.
+    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || undefined);
+    if (view.contextClass !== "DIRECT" && !name) throw new MessagingApiError(0, "GROUP_NAME_REQUIRED", "Give the group a name to continue.");
+    const twin = this.snapshot.conversations.find((c) => same(c) && (view.contextClass === "DIRECT" || (c.serverTitle ?? null) === (name ?? null)));
+    if (twin) return twin.id;
+    return this.createConversation([], "MANAGED", { principalIds: others, title: name });
+  }
+
+  /**
    * Starts a conversation with colleagues. PRIVATE_E2EE builds the MLS group on this
    * device and adds every verified device of the others; MANAGED is server-readable
    * (the UI says so before it is chosen).
@@ -1350,9 +1414,12 @@ export class MessagingEngine {
   async createConversation(
     userIds: string[],
     profile: SecurityProfile,
-    options: { cfMeetIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
+    options: { cfMeetIds?: string[]; principalIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
   ): Promise<string> {
-    const people = userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : [];
+    const people = [
+      ...(userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : []),
+      ...(options.principalIds ?? []),
+    ];
     const contacts = options.cfMeetIds ?? [];
     if (profile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready") throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const title = options.title?.trim() || undefined;
@@ -2157,6 +2224,8 @@ export class MessagingEngine {
         await this.resnapshotManaged(conv);
       }
       const refresh = st.applyEvents(page.events);
+      // Receipts caught up here count like live ones (delivered ticks were lost otherwise).
+      if (this.noteReceiptEvents(id, page.events)) this.refreshTicks(id);
       this.afterManagedChange(conv, refresh);
       after = Math.max(after, page.nextAfter ?? after, st.eventCursor ?? 0);
       if (!page.hasMore || !page.events.length) break;
@@ -2197,6 +2266,19 @@ export class MessagingEngine {
   }
 
   /** Moves the conversation's list preview forward from what was just synchronized. */
+  private bumpQueued(conversationId: string, text: string, at: string): void {
+    const me = this.snapshot.identity?.principalId;
+    if (!me) return;
+    const conversations = this.snapshot.conversations.map((c) => c.id !== conversationId ? c : {
+      ...c,
+      lastActivityAt: at > c.lastActivityAt ? at : c.lastActivityAt,
+      // The stored message (a higher sequence) replaces this preview when it arrives.
+      lastMessage: { sequence: c.lastMessage?.sequence ?? 0, senderPrincipalId: me, previewText: text, attachmentCount: 0, lifecycle: "ACTIVE", createdAt: at },
+    });
+    conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
+    this.set({ conversations });
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
@@ -2219,7 +2301,9 @@ export class MessagingEngine {
     const reply = r.replyToMessageId ? st.get(r.replyToMessageId) : undefined;
     const removed = r.lifecycle !== "ACTIVE";
     return {
-      key: `m:${r.messageId}`,
+      // Stable from the moment of sending: the queued bubble and the stored message share
+      // the clientMessageId, so the bubble is updated in place, never remounted.
+      key: r.clientMessageId ? `c:${r.clientMessageId}` : `m:${r.messageId}`,
       sequence: r.sequence,
       senderPrincipalId: r.senderPrincipalId,
       mine: r.senderPrincipalId === me,
@@ -2240,6 +2324,7 @@ export class MessagingEngine {
       pinned: pinned.has(r.messageId),
       seenBy: [],
       announcement: r.announcement,
+      forwarded: r.forwarded,
     };
   }
 
@@ -2256,7 +2341,7 @@ export class MessagingEngine {
     const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
       .filter((item) => !st.byClientMessageId(item.clientMessageId))
       .map((item: OutboxItem) => ({
-        key: `q:${item.key}`,
+        key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
         mine: true,
@@ -2539,7 +2624,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED" && this.outbox) {
       this.stateFor(conversationId);
       this.loadedManaged.add(conversationId);
-      this.outbox.enqueue({
+      const item = this.outbox.enqueue({
         key: uuid(),
         conversationId,
         clientMessageId: uuid(),
@@ -2547,6 +2632,9 @@ export class MessagingEngine {
         replyToMessageId: options.replyToMessageId ?? null,
         mentionedPrincipalIds: options.mentionedPrincipalIds ?? [],
       });
+      // The chat moves to the top with this message as its preview at once, not after the
+      // server answers.
+      this.bumpQueued(conversationId, item.text, item.createdAt);
       void this.flush();
       return;
     }
@@ -2771,7 +2859,7 @@ export class MessagingEngine {
    */
   async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
     const aid = message.file?.attachmentId;
-    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType))) return null;
+    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType) || isPlayableVideo(message.file?.mediaType))) return null;
     const cached = mediaUrls.get(aid);
     if (cached) return cached;
     const { blob } = await this.download(conversationId, message);

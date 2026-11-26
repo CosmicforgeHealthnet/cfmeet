@@ -14,9 +14,9 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
 import { AttachMenu, RichContentView } from "./RichMessages";
-import { ChatImage, LinkifiedText } from "./BubbleParts";
+import { ChatImage, ChatVideo, LinkifiedText, PhotoViewer } from "./BubbleParts";
 import { AttachmentPreview } from "./AttachmentPreview";
-import { isInlineImage, isPlayableAudio } from "@/lib/messaging/engine";
+import { isInlineImage, isPlayableAudio, isPlayableVideo } from "@/lib/messaging/engine";
 import { SecurityCode } from "./SecurityCode";
 import { MicButton, VoicePlayer, VoiceRecorder, voiceRecordingSupported } from "./VoiceNote";
 import PrivateShares from "./PrivateShares";
@@ -27,7 +27,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, Bell, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X, Camera, Mic, Headphones, Paperclip,
   UserPlus, Users,
@@ -66,16 +66,22 @@ import {
 } from "@/lib/communications/comms-core";
 import type { TimelineCallCard, TimelineMeetingCard } from "@/types/communications";
 import MessagingDevicesPanel from "./MessagingDevicesPanel";
+import { useSharedMessagingEngine } from "./MessagingEngineProvider";
+import { EmojiPicker } from "./EmojiPicker";
 import { authService } from "@/services/auth.service";
 
 function useEngine(): MessagingEngine {
-  // One engine per mounted page (lazy state initializer, never re-created on render).
-  const [engine] = useState(() => new MessagingEngine());
+  // The app-wide engine (live on every page of the signed-in app); a page-local one only
+  // where no provider exists.
+  const shared = useSharedMessagingEngine();
+  const [own] = useState(() => (shared ? null : new MessagingEngine()));
+  const engine = shared ?? own!;
   const router = useRouter();
   useEffect(() => {
-    void engine.start();
-    return () => engine.stop();
-  }, [engine]);
+    if (!own) return;
+    void own.start();
+    return () => own.stop();
+  }, [own]);
   useEffect(() => {
     // A sign-in too old to register this browser: hand over to the standard sign-in flow
     // (no Messaging activation step); the login page returns here afterwards.
@@ -363,6 +369,42 @@ function usePeoplePicker(enabled: boolean, search: string) {
   return { people, pending, error, heading, retry: () => void (contactsUsable ? contacts.refetch() : directory.refetch()) };
 }
 
+/** WhatsApp's "Add member" in group info: search your contacts / colleagues and tap to add. */
+function AddPeople({ onAdd }: { onAdd: (p: { kind: "contact" | "colleague"; value: string }) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const picker = usePeoplePicker(open, search);
+  if (!open) {
+    return (
+      <button type="button" data-testid="add-member" onClick={() => setOpen(true)}
+        className="mt-3 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-muted">
+        <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground"><UserPlus className="size-4" /></span>
+        Add member
+      </button>
+    );
+  }
+  return (
+    <div className="mt-3 rounded-xl ring-1 ring-border" data-testid="add-member-picker">
+      <input autoFocus aria-label="Search people to add" placeholder="Search name" value={search} onChange={(e) => setSearch(e.target.value)}
+        className="h-10 w-full rounded-t-xl bg-transparent px-3 text-sm outline-none" />
+      <ul className="max-h-60 overflow-y-auto border-t border-border">
+        {picker.pending ? <li className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground"><Spinner /> Loading…</li> : null}
+        {!picker.pending && picker.people.length === 0 ? <li className="px-3 py-3 text-sm text-muted-foreground">{search ? "No one matches." : "No one to add yet."}</li> : null}
+        {picker.people.map((p) => (
+          <li key={p.id}>
+            <button type="button" data-testid="add-member-person" data-name={p.name} onClick={() => { onAdd(p); setOpen(false); setSearch(""); }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted">
+              <Avatar name={p.name} seed={p.id} size="size-9" />
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => setOpen(false)} className="w-full border-t border-border py-2 text-xs font-semibold text-muted-foreground hover:bg-muted">Cancel</button>
+    </div>
+  );
+}
+
 /* ─── New chat ────────────────────────────────────────────────────────── */
 
 type Step = "chat" | "members" | "name";
@@ -450,7 +492,7 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
           ) : <span className="w-2" />}
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-lg">{title}</DialogTitle>
-            <DialogDescription className="text-xs">{step === "members" ? (chosen.length ? `${chosen.length} selected` : "Pick people to add") : step === "name" ? `${chosen.length} ${chosen.length === 1 ? "member" : "members"}` : "Private chats are end-to-end encrypted"}</DialogDescription>
+            <DialogDescription className="text-xs">{step === "members" ? (chosen.length ? `${chosen.length} selected` : "Pick people to add") : step === "name" ? `${chosen.length} ${chosen.length === 1 ? "member" : "members"}` : "Start a chat or create a group"}</DialogDescription>
           </div>
         </DialogHeader>
 
@@ -561,6 +603,41 @@ function Ticks({ receipt, list }: { receipt: "sent" | "delivered" | "read"; list
   return <CheckCheck strokeWidth={2.75} className={cn("size-4 shrink-0", list ? "text-sky-500" : "text-[#7CFFF4] drop-shadow-[0_0_1px_rgba(0,0,0,0.35)]")} aria-label="Read" />;
 }
 
+/** One tick state for a message from every other member's state (read only when all read). */
+function summaryReceipt(rows: { state: "read" | "delivered" | "sent" }[]): "read" | "delivered" | "sent" {
+  if (!rows.length) return "sent";
+  return rows.every((r) => r.state === "read") ? "read" : rows.every((r) => r.state !== "sent") ? "delivered" : "sent";
+}
+
+/** WhatsApp's Message info: read by / delivered to, live while open. */
+function MessageInfo({ engine, conversationId, message, names, onClose }: { engine: MessagingEngine; conversationId: string; message: MessageView; names: Record<string, string>; onClose: () => void }) {
+  useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const rows = message.sequence != null ? engine.messageInfo(conversationId, message.sequence) : [];
+  const section = (title: string, state: "read" | "delivered" | "sent", receipt: "read" | "delivered" | "sent") => {
+    const people = rows.filter((r) => r.state === state);
+    if (!people.length) return null;
+    return (
+      <section className="space-y-1" data-testid={`info-${state}`}>
+        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Ticks receipt={receipt} list />{title}</h3>
+        <ul>{people.map((p) => <li key={p.principalId} className="flex items-center gap-3 py-1.5 text-sm"><Avatar name={names[p.principalId] ?? "CF Meet user"} seed={p.principalId} size="size-8" />{names[p.principalId] ?? "CF Meet user"}</li>)}</ul>
+      </section>
+    );
+  };
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogTitle>Message info</DialogTitle>
+        <p className="line-clamp-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">{message.text ?? message.file?.name ?? "Message"}</p>
+        <div className="space-y-4">
+          {section("Read by", "read", "read")}
+          {section("Delivered to", "delivered", "delivered")}
+          {section("Waiting", "sent", "sent")}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── Message bubble ──────────────────────────────────────────────────── */
 
 type BubbleActions = {
@@ -574,6 +651,8 @@ type BubbleActions = {
   starred: boolean;
   /** S11 / S2: forward to another chat, report a message. */
   forward: () => void;
+  /** Who your message was delivered to and read by (absent: not yours / not sent yet). */
+  info?: () => void;
   report: () => void;
   retry: () => void;
   discard: () => void;
@@ -586,8 +665,9 @@ type BubbleActions = {
 /** The chat list's icon for a file message (WhatsApp: camera for a photo, mic for a voice message). */
 const FILE_ICONS = { photo: Camera, video: Video, voice: Mic, audio: Headphones, document: FileText, file: Paperclip } as const;
 
-function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJump, highlight, actions, first, last, group }: {
+function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJump, highlight, actions, first, last, group, onOpenPhoto }: {
   m: MessageView; name: string; names: Record<string, string>; onDownload: () => void; actions: BubbleActions; managed: boolean;
+  /** Opens the chat's photo viewer at this photo. */ onOpenPhoto?: () => void;
   /** A photo shown in the chat (null: not an inline photo). */ loadImage: (() => Promise<string | null>) | null;
   /** That photo or voice note, if it was already loaded on this visit. */ cachedMedia: string | null;
   /** Scroll to the quoted message. */ onJump: (messageId: string) => void;
@@ -635,6 +715,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
     <li
       data-testid="message"
       data-state={m.state}
+      data-receipt={mine ? m.receipt ?? undefined : undefined}
       data-mine={mine ? "true" : "false"}
       data-message-id={m.messageId ?? undefined}
       className={cn("group/msg relative flex items-end gap-2 rounded-xl transition-colors duration-700", mine ? "flex-row-reverse" : "flex-row", first ? "mt-3" : "mt-0.5", highlight && "bg-primary/15")}
@@ -651,13 +732,19 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             className={cn(
               "relative min-w-0 rounded-[20px] px-3.5 py-2 text-[15px] leading-snug",
               mine ? "bg-primary text-primary-foreground shadow-sm" : "bg-card text-foreground shadow-sm",
-              mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
+              // WhatsApp: the first bubble of a run has a tail at its top corner (square there).
+              mine ? cn(first ? "rounded-tr-none" : "rounded-tr-md", !last && "rounded-br-md") : cn(first ? "rounded-tl-none" : "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
-              (m.state === "queued" || m.state === "sending" || m.state === "pending-setup") && "opacity-70",
             )}
           >
+            {first ? (
+              <svg aria-hidden viewBox="0 0 8 13" className={cn("absolute top-0 h-[13px] w-2", mine ? "-right-2 text-primary" : "-left-2 -scale-x-100 text-card")}>
+                <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 9z" fill="currentColor" />
+              </svg>
+            ) : null}
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
+            {m.forwarded ? <p className="mb-0.5 flex items-center gap-1 text-[11px] italic opacity-75" data-testid="message-forwarded"><Forward className="size-3" /> Forwarded</p> : null}
             {m.replyTo ? (
               <button type="button" disabled={m.replyTo.removed} onClick={() => onJump(m.replyTo!.messageId)}
                 className={cn("mb-1.5 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left text-xs", mine ? "border-white/60 bg-white/15" : "border-primary bg-background/70")} data-testid="message-reply">
@@ -676,7 +763,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
               m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
-            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file ? (
+            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} onOpen={onOpenPhoto} /> : m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
                 <span className="min-w-0"><span className="block truncate text-sm font-medium">{m.file.name}</span>{m.file.size ? <span className="block text-xs opacity-70">{Math.ceil(m.file.size / 1024)} KB · Download</span> : null}</span>
@@ -714,6 +801,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                     <button type="button" className={item} data-testid="reply" onClick={() => { actions.reply(); setMenu(false); }}><CornerUpLeft className="size-4 text-muted-foreground" />Reply</button>
                     {m.text ? <button type="button" className={item} data-testid="copy" onClick={copy}><Copy className="size-4 text-muted-foreground" />Copy</button> : null}
                     <button type="button" className={item} data-testid="forward" onClick={() => { actions.forward(); setMenu(false); }}><Forward className="size-4 text-muted-foreground" />Forward</button>
+                    {actions.info ? <button type="button" className={item} data-testid="message-info" onClick={() => { actions.info?.(); setMenu(false); }}><Info className="size-4 text-muted-foreground" />Message info</button> : null}
                     {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
@@ -737,7 +825,6 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             ))}
           </div>
         ) : null}
-        {m.seenBy?.length ? <p className="mt-0.5 px-2 text-[11px] text-muted-foreground" data-testid="seen-by">Seen by {m.seenBy.map((p) => names[p] ?? "CF Meet user").join(", ")}</p> : null}
         {actions.canRetry && m.state === "failed" ? (
           <span className="mt-1 flex gap-1 text-xs font-semibold">
             <button type="button" className="rounded-full px-2.5 py-1 text-destructive hover:bg-destructive/10" data-testid="retry-send" onClick={actions.retry}>Try again</button>
@@ -842,6 +929,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
               );
             })}
           </ul>
+          {isGroup ? <AddPeople onAdd={(p) => run(p.kind === "contact" ? engine.addMemberByCfMeetId(conversation.id, p.value) : engine.addMember(conversation.id, p.value))} /> : null}
           {isGroup ? (
             <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (normalized) run(engine.addMemberByCfMeetId(conversation.id, normalized).then(() => setCfMeetId(""))); }}>
               <input aria-label="Add a contact by CF Meet ID" placeholder="Add by CF Meet ID" value={cfMeetId} maxLength={40} onChange={(e) => setCfMeetId(e.target.value)} className={field} data-testid="add-member-id" />
@@ -923,10 +1011,71 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 
 /* ─── Open chat ───────────────────────────────────────────────────────── */
 
-function ConversationPane({ engine, conversation, onBack }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void }) {
+/** WhatsApp Web's "Get notified of new messages" row, until the browser has decided. */
+function NotifyPrompt() {
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() =>
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported");
+  if (permission !== "default") return null;
+  return (
+    <button type="button" data-testid="enable-notifications"
+      onClick={() => void Notification.requestPermission().then(setPermission).catch(() => setPermission("denied"))}
+      className="flex w-full items-center gap-3 rounded-2xl bg-primary/10 px-3 py-2.5 text-left text-sm hover:bg-primary/15">
+      <Bell className="size-5 shrink-0 text-primary" />
+      <span className="min-w-0 flex-1"><span className="block font-semibold">Get notified of new messages</span><span className="block text-xs text-muted-foreground">Turn on desktop notifications</span></span>
+    </button>
+  );
+}
+
+/**
+ * An older end-to-end encrypted chat: it only works on the devices that hold its keys, and
+ * messages to someone who has never opened CF Meet wait. It continues as a chat that syncs
+ * on every device (same people, same group name); this one stays readable here.
+ */
+function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onOpenChat?: (id: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const needsName = conversation.contextClass !== "DIRECT" && !engine.knownGroupName(conversation.id);
+  const [name, setName] = useState("");
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
+      <Lock className="size-4 shrink-0 text-muted-foreground" />
+      <p className="min-w-0 flex-1 text-muted-foreground">
+        {error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}
+      </p>
+      {needsName ? (
+        <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)}
+          data-testid="continue-chat-name" className="h-9 w-40 rounded-full bg-background px-3 text-sm ring-1 ring-border" />
+      ) : null}
+      <button type="button" disabled={busy || (needsName && !name.trim())} data-testid="continue-chat-button"
+        className="h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+        onClick={() => {
+          setBusy(true);
+          setError(null);
+          void engine.continueAsManaged(conversation.id, name)
+            .then((id) => onOpenChat?.(id))
+            .catch((e) => setError(messagingErrorMessage(e)))
+            .finally(() => setBusy(false));
+        }}>
+        {busy ? "Opening…" : "Continue chat"}
+      </button>
+    </div>
+  );
+}
+
+function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void; onOpenChat?: (id: string) => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const client = useQueryClient();
-  const [text, setText] = useState("");
+  // Drafts stay with their chat (WhatsApp): kept in this browser, per account and chat.
+  const draftKey = `cfmeet:draft:${s.identity?.principalId ?? ""}:${conversation.id}`;
+  const [text, setText] = useState(() => {
+    try { return typeof window === "undefined" ? "" : window.localStorage.getItem(draftKey) ?? ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try {
+      if (text) window.localStorage.setItem(draftKey, text);
+      else window.localStorage.removeItem(draftKey);
+    } catch { /* storage unavailable: drafts just aren't kept */ }
+  }, [draftKey, text]);
   const [recording, setRecording] = useState(false);
   /** A picked file waiting in the preview until you press Send. */
   const [staged, setStaged] = useState<File | null>(null);
@@ -937,12 +1086,17 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  const mediaInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
   // "online" / "last seen" for a one-to-one chat (WhatsApp); groups keep the security badge.
   useEffect(() => { engine.watchPresence(conversation.id); return () => engine.watchPresence(null); }, [engine, conversation.id]);
   const others = Object.values(s.presence[conversation.id] ?? {});
+  // Groups list their members under the name ("Ainz, Davidayo, You"), as WhatsApp does.
+  const memberLine = conversation.contextClass === "GROUP"
+    ? [...conversation.members.filter((m) => m !== s.identity?.principalId).map((m) => s.names[m] ?? "CF Meet user"), "You"].join(", ")
+    : null;
   const presenceText = conversation.contextClass === "GROUP" || others.length !== 1 ? null
     : others[0].online ? "online"
     : others[0].lastSeenAt ? lastSeenText(others[0].lastSeenAt) : null;
@@ -1071,12 +1225,24 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   );
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
   const [forwarding, setForwarding] = useState<{ messageId: string | null; text: string | null } | null>(null);
+  const [infoFor, setInfoFor] = useState<MessageView | null>(null);
+  // The chat's photos, in order, for the viewer's previous / next.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const photos = useMemo(() => messages
+    .filter((m) => m.file?.attachmentId && isInlineImage(m.file.mediaType) && m.state !== "removed")
+    .map((m) => ({
+      key: m.key,
+      name: m.file!.name,
+      load: () => engine.imageUrl(conversation.id, m),
+      download: () => { void download(m).catch(fail); },
+    })), [messages, engine, conversation.id, download]);
   const [reporting, setReporting] = useState<{ messageId: string; text: string | null } | null>(null);
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
   const savedIds = useMemo(() => new Map((saved.data?.data ?? []).map((x) => [x.messageId, x.savedId])), [saved.data]);
   const bubbleActions = (m: MessageView): BubbleActions => ({
     forward: () => setForwarding({ messageId: m.messageId ?? null, text: m.text }),
+    info: m.mine && m.sequence != null ? () => setInfoFor(m) : undefined,
     report: () => { if (m.messageId) setReporting({ messageId: m.messageId, text: m.text }); },
     reply: () => { setReplyTo(m); composer.current?.focus(); },
     react: (reaction, add) => { if (m.messageId) void engine.react(conversation.id, m.messageId, reaction, add).catch(fail); },
@@ -1094,6 +1260,21 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); else engine.discardFile(conversation.id, m.key); },
     vote: m.messageId && m.rich?.kind === "poll" ? (choices) => { void engine.sendRich(conversation.id, { t: "vote", poll: m.messageId!, choices }).catch(fail); } : undefined,
   });
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const mentionOptions = mentionQuery === null ? [] : conversation.members
+    .filter((p) => p !== s.identity?.principalId && s.names[p] && s.names[p].toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase()))
+    .slice(0, 8);
+  const pickMention = (p: string) => {
+    const el = composer.current;
+    const caret = el?.selectionStart ?? text.length;
+    const start = text.slice(0, caret).lastIndexOf("@");
+    if (start < 0) return;
+    const inserted = `@${s.names[p]} `;
+    const next = text.slice(0, start) + inserted + text.slice(caret);
+    setText(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + inserted.length, start + inserted.length); });
+  };
   const mentions = (t: string) =>
     conversation.members.filter((p) => p !== s.identity?.principalId && s.names[p] && t.includes(`@${s.names[p]}`));
   const send = () => {
@@ -1130,6 +1311,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
 
   return (
     <div className="relative flex h-full min-w-0">
+      {viewing !== null && viewing >= 0 ? <PhotoViewer items={photos} index={Math.min(viewing, photos.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} /> : null}
+      {infoFor ? <MessageInfo engine={engine} conversationId={conversation.id} message={infoFor} names={s.names} onClose={() => setInfoFor(null)} /> : null}
       {forwarding ? <ForwardDialog engine={engine} conversations={s.conversations} sourceId={conversation.id} message={forwarding} onClose={() => setForwarding(null)} /> : null}
       {reporting ? <ReportDialog engine={engine} conversationId={conversation.id} message={reporting} privateChat={e2ee} onClose={() => setReporting(null)} /> : null}
       <section className="flex min-w-0 flex-1 flex-col" data-testid="conversation" data-conversation-id={conversation.id} data-profile={conversation.securityProfile}>
@@ -1141,7 +1324,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
             <Avatar name={title} seed={conversation.id} size="size-10" />
             <span className="min-w-0">
               <span className="block truncate font-semibold" data-testid="conversation-title">{title}</span>
-              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : presenceText ? <span className={cn("text-xs", presenceText === "online" ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")} data-testid="presence">{presenceText}</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
+              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : presenceText ? <span className={cn("text-xs", presenceText === "online" ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")} data-testid="presence">{presenceText}</span> : memberLine && !e2ee ? <span className="text-xs text-muted-foreground" data-testid="group-members">{memberLine}</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
             </span>
           </button>
           <div className="flex shrink-0 items-center">
@@ -1201,8 +1384,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                   ) : null}
                   <MessageBubble m={m} managed={managed} names={s.names} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
                     onDownload={() => { setError(null); void download(m).catch(fail); }}
-                    loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
+                    loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType) || isPlayableVideo(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
                     cachedMedia={engine.cachedMediaUrl(m)}
+                    onOpenPhoto={m.file && isInlineImage(m.file.mediaType) ? () => setViewing(photos.findIndex((p) => p.key === m.key)) : undefined}
                     onJump={jump} highlight={!!m.messageId && highlight === m.messageId} />
                 </Fragment>
               );
@@ -1221,6 +1405,19 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
         {error ? <p role="alert" className="mx-3 mb-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-6">{error}</p> : null}
         <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
           <div className="mx-auto max-w-3xl">
+            {e2ee ? <ContinueChat engine={engine} conversation={conversation} onOpenChat={onOpenChat} /> : null}
+            {mentionQuery !== null && mentionOptions.length ? (
+              <ul className="mb-2 max-h-56 overflow-y-auto rounded-2xl border border-border bg-popover py-1 shadow-lg" data-testid="mention-picker" role="listbox" aria-label="Mention someone">
+                {mentionOptions.map((p) => (
+                  <li key={p}>
+                    <button type="button" role="option" aria-selected={false} onMouseDown={(e) => { e.preventDefault(); pickMention(p); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted" data-testid="mention-option">
+                      <Avatar name={s.names[p]} seed={p} size="size-8" />{s.names[p]}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {replyTo ? (
               <div className="mb-2 flex items-center gap-3 rounded-2xl bg-muted/60 py-2 pl-3 pr-1.5 text-sm" data-testid="reply-banner">
                 <CornerUpLeft className="size-4 shrink-0 text-primary" />
@@ -1254,7 +1451,32 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                   e.target.value = "";
                 }}
               />
-              <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
+              <input
+                ref={mediaInput}
+                type="file"
+                className="hidden"
+                data-testid="media-input"
+                accept="image/*,video/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    const tooLarge = attachmentSizeRefusal(f.size, attachments);
+                    setError(tooLarge);
+                    if (!tooLarge) setStaged(f);
+                  }
+                  e.target.value = "";
+                }}
+              />
+              <EmojiPicker disabled={!canSend} onPick={(emoji) => {
+                // At the cursor, as WhatsApp does; the composer keeps focus.
+                const el = composer.current;
+                const at = el ? el.selectionStart ?? text.length : text.length;
+                const end = el ? el.selectionEnd ?? at : at;
+                const next = text.slice(0, at) + emoji + text.slice(end);
+                setText(next);
+                requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + emoji.length, at + emoji.length); });
+              }} />
+              <AttachMenu canAttach={canAttach} canShare={e2ee} disabled={!canSend} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => engine.sendRich(conversation.id, payload)}
                 fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
                 ref={composer}
@@ -1263,9 +1485,22 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 value={text}
                 maxLength={16384}
                 disabled={!canSend}
-                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
-                onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+                placeholder={canSend ? "Type a message" : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  engine.typing(conversation.id, e.target.value.length > 0);
+                  // "@" in a group opens the member list (WhatsApp), filtered by what follows.
+                  const before = e.target.value.slice(0, e.target.selectionStart ?? e.target.value.length);
+                  const at = conversation.contextClass === "GROUP" ? /(^|\s)@([^\s@]{0,30})$/.exec(before) : null;
+                  setMentionQuery(at ? at[2] : null);
+                }}
+                onKeyDown={(e) => {
+                  if (mentionQuery !== null && mentionOptions.length && (e.key === "Enter" || e.key === "Tab")) { e.preventDefault(); pickMention(mentionOptions[0]); return; }
+                  if (mentionQuery !== null && e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+                  // Esc cancels a reply first (WhatsApp).
+                  else if (e.key === "Escape" && replyTo) { e.preventDefault(); setReplyTo(null); }
+                }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
               {!text.trim() && canAttach && canRecord ? <MicButton disabled={!canSend} onClick={() => { setError(null); setRecording(true); }} /> : (
@@ -1302,7 +1537,7 @@ export default function MessagesContent() {
   return <PersonalMessages />;
 }
 
-type ListFilter = "ALL" | "UNREAD" | "STATUS" | SecurityProfile;
+type ListFilter = "ALL" | "UNREAD" | "STATUS" | "GROUPS" | "PRIVATE_E2EE";
 
 function PersonalMessages() {
   const engine = useEngine();
@@ -1339,10 +1574,15 @@ function PersonalMessages() {
       statusCopies.add(post);
     } else if (filter === "STATUS") return false;
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-    const matchesFilter = filter === "ALL" || filter === "STATUS" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
+    const matchesFilter = filter === "ALL" || filter === "STATUS"
+      || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected
+        : filter === "GROUPS" ? conversation.contextClass === "GROUP"
+        : conversation.securityProfile === filter);
     return matchesSearch && matchesFilter;
   });
-  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["STATUS", "Status"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
+  // WhatsApp's filters; "Private" only while the account still has older encrypted chats.
+  const hasPrivate = s.conversations.some((c) => c.securityProfile === "PRIVATE_E2EE");
+  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["GROUPS", "Groups"], ["STATUS", "Status"], ...(hasPrivate ? [["PRIVATE_E2EE", "Private"] as [ListFilter, string]] : [])];
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col bg-background" data-testid="messages-page">
@@ -1382,6 +1622,7 @@ function PersonalMessages() {
               <Search className="size-4 shrink-0" />
               <input type="search" aria-label="Search conversations" data-testid="conversation-search" placeholder="Search chats" value={search} onChange={(event) => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
             </label>
+            <NotifyPrompt />
             <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4" role="group" aria-label="Filter conversations">
               {filters.map(([value, label]) => (
                 <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}
@@ -1408,6 +1649,9 @@ function PersonalMessages() {
                   (summary.previewText && /\.\w{2,5}$/.test(summary.previewText) ? attachmentKind({ name: summary.previewText }) : "file") : null;
               const FileIcon = fileKind ? FILE_ICONS[fileKind] : null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
+              // Groups name who wrote the latest message ("Ainz: hi"), as WhatsApp does.
+              const senderId = latest?.senderPrincipalId ?? summary?.senderPrincipalId ?? null;
+              const senderName = c.contextClass === "GROUP" && senderId ? (s.names[senderId] ?? "").split(" ")[0] || null : null;
               const unread = c.id === selected ? 0 : c.unreadCount;
               const active = c.id === selected;
               return (
@@ -1439,10 +1683,11 @@ function PersonalMessages() {
                           {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
                           {mine && latest && (latest.state === "queued" || latest.state === "sending" || latest.state === "pending-setup") ? <Clock3 className="size-3.5 shrink-0" aria-label="Sending" /> : null}
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
+                          {mine && !latest && summary && summary.sequence > 0 && summary.lifecycle === "ACTIVE" ? <Ticks receipt={summaryReceipt(engine.messageInfo(c.id, summary.sequence))} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {preview === null
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
-                            : <>{FileIcon ? <FileIcon className="size-4 shrink-0" aria-hidden /> : null}<span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span></>}
+                            : <>{FileIcon ? <FileIcon className="size-4 shrink-0" aria-hidden /> : null}<span className="truncate">{mine && preview && !latest ? "You: " : ""}{!mine && preview && senderName ? `${senderName}: ` : ""}{preview}</span></>}
                           </>}
                         </span>
                         {unread ? (
@@ -1474,7 +1719,7 @@ function PersonalMessages() {
         </aside>
         <main className={cn("min-w-0 min-h-0 flex-1", !current && "hidden md:flex md:items-center md:justify-center")} data-testid="conversation-pane">
           {current ? (
-            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} />
+            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} onOpenChat={setSelected} />
           ) : (
             <div className="max-w-sm px-6 text-center">
               <div className="relative mx-auto flex size-24 items-center justify-center">
@@ -1483,7 +1728,7 @@ function PersonalMessages() {
                 <MessageSquarePlus className="relative size-10 text-primary" />
               </div>
               <h2 className="mt-6 text-xl font-semibold">Pick up a conversation</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Choose a chat on the left, or start a new one. Private chats are end-to-end encrypted: not even CF Meet can read them.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Choose a chat on the left, or start a new one. Your chats are on every device you sign in on.</p>
               {s.identity ? <button type="button" onClick={() => setComposeOpen(true)} className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"><MessageSquarePlus className="size-4" />New chat</button> : null}
             </div>
           )}
