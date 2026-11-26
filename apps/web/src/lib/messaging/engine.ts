@@ -376,6 +376,7 @@ export class MessagingEngine {
   private syncing = new Map<string, Promise<void>>();
   private resync = new Set<string>();
   private timers: ReturnType<typeof setInterval>[] = [];
+  private privateStarting = false;
   private reconnectDelay = 1000;
   private stopped = false;
   /** Bumped by every start(); an older start() that resumes after a stop() must not keep going. */
@@ -481,6 +482,18 @@ export class MessagingEngine {
       this.outbox.subscribe(() => {
         for (const id of this.loadedManaged) this.renderManaged(id);
       });
+      // New chats are server-stored (MANAGED): signing in is all a user needs, on every
+      // device at once. The encryption device (worker, keys, one-tab lock, unlock and
+      // device approval) starts only for an account that still has a PRIVATE_E2EE chat.
+      await this.refreshConversations();
+      if (stale()) return;
+      if (!this.hasPrivateChats()) {
+        this.set({ phase: "ready", deviceId: null, detail: null });
+        this.connect();
+        void this.flush();
+        this.timers.push(setInterval(() => void this.poll(), POLL_MS));
+        return;
+      }
       const crypto = cryptoFactory ? cryptoFactory() : new CryptoClient();
       this.crypto = crypto;
       const openArgs = {
@@ -575,10 +588,24 @@ export class MessagingEngine {
     }
   }
 
+  private hasPrivateChats(): boolean {
+    return [...this.server.values()].some((c) => c.securityProfile === "PRIVATE_E2EE");
+  }
+
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
       await this.refreshConversations();
+      // A PRIVATE_E2EE chat appeared (an older client started one): start the encryption
+      // device now, once, through the normal start path.
+      if (!this.crypto && this.snapshot.phase === "ready" && this.hasPrivateChats() && !this.privateStarting) {
+        this.privateStarting = true;
+        for (const t of this.timers) clearInterval(t);
+        this.timers = [];
+        this.detachTransport();
+        void this.start().finally(() => { this.privateStarting = false; });
+        return;
+      }
       await this.checkWelcomes();
       await this.checkIncomingTransfers();
       await this.checkIncomingLinks();
@@ -2880,7 +2907,8 @@ export class MessagingEngine {
 
   /** TRUSTED browser: new devices of the account waiting for approval. */
   async checkIncomingLinks(): Promise<void> {
-    if (this.snapshot.phase !== "ready") return;
+    // Approving a new phone only matters for the encryption device.
+    if (this.snapshot.phase !== "ready" || !this.crypto) return;
     try {
       const links = await accountDevice.pendingLinks();
       this.set({

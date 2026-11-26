@@ -27,7 +27,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X, Camera, Mic, Headphones, Paperclip,
   UserPlus, Users,
@@ -145,11 +145,7 @@ function ProfileBadge({ profile }: { profile: SecurityProfile }) {
     <span data-testid="profile-badge" data-profile={profile} title="End-to-end encrypted: only people in this chat can read it" className="inline-flex min-w-0 items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
       <Lock className="size-3 shrink-0" /><span className="truncate"><span className="sm:hidden">Encrypted</span><span className="hidden sm:inline">End-to-end encrypted</span></span>
     </span>
-  ) : (
-    <span data-testid="profile-badge" data-profile={profile} title="Managed: CF Meet can read this chat" className="inline-flex min-w-0 items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-      <LockOpen className="size-3 shrink-0" /><span className="truncate"><span className="sm:hidden">Managed</span><span className="hidden sm:inline">Managed · CF Meet can read this chat</span></span>
-    </span>
-  );
+  ) : null; // Server-stored chats are the normal kind: no badge.
 }
 
 /** Technical status, shown inside "Security & devices" (not in everyone's face). */
@@ -161,7 +157,7 @@ function StatusBar({ engine }: { engine: MessagingEngine }) {
     <div className="space-y-2" data-testid="messaging-status">
       <p className={row} data-testid="device-state" data-phase={s.phase}>
         <Smartphone className="size-4 shrink-0 text-muted-foreground" />
-        {s.phase === "ready" ? "This browser can send and read encrypted messages" : s.phase === "needs-device" ? "Encrypted messages aren't set up in this browser" : s.phase === "registering" ? "Setting up this browser…" : s.phase}
+        {s.phase === "ready" && !s.deviceId ? "Signed in · your chats sync on every device" : s.phase === "ready" ? "This browser can send and read encrypted messages" : s.phase === "needs-device" ? "Encrypted messages aren't set up in this browser" : s.phase === "registering" ? "Setting up this browser…" : s.phase}
       </p>
       <p className={row} data-testid="connection-state" data-connection={s.connection}>
         {connected ? <span className="size-2 shrink-0 rounded-full bg-emerald-500" /> : <WifiOff className="size-4 shrink-0 text-muted-foreground" />}
@@ -275,6 +271,8 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   if (s.phase !== "ready") {
     return <p className="text-sm" data-testid="messaging-unavailable">{s.detail ?? "Messaging is unavailable."}</p>;
   }
+  // Server-stored chats are on every device already: nothing to set up or bring over.
+  if (!s.deviceId) return null;
   const action = "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-muted disabled:opacity-50";
   return (
     <div className="space-y-1">
@@ -381,9 +379,10 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
   const [chosen, setChosen] = useState<string[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [groupName, setGroupName] = useState("");
-  // The messaging policy only allows private (end-to-end encrypted) chats, so there's no choice to offer.
-  const profile: SecurityProfile = "PRIVATE_E2EE";
-  const ready = s.phase === "ready";
+  // New chats are server-stored (MANAGED): available on every device the user signs in
+  // on, with no device setup. Existing PRIVATE_E2EE chats keep working where they are.
+  const profile: SecurityProfile = "MANAGED";
+  const ready = !!s.identity && s.phase !== "loading";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const toggle = (id: string, name: string) => {
@@ -1345,20 +1344,16 @@ function PersonalMessages() {
   });
   const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["STATUS", "Status"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
 
-  if (s.phase === "locked") {
-    return (
-      <div className="flex h-full min-h-[32rem] flex-col items-center justify-center bg-background px-6 text-center" data-testid="messages-page">
-        <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"><MessageSquarePlus className="size-7" /></span>
-        <h1 className="mt-5 text-xl font-semibold">Messages is open in another tab</h1>
-        <p className="mt-2 max-w-sm text-sm text-muted-foreground">To keep your private chats safe, Messages runs in one tab at a time. Close the other tab, then use it here.</p>
-        <button type="button" onClick={() => window.location.reload()} className="mt-6 h-11 rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Use here</button>
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-full min-h-[32rem] flex-col bg-background" data-testid="messages-page">
       <ConnectionBanner engine={engine} />
+      {s.phase === "locked" ? (
+        // Only private (end-to-end encrypted) chats are limited to one tab; everything else works here.
+        <section className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-sm" data-testid="private-locked">
+          <p className="min-w-0 flex-1 text-muted-foreground">Your private chats are open in another tab. Your other chats work here.</p>
+          <button type="button" onClick={() => window.location.reload()} className="h-8 rounded-full px-3 text-sm font-semibold ring-1 ring-border hover:bg-muted">Use private chats here</button>
+        </section>
+      ) : null}
       <IncomingTransfers engine={engine} />
       <IncomingLinks engine={engine} />
       {s.phase !== "loading" && s.phase !== "ready" && !MessagingEngine.settingUp(s) ? (
