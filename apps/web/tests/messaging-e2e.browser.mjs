@@ -186,6 +186,10 @@ test("the CF Meet web app runs real server-stored messaging", { timeout: 15 * 60
     await journey();
   } catch (e) {
     for (const [who, p] of Object.entries(pages)) {
+      await shot(p, `failure-${who}`);
+      const dialogs = await p.evaluate(() => [...document.querySelectorAll("[role=dialog], [data-slot=dialog-overlay]")]
+        .map((d) => `${d.getAttribute("data-slot") ?? d.getAttribute("role")} [${d.getAttribute("data-testid") ?? ""}] ${(d.textContent ?? "").slice(0, 200)}`)).catch(() => []);
+      if (dialogs.length) console.log(`--- ${who} open dialogs ---\n${dialogs.join("\n")}`);
       const text = await p.locator("[data-testid=messages-page]").innerText().catch(() => "(closed)");
       console.log(`--- ${who} page at failure ---\n${text.length > 12000 ? text.slice(-12000) : text}`);
     }
@@ -362,7 +366,9 @@ async function journey() {
   await alice.page.click("[data-testid=group-next]");
   await alice.page.fill("input[aria-label='Group name']", "Weekend plans");
   await alice.page.click("[data-testid=create-conversation]");
-  await alice.page.waitForSelector("[data-testid=conversation][data-profile=MANAGED]", { timeout: T });
+  // The New chat dialog closes once the group exists, and the group opens.
+  await alice.page.locator("[data-testid=new-conversation-form]").waitFor({ state: "detached", timeout: T });
+  await alice.page.locator("[data-testid=conversation] [data-testid=group-members]").waitFor({ timeout: T });
   const groupHello = `${SECRET} hello group`;
   await type(alice.page, groupHello);
   const groupItem = bob.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
