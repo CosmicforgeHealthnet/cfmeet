@@ -791,7 +791,8 @@ export class MessagingEngine {
 
   private async ownDevices(): Promise<ServerDevice[]> {
     const me = this.snapshot.identity!.principalId;
-    const devices = await this.loadDeviceDirectory(me);
+    // Always fresh, but shared with concurrent lookups and paused by the directory backoff.
+    const devices = await this.principalDevices(me, 0);
     const self = devices.find((d) => d.deviceId === this.snapshot.deviceId);
     if (self?.registeredAt && self.registeredAt !== this.snapshot.deviceRegisteredAt) this.set({ deviceRegisteredAt: self.registeredAt });
     return devices;
