@@ -88,6 +88,7 @@ export default function PublicRegistrationForm() {
             <Button asChild><Link href={`/invite#${encodeURIComponent(result.admissionToken)}`}>Continue with admission token</Link></Button>
           </div>
           {copyState && <p role="status" className="text-sm text-muted-foreground">{copyState}</p>}
+          <p className="text-xs text-muted-foreground">Can&apos;t make it? <Link className="font-medium text-primary underline" href={`/registration/cancel#${encodeURIComponent(result.admissionToken)}`}>Cancel your registration</Link></p>
         </div>
       : <p className="rounded-xl border border-border p-4 text-sm">No token was returned for this repeat request: the registration was cancelled or its link has expired. Contact the organizer if you need a new one.</p>}
   </main>;
