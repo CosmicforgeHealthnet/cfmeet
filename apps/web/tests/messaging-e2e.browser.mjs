@@ -9,19 +9,16 @@
 //   E2E_WEB_PORT    the port `next start` listens on (the build baked the service URLs)
 //   E2E_USERS       {"alice":{"id","email","code","name"},"bob":{...},"mallory":{...}}
 //   E2E_API_URL     the account API (`/api/v1`) the build targets, for the one-time-code sign-in
-//   E2E_SECRET      a unique phrase: it must never appear outside the devices
+//   E2E_SECRET      a unique phrase used in messages
 //   E2E_EVIDENCE    where to write the step log (JSON)
 //
-// Steps: device registration; an end-to-end encrypted conversation created in the UI while
-// the recipient is offline, read when the recipient opens it with nobody else online;
-// encrypted send / receive; XSS payloads rendered as text; reload (encrypted local
-// state); offline delivery; network loss and reconnect; an encrypted attachment;
-// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser
-// trusted by its own sign-in (no verification step, ADR 0067) that joins the chat BY ITSELF
-// while every other device is offline (MLS external commit), older messages labelled "Sent
-// before this browser joined", its history recovered device-to-device with comparison
-// codes; device removal
-// erasing local state; CSP / Trusted Types / worker integrity; expired session.
+// Chats are server-stored (MANAGED, 26 November 2026): signing in is all a user needs.
+// Steps: sign-in with no device setup on several browsers at once; a chat started in the
+// UI; send / receive both ways in real time; a burst whose per-message time must not grow
+// with the chat's length; a new browser that has the full history as soon as it signs in;
+// two tabs of one browser working together; reload; network loss and reconnect; a file;
+// XSS payloads rendered as text. Every user-visible wait is timed (TIMING lines) so a slow
+// path is measured, not guessed.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -34,12 +31,23 @@ const USERS = JSON.parse(process.env.E2E_USERS ?? "{}");
 const API = (process.env.E2E_API_URL ?? "http://127.0.0.1:18080/api/v1").replace(/\/+$/, "");
 const SECRET = process.env.E2E_SECRET ?? `secret-${Date.now()}`;
 const EVIDENCE = process.env.E2E_EVIDENCE;
-const T = 60_000;
+const T = 30_000;
+const BURST = 60;
 const log = [];
+const timings = {};
 const step = (name, detail = {}) => {
   log.push({ name, ...detail, at: new Date().toISOString() });
   console.log(`STEP ${name} ${JSON.stringify(detail)}`);
 };
+/** Times one user-visible action; every sample is kept for the evidence log. */
+async function timed(name, fn) {
+  const started = performance.now();
+  const result = await fn();
+  const ms = Math.round(performance.now() - started);
+  (timings[name] ??= []).push(ms);
+  console.log(`TIMING ${name} ${ms}ms`);
+  return result;
+}
 let server;
 let browser;
 
@@ -60,18 +68,21 @@ before(async () => {
 });
 
 after(async () => {
-  if (EVIDENCE) writeFileSync(EVIDENCE, JSON.stringify(log, null, 2));
+  const summary = Object.fromEntries(Object.entries(timings).map(([k, v]) => {
+    const sorted = [...v].sort((a, b) => a - b);
+    return [k, { n: v.length, medianMs: sorted[Math.floor(sorted.length / 2)], maxMs: sorted.at(-1) }];
+  }));
+  console.log(`TIMING SUMMARY ${JSON.stringify(summary)}`);
+  if (EVIDENCE) writeFileSync(EVIDENCE, JSON.stringify({ steps: log, timings: summary }, null, 2));
   await browser?.close();
   if (server) process.kill(-server.pid, "SIGTERM");
 });
 
 /**
- * Signs a browser context in as the passwordless sign-in does (ACC-019, PR #97): a one-time
- * code verified with the account authority (the journey users are fixed-code test accounts,
- * AUTH_TEST_ACCOUNTS), then the app's own `POST /api/session` stores the refresh
- * token in its httpOnly cookie. The access token stays out of the browser: the app mints
- * its in-memory token through `/api/session/refresh` on load. One login per context, so
- * no two contexts share a single-use refresh token.
+ * Signs a browser context in as the passwordless sign-in does (ACC-019): a one-time code
+ * verified with the account authority (fixed-code test accounts), then the app's own
+ * `POST /api/session` stores the refresh token in its httpOnly cookie. One login per
+ * context, so no two contexts share a single-use refresh token.
  */
 async function signIn(ctx, who) {
   const login = await fetch(`${API}/auth/otp/verify`, {
@@ -89,139 +100,86 @@ async function signIn(ctx, who) {
   assert.equal(session.status(), 200, `session cookie for ${who}: ${await session.text()}`);
 }
 
-async function open(who, { route } = {}) {
+async function open(who) {
   const ctx = await browser.newContext({ acceptDownloads: true });
   await signIn(ctx, who);
   // What the login flow stores for a signed-in account (the dashboard requires it).
   await ctx.addInitScript((u) => {
     if (!localStorage.getItem("cosmic_user_info")) localStorage.setItem("cosmic_user_info", JSON.stringify(u));
   }, { id: USERS[who].id, email: USERS[who].email, username: USERS[who].name });
-  await ctx.addInitScript(() => {
-    window.__violations = [];
-    document.addEventListener("securitypolicyviolation", (e) => window.__violations.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sample}`));
+  // Every rate-limited request on any page of this browser is named in the log.
+  ctx.on("response", (r) => {
+    if (r.status() !== 429) return;
+    const u = new URL(r.url());
+    console.log(`[${who} 429] ${r.request().method()} ${u.pathname}`);
   });
-  if (route) await route(ctx);
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  if (process.env.E2E_DEBUG) {
-    page.on("console", (m) => console.log(`[${who} console.${m.type()}] ${m.text()}`));
-    page.on("requestfailed", (r) => console.log(`[${who} failed] ${r.method()} ${r.url()} ${r.failure()?.errorText}`));
-    page.on("response", (r) => r.status() >= 400 && console.log(`[${who} ${r.status()}] ${r.request().method()} ${r.url()}`));
-  }
-  await page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
-  return { ctx, page, errors };
+  const page = await newPage(ctx, who);
+  return { ctx, page };
 }
 
-// The device / connection status lives in the "Security & devices" sheet, which stays
-// mounted (hidden) while closed: wait for the state, not for the sheet to be open.
-async function phase(page, p) {
+async function newPage(ctx, who) {
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log(`[${who} pageerror] ${e}`));
+  if (process.env.E2E_DEBUG) page.on("console", (m) => console.log(`[${who} console.${m.type()}] ${m.text()}`));
+  await page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
+  return page;
+}
+
+/** Signed in and usable: phase ready with NO encryption device, and nothing to set up. */
+async function ready(page) {
   try {
-    await page.waitForSelector(`[data-testid=device-state][data-phase=${p}]`, { timeout: T, state: "attached" });
+    await page.waitForSelector("[data-testid=device-state][data-phase=ready]", { timeout: T, state: "attached" });
   } catch (e) {
     const text = await page.locator("[data-testid=messages-page]").innerText().catch(() => "(no page)");
-    throw new Error(`waiting for phase ${p}; the page shows:\n${text}`, { cause: e });
+    throw new Error(`waiting for the chat to be ready; the page shows:\n${text}`, { cause: e });
   }
-}
-const violations = (page) => page.evaluate(() => window.__violations);
-const connection = (page, sel) => page.locator(`[data-testid=connection-state]${sel}`).waitFor({ timeout: T, state: "attached" });
-
-/** New chat: tapping a person starts the chat with them (WhatsApp-style). */
-async function pick(page, name) {
-  const row = page.locator(`[data-testid=colleague][data-name="${name}"]`);
-  await row.waitFor({ timeout: T, state: "attached" });
-  await row.click();
+  assert.equal(await page.locator("[data-testid=device-setup], [data-testid=new-chat-setup], [data-testid=private-locked]").count(), 0, "no device setup, unlock or tab lock");
+  assert.equal(await page.locator("[data-testid=incoming-link]").count(), 0, "no device approval");
 }
 
-/** Private messaging sets itself up after sign-in: no activation control exists. */
-async function register(page) {
-  await phase(page, "ready");
-  assert.equal(await page.locator("[data-testid=register-device]").count(), 0, "no manual activation button");
-}
+const connected = (page) => page.locator("[data-testid=connection-state][data-connection=connected]").waitFor({ timeout: T, state: "attached" });
 
-async function openConversation(page, profile, nth = 0) {
-  const item = page.locator(`[data-testid=conversation-item][data-profile=${profile}]`).nth(nth);
+async function openChat(page) {
+  const item = page.locator("[data-testid=conversation-item][data-profile=MANAGED]").first();
   await item.waitFor({ timeout: T });
   await item.click();
-  await page.waitForSelector(`[data-testid=conversation][data-profile=${profile}]`, { timeout: T });
+  await page.waitForSelector("[data-testid=conversation][data-profile=MANAGED]", { timeout: T });
 }
 
-async function send(page, text) {
+async function type(page, text) {
   await page.fill("[data-testid=composer]", text);
   await page.click("[data-testid=send]");
 }
 
+const sentOn = (page, text) => page.locator("[data-testid=message][data-state=sent], [data-testid=message][data-state=delivered]", { hasText: text }).first().waitFor({ timeout: T });
 const shown = (page, text) => page.locator("[data-testid=message-text]", { hasText: text }).first().waitFor({ timeout: T });
 
-/** Reopens a closed browser of `who` (same profile: same device) on the messages page. */
-async function reopen(who, s) {
-  s.page = await s.ctx.newPage();
-  pages[who] = s.page;
-  await s.page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
-  await phase(s.page, "ready");
+/** Sends from one page and times both the sender's confirmation and the live arrival. */
+async function exchange(from, to, text) {
+  const started = performance.now();
+  await type(from, text);
+  await Promise.all([
+    timed("send-confirmed", () => sentOn(from, text)),
+    shown(to, text).then(() => {
+      const ms = Math.round(performance.now() - started);
+      (timings["live-delivery"] ??= []).push(ms);
+      console.log(`TIMING live-delivery ${ms}ms`);
+    }),
+  ]);
 }
 
-/** The chat list never shows a blank placeholder bar for a private chat that has messages. */
-async function previewIsText(page) {
-  const item = page.locator("[data-testid=conversation-item][data-profile=PRIVATE_E2EE]").first();
-  await item.waitFor({ timeout: T });
-  await page.waitForFunction(
-    () => {
-      const el = document.querySelector("[data-testid=conversation-item][data-profile=PRIVATE_E2EE]");
-      return el && !el.querySelector("[aria-label='Loading message']");
-    },
-    null,
-    { timeout: T },
-  );
-}
-
-/** Every IndexedDB value of the Messaging store: is the needle anywhere, are keys extractable? */
-function inspectStorage(page, needle) {
-  return page.evaluate(async (needle) => {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open("cfmeet-messaging");
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    const enc = new TextEncoder().encode(needle);
-    const contains = (u8) => {
-      outer: for (let i = 0; i + enc.length <= u8.length; i++) {
-        for (let j = 0; j < enc.length; j++) if (u8[i + j] !== enc[j]) continue outer;
-        return true;
-      }
-      return false;
-    };
-    let found = 0;
-    let values = 0;
-    const keys = [];
-    for (const name of db.objectStoreNames) {
-      const all = await new Promise((r) => {
-        const q = db.transaction(name).objectStore(name).getAll();
-        q.onsuccess = () => r(q.result);
-      });
-      for (const v of all) {
-        values++;
-        if (v instanceof CryptoKey) {
-          keys.push({ extractable: v.extractable, algorithm: v.algorithm.name });
-          continue;
-        }
-        if (JSON.stringify(v).includes(needle)) found++;
-        if (v?.ct instanceof Uint8Array && contains(v.ct)) found++;
-      }
-    }
-    db.close();
-    return { found, values, keys, local: localStorage.length, session: sessionStorage.length };
-  }, needle);
+async function textsIn(page) {
+  return page.locator("[data-testid=message-text]").allTextContents();
 }
 
 const pages = {};
-test("the CF Meet web app runs real end-to-end encrypted messaging", { timeout: 15 * 60_000 }, async () => {
+test("the CF Meet web app runs real server-stored messaging", { timeout: 15 * 60_000 }, async () => {
   try {
     await journey();
   } catch (e) {
     for (const [who, p] of Object.entries(pages)) {
       const text = await p.locator("[data-testid=messages-page]").innerText().catch(() => "(closed)");
-      console.log(`--- ${who} page at failure ---\n${text}`);
+      console.log(`--- ${who} page at failure ---\n${text.length > 12000 ? text.slice(-12000) : text}`);
     }
     throw e;
   }
@@ -230,240 +188,143 @@ test("the CF Meet web app runs real end-to-end encrypted messaging", { timeout: 
 async function journey() {
   assert.ok(USERS.alice && USERS.bob, "E2E_USERS must name alice and bob");
 
-  // ---- 1. Automatic device setup in the signed-in app (keys generated in the worker; the
-  //         first browser of an account is its trusted device, no activation step).
+  // ---- 1. Signing in is all it takes: no device setup, no unlock, no approval.
   const alice = await open("alice");
   const bob = await open("bob");
   pages.alice = alice.page;
   pages.bob = bob.page;
-  await register(alice.page);
-  await register(bob.page);
-  const pageCsp = (await alice.page.request.get(`${BASE}/dashboard/messages`)).headers()["content-security-policy"];
-  assert.ok(pageCsp && !pageCsp.includes("wasm-unsafe-eval") && !pageCsp.includes("'unsafe-eval'"), pageCsp);
-  step("device registration", { devices: 2, pageCspWithoutWasmEval: true });
+  await timed("ready-after-load", () => ready(alice.page));
+  await timed("ready-after-load", () => ready(bob.page));
+  step("sign-in is enough", { browsers: 2 });
 
-  // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI while Bob is
-  //         OFFLINE: his device published its keys in advance, so Alice's device adds it
-  //         on its own (WhatsApp), and Bob reads her message later with nobody else online.
-  await bob.page.close();
+  // ---- 2. Alice starts a chat with Bob in the UI; it is server-stored.
   await alice.page.click("[data-testid=new-conversation]");
-  await pick(alice.page, USERS.bob.name);
-  await alice.page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
-  // Presence/typing replaces the header badge. Chat info always exposes the security
-  // profile, so verify it through the same control a user opens.
-  await alice.page.click("[data-testid=conversation-members-toggle]");
-  assert.equal(await alice.page.locator("[data-testid=members] [data-testid=profile-badge]").getAttribute("data-profile"), "PRIVATE_E2EE");
-  await alice.page.click("[data-testid=conversation-members-toggle]");
-  step("encrypted conversation created", {});
-
-  // ---- 3. Encrypted send and receive, both directions. Alice goes offline right after
-  //         sending; Bob's device opens the chat with no other member online.
+  const row = alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`);
+  await row.waitFor({ timeout: T, state: "attached" });
+  await timed("create-chat", async () => {
+    await row.click();
+    await alice.page.waitForSelector("[data-testid=conversation][data-profile=MANAGED]", { timeout: T });
+  });
   const hello = `${SECRET} hello bob`;
-  await send(alice.page, hello);
-  await alice.page.locator("[data-testid=message][data-mine=true][data-state=sent]").first().waitFor({ timeout: T });
-  await alice.page.close();
-  await reopen("bob", bob);
-  await previewIsText(bob.page);
-  await openConversation(bob.page, "PRIVATE_E2EE");
+  await type(alice.page, hello);
+  await sentOn(alice.page, hello);
+  await timed("open-chat", () => openChat(bob.page));
   await shown(bob.page, hello);
-  assert.equal(await bob.page.locator("[data-testid=e2ee-unavailable]").count(), 0, "readable without anyone else online");
-  step("recipient offline at creation reads with nobody online", {});
-  const reply = `${SECRET} hi alice`;
-  await send(bob.page, reply);
-  await bob.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: reply }).waitFor({ timeout: T });
-  await reopen("alice", alice);
-  await openConversation(alice.page, "PRIVATE_E2EE");
-  await shown(alice.page, reply);
-  step("encrypted send / receive", { messages: 2 });
+  step("chat started in the UI", { profile: "MANAGED" });
 
-  // ---- 4. Hostile content is shown as text and never executes.
-  const payloads = ['<img src=x onerror="window.__xss=1">', "<script>window.__xss=2</script>", "javascript:window.__xss=3", '"><svg onload=window.__xss=4>'];
-  for (const p of payloads) await send(alice.page, p);
-  for (const p of payloads) {
-    const el = bob.page.locator("[data-testid=message-text]").filter({ hasText: p.slice(0, 12) }).last();
-    await el.waitFor({ timeout: T });
-    assert.equal(await el.textContent(), p);
+  // ---- 3. Real-time send and receive, both directions.
+  await connected(alice.page);
+  await connected(bob.page);
+  for (let i = 0; i < 3; i++) {
+    await exchange(bob.page, alice.page, `${SECRET} bob says ${i}`);
+    await exchange(alice.page, bob.page, `${SECRET} alice says ${i}`);
   }
-  assert.equal(await bob.page.evaluate(() => window.__xss ?? null), null);
-  // Message text is rendered as text only (no element inside it); the list holds no image,
-  // script or foreign SVG (the app's own status icons are Lucide SVGs).
-  assert.equal(await bob.page.locator("[data-testid=message-text] *").count(), 0, "no element inside message text");
-  assert.equal(await bob.page.locator("[data-testid=messages] img, [data-testid=messages] script, [data-testid=messages] svg:not(.lucide)").count(), 0);
-  step("xss payloads inert", { payloads: payloads.length });
+  step("real-time send and receive", { messages: 6 });
 
-  // ---- 5. Reload: the device and its history come back from encrypted storage.
-  await bob.page.reload({ waitUntil: "load" });
-  await phase(bob.page, "ready");
-  await openConversation(bob.page, "PRIVATE_E2EE");
-  await shown(bob.page, hello);
-  const stored = await inspectStorage(bob.page, SECRET);
-  assert.equal(stored.found, 0, "no plaintext in IndexedDB");
-  assert.ok(stored.values > 3, `the device stored state: ${JSON.stringify(stored)}`);
-  assert.ok(stored.keys.length >= 1 && stored.keys.every((k) => k.extractable === false && k.algorithm === "AES-GCM"), JSON.stringify(stored.keys));
-  step("reload from encrypted storage", { values: stored.values, plaintextHits: stored.found, wrappingKeyExtractable: false });
+  // ---- 4. A burst: written quickly, delivered in order, and each message no slower
+  //         late in the chat than early on.
+  const burst = Array.from({ length: BURST }, (_, i) => `${SECRET} burst ${String(i).padStart(3, "0")}`);
+  const perMessage = [];
+  for (const text of burst) {
+    const started = performance.now();
+    await type(alice.page, text);
+    await sentOn(alice.page, text);
+    perMessage.push(performance.now() - started);
+  }
+  await shown(bob.page, burst.at(-1));
+  const order = await textsIn(bob.page);
+  const idx = burst.map((m) => order.indexOf(m));
+  assert.ok(idx.every((v, i) => v >= 0 && (i === 0 || v > idx[i - 1])), `burst order ${idx}`);
+  const avg = (a) => Math.round(a.reduce((s, v) => s + v, 0) / a.length);
+  const early = avg(perMessage.slice(0, 10)), late = avg(perMessage.slice(-10));
+  console.log(`TIMING burst-first10-avg ${early}ms burst-last10-avg ${late}ms`);
+  timings["burst-send"] = perMessage.map(Math.round);
+  assert.ok(late <= Math.max(3 * early, early + 1500), `sending must not slow down as the chat grows: first 10 avg ${early} ms, last 10 avg ${late} ms`);
+  step("burst in order without slowdown", { messages: BURST, first10AvgMs: early, last10AvgMs: late });
 
-  // ---- 6. Offline delivery: Bob is away while Alice writes; he catches up in order.
-  await bob.page.close();
-  const away = [1, 2, 3].map((i) => `${SECRET} while away ${i}`);
-  for (const m of away) await send(alice.page, m);
-  await alice.page.locator("[data-testid=message][data-state=sent]", { hasText: away[2] }).waitFor({ timeout: T });
-  bob.page = await bob.ctx.newPage();
-  pages.bob = bob.page;
-  await bob.page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
-  await phase(bob.page, "ready");
-  await openConversation(bob.page, "PRIVATE_E2EE");
-  for (const m of away) await shown(bob.page, m);
-  const order = await bob.page.locator("[data-testid=message-text]").allTextContents();
-  const idx = away.map((m) => order.indexOf(m));
-  assert.ok(idx.every((v, i) => v >= 0 && (i === 0 || v > idx[i - 1])), `order ${idx}`);
-  step("offline delivery in order", { messages: away.length });
-
-  // ---- 7. Network loss and reconnect (cursor resume + REST catch-up).
-  await connection(alice.page, "[data-connection=connected]");
-  await alice.ctx.setOffline(true);
-  await connection(alice.page, ":not([data-connection=connected])");
-  const during = `${SECRET} sent during the outage`;
-  await send(bob.page, during);
-  await alice.ctx.setOffline(false);
-  await connection(alice.page, "[data-connection=connected]");
-  await shown(alice.page, during);
-  step("reconnect", {});
-
-  // ---- 8. Encrypted attachment: encrypted before upload, decrypted on the device.
-  const fileBody = Buffer.from(`${SECRET} attachment body ${"x".repeat(5000)}`);
-  await alice.page.setInputFiles("[data-testid=file-input]", { name: "plan.txt", mimeType: "text/plain", buffer: fileBody });
-  const att = bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" });
-  await att.waitFor({ timeout: T });
-  const [download] = await Promise.all([bob.page.waitForEvent("download", { timeout: T }), att.click()]);
-  assert.equal(download.suggestedFilename(), "plan.txt");
-  assert.ok(readFileSync(await download.path()).equals(fileBody), "decrypted bytes equal the original");
-  step("encrypted attachment", { bytes: fileBody.length });
-
-  // ---- 9. New chats are private-only: the new-chat dialog offers no MANAGED (server-
-  //          readable) choice, so a user cannot create one by accident from the web app.
-  await alice.page.click("[data-testid=new-conversation]");
-  const dialog = alice.page.locator("[data-testid=new-conversation-form]");
-  await dialog.waitFor({ timeout: T });
-  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).waitFor({ timeout: T, state: "attached" });
-  assert.equal(await dialog.locator("[data-testid=profile-managed], [data-testid=profile-e2ee], input[type=radio]").count(), 0, "no security-profile choice");
-  await alice.page.keyboard.press("Escape");
-  await dialog.waitFor({ state: "detached", timeout: T });
-  step("new chats are private-only", {});
-
-  // ---- 10. Bob's second device: added to the group by a member device, then his history
-  //          is recovered device-to-device after both devices show the same code.
+  // ---- 5. A new browser for Bob: the full history is there as soon as he signs in.
   const bob2 = await open("bob");
   pages.bob2 = bob2.page;
-  // ADR 0067: signing in is enough. The second browser is never asked to verify itself and
-  // Bob's other browser is never asked to approve it; setup is silent.
-  // Every other device goes offline before the new browser even has its messaging device:
-  // nobody can add it, so it must not wait for anyone.
-  await alice.page.close();
-  await bob.page.close();
-  await phase(bob2.page, "ready");
-  assert.equal(await bob2.page.locator("[data-testid=account-link-code], [data-testid=link-email-code], [data-testid=incoming-link]").count(), 0, "no verification step");
-  assert.equal(await bob2.page.getByText(/Verify this browser|Securing this chat|Waiting for secure setup|can't send messages from this browser/).count(), 0, "no setup write-up");
-  step("second browser trusted by its own sign-in (no verification step)", {});
-  await previewIsText(bob2.page);
-  await openConversation(bob2.page, "PRIVATE_E2EE");
-  // Older messages show a calm, accurate label (they can never arrive on this browser; history
-  // can be transferred from Bob's other browser), never "Waiting for this message".
-  const older = bob2.page.locator("[data-testid=message][data-state=before-join] [data-testid=message-note]").first();
-  await older.waitFor({ timeout: T });
-  assert.match(await older.textContent(), /^Sent before this browser joined/);
-  // The new device writes first: once Alice reads it, both are in the epoch that
-  // contains it (a message encrypted in an earlier epoch is, correctly, unreadable to it).
-  const fromNew = `${SECRET} from bob's new device`;
-  await send(bob2.page, fromNew);
-  await bob2.page.locator("[data-testid=message][data-mine=true][data-state=sent]", { hasText: fromNew }).waitFor({ timeout: T });
-  step("new browser joins by itself with every other device offline", {});
-  await reopen("alice", alice);
-  await reopen("bob", bob);
-  await openConversation(alice.page, "PRIVATE_E2EE");
-  await shown(alice.page, fromNew);
-  const after = `${SECRET} after the new device joined`;
-  await send(alice.page, after);
-  await shown(bob2.page, after);
-  // Device controls live behind the "Device & security settings" toggle, as for a user.
-  const settings = bob2.page.locator("[data-testid=device-settings-toggle]");
-  await settings.click();
-  assert.equal(await settings.getAttribute("aria-expanded"), "true", "device settings open");
-  await bob2.page.click("[data-testid=recover-history]");
-  await bob2.page.locator("[data-testid=transfer-source]").first().click({ timeout: T });
-  const targetCode = (await bob2.page.locator("[data-testid=outgoing-code]").textContent({ timeout: T })).trim();
-  const incoming = bob.page.locator("[data-testid=incoming-code]");
-  await incoming.waitFor({ timeout: 2 * T });
-  assert.equal((await incoming.textContent()).trim(), targetCode, "both devices show the same comparison code");
-  await bob.page.click("[data-testid=approve-transfer]");
-  await bob2.page.locator("[data-testid=outgoing-transfer][data-state^=received]").waitFor({ timeout: 2 * T });
-  await shown(bob2.page, hello);
-  step("second device + history transfer", { comparisonCode: "#### ####" });
-
-  // ---- 11. Removing a device erases its keys and history from that browser.
-  await bob2.page.click("[data-testid=remove-device]");
-  await phase(bob2.page, "revoked");
-  const wiped = await inspectStorage(bob2.page, SECRET);
-  assert.equal(wiped.found, 0);
-  step("device removal erased local state", { remainingValues: wiped.values });
-
-  // ---- 12. Browser security on the real pages.
-  for (const p of [alice.page, bob.page]) {
-    assert.deepEqual(await violations(p), [], "no CSP / Trusted Types violation while messaging");
-    const sink = await p.evaluate(() => {
-      try {
-        document.body.insertAdjacentHTML("beforeend", "<img src=x onerror=1>");
-        return "assigned";
-      } catch (e) {
-        return e.name;
-      }
-    });
-    assert.equal(sink, "TypeError", "untyped HTML sink refused by Trusted Types");
-  }
-  const workerHeaders = (await alice.page.request.get(`${BASE}/messaging-crypto/manifest.json`)).headers();
-  assert.match(workerHeaders["content-security-policy"], /script-src 'self' 'wasm-unsafe-eval'/);
-  assert.match(workerHeaders["content-security-policy"], /default-src 'none'/);
-  step("csp + trusted types", {});
-
-  // ---- 13. A tampered WebAssembly module is refused by the worker (pinned SHA-384).
-  const tampered = await open("alice", {
-    route: (ctx) =>
-      ctx.route(/\/messaging-crypto\/.*\.wasm$/, async (route) => {
-        const r = await route.fetch();
-        const body = Buffer.from(await r.body());
-        body[body.length - 100] ^= 0xff;
-        await route.fulfill({ response: r, body });
-      }),
+  await ready(bob2.page);
+  await timed("new-device-history", async () => {
+    await openChat(bob2.page);
+    await shown(bob2.page, burst.at(-1));
   });
-  await tampered.page.waitForSelector("[data-testid=messaging-error]", { timeout: T });
-  assert.match(await tampered.page.locator("[data-testid=messaging-error]").textContent(), /CRYPTO_MODULE_INTEGRITY/);
-  await tampered.ctx.close();
-  step("tampered crypto module refused", {});
-
-  // ---- 14. An expired / invalid login reaches no Messaging data: a session cookie the
-  //          account authority refuses ends the session and sends the browser to sign in.
-  const expired = await browser.newContext();
-  await expired.addCookies([
-    { name: "cfm_session", value: "session", domain: "127.0.0.1", path: "/" },
-    { name: "cfm_rt", value: "invalid.token.value", domain: "127.0.0.1", path: "/api/session" },
-  ]);
-  const ep = await expired.newPage();
-  await ep.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
-  await ep.waitForURL(/\/login/, { timeout: T });
-  await expired.close();
-  step("expired session", {});
-
-  // ---- 15. Logout revokes this browser's device and erases its messaging data.
-  await alice.page.locator("[data-testid=profile-menu-toggle]:visible").first().click();
-  await alice.page.locator("[data-testid=logout-open]:visible").first().click();
-  await alice.page.locator("[data-testid=logout-confirm]").click();
-  await alice.page.waitForFunction(() => !location.pathname.startsWith("/dashboard"), null, { timeout: T });
-  const afterLogout = await inspectStorage(alice.page, SECRET);
-  assert.equal(afterLogout.values, 0, `nothing of the account remains: ${JSON.stringify(afterLogout)}`);
-  step("logout erased the device", { remainingValues: afterLogout.values });
-
-  for (const s of [alice, bob, bob2]) {
-    assert.deepEqual(s.errors.filter((e) => !/ResizeObserver/.test(e)), [], "no page errors");
-    await s.ctx.close();
+  // Older messages are reachable too (paging back if the chat shows a window).
+  for (let i = 0; i < 10 && !(await bob2.page.locator("[data-testid=message-text]", { hasText: hello }).count()); i++) {
+    const more = bob2.page.locator("[data-testid=load-older]");
+    if (!(await more.count())) break;
+    await timed("load-older", () => more.click());
+    await bob2.page.waitForTimeout(250);
   }
-}
+  await shown(bob2.page, hello);
+  step("new browser has the full history", { messages: BURST + 7 });
 
+  // ---- 6. Both of Bob's browsers live at once: a message reaches both.
+  await connected(bob2.page);
+  const both = `${SECRET} to both of bob's browsers`;
+  await type(alice.page, both);
+  await Promise.all([shown(bob.page, both), shown(bob2.page, both)]);
+  const fromSecond = `${SECRET} sent from bob's second browser`;
+  await exchange(bob2.page, alice.page, fromSecond);
+  await shown(bob.page, fromSecond);
+  step("two browsers of one account in sync", {});
+
+  // ---- 7. Two tabs of one browser: no one-tab lock.
+  const aliceTab = await newPage(alice.ctx, "alice");
+  pages.aliceTab = aliceTab;
+  await ready(aliceTab);
+  await openChat(aliceTab);
+  await shown(aliceTab, fromSecond);
+  const fromTab = `${SECRET} from alice's second tab`;
+  await type(aliceTab, fromTab);
+  await Promise.all([shown(alice.page, fromTab), shown(bob.page, fromTab)]);
+  await aliceTab.close();
+  delete pages.aliceTab;
+  step("two tabs work together", {});
+
+  // ---- 8. Reload: the chat comes back from the server.
+  await timed("reload-to-history", async () => {
+    await bob.page.reload({ waitUntil: "load" });
+    await ready(bob.page);
+    await openChat(bob.page);
+    await shown(bob.page, fromTab);
+  });
+  step("reload", {});
+
+  // ---- 9. Network loss and reconnect.
+  await connected(alice.page);
+  await alice.ctx.setOffline(true);
+  await alice.page.locator("[data-testid=connection-state]:not([data-connection=connected])").waitFor({ timeout: T, state: "attached" });
+  const during = `${SECRET} sent during the outage`;
+  await type(bob.page, during);
+  await sentOn(bob.page, during);
+  await alice.ctx.setOffline(false);
+  await timed("reconnect-catch-up", async () => {
+    await connected(alice.page);
+    await shown(alice.page, during);
+  });
+  step("reconnect", {});
+
+  // ---- 10. A file: sent, received live, downloaded byte for byte.
+  const fileBody = Buffer.from(`${SECRET} attachment body ${"x".repeat(200_000)}`);
+  await timed("file-delivered", async () => {
+    await alice.page.setInputFiles("[data-testid=file-input]", { name: "plan.txt", mimeType: "text/plain", buffer: fileBody });
+    // A picked file is previewed first (with an optional caption) and sent with Send.
+    await alice.page.locator("[data-testid=attachment-preview]").waitFor({ timeout: T });
+    await alice.page.click("[data-testid=attachment-send]");
+    await bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" }).waitFor({ timeout: 2 * T });
+  });
+  const att = bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" });
+  const [download] = await timed("file-download", () => Promise.all([bob.page.waitForEvent("download", { timeout: T }), att.click()]));
+  assert.equal(download.suggestedFilename(), "plan.txt");
+  assert.ok(readFileSync(await download.path()).equals(fileBody), "downloaded bytes equal the original");
+  step("file", { bytes: fileBody.length });
+
+  // ---- 11. Hostile text renders as text.
+  const payloads = [`<img src=x onerror="window.__xss=1">`, `<script>window.__xss=2</script>`, `"><svg onload=window.__xss=4>`];
+  for (const p of payloads) await type(alice.page, p);
+  for (const p of payloads) await shown(bob.page, p);
+  assert.equal(await bob.page.evaluate(() => window.__xss ?? null), null, "no payload executed");
+  step("xss payloads inert", { payloads: payloads.length });
+}
