@@ -27,7 +27,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown, ArrowLeft, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, Bell, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X, Camera, Mic, Headphones, Paperclip,
   UserPlus, Users,
@@ -663,6 +663,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             )}
           >
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
+            {m.forwarded ? <p className="mb-0.5 flex items-center gap-1 text-[11px] italic opacity-75" data-testid="message-forwarded"><Forward className="size-3" /> Forwarded</p> : null}
             {m.replyTo ? (
               <button type="button" disabled={m.replyTo.removed} onClick={() => onJump(m.replyTo!.messageId)}
                 className={cn("mb-1.5 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left text-xs", mine ? "border-white/60 bg-white/15" : "border-primary bg-background/70")} data-testid="message-reply">
@@ -928,6 +929,21 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 
 /* ─── Open chat ───────────────────────────────────────────────────────── */
 
+/** WhatsApp Web's "Get notified of new messages" row, until the browser has decided. */
+function NotifyPrompt() {
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() =>
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported");
+  if (permission !== "default") return null;
+  return (
+    <button type="button" data-testid="enable-notifications"
+      onClick={() => void Notification.requestPermission().then(setPermission).catch(() => setPermission("denied"))}
+      className="flex w-full items-center gap-3 rounded-2xl bg-primary/10 px-3 py-2.5 text-left text-sm hover:bg-primary/15">
+      <Bell className="size-5 shrink-0 text-primary" />
+      <span className="min-w-0 flex-1"><span className="block font-semibold">Get notified of new messages</span><span className="block text-xs text-muted-foreground">Turn on desktop notifications</span></span>
+    </button>
+  );
+}
+
 /**
  * An older end-to-end encrypted chat: it only works on the devices that hold its keys, and
  * messages to someone who has never opened CF Meet wait. It continues as a chat that syncs
@@ -967,7 +983,17 @@ function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingE
 function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void; onOpenChat?: (id: string) => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const client = useQueryClient();
-  const [text, setText] = useState("");
+  // Drafts stay with their chat (WhatsApp): kept in this browser, per account and chat.
+  const draftKey = `cfmeet:draft:${s.identity?.principalId ?? ""}:${conversation.id}`;
+  const [text, setText] = useState(() => {
+    try { return typeof window === "undefined" ? "" : window.localStorage.getItem(draftKey) ?? ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try {
+      if (text) window.localStorage.setItem(draftKey, text);
+      else window.localStorage.removeItem(draftKey);
+    } catch { /* storage unavailable: drafts just aren't kept */ }
+  }, [draftKey, text]);
   const [recording, setRecording] = useState(false);
   /** A picked file waiting in the preview until you press Send. */
   const [staged, setStaged] = useState<File | null>(null);
@@ -984,6 +1010,10 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   // "online" / "last seen" for a one-to-one chat (WhatsApp); groups keep the security badge.
   useEffect(() => { engine.watchPresence(conversation.id); return () => engine.watchPresence(null); }, [engine, conversation.id]);
   const others = Object.values(s.presence[conversation.id] ?? {});
+  // Groups list their members under the name ("Ainz, Davidayo, You"), as WhatsApp does.
+  const memberLine = conversation.contextClass === "GROUP"
+    ? [...conversation.members.filter((m) => m !== s.identity?.principalId).map((m) => s.names[m] ?? "CF Meet user"), "You"].join(", ")
+    : null;
   const presenceText = conversation.contextClass === "GROUP" || others.length !== 1 ? null
     : others[0].online ? "online"
     : others[0].lastSeenAt ? lastSeenText(others[0].lastSeenAt) : null;
@@ -1182,7 +1212,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
             <Avatar name={title} seed={conversation.id} size="size-10" />
             <span className="min-w-0">
               <span className="block truncate font-semibold" data-testid="conversation-title">{title}</span>
-              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : presenceText ? <span className={cn("text-xs", presenceText === "online" ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")} data-testid="presence">{presenceText}</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
+              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : presenceText ? <span className={cn("text-xs", presenceText === "online" ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")} data-testid="presence">{presenceText}</span> : memberLine && !e2ee ? <span className="text-xs text-muted-foreground" data-testid="group-members">{memberLine}</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
             </span>
           </button>
           <div className="flex shrink-0 items-center">
@@ -1344,7 +1374,7 @@ export default function MessagesContent() {
   return <PersonalMessages />;
 }
 
-type ListFilter = "ALL" | "UNREAD" | "STATUS" | SecurityProfile;
+type ListFilter = "ALL" | "UNREAD" | "STATUS" | "GROUPS" | "PRIVATE_E2EE";
 
 function PersonalMessages() {
   const engine = useEngine();
@@ -1381,10 +1411,15 @@ function PersonalMessages() {
       statusCopies.add(post);
     } else if (filter === "STATUS") return false;
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-    const matchesFilter = filter === "ALL" || filter === "STATUS" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
+    const matchesFilter = filter === "ALL" || filter === "STATUS"
+      || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected
+        : filter === "GROUPS" ? conversation.contextClass === "GROUP"
+        : conversation.securityProfile === filter);
     return matchesSearch && matchesFilter;
   });
-  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["STATUS", "Status"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
+  // WhatsApp's filters; "Private" only while the account still has older encrypted chats.
+  const hasPrivate = s.conversations.some((c) => c.securityProfile === "PRIVATE_E2EE");
+  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["GROUPS", "Groups"], ["STATUS", "Status"], ...(hasPrivate ? [["PRIVATE_E2EE", "Private"] as [ListFilter, string]] : [])];
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col bg-background" data-testid="messages-page">
@@ -1424,6 +1459,7 @@ function PersonalMessages() {
               <Search className="size-4 shrink-0" />
               <input type="search" aria-label="Search conversations" data-testid="conversation-search" placeholder="Search chats" value={search} onChange={(event) => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
             </label>
+            <NotifyPrompt />
             <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4" role="group" aria-label="Filter conversations">
               {filters.map(([value, label]) => (
                 <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}
@@ -1450,6 +1486,9 @@ function PersonalMessages() {
                   (summary.previewText && /\.\w{2,5}$/.test(summary.previewText) ? attachmentKind({ name: summary.previewText }) : "file") : null;
               const FileIcon = fileKind ? FILE_ICONS[fileKind] : null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
+              // Groups name who wrote the latest message ("Ainz: hi"), as WhatsApp does.
+              const senderId = latest?.senderPrincipalId ?? summary?.senderPrincipalId ?? null;
+              const senderName = c.contextClass === "GROUP" && senderId ? (s.names[senderId] ?? "").split(" ")[0] || null : null;
               const unread = c.id === selected ? 0 : c.unreadCount;
               const active = c.id === selected;
               return (
@@ -1484,7 +1523,7 @@ function PersonalMessages() {
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {preview === null
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
-                            : <>{FileIcon ? <FileIcon className="size-4 shrink-0" aria-hidden /> : null}<span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span></>}
+                            : <>{FileIcon ? <FileIcon className="size-4 shrink-0" aria-hidden /> : null}<span className="truncate">{mine && preview && !latest ? "You: " : ""}{!mine && preview && senderName ? `${senderName}: ` : ""}{preview}</span></>}
                           </>}
                         </span>
                         {unread ? (

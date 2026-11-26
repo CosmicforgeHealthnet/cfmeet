@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { MessagingEngineProvider } from "@/components/messaging/MessagingEngineProvider";
+import { ChatAlerts } from "@/components/messaging/ChatAlerts";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
@@ -72,6 +73,7 @@ export default function DashboardLayout({
         <MobileSidebar />
         <CommandPalette />
         <Toaster />
+        <ChatAlerts />
       </div>
      </MessagingEngineProvider>
     </WorkspaceProvider>

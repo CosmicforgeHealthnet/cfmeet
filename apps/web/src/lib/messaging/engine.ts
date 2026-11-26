@@ -117,6 +117,8 @@ export type MessageView = {
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
+  /** Forwarded from another chat (WhatsApp's "Forwarded" label). */
+  forwarded?: boolean;
   /** F4-F7: a private chat's poll, location, contact card or link preview (encrypted content). */
   rich?: RichContent | null;
 };
@@ -2304,6 +2306,7 @@ export class MessagingEngine {
       pinned: pinned.has(r.messageId),
       seenBy: [],
       announcement: r.announcement,
+      forwarded: r.forwarded,
     };
   }
 
