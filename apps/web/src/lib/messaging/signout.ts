@@ -35,6 +35,8 @@ async function erase(): Promise<void> {
 
 export async function signOutMessaging(timeoutMs = 5000): Promise<void> {
   if (typeof window === "undefined") return;
+  // The running engine stops first: nothing it does afterwards may write back what is cleared below.
+  currentMessagingEngine()?.halt();
   // Queued MANAGED sends and the session-device id never outlive the sign-in.
   clearAllOutboxes();
   // Unsent drafts of every chat leave with the sign-in too.

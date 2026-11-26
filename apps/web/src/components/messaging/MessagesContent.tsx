@@ -1405,8 +1405,14 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat, onOpenStar
     // Only when the chat first has messages: later arrivals are handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [divider]);
+  const lastKey = useRef<string | null>(null);
   useEffect(() => {
-    const added = items.length - shown.current;
+    // Only what arrived AFTER the previous last item counts as new: older messages loaded at
+    // the top ("Load older") are not new messages below.
+    const previous = lastKey.current;
+    lastKey.current = items.at(-1)?.key ?? null;
+    const at = previous ? items.findIndex((i) => i.key === previous) : -1;
+    const added = at >= 0 ? items.length - 1 - at : items.length - shown.current;
     shown.current = items.length;
     if (added <= 0 || divider === undefined) return;
     const latest = items.at(-1);

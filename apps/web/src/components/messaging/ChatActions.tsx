@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Link2, Megaphone, Search, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,9 +52,28 @@ export function ForwardDialog({ engine, conversations, sourceId, message, onClos
     else if (picked.length >= FORWARD_LIMIT) setError(`You can forward to up to ${FORWARD_LIMIT} chats at once.`);
     else setPicked([...picked, t]);
   };
+  // A second click (or Enter) while a forward is under way never forwards twice.
+  const inFlight = useRef(false);
   const send = useMutation({
-    mutationFn: () => engine.forwardTo(sourceId, message, picked, note),
-    onSuccess: () => onClose(),
+    mutationFn: async () => {
+      if (inFlight.current) return null;
+      inFlight.current = true;
+      try {
+        const targets = picked;
+        return { targets, result: await engine.forwardTo(sourceId, message, targets, note) };
+      } finally {
+        inFlight.current = false;
+      }
+    },
+    onSuccess: (r) => {
+      if (!r) return;
+      if (!r.result.failed.length) return onClose();
+      // Only the chats it didn't reach stay picked, so "Forward" again retries just those.
+      const left = r.result.failed.map((f) => r.targets[f.index]);
+      setPicked(left);
+      const sent = r.result.reached.length;
+      setError(`${sent ? `Sent to ${sent} of ${r.targets.length}. ` : ""}Couldn't forward to ${left.map((t) => t.name).join(", ")}: ${messagingErrorMessage(r.result.failed[0].error)}`);
+    },
     onError: (e) => setError(messagingErrorMessage(e)),
   });
   const row = (t: ForwardTarget) => (

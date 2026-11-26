@@ -228,6 +228,8 @@ type GroupChange = { commit: Uint8Array; epoch: number; welcome?: Uint8Array | n
 type PendingJoiner = { deviceId: string; sequence: number; senderPrincipalId: string };
 
 const PAGE = 100;
+/** Gone from the chat entirely (WhatsApp): expired, purged, or deleted for you only. */
+const vanishes = (lifecycle: string | undefined) => lifecycle === "EXPIRED" || lifecycle === "PURGED" || lifecycle === "HIDDEN_FOR_YOU";
 /** Newest MANAGED messages loaded when a conversation is first synchronized. */
 const INITIAL_PAGE = 50;
 /** Newest MANAGED messages re-read per poll when no realtime events arrive (edits / tombstones). */
@@ -572,6 +574,7 @@ export class MessagingEngine {
     for (const t of this.typingTimers.values()) clearTimeout(t);
     this.typingTimers.clear();
     this.detachTransport();
+    this.outbox?.detach();
     this.crypto?.terminate();
     this.crypto = null;
   }
@@ -929,14 +932,22 @@ export class MessagingEngine {
     this.connect();
   }
 
-  /** Logout: the local device and its history are erased and the device revoked. */
-  async signOut(): Promise<void> {
-    // Background work stops first: the revocation below must not be "detected" by a poll
-    // that would wipe and reopen the device store in parallel.
+  /**
+   * Sign-out step one, synchronous: background work stops and the outbox closes, so a poll
+   * can't "detect" the revocation and reopen the device store, and a send that finishes
+   * after the browser's storage is cleared can't write its queue back.
+   */
+  halt(): void {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.detachTransport();
+    this.outbox?.close();
+  }
+
+  /** Logout: the local device and its history are erased and the device revoked. */
+  async signOut(): Promise<void> {
+    this.halt();
     try {
       if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
@@ -1681,22 +1692,31 @@ export class MessagingEngine {
    * (marked Forwarded); a photo, file or voice note is downloaded once and sent again to each
    * chat, since the server doesn't copy attachments. Returns the chats it reached.
    */
-  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<string[]> {
-    const reached: string[] = [];
+  /**
+   * Forwards to each target in turn. One failing target doesn't stop the rest: the result says
+   * which went (by index into `targets`) and which didn't, so a retry re-sends only those.
+   */
+  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<{ reached: number[]; failed: { index: number; error: unknown }[] }> {
+    const reached: number[] = [];
+    const failed: { index: number; error: unknown }[] = [];
     let media: File | null = null;
     if (message.file?.attachmentId) {
       const { blob, name } = await this.download(sourceId, message);
       media = new File([blob], message.file.name || name, { type: message.file.mediaType || blob.type || "application/octet-stream" });
     }
-    for (const t of targets) {
-      const id = t.conversationId
-        ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
-      if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
-      else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
-      if (note?.trim()) await this.send(id, note.trim());
-      reached.push(id);
+    for (const [index, t] of targets.entries()) {
+      try {
+        const id = t.conversationId
+          ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
+        if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
+        else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
+        if (note?.trim()) await this.send(id, note.trim());
+        reached.push(index);
+      } catch (error) {
+        failed.push({ index, error });
+      }
     }
-    return reached;
+    return { reached, failed };
   }
 
   async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
@@ -2086,6 +2106,7 @@ export class MessagingEngine {
         reactions: r.messageId ? reactions?.get(r.messageId) ?? [] : [],
         pinned: !!r.messageId && pinned.has(r.messageId),
       };
+      if (m && vanishes(m.lifecycle)) continue;
       if (m && m.lifecycle !== "ACTIVE") {
         base.state = "removed";
         base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
@@ -2130,7 +2151,7 @@ export class MessagingEngine {
     // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
     const local = new Set(records.map((r) => r.sequence));
     for (const m of waitingHere) {
-      if (local.has(m.sequence)) continue;
+      if (local.has(m.sequence) || vanishes(m.lifecycle)) continue;
       const removed = m.lifecycle !== "ACTIVE";
       const early = !removed && sentBeforeJoin(m.createdAt);
       views.push({
@@ -2370,13 +2391,15 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId ?? null;
     const reactions = this.reactions.get(conversationId);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
-    const views = st.ordered().map((r) => this.managedView(r, st, me, reactions, pinned));
+    const views = st.ordered().filter((r) => !vanishes(r.lifecycle)).map((r) => this.managedView(r, st, me, reactions, pinned));
     // Receipts: who has read up to your latest message.
     const lastMine = [...views].reverse().find((v) => v.mine && v.state === "delivered");
     if (lastMine?.sequence != null) lastMine.seenBy = st.seenBy(lastMine.sequence, me);
-    const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
-      .filter((item) => !st.byClientMessageId(item.clientMessageId))
-      .map((item: OutboxItem) => ({
+    const pendingItems = (this.outbox?.all(conversationId) ?? []).filter((item) => !st.byClientMessageId(item.clientMessageId));
+    // Order is kept: messages after a failed one wait for it, and say so.
+    const firstFailed = pendingItems.findIndex((item) => item.state === "failed");
+    const queued: MessageView[] = pendingItems
+      .map((item: OutboxItem, index) => ({
         key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
@@ -2386,7 +2409,9 @@ export class MessagingEngine {
         state: item.state === "failed" ? "failed" : item.state === "sending" ? "sending" : "queued",
         text: item.text,
         file: null,
-        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})` : item.error ? "Waiting to send — will retry" : null,
+        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})`
+          : firstFailed >= 0 && index > firstFailed ? "Waiting — the message above wasn't sent"
+          : item.error ? "Waiting to send — will retry" : null,
         transferred: false,
         messageId: null,
         outboxKey: item.key,
@@ -2426,6 +2451,9 @@ export class MessagingEngine {
     );
     st.applyOlderPage(page.messages, page.nextBeforeSequence);
     this.renderManaged(conversationId);
+    // Older messages show their reactions too (opening the chat loads only the newest 30).
+    const ids = page.messages.filter((m) => m.lifecycle === "ACTIVE").map((m) => m.messageId);
+    if (ids.length) void this.loadReactions(conversationId, ids).catch(() => {});
   }
 
   /** Opening a conversation: sync, pins and the newest messages' reactions (MANAGED). */
