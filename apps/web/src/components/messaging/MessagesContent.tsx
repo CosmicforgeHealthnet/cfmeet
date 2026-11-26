@@ -752,7 +752,9 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
 
           {/* Hover actions (Teams / Slack): react, reply, more */}
           {live ? (
-            <div className={cn("flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100 [@media(hover:none)]:opacity-100", menu && "opacity-100", mine ? "order-first" : "")}>
+            <div className={cn("flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100 [@media(hover:none)]:w-0 [@media(hover:none)]:overflow-hidden [@media(hover:none)]:!opacity-0", menu && "opacity-100", mine ? "order-first" : "")}>
+              {/* Hover buttons (desktop). On touch screens they take no width — long-press a message
+                  for its menu (WhatsApp), which opens at the bubble's edge — so bubbles keep their width. */}
               <Popover.Root>
                 <Popover.Trigger asChild><button type="button" aria-label="React" className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><SmilePlus className="size-4" /></button></Popover.Trigger>
                 <Popover.Portal>
@@ -1240,16 +1242,27 @@ function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engin
 function NotifyPrompt() {
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() =>
     typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported");
-  if (permission !== "default") return null;
+  const [dismissed, setDismissed] = useState(() => {
+    try { return typeof window !== "undefined" && window.localStorage.getItem(NOTIFY_DISMISSED) === "1"; } catch { return false; }
+  });
+  if (permission !== "default" || dismissed) return null;
+  // Desktop only (WhatsApp Web): on a phone it would push the chat list down for nothing.
   return (
-    <button type="button" data-testid="enable-notifications"
-      onClick={() => void Notification.requestPermission().then(setPermission).catch(() => setPermission("denied"))}
-      className="flex w-full items-center gap-3 rounded-2xl bg-primary/10 px-3 py-2.5 text-left text-sm hover:bg-primary/15">
-      <Bell className="size-5 shrink-0 text-primary" />
-      <span className="min-w-0 flex-1"><span className="block font-semibold">Get notified of new messages</span><span className="block text-xs text-muted-foreground">Turn on desktop notifications</span></span>
-    </button>
+    <div className="hidden items-center gap-1 rounded-2xl bg-primary/10 pr-1 md:flex">
+      <button type="button" data-testid="enable-notifications"
+        onClick={() => void Notification.requestPermission().then(setPermission).catch(() => setPermission("denied"))}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm hover:bg-primary/15">
+        <Bell className="size-5 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1"><span className="block font-semibold">Get notified of new messages</span><span className="block text-xs text-muted-foreground">Turn on desktop notifications</span></span>
+      </button>
+      <button type="button" aria-label="Not now" title="Not now" className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-primary/15"
+        onClick={() => { setDismissed(true); try { window.localStorage.setItem(NOTIFY_DISMISSED, "1"); } catch { /* not kept */ } }}>
+        <X className="size-4" />
+      </button>
+    </div>
   );
 }
+const NOTIFY_DISMISSED = "cfmeet:notify-prompt-dismissed";
 
 /**
  * An older end-to-end encrypted chat: it only works on the devices that hold its keys, and

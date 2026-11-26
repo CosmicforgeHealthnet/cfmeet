@@ -21,7 +21,7 @@ export function EmojiPicker({ onPick, disabled }: { onPick: (emoji: string) => v
     <Popover.Root>
       <Popover.Trigger asChild>
         <button type="button" disabled={disabled} aria-label="Emoji" title="Emoji" data-testid="emoji-button"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+          className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 [@media(hover:none)]:hidden">
           <Smile className="size-5" />
         </button>
       </Popover.Trigger>
