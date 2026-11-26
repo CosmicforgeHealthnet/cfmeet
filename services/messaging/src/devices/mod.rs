@@ -950,7 +950,11 @@ pub async fn directory_lookup_allowed(
     acting: Uuid,
 ) -> Result<()> {
     let key = if ctx.first_party {
-        format!("directory:{}:{}", ctx.credential_id.simple(), acting.simple())
+        format!(
+            "directory:{}:{}",
+            ctx.credential_id.simple(),
+            acting.simple()
+        )
     } else {
         format!("directory:{}", ctx.credential_id.simple())
     };
