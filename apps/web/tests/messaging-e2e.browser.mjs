@@ -310,6 +310,9 @@ async function journey() {
   const fileBody = Buffer.from(`${SECRET} attachment body ${"x".repeat(200_000)}`);
   await timed("file-delivered", async () => {
     await alice.page.setInputFiles("[data-testid=file-input]", { name: "plan.txt", mimeType: "text/plain", buffer: fileBody });
+    // A picked file is previewed first (with an optional caption) and sent with Send.
+    await alice.page.locator("[data-testid=attachment-preview]").waitFor({ timeout: T });
+    await alice.page.click("[data-testid=attachment-send]");
     await bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" }).waitFor({ timeout: 2 * T });
   });
   const att = bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" });
