@@ -98,6 +98,10 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isDisconnectingRef = useRef(false);
   const isRefreshingCredentialRef = useRef(false);
+  // The mic / camera LiveKit applies when it (re)connects: the join choice at first, then
+  // whatever the person had when a breakout move, backstage switch or "Fix connection"
+  // reconnected the room (LiveKit re-applies these on every reconnect).
+  const [wantedMedia, setWantedMedia] = useState({ audio: initialAudio, video: initialVideo });
   const sessionClosed = useRef(false);
   const queryClient = useQueryClient();
   const conference = useConference(joinData.conferenceId);
@@ -185,8 +189,8 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   return (
     <LayoutContextProvider>
       <LiveKitRoom
-        video={initialVideo && (joinData.permissions?.videoPublish ?? true)}
-        audio={initialAudio && (joinData.permissions?.audioPublish ?? true)}
+        video={wantedMedia.video && (joinData.permissions?.videoPublish ?? true)}
+        audio={wantedMedia.audio && (joinData.permissions?.audioPublish ?? true)}
         token={joinData.rtcToken}
         serverUrl={joinData.rtcUrl}
         data-lk-theme="default"
@@ -198,7 +202,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
         }}
       >
         <RealtimeRoomSync conferenceId={joinData.conferenceId} />
-        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} />
+        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={(value, media) => { isRefreshingCredentialRef.current = value; if (media) setWantedMedia(media); }} />
         <RoomAudioRenderer />
       </LiveKitRoom>
     </LayoutContextProvider>
@@ -215,7 +219,7 @@ interface RoomContentProps {
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
   onLeave?: () => Promise<void>;
-  onCredentialRefreshStateChange: (refreshing: boolean) => void;
+  onCredentialRefreshStateChange: (refreshing: boolean, media?: { audio: boolean; video: boolean }) => void;
 }
 
 function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCredentialRefreshStateChange }: RoomContentProps) {
