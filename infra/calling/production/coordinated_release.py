@@ -152,6 +152,17 @@ ADMIN_BRIDGE_HQ_SOURCE_ENV = 'ADMIN_BRIDGE_HQ_ALLOWED_SOURCE'
 ADMIN_BRIDGE_HQ_LISTEN_ENV = 'ADMIN_BRIDGE_HQ_LISTEN_ADDRESS'
 ADMIN_BRIDGE_SERVER_NAME = 'admin-bridge.cfmeet.internal'
 
+# Same-host transport (agreed with HQ 2026-11-26: HQ and CF Meet on one VPS). No tunnel and no
+# host port: HQ creates and owns the internal Docker network below; the relay joins it at a
+# fixed address next to HQ's connector (.3) and worker (.4), still passes TLS straight through,
+# and admits only those two. Selected by `"transport": "same-host"` in enable.json; the
+# tunnel transport above stays for separate hosts.
+ADMIN_BRIDGE_HQ_SAME_HOST_NET = 'cf-staging-cfmeet-bridge'
+ADMIN_BRIDGE_HQ_SAME_HOST_SUBNET = '10.231.14.0/28'
+ADMIN_BRIDGE_HQ_SAME_HOST_RELAY_IP = '10.231.14.2'
+ADMIN_BRIDGE_HQ_SAME_HOST_SOURCES = ('10.231.14.3', '10.231.14.4')
+ADMIN_BRIDGE_HQ_TRANSPORTS = ('tunnel', 'same-host')
+
 # Owner events (ADR 0068 A7, design §11): the bridge's optional third listener, plain HTTP on
 # the private network (ADMIN_BRIDGE_EVENTS_BIND_ADDRESS; started only while the bridge is
 # enabled), behind its own private TLS route like every other internal service. Owners post
@@ -188,21 +199,29 @@ def admin_bridge_hq_relay_config(allowed_source):
     finds the bridge after every recreate. Traffic arriving on the tunnel interface is DNATed
     to the container with its source address intact, so `allow` sees HQ's tunnel address.
     Refuses public, wildcard or malformed addresses."""
-    source = _private_ipv4(allowed_source, ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
+    sources = [allowed_source] if isinstance(allowed_source, str) else list(allowed_source)
+    if not sources:
+        raise RuntimeError('%s must name at least one address' % ADMIN_BRIDGE_HQ_SOURCE_ENV)
+    allow = ''.join('        allow %s;\n' % _private_ipv4(a, ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
+                    for a in sources)
     return ('daemon off;\nworker_processes 1;\npid /tmp/nginx.pid;\nerror_log stderr warn;\n'
             'events { worker_connections 256; }\nstream {\n    resolver 127.0.0.11 valid=10s ipv6=off;\n'
-            '    server {\n        listen %d;\n        allow %s;\n        deny all;\n'
+            '    server {\n        listen %d;\n%s        deny all;\n'
             '        set $peer %s:8443;\n        proxy_pass $peer;\n'
             '        proxy_connect_timeout 5s;\n        proxy_timeout 60s;\n    }\n}\n'
-            % (ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
+            % (ADMIN_BRIDGE_HQ_PORT, allow, SERVICES['admin-bridge']['container']))
 
 
 def admin_bridge_hq_relay_args(image, config, listen_address):
     """The relay container: published on the CF Meet host's tunnel address only (never 0.0.0.0
     or a public address), read-only, no capabilities, unprivileged."""
-    listen = _private_ipv4(listen_address, ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
-    return ['docker', 'create', '--name', ADMIN_BRIDGE_HQ_RELAY, '--restart', 'unless-stopped',
-            '--network', ADMIN_BRIDGE_HQ_RELAY_NET, '--publish', '%s:%d:%d/tcp' % (listen, ADMIN_BRIDGE_HQ_PORT, ADMIN_BRIDGE_HQ_PORT),
+    if listen_address is None:  # same-host: HQ's internal network, nothing published
+        placement = ['--network', ADMIN_BRIDGE_HQ_SAME_HOST_NET, '--ip', ADMIN_BRIDGE_HQ_SAME_HOST_RELAY_IP]
+    else:
+        listen = _private_ipv4(listen_address, ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+        placement = ['--network', ADMIN_BRIDGE_HQ_RELAY_NET,
+                     '--publish', '%s:%d:%d/tcp' % (listen, ADMIN_BRIDGE_HQ_PORT, ADMIN_BRIDGE_HQ_PORT)]
+    return ['docker', 'create', '--name', ADMIN_BRIDGE_HQ_RELAY, '--restart', 'unless-stopped'] + placement + [
             '--read-only', '--tmpfs', '/tmp:rw,size=1m', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
             '--user', '101:101', '--memory', '32m', '--pids-limit', '32', '--log-opt', 'max-size=5m',
             '--log-opt', 'max-file=2', '--mount', 'type=bind,src=%s,dst=/etc/nginx/nginx.conf,readonly' % config,
@@ -2197,7 +2216,7 @@ ADMIN_BRIDGE_TLS_TARGET = '/run/admin-bridge/tls'
 ADMIN_BRIDGE_HMAC_TARGET = '/run/admin-bridge/hmac'
 ADMIN_BRIDGE_TLS_FILES = {'server.crt': 0o022, 'server.key': 0o077, 'hq-client-ca.pem': 0o022}
 ADMIN_BRIDGE_ENABLE_KEYS = ('policy_revision', 'policy_key_id', 'policy_public_key_hex', 'hq_workload_uri',
-                            'enrolled_markets', 'enrolled_tenants', 'listen_address', 'allowed_source')
+                            'enrolled_markets', 'enrolled_tenants')
 ADMIN_BRIDGE_HQ_CONFIRM = 'hq-enrolled-read-only'
 _LOWER_UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 _KID = r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}'
@@ -2206,8 +2225,12 @@ _KID = r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}'
 def admin_bridge_enable_settings(record):
     """enable.json â†’ (bridge env overrides, relay listen address, relay allowed source). Refuses
     anything but the exact keys and values the bridge and HQ accept."""
-    if not isinstance(record, dict) or sorted(record) != sorted(ADMIN_BRIDGE_ENABLE_KEYS):
-        raise RuntimeError('enable.json must hold exactly: ' + ', '.join(ADMIN_BRIDGE_ENABLE_KEYS))
+    transport = record.get('transport', 'tunnel') if isinstance(record, dict) else None
+    extra = ('transport',) if transport == 'same-host' else \
+        tuple(k for k in ('transport',) if isinstance(record, dict) and k in record) + ('listen_address', 'allowed_source')
+    if not isinstance(record, dict) or sorted(record) != sorted(ADMIN_BRIDGE_ENABLE_KEYS + extra):
+        raise RuntimeError('enable.json must hold exactly: ' + ', '.join(ADMIN_BRIDGE_ENABLE_KEYS)
+                           + ' and either "transport": "same-host" or listen_address and allowed_source')
     revision = record['policy_revision']
     if type(revision) is not int or revision < 1:
         raise RuntimeError('policy_revision must be an integer >= 1')
@@ -2228,8 +2251,19 @@ def admin_bridge_enable_settings(record):
         raise RuntimeError('enrolled_tenants must be 1-16 Platform Access tenant UUIDs in canonical lowercase')
     if len(set(markets)) != len(markets) or len(set(tenants)) != len(tenants):
         raise RuntimeError('enrolled_markets and enrolled_tenants must not repeat a value')
-    listen = _private_ipv4(record['listen_address'], ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
-    source = _private_ipv4(record['allowed_source'], ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
+    transport = record.get('transport', 'tunnel')
+    if transport not in ADMIN_BRIDGE_HQ_TRANSPORTS:
+        raise RuntimeError('transport must be one of %s' % ', '.join(ADMIN_BRIDGE_HQ_TRANSPORTS))
+    if transport == 'same-host':
+        if 'listen_address' in record or 'allowed_source' in record:
+            raise RuntimeError('same-host uses the agreed addresses; drop listen_address and allowed_source')
+        listen, source = None, ADMIN_BRIDGE_HQ_SAME_HOST_SOURCES
+    else:
+        for key in ('listen_address', 'allowed_source'):
+            if key not in record:
+                raise RuntimeError('the tunnel transport needs %s' % key)
+        listen = _private_ipv4(record['listen_address'], ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+        source = _private_ipv4(record['allowed_source'], ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
     overrides = {
         'ADMIN_BRIDGE_ENABLED': 'true',
         'ADMIN_BRIDGE_WRITES_ENABLED': 'false',
@@ -2346,7 +2380,10 @@ def install_admin_bridge_hq_relay(listen, source):
     config = WORK / 'admin-bridge-hq-relay.conf'
     config.write_text(admin_bridge_hq_relay_config(source))
     config.chmod(0o644)
-    if ADMIN_BRIDGE_HQ_RELAY_NET not in p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines():
+    networks = p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines()
+    if listen is None:
+        same_host_network_problems(networks)
+    elif ADMIN_BRIDGE_HQ_RELAY_NET not in networks:
         p.run('docker', 'network', 'create', ADMIN_BRIDGE_HQ_RELAY_NET)
     _own(ADMIN_BRIDGE_HQ_RELAY)
     p.run(*admin_bridge_hq_relay_args(p.inspect('cfmeet-core-tls')['Image'], config, listen))
@@ -2354,8 +2391,25 @@ def install_admin_bridge_hq_relay(listen, source):
     start(ADMIN_BRIDGE_HQ_RELAY)
     p.run('docker', 'exec', ADMIN_BRIDGE_HQ_RELAY, 'nginx', '-t', '-c', '/etc/nginx/nginx.conf')
     bindings = p.inspect(ADMIN_BRIDGE_HQ_RELAY)['HostConfig']['PortBindings']
-    if bindings != {'%d/tcp' % ADMIN_BRIDGE_HQ_PORT: [{'HostIp': listen, 'HostPort': str(ADMIN_BRIDGE_HQ_PORT)}]}:
+    if listen is None:
+        if bindings:
+            raise RuntimeError('HQ relay must publish no host port in the same-host transport')
+    elif bindings != {'%d/tcp' % ADMIN_BRIDGE_HQ_PORT: [{'HostIp': listen, 'HostPort': str(ADMIN_BRIDGE_HQ_PORT)}]}:
         raise RuntimeError('HQ relay must be published on the tunnel address only')
+
+
+def same_host_network_problems(networks, inspect=None):
+    """HQ owns the same-host network: it must already exist, be internal and have exactly the
+    agreed subnet. CF Meet never creates or changes it."""
+    if ADMIN_BRIDGE_HQ_SAME_HOST_NET not in networks:
+        raise RuntimeError('%s does not exist: HQ creates it first (pa-staging-ops.sh prepare-host)'
+                           % ADMIN_BRIDGE_HQ_SAME_HOST_NET)
+    net = (inspect or (lambda n: json.loads(p.run('docker', 'network', 'inspect', n))[0]))(
+        ADMIN_BRIDGE_HQ_SAME_HOST_NET)
+    subnets = [c.get('Subnet') for c in (net.get('IPAM') or {}).get('Config') or []]
+    if net.get('Internal') is not True or subnets != [ADMIN_BRIDGE_HQ_SAME_HOST_SUBNET]:
+        raise RuntimeError('%s must be internal with exactly subnet %s'
+                           % (ADMIN_BRIDGE_HQ_SAME_HOST_NET, ADMIN_BRIDGE_HQ_SAME_HOST_SUBNET))
 
 
 def remove_admin_bridge_hq_relay():

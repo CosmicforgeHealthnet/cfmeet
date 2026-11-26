@@ -132,7 +132,7 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
    3. Installs the relay from step 4.
 
    Any failure removes the relay and restores the dark bridge.
-4. **HQ connection: private tunnel only** (owner decision 2026-11-20). Bring the tunnel up **before** step 3. HQ connects only to a pinned private IP, so HQ staging reaches the bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet host. Setting up the tunnel is a privileged operator step; the addresses move out of band, never via chat or git.
+4. **HQ connection, separate hosts: private tunnel** (owner decision 2026-11-20). Bring the tunnel up **before** step 3. HQ connects only to a pinned private IP, so HQ staging reaches the bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet host. Setting up the tunnel is a privileged operator step; the addresses move out of band, never via chat or git.
    - Bring up the tunnel. Note the CF Meet host's tunnel address (`ADMIN_BRIDGE_HQ_LISTEN_ADDRESS`) and HQ's tunnel address (`ADMIN_BRIDGE_HQ_ALLOWED_SOURCE`). Both must be **RFC 1918 only**. 100.64/10 is refused by HQ, which treats it as shared CGNAT space; the tool refuses it, and public addresses, too. Suggested: a dedicated /30 such as `10.250.0.0/30`, with CF Meet at `10.250.0.1` and HQ at `10.250.0.2`.
    - `activate-admin-bridge-hq` installs the passthrough relay `cfmeet-admin-bridge-hq-relay` (step 3). Do not install it by hand. It is an nginx `stream` relay with `allow <HQ tunnel address>; deny all;`, and TLS is **not** terminated.
      - It runs on its own network, `cfmeet-admin-bridge-hq-net`, joined to the private network, and is published **only** on `<CF Meet tunnel address>:8460`.
@@ -142,6 +142,12 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
    - **Server certificate:** issue it from CF Meet's private admin-bridge CA with DNS SAN `admin-bridge.cfmeet.internal` (HQ uses it as SNI), never a public name. Give HQ the CA bundle and the leaf SHA-256 fingerprint out of band. HQ pins both, so send the new fingerprint **before** each rotation.
    - **HQ's client certificate:** exactly one URI SAN, `cf://staging/product-admin/cfmeet`. Enrol the leaf's DER SHA-256 with `enroll-cert`.
    - **Enrolled scope:** `ADMIN_BRIDGE_ENROLLED_MARKETS=GLOBAL`; `ADMIN_BRIDGE_ENROLLED_TENANTS=<CF Meet first-party Platform Access tenant UUID>`. Tenant scopes are always Platform Access tenant **UUIDs in canonical lowercase** (8-4-4-4-12; normalise any upper-case value first), never slugs: owner reads are scoped by that UUID (Calling refuses anything else), and a partner's workspace id is its Platform Access tenant UUID.
+5. **HQ connection, same host (HQ and CF Meet on one VPS; agreed with HQ 2026-11-26).** No tunnel and no host port.
+   - HQ creates and owns `cf-staging-cfmeet-bridge` (`pa-staging-ops.sh prepare-host`): internal, subnet `10.231.14.0/28`. `.1` is the Docker gateway, `.3` HQ's connector, `.4` HQ's worker.
+   - Put `"transport": "same-host"` in `enable.json`, with no `listen_address` or `allowed_source`.
+   - `activate-admin-bridge-hq` refuses unless that network exists, is internal and has exactly that subnet. It then joins the relay at `10.231.14.2`, admitting only `.3` and `.4`, publishing nothing, still passing TLS through.
+   - The relay joins no other HQ network, and CF Meet never joins HQ's database network. HQ's checks fail if any other container joins `cf-staging-cfmeet-bridge`.
+   - Leave 8460 closed on every host interface.
 5. **Verify.**
    - `/ready` returns `{"ready":true,"enabled":true,"policy_revision":1,"openapi_sha256":<pinned hash>}`.
    - HQ's `bridge.capabilities.read` returns the same `openapi_sha256` as HQ's pin.
