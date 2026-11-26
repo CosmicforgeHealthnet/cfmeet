@@ -603,6 +603,12 @@ function Ticks({ receipt, list }: { receipt: "sent" | "delivered" | "read"; list
   return <CheckCheck strokeWidth={2.75} className={cn("size-4 shrink-0", list ? "text-sky-500" : "text-[#7CFFF4] drop-shadow-[0_0_1px_rgba(0,0,0,0.35)]")} aria-label="Read" />;
 }
 
+/** One tick state for a message from every other member's state (read only when all read). */
+function summaryReceipt(rows: { state: "read" | "delivered" | "sent" }[]): "read" | "delivered" | "sent" {
+  if (!rows.length) return "sent";
+  return rows.every((r) => r.state === "read") ? "read" : rows.every((r) => r.state !== "sent") ? "delivered" : "sent";
+}
+
 /** WhatsApp's Message info: read by / delivered to, live while open. */
 function MessageInfo({ engine, conversationId, message, names, onClose }: { engine: MessagingEngine; conversationId: string; message: MessageView; names: Record<string, string>; onClose: () => void }) {
   useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -1641,6 +1647,7 @@ function PersonalMessages() {
                           {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
                           {mine && latest && (latest.state === "queued" || latest.state === "sending" || latest.state === "pending-setup") ? <Clock3 className="size-3.5 shrink-0" aria-label="Sending" /> : null}
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
+                          {mine && !latest && summary && summary.sequence > 0 && summary.lifecycle === "ACTIVE" ? <Ticks receipt={summaryReceipt(engine.messageInfo(c.id, summary.sequence))} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {preview === null
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
