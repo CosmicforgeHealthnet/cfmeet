@@ -15,7 +15,7 @@ import ContactLists from "./ContactLists";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Bell, BellOff, Hash, Info, Check, Copy, Link2, MessageSquare, MoreHorizontal, Pencil, Phone, QrCode as QrIcon, RefreshCw, Search, Settings2, Star, UserMinus, UserPlus, Users, Video } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -34,6 +34,8 @@ import {
   useHubProfile,
   useHubRequests,
   useHubSync,
+  useHubInvites,
+  hubKeys,
 } from "@/hooks/v2/useCommunications";
 import { useMessagingDirectory } from "@/hooks/v2/useMessaging";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -110,6 +112,7 @@ function MyIdCard({ areas }: { areas: CommunicationsAreas }) {
         <button type="button" onClick={() => setConfirmRotate(true)} className={cn(pill, "text-muted-foreground hover:bg-background hover:text-foreground")}><RefreshCw className="size-4" />Change ID</button>
       </div>
       {qr.error ? <div className="mt-2"><ErrorText error={qr.error} /></div> : null}
+      <InviteLinks enabled={areas.contacts} />
       {qr.data?.payload ? (
         <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl bg-background p-3" data-testid="qr-panel">
           <div className="rounded-xl bg-white p-2"><QrCode value={qr.data.payload} label="QR code to connect with you on CF Meet" /></div>
@@ -133,6 +136,53 @@ function MyIdCard({ areas }: { areas: CommunicationsAreas }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * "Invite link": a link anyone can open to connect with you (7 days, up to 20 uses), copied
+ * or shared; your active links with their uses and a Revoke (Hub /invites).
+ */
+function InviteLinks({ enabled }: { enabled: boolean }) {
+  const client = useQueryClient();
+  const list = useHubInvites(enabled);
+  const { copied, copy } = useCopy();
+  const create = useMutation({
+    mutationFn: () => hub.createInvite(7 * 24 * 3600, 20),
+    onSuccess: (inv) => { if (inv.payload) copy(inv.payload, "invite"); },
+    onSettled: () => client.invalidateQueries({ queryKey: hubKeys.invites }),
+  });
+  const revoke = useMutation({
+    mutationFn: (inviteId: string) => hub.revokeInvite(inviteId),
+    onSettled: () => client.invalidateQueries({ queryKey: hubKeys.invites }),
+  });
+  const [now] = useState(() => Date.now());
+  const active = (list.data?.data ?? []).filter((i) => !i.revoked && Date.parse(i.expiresAt) > now && i.uses < i.maxUses);
+  const link = create.data?.payload ?? null;
+  return (
+    <div className="mt-3 space-y-2" data-testid="invite-links">
+      <button type="button" disabled={create.isPending} onClick={() => create.mutate()} className={cn(pill, "bg-background text-foreground ring-1 ring-border hover:bg-muted")} data-testid="create-invite-link"><Link2 className="size-4" />{create.isPending ? "Creating…" : "Invite link"}</button>
+      {link ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-background p-3 text-sm" data-testid="new-invite-link">
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{link}</span>
+          <button type="button" onClick={() => copy(link, "invite")} className={cn(pill, "h-8 px-3 text-primary hover:bg-primary/10")}>{copied === "invite" ? <Check className="size-4" /> : <Copy className="size-4" />}{copied === "invite" ? "Copied" : "Copy"}</button>
+          {typeof navigator !== "undefined" && "share" in navigator ? <button type="button" onClick={() => void navigator.share({ title: "Connect with me on CF Meet", url: link }).catch(() => {})} className={cn(pill, "h-8 px-3 text-primary hover:bg-primary/10")}>Share</button> : null}
+        </div>
+      ) : null}
+      <ErrorText error={create.error} />
+      {active.length ? (
+        <ul className="space-y-1" aria-label="Your active invite links">
+          {active.map((i) => (
+            <li key={i.inviteId} className="flex items-center gap-2 rounded-lg px-1 text-xs text-muted-foreground" data-testid="invite-link-row">
+              <Link2 className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">Invite link · used {i.uses} of {i.maxUses} · expires {new Date(i.expiresAt).toLocaleDateString()}</span>
+              <button type="button" disabled={revoke.isPending} onClick={() => revoke.mutate(i.inviteId)} className="rounded-full px-2 py-1 font-semibold text-destructive hover:bg-destructive/10" data-testid="revoke-invite-link">Revoke</button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <ErrorText error={revoke.error} />
+    </div>
   );
 }
 

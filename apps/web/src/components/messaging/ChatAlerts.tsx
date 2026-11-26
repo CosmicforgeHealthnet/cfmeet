@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { useHubCapabilities, useHubInbox } from "@/hooks/v2/useCommunications";
-import { communicationsAreas } from "@/lib/communications/comms-core";
+import { effectiveNotifications, useChatNotificationSettings, useUnreadChats } from "@/hooks/useUnreadChats";
 import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 
 const NO_SNAPSHOT = () => null;
@@ -22,16 +21,13 @@ export function ChatAlerts() {
     engine ? engine.getSnapshot : NO_SNAPSHOT,
     engine ? engine.getSnapshot : NO_SNAPSHOT,
   );
-  const capabilities = useHubCapabilities();
-  const areas = communicationsAreas(capabilities.data);
-  const inbox = useHubInbox(!!engine && (areas.contacts || areas.managedMessaging));
-  const muted = useMemo(() => new Set((inbox.data?.data ?? []).filter((e) => e.notifications === "MUTED").map((e) => e.conversationId)), [inbox.data]);
+  const settings = useChatNotificationSettings();
   const router = useRouter();
-  const seen = useRef<Map<string, number> | null>(null);
+  const seen = useRef<Map<string, { sequence: number; mentions: number }> | null>(null);
   const baseTitle = useRef<string | null>(null);
 
-  // Unread chats in the tab title.
-  const unreadChats = (s?.conversations ?? []).filter((c) => c.unreadCount > 0 && !muted.has(c.id) && !c.archived).length;
+  // Unread chats in the tab title: the same count as the Chats badge.
+  const unreadChats = useUnreadChats();
   useEffect(() => {
     if (typeof document === "undefined") return;
     if (baseTitle.current === null) baseTitle.current = document.title.replace(/^\(\d+\) /, "");
@@ -43,21 +39,25 @@ export function ChatAlerts() {
   useEffect(() => {
     if (!s) return;
     const previous = seen.current;
-    const next = new Map(s.conversations.map((c) => [c.id, c.lastMessage?.sequence ?? 0]));
+    const next = new Map(s.conversations.map((c) => [c.id, { sequence: c.lastMessage?.sequence ?? 0, mentions: c.mentionCount }]));
     seen.current = next;
     if (!previous || typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
     const open = window.location.pathname.startsWith("/dashboard/messages") ? new URLSearchParams(window.location.search).get("conversation") : null;
     const me = s.identity?.principalId;
     for (const c of s.conversations) {
       const last = c.lastMessage;
-      if (!last || last.senderPrincipalId === me || muted.has(c.id) || c.unreadCount === 0) continue;
-      if ((previous.get(c.id) ?? 0) >= last.sequence) continue;
+      if (!last || last.senderPrincipalId === me || last.lifecycle !== "ACTIVE") continue;
+      const before = previous.get(c.id);
+      if ((before?.sequence ?? 0) >= last.sequence) continue;
+      // The chat's setting as it applies now: muted (until it expires), only @mentions, or all.
+      const setting = effectiveNotifications(settings.get(c.id));
+      if (setting === "MUTED" || (setting === "MENTIONS" && c.mentionCount <= (before?.mentions ?? 0))) continue;
       const showing = document.visibilityState === "visible" && (open === c.id || (open === null && window.location.pathname.startsWith("/dashboard/messages")));
       if (showing) continue;
       notify(router, c.id, c.title, c.contextClass === "GROUP" ? s.names[last.senderPrincipalId] ?? null : null,
         last.previewText ?? (last.attachmentCount ? "📎 Attachment" : "New message"));
     }
-  }, [s, muted, router]);
+  }, [s, settings, router]);
 
   return null;
 }

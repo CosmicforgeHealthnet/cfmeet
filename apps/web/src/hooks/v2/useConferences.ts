@@ -13,6 +13,7 @@ import type {
   LeaveConferenceRequest,
 } from "@/types/v2";
 import { spaceKeys } from "./useSpaces";
+import { roomPoll } from "@/lib/realtime-health";
 
 // Query Keys
 export const conferenceKeys = {
@@ -57,7 +58,7 @@ export function useConference(id: string) {
     queryKey: conferenceKeys.detail(id),
     queryFn: () => conferencesService.get(id),
     enabled: !!id,
-    refetchInterval: 5000, // Poll every 5 seconds for live updates
+    refetchInterval: roomPoll(id, 5000),
   });
 }
 

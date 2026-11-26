@@ -387,4 +387,163 @@ async function journey() {
   await shot(alice.page, "03-group-alice");
   await shot(bob.page, "04-group-bob");
   step("group: named, members in the header, sender in the preview", {});
+
+  // ---- 13. Every texting action, live on the other side (WhatsApp behaviour).
+  const bubble = (page, text) => page.locator("[data-testid=message]", { hasText: text }).first();
+  const menu = async (page, text, item) => {
+    await bubble(page, text).hover();
+    await bubble(page, text).locator("[data-testid=message-actions]").click();
+    await page.click(`[data-testid=message-menu] [data-testid=${item}]`);
+  };
+  // Reply: Bob's quote shows on Alice's side.
+  const replyText = `${SECRET} replying to bob`;
+  await menu(alice.page, fromBob, "reply");
+  await alice.page.locator("[data-testid=reply-banner]").waitFor({ timeout: T });
+  await type(alice.page, replyText);
+  await bob.page.locator("[data-testid=message]", { hasText: replyText }).locator("[data-testid=message-reply]").waitFor({ timeout: T });
+  // Reaction: Bob reacts, Alice sees it; Bob removes it, Alice sees it go.
+  await bubble(bob.page, replyText).hover();
+  await bubble(bob.page, replyText).getByRole("button", { name: "React", exact: true }).click();
+  await bob.page.getByRole("button", { name: "React 👍" }).first().click();
+  await timed("reaction-live", () => bubble(alice.page, replyText).locator("[data-testid=reaction]", { hasText: "👍" }).waitFor({ timeout: T }));
+  await bubble(bob.page, replyText).locator("[data-testid=reaction]", { hasText: "👍" }).click();
+  await bubble(alice.page, replyText).locator("[data-testid=reaction]").waitFor({ state: "detached", timeout: T });
+  // Edit: the new text replaces the old one on Bob's side.
+  const edited = `${SECRET} edited reply`;
+  await menu(alice.page, replyText, "edit");
+  await alice.page.fill("[data-testid=edit-input]", edited);
+  await alice.page.click("[data-testid=edit-save]");
+  await timed("edit-live", () => shown(bob.page, edited));
+  // Delete for everyone: gone from Bob's chat.
+  await menu(alice.page, edited, "delete");
+  await bob.page.locator("[data-testid=message-text]", { hasText: edited }).waitFor({ state: "detached", timeout: T });
+  // Typing: Alice sees Bob typing, and it stops when he clears the box.
+  await bob.page.fill("[data-testid=composer]", "typing…");
+  await bob.page.type("[data-testid=composer]", " x");
+  await timed("typing-indicator", () => alice.page.getByText(/is typing…/).first().waitFor({ timeout: T }));
+  await bob.page.fill("[data-testid=composer]", "");
+  step("reply, reaction, edit, delete for everyone, typing — live on the other side", {});
+
+  // Forward (WhatsApp): quick ➦ arrow, tick a chat, add a message, send once.
+  const forwardNote = `${SECRET} see this`;
+  await bubble(alice.page, fromBob).hover();
+  await bubble(alice.page, fromBob).locator("[data-testid=quick-forward]").click();
+  await alice.page.locator("[data-testid=forward-dialog]").waitFor({ timeout: T });
+  await alice.page.locator(`[data-testid=forward-target][data-name="${USERS.bob.name}"]`).first().click();
+  await alice.page.fill("[data-testid=forward-note]", forwardNote);
+  await alice.page.click("[data-testid=forward-send]");
+  await alice.page.locator("[data-testid=forward-dialog]").waitFor({ state: "detached", timeout: T });
+  await bob.page.locator("[data-testid=conversation-item]", { hasText: USERS.alice.name }).first().click();
+  await bob.page.locator("[data-testid=message]", { hasText: fromBob }).locator("[data-testid=message-forwarded]").last().waitFor({ timeout: T });
+  await shown(bob.page, forwardNote);
+  // A file forwards too (re-sent: the server doesn't copy attachments).
+  await alice.page.locator("[data-testid=conversation-item]", { hasText: USERS.bob.name }).first().click();
+  await bubble(alice.page, "plan.txt").hover();
+  await bubble(alice.page, "plan.txt").locator("[data-testid=quick-forward]").click();
+  await alice.page.locator('[data-testid=forward-target][data-name="Weekend plans"]').first().click();
+  await alice.page.click("[data-testid=forward-send]");
+  await alice.page.locator("[data-testid=forward-dialog]").waitFor({ state: "detached", timeout: T });
+  await bob.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first().click();
+  await bob.page.locator("[data-testid=attachment]", { hasText: "plan.txt" }).waitFor({ timeout: 2 * T });
+  await shot(alice.page, "05-forward-alice");
+  step("forward: text with a note, and a file, to chats picked in the dialog", {});
+
+  // Unread badge: a message to a chat Alice isn't looking at shows a badge; opening clears it.
+  const unreadText = `${SECRET} while alice looks elsewhere`;
+  await type(bob.page, unreadText);
+  const groupRow = alice.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+  await timed("unread-badge", () => groupRow.locator("[data-testid=unread-badge]").waitFor({ timeout: T }));
+  await groupRow.click();
+  await shown(alice.page, unreadText);
+  await groupRow.locator("[data-testid=unread-badge]").waitFor({ state: "detached", timeout: T });
+  // Search in chat finds an older message.
+  await alice.page.click("[data-testid=conversation-search-toggle]");
+  await alice.page.fill("[data-testid=conversation-message-search] input", "hello group");
+  await alice.page.keyboard.press("Enter");
+  await timed("search", () => alice.page.locator("[data-testid=search-results]", { hasText: "hello group" }).waitFor({ timeout: T }));
+  // Message info lists Bob as having read Alice's message.
+  await alice.page.keyboard.press("Escape");
+  await menu(alice.page, groupHello, "message-info");
+  await alice.page.locator("[data-testid=info-read]").waitFor({ timeout: T });
+  await alice.page.keyboard.press("Escape");
+  step("unread badge, search in chat, message info", {});
+
+  // ---- 14. Group info, as on WhatsApp.
+  await alice.page.click("[data-testid=conversation-members-toggle]");
+  const info = alice.page.locator("[data-testid=members]");
+  await info.locator("[data-testid=info-title]", { hasText: "Weekend plans" }).waitFor({ timeout: T });
+  assert.match(await info.locator("[data-testid=info-subtitle]").innerText(), /Group · 2 members/);
+  await info.locator("[data-testid=admin-badge]").first().waitFor({ timeout: T });
+  await info.getByRole("button", { name: "Search members" }).first().click();
+  await info.locator("[data-testid=member-search]").fill(USERS.bob.name.slice(0, 4));
+  assert.equal(await info.locator("[data-testid=member-row]").count(), 1, "member search filters the list");
+  await info.locator("[data-testid=member-search]").fill("");
+  await info.locator("[data-testid=invite-link]").click();
+  await timed("invite-link", () => info.locator("[data-testid=invite-url]").waitFor({ timeout: T }));
+  assert.match(await info.locator("[data-testid=invite-url]").innerText(), /\/dashboard\/messages\/join\?token=/);
+  const [exported] = await Promise.all([alice.page.waitForEvent("download", { timeout: T }), info.locator("[data-testid=export-chat]").click()]);
+  const exportedText = readFileSync(await exported.path(), "utf8");
+  assert.ok(exportedText.includes("hello group") && exportedText.includes("Weekend plans"), "the export holds the chat");
+  await shot(alice.page, "06-group-info");
+  await info.getByRole("button", { name: "Close chat info" }).click();
+  step("group info: title, members, admin badge, member search, invite link, export", {});
 }
+
+/**
+ * Phone-sized tour (screenshots only, never fails the run): the main screens at an iPhone
+ * viewport with touch, after the journey has filled the chats, so mobile layouts can be
+ * reviewed (and compared between versions) from CI artifacts.
+ */
+test("phone-sized screens (screenshots)", { timeout: 5 * 60_000 }, async () => {
+  if (!SCREENS || !USERS.bob) return;
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  try {
+    await signIn(ctx, "bob");
+    await ctx.addInitScript((u) => {
+      if (!localStorage.getItem("cosmic_user_info")) localStorage.setItem("cosmic_user_info", JSON.stringify(u));
+    }, { id: USERS.bob.id, email: USERS.bob.email, username: USERS.bob.name });
+    const page = await ctx.newPage();
+    const settle = () => page.waitForTimeout(3000);
+    const visit = async (path, name) => {
+      await page.goto(`${BASE}${path}`, { waitUntil: "load" }).catch(() => {});
+      await settle();
+      await shot(page, name);
+    };
+    await visit("/dashboard", "m01-home");
+    await visit("/dashboard/messages", "m02-chats");
+    const rows = page.locator("[data-testid=conversation-item]");
+    if (await rows.count().catch(() => 0)) {
+      await rows.first().click().catch(() => {});
+      await settle();
+      await shot(page, "m03-chat-open");
+      await page.locator("[data-testid=conversation-members-toggle]").click().catch(() => {});
+      await settle();
+      await shot(page, "m04-chat-info");
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" }).catch(() => {});
+      await settle();
+      const group = page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+      if (await group.count().catch(() => 0)) {
+        await group.click().catch(() => {});
+        await settle();
+        await shot(page, "m05-group-open");
+      }
+    }
+    await visit("/dashboard/contacts", "m06-contacts");
+    await visit("/dashboard/calls", "m07-calls");
+    await visit("/dashboard/meetings", "m08-meetings");
+    await visit("/dashboard/calendar", "m09-calendar");
+    await visit("/dashboard/organizations", "m10-organizations");
+    await visit("/dashboard/settings", "m11-settings");
+    // The app menu (mobile sidebar).
+    await page.goto(`${BASE}/dashboard`, { waitUntil: "load" }).catch(() => {});
+    await settle();
+    await page.getByRole("button", { name: /menu/i }).first().click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    await shot(page, "m12-menu");
+  } catch (e) {
+    console.log(`phone tour stopped: ${e}`);
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+});

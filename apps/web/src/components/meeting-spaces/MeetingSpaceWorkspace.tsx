@@ -16,6 +16,7 @@ import MembersPanel from "./MembersPanel";
 import InvitationsPanel from "./InvitationsPanel";
 import RegistrationPanel from "./RegistrationPanel";
 import { RequestError } from "./ManagementUI";
+import SpaceMeetingRules from "./SpaceMeetingRules";
 
 const TYPE_LABELS: Record<string, string> = { STANDARD: "Meeting", WEBINAR: "Webinar", TOWN_HALL: "Town hall", HEALTHCARE: "Healthcare", TRAINING: "Training" };
 const ACCESS: Record<string, { label: string; icon: typeof Globe }> = {
@@ -184,7 +185,7 @@ export default function MeetingSpaceWorkspace({ id }: { id: string }) {
                         </div>
                       ) : null}
                     </section>
-
+                    {space.viewerRole && ["OWNER", "HOST"].includes(space.viewerRole) ? <SpaceMeetingRules space={space} /> : null}
                   </div>
                 )}
 

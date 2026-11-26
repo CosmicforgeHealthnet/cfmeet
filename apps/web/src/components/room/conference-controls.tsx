@@ -19,7 +19,7 @@ import RoomQualityPanel from "./RoomQualityPanel";
 import { profilesService } from "@/services/v2/profiles.service";
 import type { MediaContextView } from "@/types/v2";
 
-export default function ConferenceControls({ id, role, sessionId, initialMediaContext, onCredentialRefreshStateChange, tools, audioSettings }: { tools?: (close: () => void, openAudio: () => void) => ReactNode; audioSettings?: ReactNode; id: string; role?: Role; sessionId?: string; initialMediaContext?: MediaContextView; onCredentialRefreshStateChange: (refreshing: boolean) => void }) {
+export default function ConferenceControls({ id, role, sessionId, initialMediaContext, onCredentialRefreshStateChange, tools, audioSettings }: { tools?: (close: () => void, openAudio: () => void) => ReactNode; audioSettings?: ReactNode; id: string; role?: Role; sessionId?: string; initialMediaContext?: MediaContextView; onCredentialRefreshStateChange: (refreshing: boolean, media?: { audio: boolean; video: boolean }) => void }) {
   const query = useConference(id);
   const lock = useLockConference(), unlock = useUnlockConference();
   const refreshCredential = useMediaCredential(id);
@@ -40,12 +40,16 @@ export default function ConferenceControls({ id, role, sessionId, initialMediaCo
   const canViewQuality = meetingAllows(currentRole, "quality.view", space.data?.rolePolicy);
   const isWebinar = space.data?.meetingType === "WEBINAR" || space.data?.meetingType === "TOWN_HALL";
   const inBackstage = mediaContext?.kind === "BACKSTAGE";
+  // What a reconnect must restore: the mic and camera as they are now (not as at join).
+  const currentMedia = () => ({ audio: room.localParticipant.isMicrophoneEnabled, video: room.localParticipant.isCameraEnabled });
   const refresh = async () => {
     setCredentialError(undefined);
     try {
       if (!sessionId) throw new Error("This session cannot refresh its media credential. Leave and rejoin the conference.");
+      // Before the request: the server may drop us from the old room first, which must not
+      // read as leaving the meeting. Mic and camera stay as the person left them.
+      onCredentialRefreshStateChange(true, currentMedia());
       const result = await refreshCredential.mutateAsync({ participantSessionId: sessionId });
-      onCredentialRefreshStateChange(true);
       await room.disconnect(false);
       await room.connect(result.rtc.url, result.rtc.credential);
       setMediaContext(result.mediaContext);
@@ -81,8 +85,8 @@ export default function ConferenceControls({ id, role, sessionId, initialMediaCo
       setMediaContext(result.mediaContext);
       if (result.credentialRefreshRequired) {
         if (!sessionId) throw new Error("This session cannot refresh its media credential. Leave and rejoin the conference.");
+        onCredentialRefreshStateChange(true, currentMedia());
         const credential = await refreshCredential.mutateAsync({ participantSessionId: sessionId });
-        onCredentialRefreshStateChange(true);
         await room.disconnect(false);
         await room.connect(credential.rtc.url, credential.rtc.credential);
         setMediaContext(credential.mediaContext);

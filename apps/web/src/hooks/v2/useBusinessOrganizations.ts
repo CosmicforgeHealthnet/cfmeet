@@ -181,3 +181,22 @@ export function useInvitationDecision() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: workspaceKeys.list() }),
   });
 }
+
+const MY_INVITATIONS = ["v2", "organizations", "my-invitations"] as const;
+
+/** My pending organization invitations (FEATURE_DISABLED until Organizations is live: empty). */
+export function useMyOrganizationInvitations() {
+  return useQuery({ queryKey: MY_INVITATIONS, queryFn: service.myInvitations, retry: false, staleTime: 30_000 });
+}
+
+/** Accept or decline one; the list and my workspaces refresh. */
+export function useAnswerOrganizationInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, accept }: { id: string; accept: boolean }) => (accept ? service.acceptMyInvitation(id) : service.declineMyInvitation(id)),
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: MY_INVITATIONS }),
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.list() }),
+    ]),
+  });
+}

@@ -21,6 +21,7 @@ import { Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, 
 import { useCalling } from "@/context/CallingContext";
 import { callingKeys, useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
 import { callsService } from "@/services/calling/calls.service";
+import { toast } from "@/components/ui/toast";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
@@ -240,12 +241,22 @@ export default function ActiveCallDock() {
     if (data && operation !== "leave") {
       queryClient.setQueryData(callingKeys.detail(media.callId), { ...data, state: operation === "cancel" ? "CANCELLED" : "ENDED" });
     }
-    if (!data) return;
     const callId = media.callId;
-    void (operation === "leave"
-      ? session ? mutation.mutateAsync({ operation: "removeSession", callId, sessionId: session.sessionId, body: { expectedVersion: data.version }, key: newIdempotencyKey() }) : Promise.resolve()
-      : callsService.hangUp(callId, operation, data.version).finally(() => void queryClient.invalidateQueries({ queryKey: callingKeys.detail(callId) }))
-    ).catch(() => undefined);
+    if (operation === "leave") {
+      if (data && session) void mutation.mutateAsync({ operation: "removeSession", callId, sessionId: session.sessionId, body: { expectedVersion: data.version }, key: newIdempotencyKey() }).catch(() => undefined);
+      return;
+    }
+    // Cancel / end must reach the server, or the other side keeps ringing: with the call's
+    // details (fetched if they hadn't loaded), retried once with a fresh version, and said
+    // out loud if it still fails.
+    const attempt = async (version?: number) => {
+      const current = version ?? (await callsService.get(callId)).version;
+      await callsService.hangUp(callId, operation, current);
+    };
+    void attempt(data?.version)
+      .catch(() => attempt())
+      .catch(() => toast(operation === "cancel" ? "The call couldn't be cancelled — it may still be ringing. Try again from Calls." : "The call couldn't be ended for everyone. Try again from Calls.", "error"))
+      .finally(() => void queryClient.invalidateQueries({ queryKey: callingKeys.detail(callId) }));
   };
   const hangUp = controls.cancel || !call.data
     ? { label: "Cancel", run: () => hangUpNow("cancel") }

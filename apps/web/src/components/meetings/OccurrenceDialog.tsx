@@ -39,6 +39,14 @@ export default function OccurrenceDialog({ item, onClose }: { item: AgendaItem; 
   const [start, setStart] = useState(() => utcToZonedLocal(item.scheduledStartAt, zone));
   const [end, setEnd] = useState(() => (item.scheduledEndAt ? utcToZonedLocal(item.scheduledEndAt, zone) : ""));
   const [error, setError] = useState<unknown>();
+  // Moving the start keeps the meeting's length: the end moves with it.
+  const moveStart = (next: string) => {
+    const before = Date.parse(`${start}Z`), after = Date.parse(`${next}Z`), ends = Date.parse(`${end}Z`);
+    if (end && Number.isFinite(before) && Number.isFinite(after) && Number.isFinite(ends)) {
+      setEnd(new Date(ends + (after - before)).toISOString().slice(0, end.length));
+    }
+    setStart(next);
+  };
   const [copied, setCopied] = useState(false);
   const reschedule = useRescheduleOccurrence();
   const cancel = useCancelOccurrence();
@@ -156,7 +164,7 @@ export default function OccurrenceDialog({ item, onClose }: { item: AgendaItem; 
         </DialogHeader>
         {mode === "reschedule" || mode === "exception-reschedule" ? <>
           <p className="text-sm text-muted-foreground">{actions.recurring ? "Only this session moves. The rest of the series stays the same. " : ""}Times are in the meeting&apos;s time zone. Leave the end empty to keep the same length.</p>
-          <ZonedDateTimeField id="occurrence-start" label="New start" required value={start} onChange={setStart} timeZone={zone} />
+          <ZonedDateTimeField id="occurrence-start" label="New start" required value={start} onChange={moveStart} timeZone={zone} />
           <ZonedDateTimeField id="occurrence-end" label="New end (optional)" value={end} min={start} onChange={setEnd} timeZone={zone} />
           {start ? <p className="text-xs text-muted-foreground">Your time: {(() => { try { return <ScheduleText start={occurrenceWindowInZone(start, null, zone, 0).scheduledStartAt} timeZone={viewerTimeZone()} />; } catch { return "—"; } })()}</p> : null}
         </> : <p className="text-sm text-muted-foreground">{actions.recurring ? "Other sessions in the series stay as they are. " : ""}People won&apos;t be able to join it anymore.</p>}

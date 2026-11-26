@@ -9,6 +9,9 @@ import apiV2 from "./v2/api";
 import type { AccountSessionRevokeResponse, GoogleExchangeRequest } from "@/types/generated/meeting-service";
 import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/workspace-core";
 
+/** sessionStorage key: the ?next= destination of a Google sign-in in progress. */
+export const GOOGLE_NEXT_KEY = "cfmeet:google-next";
+
 /**
  * Stores a fresh sign-in: refresh token in the httpOnly session cookie, access token in
  * memory, non-secret user summary for the UI (ACC-019).
@@ -172,6 +175,12 @@ export const authService = {
   },
 
   initiateGoogleOAuth: () => {
+    // Where sign-in was going (?next=) survives the round trip to Google in this tab only.
+    try {
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next) window.sessionStorage.setItem(GOOGLE_NEXT_KEY, next);
+      else window.sessionStorage.removeItem(GOOGLE_NEXT_KEY);
+    } catch { /* storage disabled: lands on the dashboard */ }
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
     window.location.href = `${apiUrl}/auth/oauth/google`;
   },

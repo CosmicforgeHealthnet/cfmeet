@@ -26,7 +26,7 @@ import { messagingClientAccessToken, messagingSessionDeviceToken } from "@/servi
 
 import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
 import { b64u } from "./api";
-import { MessagingApiError } from "./errors";
+import { MessagingApiError, friendlyErrorCode, messagingErrorMessage } from "./errors";
 import { accountDevice } from "@/lib/auth/account-device";
 import type { LinkView } from "@/lib/auth/account-device-core";
 import { accountSession } from "@/lib/auth/session";
@@ -134,6 +134,8 @@ export type IncomingTransfer = {
 export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
 
 export type EngineSnapshot = {
+  /** Chats this account was taken out of by someone else (not left on this device), newest last. */
+  removedFrom?: { conversationId: string; title: string }[];
   /** Per conversation: who is online and when others were last seen. */
   presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
@@ -228,6 +230,8 @@ type GroupChange = { commit: Uint8Array; epoch: number; welcome?: Uint8Array | n
 type PendingJoiner = { deviceId: string; sequence: number; senderPrincipalId: string };
 
 const PAGE = 100;
+/** Gone from the chat entirely (WhatsApp): expired, purged, or deleted for you only. */
+const vanishes = (lifecycle: string | undefined) => lifecycle === "EXPIRED" || lifecycle === "PURGED" || lifecycle === "HIDDEN_FOR_YOU";
 /** Newest MANAGED messages loaded when a conversation is first synchronized. */
 const INITIAL_PAGE = 50;
 /** Newest MANAGED messages re-read per poll when no realtime events arrive (edits / tombstones). */
@@ -332,7 +336,7 @@ function sendFailureText(e: unknown): string {
   if (e instanceof MessagingApiError && e.code === "FEATURE_DISABLED" && (e.reason === "ATTACHMENTS_DISABLED" || e.reason === "ATTACHMENT_STORAGE_NOT_CONFIGURED")) {
     return "sending photos and files isn't switched on for CF Meet yet";
   }
-  return e instanceof Error ? e.message : "error";
+  return messagingErrorMessage(e).replace(/\.$/, "");
 }
 
 export class MessagingEngine {
@@ -364,6 +368,7 @@ export class MessagingEngine {
   /** Per conversation, each member's delivered / read sequence (from receipt events and snapshots). */
   private receipts = new Map<string, Map<string, { read: number; delivered: number }>>();
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private presenceWatched: string | null = null;
   private server = new Map<string, ServerConversation>();
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
@@ -572,6 +577,7 @@ export class MessagingEngine {
     for (const t of this.typingTimers.values()) clearTimeout(t);
     this.typingTimers.clear();
     this.detachTransport();
+    this.outbox?.detach();
     this.crypto?.terminate();
     this.crypto = null;
   }
@@ -929,14 +935,22 @@ export class MessagingEngine {
     this.connect();
   }
 
-  /** Logout: the local device and its history are erased and the device revoked. */
-  async signOut(): Promise<void> {
-    // Background work stops first: the revocation below must not be "detected" by a poll
-    // that would wipe and reopen the device store in parallel.
+  /**
+   * Sign-out step one, synchronous: background work stops and the outbox closes, so a poll
+   * can't "detect" the revocation and reopen the device store, and a send that finishes
+   * after the browser's storage is cleared can't write its queue back.
+   */
+  halt(): void {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.detachTransport();
+    this.outbox?.close();
+  }
+
+  /** Logout: the local device and its history are erased and the device revoked. */
+  async signOut(): Promise<void> {
+    this.halt();
     try {
       if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
@@ -1010,6 +1024,8 @@ export class MessagingEngine {
           this.reconnectDelay = 1000;
           // Missed while offline: catch up every conversation from the Delivery Service.
           for (const id of this.server.keys()) this.scheduleSync(id);
+          // The open chat's "online" / "last seen" is asked again now, not at the next poll.
+          if (this.presenceWatched) transport.queryPresence(this.presenceWatched);
           this.outbox?.wake();
           void this.flush();
         } else if (!this.stopped) {
@@ -1114,6 +1130,7 @@ export class MessagingEngine {
   watchPresence(conversationId: string | null): void {
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
+    this.presenceWatched = conversationId;
     if (!conversationId) return;
     const ask = () => this.transport?.queryPresence(conversationId);
     ask();
@@ -1248,6 +1265,10 @@ export class MessagingEngine {
     }
     const fresh = out.filter((c) => !this.server.has(c.conversationId));
     const gone = [...this.server.keys()].filter((id) => !out.some((c) => c.conversationId === id));
+    const removed = gone
+      .filter((id) => !this.leaving.has(id))
+      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat" }));
+    if (removed.length) this.set({ removedFrom: [...(this.snapshot.removedFrom ?? []), ...removed].slice(-10) });
     for (const id of gone) {
       // No longer a member (removed / left): it disappears from this client.
       this.server.delete(id);
@@ -1623,9 +1644,16 @@ export class MessagingEngine {
   async leaveConversation(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId;
     if (!me) return;
-    await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
-    await this.refreshConversations();
+    this.leaving.add(conversationId);
+    try {
+      await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
   }
+  /** Chats being left on this device: their disappearing is not "you were removed". */
+  private leaving = new Set<string>();
 
   async setMemberRole(conversationId: string, principalId: string, role: MemberRole): Promise<void> {
     await relay("PATCH", `v1/conversations/${conversationId}/members/${principalId}`, { role });
@@ -1675,6 +1703,39 @@ export class MessagingEngine {
    * S11: forward a message. MANAGED → MANAGED goes through the server (it copies the message);
    * anything private is re-sent from this device as a new message (the server can't read it).
    */
+  /**
+   * WhatsApp's Forward: one message to several chats (or people, whose direct chat is opened
+   * or created), with an optional note after it. Text goes through the server's forward
+   * (marked Forwarded); a photo, file or voice note is downloaded once and sent again to each
+   * chat, since the server doesn't copy attachments. Returns the chats it reached.
+   */
+  /**
+   * Forwards to each target in turn. One failing target doesn't stop the rest: the result says
+   * which went (by index into `targets`) and which didn't, so a retry re-sends only those.
+   */
+  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<{ reached: number[]; failed: { index: number; error: unknown }[] }> {
+    const reached: number[] = [];
+    const failed: { index: number; error: unknown }[] = [];
+    let media: File | null = null;
+    if (message.file?.attachmentId) {
+      const { blob, name } = await this.download(sourceId, message);
+      media = new File([blob], message.file.name || name, { type: message.file.mediaType || blob.type || "application/octet-stream" });
+    }
+    for (const [index, t] of targets.entries()) {
+      try {
+        const id = t.conversationId
+          ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
+        if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
+        else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
+        if (note?.trim()) await this.send(id, note.trim());
+        reached.push(index);
+      } catch (error) {
+        failed.push({ index, error });
+      }
+    }
+    return { reached, failed };
+  }
+
   async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
     const source = this.server.get(sourceId);
     const target = this.server.get(targetId);
@@ -2062,6 +2123,7 @@ export class MessagingEngine {
         reactions: r.messageId ? reactions?.get(r.messageId) ?? [] : [],
         pinned: !!r.messageId && pinned.has(r.messageId),
       };
+      if (m && vanishes(m.lifecycle)) continue;
       if (m && m.lifecycle !== "ACTIVE") {
         base.state = "removed";
         base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
@@ -2106,7 +2168,7 @@ export class MessagingEngine {
     // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
     const local = new Set(records.map((r) => r.sequence));
     for (const m of waitingHere) {
-      if (local.has(m.sequence)) continue;
+      if (local.has(m.sequence) || vanishes(m.lifecycle)) continue;
       const removed = m.lifecycle !== "ACTIVE";
       const early = !removed && sentBeforeJoin(m.createdAt);
       views.push({
@@ -2279,13 +2341,25 @@ export class MessagingEngine {
     this.set({ conversations });
   }
 
+  /** The chat the user is looking at (null: none, or the tab is hidden). */
+  private openConversationId: string | null = null;
+  setOpenConversation(conversationId: string | null): void {
+    this.openConversationId = conversationId;
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
+    const me = this.snapshot.identity?.principalId;
     const conversations = this.snapshot.conversations.map((c) => {
       if (c.id !== conversationId || (c.lastMessage && c.lastMessage.sequence > latest.sequence)) return c;
+      // A new message from someone else in a chat that isn't open counts as unread at once
+      // (WhatsApp), not at the next poll: badges, the tab title and notifications follow it.
+      const fresh = latest.sequence > (c.lastMessage?.sequence ?? 0) && latest.senderPrincipalId !== me && latest.lifecycle === "ACTIVE";
+      const unseen = fresh && this.openConversationId !== conversationId;
       return {
         ...c,
+        unreadCount: unseen ? c.unreadCount + 1 : c.unreadCount,
         lastActivityAt: latest.createdAt > c.lastActivityAt ? latest.createdAt : c.lastActivityAt,
         lastMessage: { sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt },
       };
@@ -2334,13 +2408,15 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId ?? null;
     const reactions = this.reactions.get(conversationId);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
-    const views = st.ordered().map((r) => this.managedView(r, st, me, reactions, pinned));
+    const views = st.ordered().filter((r) => !vanishes(r.lifecycle)).map((r) => this.managedView(r, st, me, reactions, pinned));
     // Receipts: who has read up to your latest message.
     const lastMine = [...views].reverse().find((v) => v.mine && v.state === "delivered");
     if (lastMine?.sequence != null) lastMine.seenBy = st.seenBy(lastMine.sequence, me);
-    const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
-      .filter((item) => !st.byClientMessageId(item.clientMessageId))
-      .map((item: OutboxItem) => ({
+    const pendingItems = (this.outbox?.all(conversationId) ?? []).filter((item) => !st.byClientMessageId(item.clientMessageId));
+    // Order is kept: messages after a failed one wait for it, and say so.
+    const firstFailed = pendingItems.findIndex((item) => item.state === "failed");
+    const queued: MessageView[] = pendingItems
+      .map((item: OutboxItem, index) => ({
         key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
@@ -2350,7 +2426,9 @@ export class MessagingEngine {
         state: item.state === "failed" ? "failed" : item.state === "sending" ? "sending" : "queued",
         text: item.text,
         file: null,
-        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})` : item.error ? "Waiting to send — will retry" : null,
+        note: item.state === "failed" ? `Not sent: ${friendlyErrorCode(item.error)}`
+          : firstFailed >= 0 && index > firstFailed ? "Waiting — the message above wasn't sent"
+          : item.error ? "Waiting to send — will retry" : null,
         transferred: false,
         messageId: null,
         outboxKey: item.key,
@@ -2358,7 +2436,7 @@ export class MessagingEngine {
       }));
     const pending = this.pendingSends.get(conversationId) ?? [];
     this.set({
-      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...queued, ...pending]) },
+      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...[...queued, ...pending].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))]) },
       hasOlder: { ...this.snapshot.hasOlder, [conversationId]: st.hasOlder },
     });
   }
@@ -2390,6 +2468,9 @@ export class MessagingEngine {
     );
     st.applyOlderPage(page.messages, page.nextBeforeSequence);
     this.renderManaged(conversationId);
+    // Older messages show their reactions too (opening the chat loads only the newest 30).
+    const ids = page.messages.filter((m) => m.lifecycle === "ACTIVE").map((m) => m.messageId);
+    if (ids.length) void this.loadReactions(conversationId, ids).catch(() => {});
   }
 
   /** Opening a conversation: sync, pins and the newest messages' reactions (MANAGED). */
@@ -2498,6 +2579,57 @@ export class MessagingEngine {
     this.renderManaged(conversationId);
   }
 
+  /**
+   * Search every chat (WhatsApp's search box): the server searches server-stored chats; the
+   * messages of older encrypted chats loaded on this device are searched here.
+   */
+  async searchAll(q: string): Promise<(SearchHit & { conversationId: string })[]> {
+    const query = q.trim();
+    if (query.length < 2) return [];
+    const needle = query.toLocaleLowerCase();
+    const local = [...this.server.values()]
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE")
+      .flatMap((c) => (this.snapshot.messages[c.conversationId] ?? [])
+        .filter((m) => m.sequence !== null && m.text?.toLocaleLowerCase().includes(needle))
+        .map((m) => ({ conversationId: c.conversationId, messageId: m.key, sequence: m.sequence!, senderPrincipalId: m.senderPrincipalId ?? "", createdAt: m.createdAt ?? "", text: m.text })));
+    const r = await relay<{ results: ManagedServerMessage[] }>("GET", `v1/messaging/search?q=${encodeURIComponent(query.slice(0, 200))}&limit=30`).catch(() => ({ results: [] as ManagedServerMessage[] }));
+    const remote = r.results.map((m) => ({ conversationId: m.conversationId, messageId: m.messageId, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId, createdAt: m.createdAt, text: m.managed?.text ?? null }));
+    return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
+  }
+
+  /** People banned from a group (admins): removed, and can't be added back until unbanned. */
+  bans(conversationId: string): Promise<{ principalId: string; reason: string | null; bannedAt: string }[]> {
+    return relay<{ bans: { principalId: string; reason: string | null; bannedAt: string }[] }>("GET", `v1/conversations/${conversationId}/bans`).then((r) => r.bans ?? []);
+  }
+  async ban(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/bans`, { principalId });
+    await this.refreshConversations();
+  }
+  unban(conversationId: string, principalId: string): Promise<unknown> {
+    return relay("DELETE", `v1/conversations/${conversationId}/bans/${principalId}`);
+  }
+
+  /** Groups someone added you to that wait for your answer (newest first). */
+  async groupInvitations(): Promise<{ conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[]> {
+    const r = await relay<{ invitations: { conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[] }>("GET", "v1/messaging/invitations");
+    const missing = [...new Set(r.invitations.map((i) => i.invitedByPrincipalId).filter((p): p is string => !!p && !this.snapshot.names[p]))];
+    if (missing.length) {
+      try {
+        const n = await identityApi.names(missing.slice(0, 256));
+        const names = { ...this.snapshot.names };
+        for (const p of n.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        this.set({ names });
+      } catch { /* names are cosmetic */ }
+    }
+    return r.invitations;
+  }
+
+  /** Join (or turn down) a group you were invited to; joined chats appear in the list. */
+  async answerGroupInvitation(conversationId: string, accept: boolean): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/invitation/${accept ? "accept" : "decline"}`, {});
+    await this.refreshConversations();
+  }
+
   /** MANAGED server search; PRIVATE_E2EE content is searched on this device only. */
   async search(conversationId: string, q: string): Promise<SearchHit[]> {
     const conv = this.server.get(conversationId);
@@ -2529,6 +2661,10 @@ export class MessagingEngine {
 
   private onTyping(conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number): void {
     if (principalId === this.snapshot.identity?.principalId) return;
+    // Someone typing is online right now.
+    if (state === "started" && this.snapshot.presence[conversationId]?.[principalId]?.online === false) {
+      this.set({ presence: { ...this.snapshot.presence, [conversationId]: { ...this.snapshot.presence[conversationId], [principalId]: { online: true, lastSeenAt: new Date().toISOString() } } } });
+    }
     const key = `${conversationId}:${principalId}`;
     const existing = this.typingTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -2581,7 +2717,8 @@ export class MessagingEngine {
   /** Sends every due MANAGED outbox item (serialized; offline: waits for `online`). */
   private flush(): Promise<number> {
     if (!this.outbox || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve(0);
-    if (this.flushing) return this.flushing;
+    // A run in progress may already be past what was just queued (or just unheld): go again after it.
+    if (this.flushing) { this.flushAgain = true; return this.flushing; }
     const outbox = this.outbox;
     const run = flushOutbox(outbox, async (item) => {
       const msg = await relay<ManagedServerMessage>("POST", `v1/conversations/${item.conversationId}/messages`, {
@@ -2594,14 +2731,25 @@ export class MessagingEngine {
       st.applyMessages([msg]);
       this.renderManaged(item.conversationId);
       this.bumpConversation(item.conversationId, st);
-    }).finally(() => {
+    }, 50, (item) => this.fileSendingBefore(item.conversationId, item.createdAt)).finally(() => {
       if (this.flushing === run) this.flushing = null;
+      if (this.flushAgain) { this.flushAgain = false; void this.flush(); }
     });
     this.flushing = run;
     return run;
   }
 
   // ------------------------------------------------------------------- send
+
+  /**
+   * A photo or file sent before this time is still uploading: text after it waits, so it never
+   * overtakes it — for up to two minutes, so a stalled upload can't hold the chat's text back.
+   */
+  private fileSendingBefore(conversationId: string, createdAt: string): boolean {
+    const since = Date.now() - 120_000;
+    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt && Date.parse(m.createdAt ?? "") > since);
+  }
+  private flushAgain = false;
 
   private addPending(conversationId: string, view: MessageView): void {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
@@ -2699,7 +2847,7 @@ export class MessagingEngine {
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
     await this.sync(conversationId);
   }
@@ -2822,8 +2970,10 @@ export class MessagingEngine {
       this.settlePending(conversationId, key, null);
     } catch (e) {
       this.failedFiles.set(key, { file, durationMs, caption });
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
+    // Text typed after this file was waiting for it.
+    if (conv.securityProfile === "MANAGED") void this.flush();
     await this.sync(conversationId);
   }
 
