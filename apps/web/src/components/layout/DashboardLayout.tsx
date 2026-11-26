@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { MessagingEngineProvider } from "@/components/messaging/MessagingEngineProvider";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
@@ -54,6 +55,7 @@ export default function DashboardLayout({
 
   return (
     <WorkspaceProvider>
+     <MessagingEngineProvider>
       <div className="flex h-screen overflow-hidden bg-background">
         {/* Desktop / tablet rail */}
         <div className="hidden md:block">
@@ -71,6 +73,7 @@ export default function DashboardLayout({
         <CommandPalette />
         <Toaster />
       </div>
+     </MessagingEngineProvider>
     </WorkspaceProvider>
   );
 }

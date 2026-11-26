@@ -1113,6 +1113,21 @@ export class MessagingEngine {
     this.presenceTimer = setInterval(ask, 20_000);
   }
 
+  /** Applies read / delivery receipts among `events`; whether any was found. */
+  private noteReceiptEvents(conversationId: string, events: readonly ConversationEvent[]): boolean {
+    let any = false;
+    for (const e of events) {
+      if (e.type !== "read.cursor.updated" && e.type !== "delivery.cursor.updated") continue;
+      const d = (e.data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId !== "string") continue;
+      this.noteReceipt(conversationId, d.principalId,
+        typeof d.readSequence === "number" ? d.readSequence : undefined,
+        typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+      any = true;
+    }
+    return any;
+  }
+
   private noteReceipt(conversationId: string, principalId: string, read?: number, delivered?: number): void {
     let byMember = this.receipts.get(conversationId);
     if (!byMember) this.receipts.set(conversationId, (byMember = new Map()));
@@ -2189,6 +2204,8 @@ export class MessagingEngine {
         await this.resnapshotManaged(conv);
       }
       const refresh = st.applyEvents(page.events);
+      // Receipts caught up here count like live ones (delivered ticks were lost otherwise).
+      if (this.noteReceiptEvents(id, page.events)) this.refreshTicks(id);
       this.afterManagedChange(conv, refresh);
       after = Math.max(after, page.nextAfter ?? after, st.eventCursor ?? 0);
       if (!page.hasMore || !page.events.length) break;

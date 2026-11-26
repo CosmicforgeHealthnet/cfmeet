@@ -221,6 +221,22 @@ async function journey() {
   }
   step("real-time send and receive", { messages: 6 });
 
+  // ---- 3b. Ticks as on WhatsApp: ✓✓ as soon as Bob's browser has the message, wherever
+  //          he is in CF Meet (his chat closed), and read only once he opens the chat.
+  await bob.page.goto(`${BASE}/dashboard`, { waitUntil: "load" });
+  await bob.page.waitForTimeout(1500);
+  const away = `${SECRET} while bob is on another page`;
+  await type(alice.page, away);
+  const awayBubble = alice.page.locator("[data-testid=message]", { hasText: away }).first();
+  await timed("delivered-tick", () => alice.page.locator("[data-testid=message][data-receipt=delivered]", { hasText: away }).first().waitFor({ timeout: T }));
+  assert.equal(await awayBubble.getAttribute("data-receipt"), "delivered", "delivered, not read, while Bob has not opened the chat");
+  await bob.page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
+  await ready(bob.page);
+  await openChat(bob.page);
+  await shown(bob.page, away);
+  await timed("read-tick", () => alice.page.locator("[data-testid=message][data-receipt=read]", { hasText: away }).first().waitFor({ timeout: T }));
+  step("ticks: delivered away from the chat, read when opened", {});
+
   // ---- 4. A burst: written quickly, delivered in order, and each message no slower
   //         late in the chat than early on.
   const burst = Array.from({ length: BURST }, (_, i) => `${SECRET} burst ${String(i).padStart(3, "0")}`);

@@ -66,16 +66,21 @@ import {
 } from "@/lib/communications/comms-core";
 import type { TimelineCallCard, TimelineMeetingCard } from "@/types/communications";
 import MessagingDevicesPanel from "./MessagingDevicesPanel";
+import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 import { authService } from "@/services/auth.service";
 
 function useEngine(): MessagingEngine {
-  // One engine per mounted page (lazy state initializer, never re-created on render).
-  const [engine] = useState(() => new MessagingEngine());
+  // The app-wide engine (live on every page of the signed-in app); a page-local one only
+  // where no provider exists.
+  const shared = useSharedMessagingEngine();
+  const [own] = useState(() => (shared ? null : new MessagingEngine()));
+  const engine = shared ?? own!;
   const router = useRouter();
   useEffect(() => {
-    void engine.start();
-    return () => engine.stop();
-  }, [engine]);
+    if (!own) return;
+    void own.start();
+    return () => own.stop();
+  }, [own]);
   useEffect(() => {
     // A sign-in too old to register this browser: hand over to the standard sign-in flow
     // (no Messaging activation step); the login page returns here afterwards.
@@ -635,6 +640,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
     <li
       data-testid="message"
       data-state={m.state}
+      data-receipt={mine ? m.receipt ?? undefined : undefined}
       data-mine={mine ? "true" : "false"}
       data-message-id={m.messageId ?? undefined}
       className={cn("group/msg relative flex items-end gap-2 rounded-xl transition-colors duration-700", mine ? "flex-row-reverse" : "flex-row", first ? "mt-3" : "mt-0.5", highlight && "bg-primary/15")}
