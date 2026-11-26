@@ -1357,6 +1357,9 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat, onOpenStar
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
   const [forwarding, setForwarding] = useState<MessageView | null>(null);
   const [infoFor, setInfoFor] = useState<MessageView | null>(null);
+  // In bubbles (quotes, reactions) your own messages are "You", as on WhatsApp.
+  const myId = s.identity?.principalId;
+  const bubbleNames = useMemo(() => (myId ? { ...s.names, [myId]: "You" } : s.names), [s.names, myId]);
   // The chat's photos, in order, for the viewer's previous / next.
   const [viewing, setViewing] = useState<number | null>(null);
   const photos = useMemo(() => messages
@@ -1513,7 +1516,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat, onOpenStar
                   {divider && m.key === divider ? (
                     <li className="my-3 flex justify-center" data-testid="unread-divider"><span className="rounded-full bg-background/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm ring-1 ring-border">{unreadAtOpen === 1 ? "1 unread message" : `${unreadAtOpen} unread messages`}</span></li>
                   ) : null}
-                  <MessageBubble m={m} managed={managed} names={s.names} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
+                  <MessageBubble m={m} managed={managed} names={bubbleNames} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
                     onDownload={() => { setError(null); void download(m).catch(fail); }}
                     loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType) || isPlayableVideo(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
                     cachedMedia={engine.cachedMediaUrl(m)}

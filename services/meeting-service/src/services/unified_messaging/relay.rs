@@ -766,6 +766,28 @@ pub fn native_public_path(method: &str, template: &str) -> Option<String> {
 }
 
 /// A relayed request (the handler parsed it; nothing here is trusted for identity).
+/// The allowlisted client path as forwarded to Messaging: decoded once, then every non-ASCII
+/// byte percent-encoded (upper-case hex). An emoji reaction segment reaches Messaging as
+/// `%F0%9F%91%8D` whichever form the client sent; ASCII stays as it is (the allowlist
+/// already refused `%`, `/` and dots inside a reaction).
+fn forwarded_path(path: &str) -> String {
+    let decoded = urlencoding::decode(path)
+        .map(|d| d.into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    let mut out = String::with_capacity(decoded.len());
+    for c in decoded.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    out
+}
+
 pub struct RelayRequest<'a> {
     pub method: Method,
     pub path: &'a str,
@@ -808,7 +830,7 @@ impl UnifiedMessaging {
                 Peer::Messaging,
                 Some(acting),
                 req.method,
-                &format!("/internal/v1/delegated/{}", req.path),
+                &format!("/internal/v1/delegated/{}", forwarded_path(req.path)),
                 &query,
                 &headers,
                 body.as_ref(),
@@ -1066,6 +1088,18 @@ mod tests {
     use super::*;
 
     const C: &str = "6f1d2c3b-4a59-4e68-9f70-8a91b2c3d4e5";
+
+    #[test]
+    fn emoji_reactions_are_forwarded_percent_encoded() {
+        let encoded = "v1/conversations/c/messages/m/reactions/%F0%9F%91%8D";
+        assert_eq!(forwarded_path(encoded), encoded);
+        assert_eq!(
+            forwarded_path("v1/conversations/c/messages/m/reactions/\u{1F44D}"),
+            encoded,
+            "a raw emoji is encoded"
+        );
+        assert_eq!(forwarded_path("v1/conversations"), "v1/conversations");
+    }
 
     #[test]
     fn only_end_user_operations_are_relayed() {
