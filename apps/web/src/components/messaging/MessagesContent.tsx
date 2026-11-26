@@ -640,6 +640,13 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
 }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  // ↑ in an empty composer edits your last message (WhatsApp / Slack).
+  useEffect(() => {
+    if (!m.mine || !m.messageId || m.text === null) return;
+    const onEdit = (e: Event) => { if ((e as CustomEvent<string>).detail === m.messageId) setEditing(m.text ?? ""); };
+    window.addEventListener(EDIT_EVENT, onEdit);
+    return () => window.removeEventListener(EDIT_EVENT, onEdit);
+  }, [m.mine, m.messageId, m.text]);
   // Private chats get the same actions as managed ones (the server holds no content, only ids).
   const live = !!m.messageId && (m.state === "delivered" || m.state === "sent");
   const mine = m.mine;
@@ -717,7 +724,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             ) : null}
             {editing !== null ? (
               <form className="flex min-w-56 flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void actions.edit(editing).then(() => setEditing(null)); }}>
-                <input autoFocus className="min-w-0 rounded-lg bg-background px-2.5 py-1.5 text-sm text-foreground outline-none" aria-label="Edit message" value={editing} maxLength={16384} onChange={(e) => setEditing(e.target.value)} data-testid="edit-input" />
+                <input autoFocus className="min-w-0 rounded-lg bg-background px-2.5 py-1.5 text-sm text-foreground outline-none" aria-label="Edit message" value={editing} maxLength={16384} onChange={(e) => setEditing(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setEditing(null); } }} data-testid="edit-input" />
                 <span className="flex justify-end gap-2 text-xs font-semibold">
                   <button type="button" className="rounded-full px-2.5 py-1 hover:bg-white/15" onClick={() => setEditing(null)}>Cancel</button>
                   <button type="submit" className="rounded-full bg-background px-2.5 py-1 text-foreground" data-testid="edit-save">Save</button>
@@ -745,7 +752,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
 
           {/* Hover actions (Teams / Slack): react, reply, more */}
           {live ? (
-            <div className={cn("flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100", menu && "opacity-100", mine ? "order-first" : "")}>
+            <div className={cn("flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100 [@media(hover:none)]:opacity-100", menu && "opacity-100", mine ? "order-first" : "")}>
               <Popover.Root>
                 <Popover.Trigger asChild><button type="button" aria-label="React" className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><SmilePlus className="size-4" /></button></Popover.Trigger>
                 <Popover.Portal>
@@ -1754,8 +1761,14 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
                   if (mentionQuery !== null && mentionOptions.length && (e.key === "Enter" || e.key === "Tab")) { e.preventDefault(); pickMention(mentionOptions[0]); return; }
                   if (mentionQuery !== null && e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
-                  // Esc cancels a reply first (WhatsApp).
+                  // Esc cancels a reply first (WhatsApp), then closes an open panel.
                   else if (e.key === "Escape" && replyTo) { e.preventDefault(); setReplyTo(null); }
+                  else if (e.key === "Escape" && (details || searching)) { e.preventDefault(); setDetails(false); setSearching(false); }
+                  // ↑ in an empty composer: edit your last message.
+                  else if (e.key === "ArrowUp" && !text && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                    const last = [...messages].reverse().find((x) => x.mine && x.messageId && x.text !== null && (x.state === "delivered" || x.state === "sent") && (!x.rich || x.rich.kind === "link"));
+                    if (last?.messageId) { e.preventDefault(); window.dispatchEvent(new CustomEvent(EDIT_EVENT, { detail: last.messageId })); }
+                  }
                 }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
@@ -1794,6 +1807,9 @@ export default function MessagesContent() {
   }
   return <PersonalMessages />;
 }
+
+/** Window event: open the editor of one of your messages (detail: its messageId). */
+const EDIT_EVENT = "cfmeet:edit-message";
 
 type ListFilter = "ALL" | "UNREAD" | "STATUS" | "GROUPS" | "PRIVATE_E2EE";
 
