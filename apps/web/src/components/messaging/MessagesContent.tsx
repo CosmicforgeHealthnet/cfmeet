@@ -369,6 +369,42 @@ function usePeoplePicker(enabled: boolean, search: string) {
   return { people, pending, error, heading, retry: () => void (contactsUsable ? contacts.refetch() : directory.refetch()) };
 }
 
+/** WhatsApp's "Add member" in group info: search your contacts / colleagues and tap to add. */
+function AddPeople({ onAdd }: { onAdd: (p: { kind: "contact" | "colleague"; value: string }) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const picker = usePeoplePicker(open, search);
+  if (!open) {
+    return (
+      <button type="button" data-testid="add-member" onClick={() => setOpen(true)}
+        className="mt-3 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-muted">
+        <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground"><UserPlus className="size-4" /></span>
+        Add member
+      </button>
+    );
+  }
+  return (
+    <div className="mt-3 rounded-xl ring-1 ring-border" data-testid="add-member-picker">
+      <input autoFocus aria-label="Search people to add" placeholder="Search name" value={search} onChange={(e) => setSearch(e.target.value)}
+        className="h-10 w-full rounded-t-xl bg-transparent px-3 text-sm outline-none" />
+      <ul className="max-h-60 overflow-y-auto border-t border-border">
+        {picker.pending ? <li className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground"><Spinner /> Loading…</li> : null}
+        {!picker.pending && picker.people.length === 0 ? <li className="px-3 py-3 text-sm text-muted-foreground">{search ? "No one matches." : "No one to add yet."}</li> : null}
+        {picker.people.map((p) => (
+          <li key={p.id}>
+            <button type="button" data-testid="add-member-person" data-name={p.name} onClick={() => { onAdd(p); setOpen(false); setSearch(""); }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted">
+              <Avatar name={p.name} seed={p.id} size="size-9" />
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => setOpen(false)} className="w-full border-t border-border py-2 text-xs font-semibold text-muted-foreground hover:bg-muted">Cancel</button>
+    </div>
+  );
+}
+
 /* ─── New chat ────────────────────────────────────────────────────────── */
 
 type Step = "chat" | "members" | "name";
@@ -848,6 +884,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
               );
             })}
           </ul>
+          {isGroup ? <AddPeople onAdd={(p) => run(p.kind === "contact" ? engine.addMemberByCfMeetId(conversation.id, p.value) : engine.addMember(conversation.id, p.value))} /> : null}
           {isGroup ? (
             <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (normalized) run(engine.addMemberByCfMeetId(conversation.id, normalized).then(() => setCfMeetId(""))); }}>
               <input aria-label="Add a contact by CF Meet ID" placeholder="Add by CF Meet ID" value={cfMeetId} maxLength={40} onChange={(e) => setCfMeetId(e.target.value)} className={field} data-testid="add-member-id" />
