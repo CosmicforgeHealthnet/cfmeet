@@ -3313,20 +3313,29 @@ async fn cfmeet_uploaders_have_a_daily_volume() {
 
 #[tokio::test]
 async fn managed_media_is_a_delivery_copy_deleted_after_retention() {
-    let Some(e) = env_retaining(14).await else { return };
+    let Some(e) = env_retaining(14).await else {
+        return;
+    };
     let c = e.h.customer(ALL_SCOPES);
     e.policy(&c, json!({})).await;
     let (conv, people) = e.managed_group(&c, 2).await;
     let (alice, bob) = (people[0], people[1]);
     let id = cid(&conv);
     let up = e
-        .managed_upload(&c, &conv, alice, "IMAGE", "image/png", "photo.png", &png(800))
+        .managed_upload(
+            &c,
+            &conv,
+            alice,
+            "IMAGE",
+            "image/png",
+            "photo.png",
+            &png(800),
+        )
         .await;
     assert_eq!(up.json["state"], "READY", "{}", up.text);
     let aid = up.json["attachmentId"].clone();
-    let sent = e
-        .h
-        .post(
+    let sent =
+        e.h.post(
             &c,
             Some(alice),
             &format!("/v1/conversations/{id}/messages"),
@@ -3355,10 +3364,18 @@ async fn managed_media_is_a_delivery_copy_deleted_after_retention() {
         ))
         .await;
     assert_eq!(state, 1, "deleted for retention");
-    let listed = e
-        .h
-        .get(&c, Some(bob), &format!("/v1/conversations/{id}/messages?afterSequence=0&limit=50"))
+    let listed =
+        e.h.get(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{id}/messages?afterSequence=0&limit=50"),
+        )
         .await;
     assert_eq!(listed.status, StatusCode::OK, "{}", listed.text);
-    assert!(listed.text.contains(sent.json["messageId"].as_str().unwrap()), "the message itself is kept");
+    assert!(
+        listed
+            .text
+            .contains(sent.json["messageId"].as_str().unwrap()),
+        "the message itself is kept"
+    );
 }
