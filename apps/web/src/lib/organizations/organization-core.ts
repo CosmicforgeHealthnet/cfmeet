@@ -328,7 +328,12 @@ const RETURN_PATHS = [
   /^\/developers(\/[A-Za-z0-9_\-/]*)?$/,
 ];
 
+/** The OAuth consent page keeps the app's request (its query) across sign-in. */
+const OAUTH_RETURN = /^\/oauth\/authorize\?[A-Za-z0-9_\-.~%=&+]{1,1800}$/;
+
 export function safeReturnPath(value: string | null | undefined): string | null {
-  if (!value || value.length > 200 || !value.startsWith("/") || value.startsWith("//")) return null;
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  if (OAUTH_RETURN.test(value)) return value;
+  if (value.length > 200) return null;
   return RETURN_PATHS.some((p) => p.test(value)) ? value : null;
 }

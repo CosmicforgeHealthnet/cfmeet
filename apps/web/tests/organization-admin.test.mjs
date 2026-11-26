@@ -159,6 +159,14 @@ test("invitation tokens come only from the fragment and are bounded; return path
   assert.equal(safeReturnPath("//evil.example"), null);
   assert.equal(safeReturnPath("https://evil.example"), null);
   assert.equal(safeReturnPath("/login?x=1"), null);
+  // The OAuth consent page keeps the app's request across sign-in, and nothing else.
+  const consent = "/oauth/authorize?client_id=3f2a&redirect_uri=https%3A%2F%2Fapp.example%2Fcb&scope=profile%3Aread&state=xyz&code_challenge=abc-DEF_123&code_challenge_method=S256";
+  assert.equal(safeReturnPath(consent), consent);
+  assert.equal(safeReturnPath("/oauth/authorize"), null, "the query is required");
+  assert.equal(safeReturnPath("/oauth/authorize?x=1#frag"), null);
+  assert.equal(safeReturnPath("/oauth/authorize?x=<script>"), null);
+  assert.equal(safeReturnPath("/oauth/authorizeX?x=1"), null);
+  assert.equal(safeReturnPath(`/oauth/authorize?${"a".repeat(1900)}`), null, "bounded length");
 });
 
 // ---- workspace context ------------------------------------------------------------------
