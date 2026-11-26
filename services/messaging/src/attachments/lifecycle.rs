@@ -93,6 +93,7 @@ pub struct LifecycleReport {
     pub derivatives_deferred: usize,
     pub expired_intents: usize,
     pub abandoned: usize,
+    pub media_expired: usize,
     pub rescanned: usize,
     pub deleted_objects: usize,
     pub held: usize,
@@ -205,6 +206,41 @@ pub async fn expire_unlinked(state: &AppState, batch: i64) -> Result<usize> {
                 .transaction::<_, bool, Error>(move |txn| {
                     Box::pin(async move {
                         delete_attachment(txn, &row, "ABANDONED_UPLOAD", st.now()).await
+                    })
+                })
+                .await
+                .map_err(Error::from)?,
+        );
+    }
+    Ok(n)
+}
+
+/// MANAGED media is kept on the server only as a delivery copy (product decision,
+/// 26 November 2026): once `managed_media_retention` has passed since upload, the
+/// attachment is deleted and its object queued for removal (a legal hold keeps it).
+/// The message itself stays; PRIVATE_E2EE attachments are not touched.
+pub async fn expire_managed_media(state: &AppState, batch: i64) -> Result<usize> {
+    let Some(retention) = state.attachments.managed_media_retention else {
+        return Ok(0);
+    };
+    let cutoff = state.now() - retention;
+    let due: Vec<AttachmentRow> = db::all(
+        &state.db,
+        &format!(
+            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE state = 'READY' AND security_profile = 'MANAGED'                AND message_id IS NOT NULL AND state_changed_at <= $1 ORDER BY state_changed_at LIMIT $2"
+        ),
+        vec![cutoff.into(), batch.into()],
+    )
+    .await?;
+    let mut n = 0;
+    for row in due {
+        let st = state.clone();
+        n += usize::from(
+            state
+                .db
+                .transaction::<_, bool, Error>(move |txn| {
+                    Box::pin(async move {
+                        delete_attachment(txn, &row, "MEDIA_RETENTION", st.now()).await
                     })
                 })
                 .await
@@ -472,6 +508,7 @@ pub async fn run_once(state: &AppState) -> Result<LifecycleReport> {
     let mut r = LifecycleReport {
         expired_intents: expire_intents(state, 500).await?,
         abandoned: expire_unlinked(state, 500).await?,
+        media_expired: expire_managed_media(state, 500).await?,
         rescanned: rescan_due(state, 50).await?,
         ..Default::default()
     };
@@ -494,6 +531,7 @@ pub async fn run(state: AppState, interval: std::time::Duration) {
                     tracing::info!(
                         expired = r.expired_intents,
                         abandoned = r.abandoned,
+                        media_expired = r.media_expired,
                         deleted = r.deleted_objects,
                         held = r.held,
                         dead = r.dead,
