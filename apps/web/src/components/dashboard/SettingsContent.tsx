@@ -2,19 +2,20 @@
 
 import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, BellRing, ChevronRight, KeyRound, Laptop, Monitor, Moon, Palette, ShieldCheck, Sun, UserRound, Webhook } from "lucide-react";
+import { ArrowLeft, BellRing, ChevronRight, KeyRound, Laptop, Monitor, Moon, Palette, Plug, ShieldCheck, Sun, UserRound, Webhook } from "lucide-react";
 import { useTheme } from "next-themes";
 import ChatSettings from "@/components/account/ChatSettings";
 import AccountProfileSettings from "@/components/account/AccountProfileSettings";
 import AccountSecuritySettings from "@/components/account/AccountSecuritySettings";
 import LinkedDevices from "@/components/account/LinkedDevices";
+import ConnectedApps from "@/components/account/ConnectedApps";
 import { useAccountProfile } from "@/hooks/useAccount";
 import { useHubProfile } from "@/hooks/v2/useCommunications";
 import ApiKeysContent from "./ApiKeysContent";
 import WebhooksContent from "./WebhooksContent";
 import { cn } from "@/lib/utils";
 
-type Tab = "profile" | "security" | "devices" | "chats" | "appearance" | "api-keys" | "webhooks";
+type Tab = "profile" | "security" | "devices" | "apps" | "chats" | "appearance" | "api-keys" | "webhooks";
 /** `desktopOnly`: on a phone the profile card at the top is the way in (no second "Profile" row). */
 type Item = { id: Tab; label: string; hint: string; icon: typeof UserRound; tint: string; desktopOnly?: boolean };
 
@@ -25,6 +26,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { id: "profile", label: "Profile", hint: "Photo, name, email, your data", icon: UserRound, tint: "bg-[#006BFF]", desktopOnly: true },
       { id: "security", label: "Privacy & security", hint: "Two-step sign-in, where you're signed in", icon: ShieldCheck, tint: "bg-emerald-600" },
       { id: "devices", label: "Linked devices", hint: "Browsers and phones on your account", icon: Laptop, tint: "bg-violet-600" },
+      { id: "apps", label: "Connected apps", hint: "Apps you allowed to use your account", icon: Plug, tint: "bg-cyan-600" },
     ],
   },
   {
@@ -107,6 +109,7 @@ function Settings() {
           {current.id === "profile" && <AccountProfileSettings />}
           {current.id === "security" && <AccountSecuritySettings />}
           {current.id === "devices" && <LinkedDevices />}
+          {current.id === "apps" && <ConnectedApps />}
           {current.id === "chats" && <ChatSettings />}
           {current.id === "appearance" && <Appearance />}
           {current.id === "api-keys" && <ApiKeysContent />}
