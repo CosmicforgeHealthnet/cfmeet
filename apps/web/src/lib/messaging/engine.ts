@@ -1675,6 +1675,30 @@ export class MessagingEngine {
    * S11: forward a message. MANAGED → MANAGED goes through the server (it copies the message);
    * anything private is re-sent from this device as a new message (the server can't read it).
    */
+  /**
+   * WhatsApp's Forward: one message to several chats (or people, whose direct chat is opened
+   * or created), with an optional note after it. Text goes through the server's forward
+   * (marked Forwarded); a photo, file or voice note is downloaded once and sent again to each
+   * chat, since the server doesn't copy attachments. Returns the chats it reached.
+   */
+  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<string[]> {
+    const reached: string[] = [];
+    let media: File | null = null;
+    if (message.file?.attachmentId) {
+      const { blob, name } = await this.download(sourceId, message);
+      media = new File([blob], message.file.name || name, { type: message.file.mediaType || blob.type || "application/octet-stream" });
+    }
+    for (const t of targets) {
+      const id = t.conversationId
+        ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
+      if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
+      else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
+      if (note?.trim()) await this.send(id, note.trim());
+      reached.push(id);
+    }
+    return reached;
+  }
+
   async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
     const source = this.server.get(sourceId);
     const target = this.server.get(targetId);

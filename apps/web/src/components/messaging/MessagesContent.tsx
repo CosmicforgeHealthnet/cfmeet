@@ -41,11 +41,10 @@ import { cn } from "@/lib/utils";
 import { MessagingEngine, type ConversationView, type MessageView, type SearchHit, type SecurityProfile } from "@/lib/messaging/engine";
 import { mergeTimeline, type TimelineCard } from "@/lib/messaging/managed-store";
 import { attachmentKind, chatPreview, type AttachmentKind } from "@/lib/messaging/e2ee-membership";
-import { useMessagingDirectory, useMessagingDevices, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
-import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubContacts, useHubInbox } from "@/hooks/v2/useCommunications";
+import { useMessagingDevices, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
+import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubInbox } from "@/hooks/v2/useCommunications";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import OrganizationMessages from "@/components/messaging/OrganizationMessages";
-import { organizationsService } from "@/services/v2/organizations.service";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
@@ -54,11 +53,7 @@ import {
   attachmentAvailability,
   attachmentSizeRefusal,
   callHref,
-  colleaguesOfOrganization,
   communicationsAreas,
-  connectedContacts,
-  contactLabel,
-  conversationPeopleSource,
   formatDuration,
   meetingJoinHref,
   meetingShareLine,
@@ -68,6 +63,7 @@ import type { TimelineCallCard, TimelineMeetingCard } from "@/types/communicatio
 import MessagingDevicesPanel from "./MessagingDevicesPanel";
 import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 import { EmojiPicker } from "./EmojiPicker";
+import { usePeoplePicker } from "./people-picker";
 import { authService } from "@/services/auth.service";
 
 function useEngine(): MessagingEngine {
@@ -336,38 +332,6 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
  * automatically a contact). When the Hub is not available in Personal, the colleague
  * directory is offered instead, labelled as such.
  */
-function usePeoplePicker(enabled: boolean, search: string) {
-  const workspace = useWorkspace();
-  const source = conversationPeopleSource(workspace.kind);
-  const capabilities = useHubCapabilities();
-  const areas = communicationsAreas(capabilities.data);
-  const contactsUsable = source === "contacts" && areas.contacts;
-  const contacts = useHubContacts(enabled && contactsUsable);
-  const colleaguesWanted = enabled && (source === "colleagues" || (!capabilities.isPending && !contactsUsable));
-  const directory = useMessagingDirectory(search, colleaguesWanted);
-  const orgId = workspace.kind === "ORGANIZATION" ? workspace.organizationId : null;
-  const members = useQuery({
-    queryKey: ["workspace", orgId ?? "personal", "members"],
-    queryFn: () => organizationsService.listMembers(orgId!),
-    enabled: colleaguesWanted && !!orgId,
-    retry: false,
-  });
-  const colleagues = orgId ? colleaguesOfOrganization(directory.data?.people ?? [], members.data) : (directory.data?.people ?? []);
-  const needle = search.trim().toLocaleLowerCase();
-  const people = contactsUsable
-    ? connectedContacts(contacts.data ?? [])
-        .filter((c) => !needle || contactLabel(c).toLocaleLowerCase().includes(needle))
-        .map((c) => ({ id: `cf:${c.cfMeetId}`, name: contactLabel(c), kind: "contact" as const, value: c.cfMeetId }))
-    : colleagues.map((p) => ({ id: `u:${p.userId}`, name: p.displayName, kind: "colleague" as const, value: p.userId }));
-  const pending = contactsUsable ? contacts.isPending : directory.isPending || (!!orgId && members.isPending);
-  const error = contactsUsable ? contacts.error : (directory.error ?? members.error);
-  const heading = contactsUsable
-    ? "Your contacts"
-    : orgId
-      ? `Colleagues in ${workspace.workspace?.displayName ?? "this organization"}`
-      : "Colleagues in your organizations";
-  return { people, pending, error, heading, retry: () => void (contactsUsable ? contacts.refetch() : directory.refetch()) };
-}
 
 /** WhatsApp's "Add member" in group info: search your contacts / colleagues and tap to add. */
 function AddPeople({ onAdd }: { onAdd: (p: { kind: "contact" | "colleague"; value: string }) => void }) {
@@ -791,6 +755,8 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                 </Popover.Portal>
               </Popover.Root>
               <button type="button" aria-label="Reply" className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" onClick={actions.reply}><CornerUpLeft className="size-4" /></button>
+              {/* WhatsApp's quick forward arrow. */}
+              <button type="button" aria-label="Forward" data-testid="quick-forward" className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" onClick={actions.forward}><Forward className="size-4" /></button>
               <Popover.Root open={menu} onOpenChange={setMenu}>
                 <Popover.Trigger asChild><button type="button" aria-label="Message actions" aria-expanded={menu} data-testid="message-actions" className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><MoreHorizontal className="size-4" /></button></Popover.Trigger>
                 <Popover.Portal>
@@ -1224,7 +1190,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
     [engine, conversation.id],
   );
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
-  const [forwarding, setForwarding] = useState<{ messageId: string | null; text: string | null } | null>(null);
+  const [forwarding, setForwarding] = useState<MessageView | null>(null);
   const [infoFor, setInfoFor] = useState<MessageView | null>(null);
   // The chat's photos, in order, for the viewer's previous / next.
   const [viewing, setViewing] = useState<number | null>(null);
@@ -1241,7 +1207,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
   const savedIds = useMemo(() => new Map((saved.data?.data ?? []).map((x) => [x.messageId, x.savedId])), [saved.data]);
   const bubbleActions = (m: MessageView): BubbleActions => ({
-    forward: () => setForwarding({ messageId: m.messageId ?? null, text: m.text }),
+    forward: () => setForwarding(m),
     info: m.mine && m.sequence != null ? () => setInfoFor(m) : undefined,
     report: () => { if (m.messageId) setReporting({ messageId: m.messageId, text: m.text }); },
     reply: () => { setReplyTo(m); composer.current?.focus(); },
