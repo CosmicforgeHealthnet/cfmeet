@@ -939,9 +939,21 @@ pub async fn revoke(
     Ok(revoked)
 }
 
-/// Counts one directory / proof lookup of the credential (anti-enumeration bound).
-pub async fn directory_lookup_allowed(state: &AppState, ctx: &TrustedContext) -> Result<()> {
-    let key = format!("directory:{}", ctx.credential_id.simple());
+/// Counts one directory / proof lookup (anti-enumeration bound). The bound is per
+/// credential, except for FIRST_PARTY clients (CF Meet's own apps): their requests are
+/// relayed through one service account with the acting person signed into the service
+/// token, so per credential would make every CF Meet user share one budget. Those are
+/// bounded per acting person instead, at the same rate.
+pub async fn directory_lookup_allowed(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: Uuid,
+) -> Result<()> {
+    let key = if ctx.first_party {
+        format!("directory:{}:{}", ctx.credential_id.simple(), acting.simple())
+    } else {
+        format!("directory:{}", ctx.credential_id.simple())
+    };
     match limits::hit(
         &state.db,
         &key,
