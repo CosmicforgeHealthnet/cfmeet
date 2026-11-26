@@ -467,4 +467,24 @@ async function journey() {
   await alice.page.locator("[data-testid=info-read]").waitFor({ timeout: T });
   await alice.page.keyboard.press("Escape");
   step("unread badge, search in chat, message info", {});
+
+  // ---- 14. Group info, as on WhatsApp.
+  await alice.page.click("[data-testid=conversation-members-toggle]");
+  const info = alice.page.locator("[data-testid=members]");
+  await info.locator("[data-testid=info-title]", { hasText: "Weekend plans" }).waitFor({ timeout: T });
+  assert.match(await info.locator("[data-testid=info-subtitle]").innerText(), /Group · 2 members/);
+  await info.locator("[data-testid=admin-badge]").first().waitFor({ timeout: T });
+  await info.getByRole("button", { name: "Search members" }).first().click();
+  await info.locator("[data-testid=member-search]").fill(USERS.bob.name.slice(0, 4));
+  assert.equal(await info.locator("[data-testid=member-row]").count(), 1, "member search filters the list");
+  await info.locator("[data-testid=member-search]").fill("");
+  await info.locator("[data-testid=invite-link]").click();
+  await timed("invite-link", () => info.locator("[data-testid=invite-url]").waitFor({ timeout: T }));
+  assert.match(await info.locator("[data-testid=invite-url]").innerText(), /\/dashboard\/messages\/join\?token=/);
+  const [exported] = await Promise.all([alice.page.waitForEvent("download", { timeout: T }), info.locator("[data-testid=export-chat]").click()]);
+  const exportedText = readFileSync(await exported.path(), "utf8");
+  assert.ok(exportedText.includes("hello group") && exportedText.includes("Weekend plans"), "the export holds the chat");
+  await shot(alice.page, "06-group-info");
+  await info.getByRole("button", { name: "Close chat info" }).click();
+  step("group info: title, members, admin badge, member search, invite link, export", {});
 }

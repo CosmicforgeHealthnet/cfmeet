@@ -116,19 +116,20 @@ const REASONS = [
 export function ReportDialog({ engine, conversationId, message, privateChat, onClose }: {
   engine: MessagingEngine;
   conversationId: string;
-  message: { messageId: string; text: string | null };
+  /** The reported message; absent: the whole chat ("Report group"). */
+  message?: { messageId: string; text: string | null };
   privateChat: boolean;
   onClose: () => void;
 }) {
   const [reason, setReason] = useState<string>("SPAM");
   const [note, setNote] = useState("");
-  const report = useMutation({ mutationFn: () => engine.reportMessages(conversationId, [message], reason, note.trim() || undefined) });
+  const report = useMutation({ mutationFn: () => engine.reportMessages(conversationId, message ? [message] : [], reason, note.trim() || undefined) });
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{report.isSuccess ? "Thanks for reporting" : "Report message"}</DialogTitle>
-          <DialogDescription>{report.isSuccess ? "CF Meet will review it." : privateChat ? "This chat is private: reporting sends this one message to CF Meet so it can be reviewed." : "CF Meet will review this message."}</DialogDescription>
+          <DialogTitle>{report.isSuccess ? "Thanks for reporting" : message ? "Report message" : "Report group"}</DialogTitle>
+          <DialogDescription>{report.isSuccess ? "CF Meet will review it." : !message ? "CF Meet will review this group." : privateChat ? "This chat is private: reporting sends this one message to CF Meet so it can be reviewed." : "CF Meet will review this message."}</DialogDescription>
         </DialogHeader>
         {report.isSuccess ? <Button className="h-11 w-full rounded-xl" onClick={onClose}>Done</Button> : (
           <div className="space-y-3">
