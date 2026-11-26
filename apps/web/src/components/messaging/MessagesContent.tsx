@@ -1236,6 +1236,21 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
     discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); else engine.discardFile(conversation.id, m.key); },
     vote: m.messageId && m.rich?.kind === "poll" ? (choices) => { void engine.sendRich(conversation.id, { t: "vote", poll: m.messageId!, choices }).catch(fail); } : undefined,
   });
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const mentionOptions = mentionQuery === null ? [] : conversation.members
+    .filter((p) => p !== s.identity?.principalId && s.names[p] && s.names[p].toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase()))
+    .slice(0, 8);
+  const pickMention = (p: string) => {
+    const el = composer.current;
+    const caret = el?.selectionStart ?? text.length;
+    const start = text.slice(0, caret).lastIndexOf("@");
+    if (start < 0) return;
+    const inserted = `@${s.names[p]} `;
+    const next = text.slice(0, start) + inserted + text.slice(caret);
+    setText(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + inserted.length, start + inserted.length); });
+  };
   const mentions = (t: string) =>
     conversation.members.filter((p) => p !== s.identity?.principalId && s.names[p] && t.includes(`@${s.names[p]}`));
   const send = () => {
@@ -1365,6 +1380,18 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
         <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
           <div className="mx-auto max-w-3xl">
             {e2ee ? <ContinueChat engine={engine} conversation={conversation} onOpenChat={onOpenChat} /> : null}
+            {mentionQuery !== null && mentionOptions.length ? (
+              <ul className="mb-2 max-h-56 overflow-y-auto rounded-2xl border border-border bg-popover py-1 shadow-lg" data-testid="mention-picker" role="listbox" aria-label="Mention someone">
+                {mentionOptions.map((p) => (
+                  <li key={p}>
+                    <button type="button" role="option" aria-selected={false} onMouseDown={(e) => { e.preventDefault(); pickMention(p); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted" data-testid="mention-option">
+                      <Avatar name={s.names[p]} seed={p} size="size-8" />{s.names[p]}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {replyTo ? (
               <div className="mb-2 flex items-center gap-3 rounded-2xl bg-muted/60 py-2 pl-3 pr-1.5 text-sm" data-testid="reply-banner">
                 <CornerUpLeft className="size-4 shrink-0 text-primary" />
@@ -1417,8 +1444,17 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                 maxLength={16384}
                 disabled={!canSend}
                 placeholder={canSend ? "Type a message" : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
-                onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  engine.typing(conversation.id, e.target.value.length > 0);
+                  // "@" in a group opens the member list (WhatsApp), filtered by what follows.
+                  const before = e.target.value.slice(0, e.target.selectionStart ?? e.target.value.length);
+                  const at = conversation.contextClass === "GROUP" ? /(^|\s)@([^\s@]{0,30})$/.exec(before) : null;
+                  setMentionQuery(at ? at[2] : null);
+                }}
                 onKeyDown={(e) => {
+                  if (mentionQuery !== null && mentionOptions.length && (e.key === "Enter" || e.key === "Tab")) { e.preventDefault(); pickMention(mentionOptions[0]); return; }
+                  if (mentionQuery !== null && e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
                   // Esc cancels a reply first (WhatsApp).
                   else if (e.key === "Escape" && replyTo) { e.preventDefault(); setReplyTo(null); }
