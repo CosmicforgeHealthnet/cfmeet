@@ -264,6 +264,13 @@ function accountErrorCode(e: unknown): string | null {
 }
 /** How often a member device checks an encrypted group for members' new devices. */
 const DEVICE_CHECK_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_DEVICE_CHECK_MS) || 30_000);
+// Before-send device discovery runs at most this often per conversation, and a device list
+// younger than this is reused: a burst of sends must not become a burst of directory lookups.
+const SEND_DEVICE_CHECK_MS = 5_000;
+// After a failed directory lookup (rate limit, outage), lookups pause with backoff instead
+// of being retried on every incoming message.
+const DIRECTORY_BACKOFF_MS = 5_000;
+const DIRECTORY_BACKOFF_MAX_MS = 60_000;
 // Realtime origin: the configured Messaging URL, else the API origin (where production
 // routes /v1/realtime). An empty value would silently leave live updates off.
 const MESSAGING_URL = messagingRealtimeOrigin(process.env.NEXT_PUBLIC_MESSAGING_URL, process.env.NEXT_PUBLIC_API_URL);
@@ -449,6 +456,9 @@ export class MessagingEngine {
   private unclaimable = new Map<string, number>();
   /** Members' device lists (cached briefly: adding new devices before every send). */
   private deviceLists = new Map<string, { at: number; devices: ServerDevice[] }>();
+  private deviceListLoads = new Map<string, Promise<ServerDevice[]>>();
+  private directoryPausedUntil = 0;
+  private directoryBackoff = DIRECTORY_BACKOFF_MS;
   /** Automatic enrollment: in progress, and when a failed attempt may be retried. */
   private enrolling: Promise<void> | null = null;
   private nextEnrollAt = 0;
@@ -960,9 +970,23 @@ export class MessagingEngine {
   private async principalDevices(principalId: string, maxAgeMs: number): Promise<ServerDevice[]> {
     const hit = this.deviceLists.get(principalId);
     if (hit && Date.now() - hit.at < maxAgeMs) return hit.devices;
-    const devices = await this.loadDeviceDirectory(principalId);
-    this.deviceLists.set(principalId, { at: Date.now(), devices });
-    return devices;
+    // Concurrent callers share one lookup.
+    const pending = this.deviceListLoads.get(principalId);
+    if (pending) return pending;
+    if (Date.now() < this.directoryPausedUntil) throw new MessagingApiError(429, "RATE_LIMITED", "DEVICE_DIRECTORY_BACKOFF");
+    const load = this.loadDeviceDirectory(principalId).then((devices) => {
+      this.deviceLists.set(principalId, { at: Date.now(), devices });
+      this.directoryBackoff = DIRECTORY_BACKOFF_MS;
+      return devices;
+    }, (e) => {
+      if (isTransientStartError(e)) {
+        this.directoryPausedUntil = Date.now() + this.directoryBackoff / 2 + Math.random() * (this.directoryBackoff / 2);
+        this.directoryBackoff = Math.min(this.directoryBackoff * 2, DIRECTORY_BACKOFF_MAX_MS);
+      }
+      throw e;
+    }).finally(() => this.deviceListLoads.delete(principalId));
+    this.deviceListLoads.set(principalId, load);
+    return load;
   }
 
   private conversationMembers(conversationId: string): Promise<{ principalId: string; role?: string; state?: string }[]> {
@@ -1897,7 +1921,7 @@ export class MessagingEngine {
   private async addMissingDevices(conv: ServerConversation, urgent = false): Promise<void> {
     const id = conv.conversationId;
     const checks = urgent ? this.sendDeviceChecks : this.deviceChecks;
-    if ((!urgent && Date.now() - (checks.get(id) ?? 0) < DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
+    if (Date.now() - (checks.get(id) ?? 0) < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
     checks.set(id, Date.now());
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return;
@@ -1905,7 +1929,7 @@ export class MessagingEngine {
     const active = (await this.conversationMembers(id)).filter((m) => !m.state || m.state === "ACTIVE");
     let unavailable = false;
     const lookups = new Map(
-      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, 0).catch(() => {
+      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, urgent ? SEND_DEVICE_CHECK_MS : 0).catch(() => {
         unavailable = true;
         return [] as ServerDevice[];
       })] as const)),
@@ -1913,7 +1937,7 @@ export class MessagingEngine {
     const { principals: missing, deviceIds, activeInTree } = missingDevices(active, (p) => lookups.get(p) ?? [], inTree, this.snapshot.deviceId);
     const listed = [...lookups.values()].flat();
     if (unavailable) {
-      checks.delete(id);
+      // Retry on the next check after the directory backoff, never on every message.
       this.set({ detail: "Some devices are waiting for synchronization. Device discovery will retry." });
     }
     // A device without published KeyPackages (e.g. a browser whose storage was cleared) is
@@ -2862,7 +2886,6 @@ export class MessagingEngine {
     // The sender adds the others' newly registered devices before it encrypts, so the
     // message reaches every device they have (from the KeyPackages they published).
     if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {
-      this.sendDeviceChecks.delete(conversationId);
       this.set({ detail: "Some devices are waiting for synchronization. Device enrollment will retry." });
     });
     // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
