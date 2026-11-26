@@ -488,3 +488,62 @@ async function journey() {
   await info.getByRole("button", { name: "Close chat info" }).click();
   step("group info: title, members, admin badge, member search, invite link, export", {});
 }
+
+/**
+ * Phone-sized tour (screenshots only, never fails the run): the main screens at an iPhone
+ * viewport with touch, after the journey has filled the chats, so mobile layouts can be
+ * reviewed (and compared between versions) from CI artifacts.
+ */
+test("phone-sized screens (screenshots)", { timeout: 5 * 60_000 }, async () => {
+  if (!SCREENS || !USERS.bob) return;
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  try {
+    await signIn(ctx, "bob");
+    await ctx.addInitScript((u) => {
+      if (!localStorage.getItem("cosmic_user_info")) localStorage.setItem("cosmic_user_info", JSON.stringify(u));
+    }, { id: USERS.bob.id, email: USERS.bob.email, username: USERS.bob.name });
+    const page = await ctx.newPage();
+    const settle = () => page.waitForTimeout(3000);
+    const visit = async (path, name) => {
+      await page.goto(`${BASE}${path}`, { waitUntil: "load" }).catch(() => {});
+      await settle();
+      await shot(page, name);
+    };
+    await visit("/dashboard", "m01-home");
+    await visit("/dashboard/messages", "m02-chats");
+    const rows = page.locator("[data-testid=conversation-item]");
+    if (await rows.count().catch(() => 0)) {
+      await rows.first().click().catch(() => {});
+      await settle();
+      await shot(page, "m03-chat-open");
+      await page.locator("[data-testid=conversation-members-toggle]").click().catch(() => {});
+      await settle();
+      await shot(page, "m04-chat-info");
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" }).catch(() => {});
+      await settle();
+      const group = page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+      if (await group.count().catch(() => 0)) {
+        await group.click().catch(() => {});
+        await settle();
+        await shot(page, "m05-group-open");
+      }
+    }
+    await visit("/dashboard/contacts", "m06-contacts");
+    await visit("/dashboard/calls", "m07-calls");
+    await visit("/dashboard/meetings", "m08-meetings");
+    await visit("/dashboard/calendar", "m09-calendar");
+    await visit("/dashboard/organizations", "m10-organizations");
+    await visit("/dashboard/settings", "m11-settings");
+    // The app menu (mobile sidebar).
+    await page.goto(`${BASE}/dashboard`, { waitUntil: "load" }).catch(() => {});
+    await settle();
+    await page.getByRole("button", { name: /menu/i }).first().click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    await shot(page, "m12-menu");
+  } catch (e) {
+    console.log(`phone tour stopped: ${e}`);
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+});
