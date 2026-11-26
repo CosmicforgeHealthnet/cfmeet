@@ -603,6 +603,35 @@ function Ticks({ receipt, list }: { receipt: "sent" | "delivered" | "read"; list
   return <CheckCheck strokeWidth={2.75} className={cn("size-4 shrink-0", list ? "text-sky-500" : "text-[#7CFFF4] drop-shadow-[0_0_1px_rgba(0,0,0,0.35)]")} aria-label="Read" />;
 }
 
+/** WhatsApp's Message info: read by / delivered to, live while open. */
+function MessageInfo({ engine, conversationId, message, names, onClose }: { engine: MessagingEngine; conversationId: string; message: MessageView; names: Record<string, string>; onClose: () => void }) {
+  useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const rows = message.sequence != null ? engine.messageInfo(conversationId, message.sequence) : [];
+  const section = (title: string, state: "read" | "delivered" | "sent", receipt: "read" | "delivered" | "sent") => {
+    const people = rows.filter((r) => r.state === state);
+    if (!people.length) return null;
+    return (
+      <section className="space-y-1" data-testid={`info-${state}`}>
+        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Ticks receipt={receipt} list />{title}</h3>
+        <ul>{people.map((p) => <li key={p.principalId} className="flex items-center gap-3 py-1.5 text-sm"><Avatar name={names[p.principalId] ?? "CF Meet user"} seed={p.principalId} size="size-8" />{names[p.principalId] ?? "CF Meet user"}</li>)}</ul>
+      </section>
+    );
+  };
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogTitle>Message info</DialogTitle>
+        <p className="line-clamp-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">{message.text ?? message.file?.name ?? "Message"}</p>
+        <div className="space-y-4">
+          {section("Read by", "read", "read")}
+          {section("Delivered to", "delivered", "delivered")}
+          {section("Waiting", "sent", "sent")}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── Message bubble ──────────────────────────────────────────────────── */
 
 type BubbleActions = {
@@ -616,6 +645,8 @@ type BubbleActions = {
   starred: boolean;
   /** S11 / S2: forward to another chat, report a message. */
   forward: () => void;
+  /** Who your message was delivered to and read by (absent: not yours / not sent yet). */
+  info?: () => void;
   report: () => void;
   retry: () => void;
   discard: () => void;
@@ -757,6 +788,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                     <button type="button" className={item} data-testid="reply" onClick={() => { actions.reply(); setMenu(false); }}><CornerUpLeft className="size-4 text-muted-foreground" />Reply</button>
                     {m.text ? <button type="button" className={item} data-testid="copy" onClick={copy}><Copy className="size-4 text-muted-foreground" />Copy</button> : null}
                     <button type="button" className={item} data-testid="forward" onClick={() => { actions.forward(); setMenu(false); }}><Forward className="size-4 text-muted-foreground" />Forward</button>
+                    {actions.info ? <button type="button" className={item} data-testid="message-info" onClick={() => { actions.info?.(); setMenu(false); }}><Info className="size-4 text-muted-foreground" />Message info</button> : null}
                     {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
@@ -1179,12 +1211,14 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   );
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
   const [forwarding, setForwarding] = useState<{ messageId: string | null; text: string | null } | null>(null);
+  const [infoFor, setInfoFor] = useState<MessageView | null>(null);
   const [reporting, setReporting] = useState<{ messageId: string; text: string | null } | null>(null);
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
   const savedIds = useMemo(() => new Map((saved.data?.data ?? []).map((x) => [x.messageId, x.savedId])), [saved.data]);
   const bubbleActions = (m: MessageView): BubbleActions => ({
     forward: () => setForwarding({ messageId: m.messageId ?? null, text: m.text }),
+    info: m.mine && m.sequence != null ? () => setInfoFor(m) : undefined,
     report: () => { if (m.messageId) setReporting({ messageId: m.messageId, text: m.text }); },
     reply: () => { setReplyTo(m); composer.current?.focus(); },
     react: (reaction, add) => { if (m.messageId) void engine.react(conversation.id, m.messageId, reaction, add).catch(fail); },
@@ -1238,6 +1272,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
 
   return (
     <div className="relative flex h-full min-w-0">
+      {infoFor ? <MessageInfo engine={engine} conversationId={conversation.id} message={infoFor} names={s.names} onClose={() => setInfoFor(null)} /> : null}
       {forwarding ? <ForwardDialog engine={engine} conversations={s.conversations} sourceId={conversation.id} message={forwarding} onClose={() => setForwarding(null)} /> : null}
       {reporting ? <ReportDialog engine={engine} conversationId={conversation.id} message={reporting} privateChat={e2ee} onClose={() => setReporting(null)} /> : null}
       <section className="flex min-w-0 flex-1 flex-col" data-testid="conversation" data-conversation-id={conversation.id} data-profile={conversation.securityProfile}>

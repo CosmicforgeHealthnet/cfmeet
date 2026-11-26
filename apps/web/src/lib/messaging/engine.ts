@@ -1120,6 +1120,19 @@ export class MessagingEngine {
     this.presenceTimer = setInterval(ask, 20_000);
   }
 
+  /** WhatsApp's Message info: each other member's state for one of your messages. */
+  messageInfo(conversationId: string, sequence: number): { principalId: string; state: "read" | "delivered" | "sent" }[] {
+    const me = this.snapshot.identity?.principalId;
+    const byMember = this.receipts.get(conversationId);
+    return (this.server.get(conversationId)?.members ?? [])
+      .map((m) => m.principalId)
+      .filter((p) => p !== me)
+      .map((p) => {
+        const r = byMember?.get(p);
+        return { principalId: p, state: (r && r.read >= sequence ? "read" : r && r.delivered >= sequence ? "delivered" : "sent") as "read" | "delivered" | "sent" };
+      });
+  }
+
   /** Applies read / delivery receipts among `events`; whether any was found. */
   private noteReceiptEvents(conversationId: string, events: readonly ConversationEvent[]): boolean {
     let any = false;
