@@ -218,20 +218,23 @@ export async function flushOutbox(
   for (let round = 0; round < maxRounds; round++) {
     const due = outbox.due();
     if (!due.length) break;
-    let progressed = false;
-    for (const item of due) {
+    // `due` holds at most the oldest item of each conversation: conversations send in
+    // parallel (a slow chat never holds up another) and each keeps its order.
+    const outcomes = await Promise.all(due.map(async (item) => {
       outbox.markSending(item.key);
       try {
         await send(item);
         outbox.markSent(item.key);
-        sent++;
-        progressed = true;
+        return true;
       } catch (e) {
         const err = e as { status?: number; code?: string; message?: string } | null;
         const status = typeof err?.status === "number" ? err.status : 0;
         outbox.markFailed(item.key, err?.code ?? err?.message ?? "SEND_FAILED", isRetryable(status, err?.code));
+        return false;
       }
-    }
+    }));
+    const progressed = outcomes.filter(Boolean).length;
+    sent += progressed;
     if (!progressed) break;
   }
   return sent;

@@ -1348,7 +1348,14 @@ export class MessagingEngine {
    * on. Opens the server-stored chat when it already exists; the encrypted chat stays
    * readable where it is. Returns the server-stored chat's id.
    */
-  async continueAsManaged(conversationId: string): Promise<string> {
+  /** The group name "Continue chat" can carry over (null: the user must name it). */
+  knownGroupName(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.contextClass === "DIRECT") return null;
+    return view.groupTitle ?? view.serverTitle ?? null;
+  }
+
+  async continueAsManaged(conversationId: string, groupName?: string): Promise<string> {
     const me = this.snapshot.identity?.principalId;
     const view = this.snapshot.conversations.find((c) => c.id === conversationId);
     if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
@@ -1356,10 +1363,12 @@ export class MessagingEngine {
     const others = view.members.filter((m) => m !== me);
     const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
       && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
-    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? undefined;
+    // Never the member list shown when a group's name is unknown: that is not its name.
+    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || undefined);
+    if (view.contextClass !== "DIRECT" && !name) throw new MessagingApiError(0, "GROUP_NAME_REQUIRED", "Give the group a name to continue.");
     const twin = this.snapshot.conversations.find((c) => same(c) && (view.contextClass === "DIRECT" || (c.serverTitle ?? null) === (name ?? null)));
     if (twin) return twin.id;
-    return this.createConversation([], "MANAGED", { principalIds: others, title: view.contextClass === "DIRECT" ? undefined : name ?? view.title });
+    return this.createConversation([], "MANAGED", { principalIds: others, title: name });
   }
 
   /**
@@ -2220,6 +2229,19 @@ export class MessagingEngine {
   }
 
   /** Moves the conversation's list preview forward from what was just synchronized. */
+  private bumpQueued(conversationId: string, text: string, at: string): void {
+    const me = this.snapshot.identity?.principalId;
+    if (!me) return;
+    const conversations = this.snapshot.conversations.map((c) => c.id !== conversationId ? c : {
+      ...c,
+      lastActivityAt: at > c.lastActivityAt ? at : c.lastActivityAt,
+      // The stored message (a higher sequence) replaces this preview when it arrives.
+      lastMessage: { sequence: c.lastMessage?.sequence ?? 0, senderPrincipalId: me, previewText: text, attachmentCount: 0, lifecycle: "ACTIVE", createdAt: at },
+    });
+    conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
+    this.set({ conversations });
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
@@ -2242,7 +2264,9 @@ export class MessagingEngine {
     const reply = r.replyToMessageId ? st.get(r.replyToMessageId) : undefined;
     const removed = r.lifecycle !== "ACTIVE";
     return {
-      key: `m:${r.messageId}`,
+      // Stable from the moment of sending: the queued bubble and the stored message share
+      // the clientMessageId, so the bubble is updated in place, never remounted.
+      key: r.clientMessageId ? `c:${r.clientMessageId}` : `m:${r.messageId}`,
       sequence: r.sequence,
       senderPrincipalId: r.senderPrincipalId,
       mine: r.senderPrincipalId === me,
@@ -2279,7 +2303,7 @@ export class MessagingEngine {
     const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
       .filter((item) => !st.byClientMessageId(item.clientMessageId))
       .map((item: OutboxItem) => ({
-        key: `q:${item.key}`,
+        key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
         mine: true,
@@ -2562,7 +2586,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED" && this.outbox) {
       this.stateFor(conversationId);
       this.loadedManaged.add(conversationId);
-      this.outbox.enqueue({
+      const item = this.outbox.enqueue({
         key: uuid(),
         conversationId,
         clientMessageId: uuid(),
@@ -2570,6 +2594,9 @@ export class MessagingEngine {
         replyToMessageId: options.replyToMessageId ?? null,
         mentionedPrincipalIds: options.mentionedPrincipalIds ?? [],
       });
+      // The chat moves to the top with this message as its preview at once, not after the
+      // server answers.
+      this.bumpQueued(conversationId, item.text, item.createdAt);
       void this.flush();
       return;
     }

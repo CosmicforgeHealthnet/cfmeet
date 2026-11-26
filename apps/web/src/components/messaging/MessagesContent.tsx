@@ -450,7 +450,7 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
           ) : <span className="w-2" />}
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-lg">{title}</DialogTitle>
-            <DialogDescription className="text-xs">{step === "members" ? (chosen.length ? `${chosen.length} selected` : "Pick people to add") : step === "name" ? `${chosen.length} ${chosen.length === 1 ? "member" : "members"}` : "Private chats are end-to-end encrypted"}</DialogDescription>
+            <DialogDescription className="text-xs">{step === "members" ? (chosen.length ? `${chosen.length} selected` : "Pick people to add") : step === "name" ? `${chosen.length} ${chosen.length === 1 ? "member" : "members"}` : "Start a chat or create a group"}</DialogDescription>
           </div>
         </DialogHeader>
 
@@ -654,7 +654,6 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
               mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
-              (m.state === "queued" || m.state === "sending" || m.state === "pending-setup") && "opacity-70",
             )}
           >
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
@@ -931,18 +930,24 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onOpenChat?: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const needsName = conversation.contextClass !== "DIRECT" && !engine.knownGroupName(conversation.id);
+  const [name, setName] = useState("");
   return (
     <div className="mb-2 flex flex-wrap items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
       <Lock className="size-4 shrink-0 text-muted-foreground" />
       <p className="min-w-0 flex-1 text-muted-foreground">
         {error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}
       </p>
-      <button type="button" disabled={busy} data-testid="continue-chat-button"
+      {needsName ? (
+        <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)}
+          data-testid="continue-chat-name" className="h-9 w-40 rounded-full bg-background px-3 text-sm ring-1 ring-border" />
+      ) : null}
+      <button type="button" disabled={busy || (needsName && !name.trim())} data-testid="continue-chat-button"
         className="h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
         onClick={() => {
           setBusy(true);
           setError(null);
-          void engine.continueAsManaged(conversation.id)
+          void engine.continueAsManaged(conversation.id, name)
             .then((id) => onOpenChat?.(id))
             .catch((e) => setError(messagingErrorMessage(e)))
             .finally(() => setBusy(false));
@@ -1514,7 +1519,7 @@ function PersonalMessages() {
                 <MessageSquarePlus className="relative size-10 text-primary" />
               </div>
               <h2 className="mt-6 text-xl font-semibold">Pick up a conversation</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Choose a chat on the left, or start a new one. Private chats are end-to-end encrypted: not even CF Meet can read them.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Choose a chat on the left, or start a new one. Your chats are on every device you sign in on.</p>
               {s.identity ? <button type="button" onClick={() => setComposeOpen(true)} className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"><MessageSquarePlus className="size-4" />New chat</button> : null}
             </div>
           )}

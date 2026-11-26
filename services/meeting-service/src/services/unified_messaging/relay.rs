@@ -572,6 +572,39 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // Forwarding a message into another chat the caller belongs to (Messaging checks
+    // membership of both).
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("messages"), Id, Lit("forward")],
+        &[],
+        false,
+    ),
+    // Group invite links: list, create, revoke (admins, checked by Messaging) and join.
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("invite-links")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("invite-links")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("invite-links"), Id, Lit("revoke")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("invite-links"), Lit("join")],
+        &[],
+        false,
+    ),
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("pins")],
