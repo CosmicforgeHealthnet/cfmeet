@@ -267,6 +267,10 @@ const DEVICE_CHECK_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_
 // Before-send device discovery runs at most this often per conversation, and a device list
 // younger than this is reused: a burst of sends must not become a burst of directory lookups.
 const SEND_DEVICE_CHECK_MS = 5_000;
+// Private chat refresh: newest records read per render, and the longest time between full
+// 200-record reads of a loaded window.
+const PRIVATE_TAIL_LIMIT = 32;
+const PRIVATE_FULL_READ_MS = 60_000;
 // After a failed directory lookup (rate limit, outage), lookups pause with backoff instead
 // of being retried on every incoming message.
 const DIRECTORY_BACKOFF_MS = 5_000;
@@ -411,6 +415,7 @@ export class MessagingEngine {
   private managed = new Map<string, ManagedConversationState>();
   private loadedManaged = new Set<string>();
   private privateWindows = new Map<string, PrivateHistoryWindow>();
+  private privateFullReads = new Map<string, number>();
   private privateVisibility = new Map<string, number>();
   private privatePaging = new Map<string, Promise<void>>();
   private reactions = new Map<string, Map<string, ReactionView[]>>();
@@ -655,7 +660,7 @@ export class MessagingEngine {
   }
 
   stop(): void {
-    this.privateWindows.clear(); this.privateVisibility.clear(); this.privatePaging.clear();
+    this.privateWindows.clear(); this.privateVisibility.clear(); this.privatePaging.clear(); this.privateFullReads.clear();
     this.stopped = true;
     if (MessagingEngine.active === this) MessagingEngine.active = null;
     if (typeof window !== "undefined") {
@@ -2177,8 +2182,23 @@ export class MessagingEngine {
     if (!crypto || !this.snapshot.deviceId || this.stopped) return null;
     const window = this.privateWindows.get(conversationId) ?? new PrivateHistoryWindow();
     this.privateWindows.set(conversationId, window);
-    const page = await crypto.call<PrivateHistoryPage>("historyPage", { conversationId, limit: 200, ...(beforeSequence === undefined ? {} : { beforeSequence }) });
+    // A refresh of a loaded window reads only the newest records: every send and receive
+    // re-renders, and re-decrypting the whole 200-record page each time made each message
+    // slower than the last in a long chat. Rows already loaded are kept current by
+    // updateKnown (sync) and reconcile (removals). A full page is read when the window is
+    // new, when the tail does not reach the loaded head (a gap), and at least every
+    // PRIVATE_FULL_READ_MS as a safety net.
+    const refresh = beforeSequence === undefined;
+    const tailOnly = refresh && window.head > 0 && Date.now() - (this.privateFullReads.get(conversationId) ?? 0) < PRIVATE_FULL_READ_MS;
+    let page = await crypto.call<PrivateHistoryPage>("historyPage", { conversationId, limit: tailOnly ? PRIVATE_TAIL_LIMIT : 200, ...(refresh ? {} : { beforeSequence }) });
     if (this.stopped || crypto !== this.crypto || generation !== this.generation || this.privateWindows.get(conversationId) !== window) return null;
+    if (tailOnly && page.nextBeforeSequence !== null && (page.records[0]?.sequence ?? 0) > window.head + 1) {
+      page = await crypto.call<PrivateHistoryPage>("historyPage", { conversationId, limit: 200 });
+      if (this.stopped || crypto !== this.crypto || generation !== this.generation || this.privateWindows.get(conversationId) !== window) return null;
+      this.privateFullReads.set(conversationId, Date.now());
+    } else if (refresh && !tailOnly) {
+      this.privateFullReads.set(conversationId, Date.now());
+    }
     window.prune(this.privateVisibility.get(conversationId) ?? 1);
     const visibleFrom = this.privateVisibility.get(conversationId) ?? 1;
     window.merge({ records: page.records.filter(record => record.sequence >= visibleFrom), nextBeforeSequence: page.nextBeforeSequence !== null && page.nextBeforeSequence > visibleFrom ? page.nextBeforeSequence : null }, beforeSequence);

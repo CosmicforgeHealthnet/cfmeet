@@ -63,3 +63,23 @@ test('large replay updates only loaded outcomes rather than loading unknown arch
   assert.equal(history.ordered.find(row=>row.sequence===999).status,'REMOVED');
   assert.equal(history.cursor,801);
 });
+
+test('a short tail refresh overlapping the loaded head keeps the cached history and its cursor', () => {
+  const history = new PrivateHistoryWindow();
+  history.merge({ records: rows(101, 300), nextBeforeSequence: 101 });
+  assert.equal(history.head, 300);
+  assert.equal(history.cursor, 101);
+  // The engine reads only the newest 32 records when they reach the loaded head.
+  history.merge({ records: rows(275, 306), nextBeforeSequence: 275 });
+  assert.equal(history.head, 306);
+  assert.equal(history.ordered.length, 206, 'nothing already loaded is dropped');
+  assert.equal(history.cursor, 101, 'no false gap: older paging still starts below the loaded range');
+  history.merge({ records: rows(1, 100), nextBeforeSequence: null }, 101);
+  assert.equal(history.cursor, null);
+  assert.equal(history.ordered.length, 306);
+  // A tail that does not reach the head would leave a gap; the engine reads a full page then.
+  const gapped = new PrivateHistoryWindow();
+  gapped.merge({ records: rows(1, 50), nextBeforeSequence: null });
+  gapped.merge({ records: rows(90, 121), nextBeforeSequence: 90 });
+  assert.equal(gapped.cursor, 90, 'a gap is visible as a cursor, never silently skipped');
+});

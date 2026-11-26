@@ -5,12 +5,14 @@ export type PrivateHistoryPage = { records: StoredRecord[]; nextBeforeSequence: 
 export class PrivateHistoryWindow {
   private records = new Map<number, StoredRecord>();
   private ranges: { low: number; high: number }[] = [];
-  private head = 0;
+  private _head = 0;
   private first = 1;
 
+  /** Newest sequence merged from a head (refresh) page; 0 before the first. */
+  get head(): number { return this._head; }
   get ordered(): StoredRecord[] { return [...this.records.values()].sort((a, b) => a.sequence - b.sequence); }
   get cursor(): number | null {
-    const range = this.ranges.find(item => item.high >= this.head + 1);
+    const range = this.ranges.find(item => item.high >= this._head + 1);
     return range && range.low > this.first ? range.low : null;
   }
   upsert(records: StoredRecord[]): void {
@@ -33,9 +35,9 @@ export class PrivateHistoryWindow {
     if (page.records.some((record, index) => !Number.isSafeInteger(record.sequence) || record.sequence < this.first || (index > 0 && record.sequence <= page.records[index - 1].sequence) || (before !== undefined && record.sequence >= before))) throw new Error("PRIVATE_HISTORY_PAGE_INVALID");
     if (page.nextBeforeSequence !== null && (oldest === undefined || page.nextBeforeSequence !== oldest)) throw new Error("PRIVATE_HISTORY_PAGE_INVALID");
     if (before === undefined) {
-      if (newest === undefined) { this.records.clear(); this.ranges = []; this.head = 0; return; }
-      if (newest < this.head) throw new Error("PRIVATE_HISTORY_HEAD_REGRESSION");
-      this.head = newest;
+      if (newest === undefined) { this.records.clear(); this.ranges = []; this._head = 0; return; }
+      if (newest < this._head) throw new Error("PRIVATE_HISTORY_HEAD_REGRESSION");
+      this._head = newest;
     }
     this.upsert(page.records);
     const low = page.nextBeforeSequence === null ? this.first : oldest!;
