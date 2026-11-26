@@ -732,11 +732,17 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
             className={cn(
               "relative min-w-0 rounded-[20px] px-3.5 py-2 text-[15px] leading-snug",
               mine ? "bg-primary text-primary-foreground shadow-sm" : "bg-card text-foreground shadow-sm",
-              mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
+              // WhatsApp: the first bubble of a run has a tail at its top corner (square there).
+              mine ? cn(first ? "rounded-tr-none" : "rounded-tr-md", !last && "rounded-br-md") : cn(first ? "rounded-tl-none" : "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
             )}
           >
+            {first ? (
+              <svg aria-hidden viewBox="0 0 8 13" className={cn("absolute top-0 h-[13px] w-2", mine ? "-right-2 text-primary" : "-left-2 -scale-x-100 text-card")}>
+                <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 9z" fill="currentColor" />
+              </svg>
+            ) : null}
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
             {m.forwarded ? <p className="mb-0.5 flex items-center gap-1 text-[11px] italic opacity-75" data-testid="message-forwarded"><Forward className="size-3" /> Forwarded</p> : null}
             {m.replyTo ? (

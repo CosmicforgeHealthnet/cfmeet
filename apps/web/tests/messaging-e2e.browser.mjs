@@ -31,6 +31,14 @@ const USERS = JSON.parse(process.env.E2E_USERS ?? "{}");
 const API = (process.env.E2E_API_URL ?? "http://127.0.0.1:18080/api/v1").replace(/\/+$/, "");
 const SECRET = process.env.E2E_SECRET ?? `secret-${Date.now()}`;
 const EVIDENCE = process.env.E2E_EVIDENCE;
+// Where screenshots of the real chat UI go (uploaded by CI for review); unset: none.
+const SCREENS = process.env.E2E_SCREENSHOTS;
+async function shot(page, name) {
+  if (!SCREENS) return;
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(SCREENS, { recursive: true });
+  await page.screenshot({ path: `${SCREENS}/${name}.png` }).catch(() => {});
+}
 const T = 30_000;
 const BURST = 60;
 const log = [];
@@ -343,4 +351,34 @@ async function journey() {
   for (const p of payloads) await shown(bob.page, p);
   assert.equal(await bob.page.evaluate(() => window.__xss ?? null), null, "no payload executed");
   step("xss payloads inert", { payloads: payloads.length });
+  await shot(alice.page, "01-direct-chat-alice");
+  await shot(bob.page, "02-direct-chat-bob");
+
+  // ---- 12. A group, as on WhatsApp: named at creation, the name everywhere, members under
+  //          the name, and the sender's name in the chat list preview.
+  await alice.page.click("[data-testid=new-conversation]");
+  await alice.page.click("[data-testid=new-group]");
+  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).click();
+  await alice.page.click("[data-testid=group-next]");
+  await alice.page.fill("input[aria-label='Group name']", "Weekend plans");
+  await alice.page.click("[data-testid=create-conversation]");
+  await alice.page.waitForSelector("[data-testid=conversation][data-profile=MANAGED]", { timeout: T });
+  const groupHello = `${SECRET} hello group`;
+  await type(alice.page, groupHello);
+  const groupItem = bob.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+  await groupItem.waitFor({ timeout: T });
+  await groupItem.click();
+  await shown(bob.page, groupHello);
+  assert.ok((await bob.page.locator("[data-testid=group-members]").innerText()).includes("You"), "the group header lists its members");
+  const fromBob = `${SECRET} bob in the group`;
+  await type(bob.page, fromBob);
+  await shown(alice.page, fromBob);
+  const aliceItem = alice.page.locator("[data-testid=conversation-item]", { hasText: "Weekend plans" }).first();
+  await aliceItem.waitFor({ timeout: T });
+  const firstName = USERS.bob.name.split(" ")[0];
+  await alice.page.waitForFunction((name) => [...document.querySelectorAll("[data-testid=conversation-item]")]
+    .some((el) => el.textContent.includes("Weekend plans") && el.textContent.includes(`${name}: `)), firstName, { timeout: T });
+  await shot(alice.page, "03-group-alice");
+  await shot(bob.page, "04-group-bob");
+  step("group: named, members in the header, sender in the preview", {});
 }
