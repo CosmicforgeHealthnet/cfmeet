@@ -1003,17 +1003,20 @@ function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingE
   const needsName = conversation.contextClass !== "DIRECT" && !engine.knownGroupName(conversation.id);
   const [name, setName] = useState("");
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
-      <Lock className="size-4 shrink-0 text-muted-foreground" />
-      <p className="min-w-0 flex-1 text-muted-foreground">
-        {error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}
+    // Stacked: the explanation across the full width, then the name box and the button on
+    // one row (a narrow phone never squeezes the text into a column).
+    <div className="mb-2 space-y-2 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
+      <p className="flex items-start gap-2 text-muted-foreground">
+        <Lock className="mt-0.5 size-4 shrink-0" />
+        <span>{error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}</span>
       </p>
+      <div className="flex items-center gap-2">
       {needsName ? (
         <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)}
-          data-testid="continue-chat-name" className="h-9 w-40 rounded-full bg-background px-3 text-sm ring-1 ring-border" />
+          data-testid="continue-chat-name" className="h-9 min-w-0 flex-1 rounded-full bg-background px-3 text-sm ring-1 ring-border" />
       ) : null}
       <button type="button" disabled={busy || (needsName && !name.trim())} data-testid="continue-chat-button"
-        className="h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+        className={cn("h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60", !needsName && "ml-auto")}
         onClick={() => {
           setBusy(true);
           setError(null);
@@ -1024,6 +1027,7 @@ function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingE
         }}>
         {busy ? "Opening…" : "Continue chat"}
       </button>
+      </div>
     </div>
   );
 }
@@ -1106,6 +1110,13 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
   useEffect(() => {
     if (lastSequence !== null && typeof document !== "undefined" && document.visibilityState === "visible") void engine.markRead(conversation.id);
   }, [engine, conversation.id, lastSequence]);
+  // The engine counts new messages as unread unless this chat is on screen (tab visible).
+  useEffect(() => {
+    const sync = () => engine.setOpenConversation(document.visibilityState === "visible" ? conversation.id : null);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => { document.removeEventListener("visibilitychange", sync); engine.setOpenConversation(null); };
+  }, [engine, conversation.id]);
   // Coming back to the tab or window reads what arrived while it was in the background.
   useEffect(() => {
     const read = () => { if (document.visibilityState === "visible") void engine.markRead(conversation.id); };

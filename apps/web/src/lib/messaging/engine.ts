@@ -2303,13 +2303,25 @@ export class MessagingEngine {
     this.set({ conversations });
   }
 
+  /** The chat the user is looking at (null: none, or the tab is hidden). */
+  private openConversationId: string | null = null;
+  setOpenConversation(conversationId: string | null): void {
+    this.openConversationId = conversationId;
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
+    const me = this.snapshot.identity?.principalId;
     const conversations = this.snapshot.conversations.map((c) => {
       if (c.id !== conversationId || (c.lastMessage && c.lastMessage.sequence > latest.sequence)) return c;
+      // A new message from someone else in a chat that isn't open counts as unread at once
+      // (WhatsApp), not at the next poll: badges, the tab title and notifications follow it.
+      const fresh = latest.sequence > (c.lastMessage?.sequence ?? 0) && latest.senderPrincipalId !== me && latest.lifecycle === "ACTIVE";
+      const unseen = fresh && this.openConversationId !== conversationId;
       return {
         ...c,
+        unreadCount: unseen ? c.unreadCount + 1 : c.unreadCount,
         lastActivityAt: latest.createdAt > c.lastActivityAt ? latest.createdAt : c.lastActivityAt,
         lastMessage: { sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt },
       };

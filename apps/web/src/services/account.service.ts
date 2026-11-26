@@ -51,6 +51,8 @@ export const accountService = {
   /** Upload a profile photo (PNG, JPEG or WebP, at most 512 KiB); returns the updated profile. */
   uploadAvatar: async (file: File) =>
     (await apiV2.put<AccountProfile>("/me/avatar", file, { headers: { "Content-Type": file.type } })).data,
+  /** Removes the profile photo and deletes the stored image (it stops being served). */
+  removeAvatar: async (): Promise<AccountProfile> => (await apiV2.delete<AccountProfile>("/me/avatar")).data,
 
   /** Sign out every other device (this one stays signed in). */
   revokeOtherSessions: async () => (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-others")).data,
