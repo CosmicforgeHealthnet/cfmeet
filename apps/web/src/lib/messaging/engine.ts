@@ -26,7 +26,7 @@ import { messagingClientAccessToken, messagingSessionDeviceToken } from "@/servi
 
 import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
 import { b64u } from "./api";
-import { MessagingApiError } from "./errors";
+import { MessagingApiError, friendlyErrorCode, messagingErrorMessage } from "./errors";
 import { accountDevice } from "@/lib/auth/account-device";
 import type { LinkView } from "@/lib/auth/account-device-core";
 import { accountSession } from "@/lib/auth/session";
@@ -134,6 +134,8 @@ export type IncomingTransfer = {
 export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
 
 export type EngineSnapshot = {
+  /** Chats this account was taken out of by someone else (not left on this device), newest last. */
+  removedFrom?: { conversationId: string; title: string }[];
   /** Per conversation: who is online and when others were last seen. */
   presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
@@ -334,7 +336,7 @@ function sendFailureText(e: unknown): string {
   if (e instanceof MessagingApiError && e.code === "FEATURE_DISABLED" && (e.reason === "ATTACHMENTS_DISABLED" || e.reason === "ATTACHMENT_STORAGE_NOT_CONFIGURED")) {
     return "sending photos and files isn't switched on for CF Meet yet";
   }
-  return e instanceof Error ? e.message : "error";
+  return messagingErrorMessage(e).replace(/\.$/, "");
 }
 
 export class MessagingEngine {
@@ -366,6 +368,7 @@ export class MessagingEngine {
   /** Per conversation, each member's delivered / read sequence (from receipt events and snapshots). */
   private receipts = new Map<string, Map<string, { read: number; delivered: number }>>();
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private presenceWatched: string | null = null;
   private server = new Map<string, ServerConversation>();
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
@@ -1021,6 +1024,8 @@ export class MessagingEngine {
           this.reconnectDelay = 1000;
           // Missed while offline: catch up every conversation from the Delivery Service.
           for (const id of this.server.keys()) this.scheduleSync(id);
+          // The open chat's "online" / "last seen" is asked again now, not at the next poll.
+          if (this.presenceWatched) transport.queryPresence(this.presenceWatched);
           this.outbox?.wake();
           void this.flush();
         } else if (!this.stopped) {
@@ -1125,6 +1130,7 @@ export class MessagingEngine {
   watchPresence(conversationId: string | null): void {
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
+    this.presenceWatched = conversationId;
     if (!conversationId) return;
     const ask = () => this.transport?.queryPresence(conversationId);
     ask();
@@ -1259,6 +1265,10 @@ export class MessagingEngine {
     }
     const fresh = out.filter((c) => !this.server.has(c.conversationId));
     const gone = [...this.server.keys()].filter((id) => !out.some((c) => c.conversationId === id));
+    const removed = gone
+      .filter((id) => !this.leaving.has(id))
+      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat" }));
+    if (removed.length) this.set({ removedFrom: [...(this.snapshot.removedFrom ?? []), ...removed].slice(-10) });
     for (const id of gone) {
       // No longer a member (removed / left): it disappears from this client.
       this.server.delete(id);
@@ -1634,9 +1644,16 @@ export class MessagingEngine {
   async leaveConversation(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId;
     if (!me) return;
-    await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
-    await this.refreshConversations();
+    this.leaving.add(conversationId);
+    try {
+      await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
   }
+  /** Chats being left on this device: their disappearing is not "you were removed". */
+  private leaving = new Set<string>();
 
   async setMemberRole(conversationId: string, principalId: string, role: MemberRole): Promise<void> {
     await relay("PATCH", `v1/conversations/${conversationId}/members/${principalId}`, { role });
@@ -2409,7 +2426,7 @@ export class MessagingEngine {
         state: item.state === "failed" ? "failed" : item.state === "sending" ? "sending" : "queued",
         text: item.text,
         file: null,
-        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})`
+        note: item.state === "failed" ? `Not sent: ${friendlyErrorCode(item.error)}`
           : firstFailed >= 0 && index > firstFailed ? "Waiting — the message above wasn't sent"
           : item.error ? "Waiting to send — will retry" : null,
         transferred: false,
@@ -2419,7 +2436,7 @@ export class MessagingEngine {
       }));
     const pending = this.pendingSends.get(conversationId) ?? [];
     this.set({
-      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...queued, ...pending]) },
+      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...[...queued, ...pending].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))]) },
       hasOlder: { ...this.snapshot.hasOlder, [conversationId]: st.hasOlder },
     });
   }
@@ -2644,6 +2661,10 @@ export class MessagingEngine {
 
   private onTyping(conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number): void {
     if (principalId === this.snapshot.identity?.principalId) return;
+    // Someone typing is online right now.
+    if (state === "started" && this.snapshot.presence[conversationId]?.[principalId]?.online === false) {
+      this.set({ presence: { ...this.snapshot.presence, [conversationId]: { ...this.snapshot.presence[conversationId], [principalId]: { online: true, lastSeenAt: new Date().toISOString() } } } });
+    }
     const key = `${conversationId}:${principalId}`;
     const existing = this.typingTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -2696,7 +2717,8 @@ export class MessagingEngine {
   /** Sends every due MANAGED outbox item (serialized; offline: waits for `online`). */
   private flush(): Promise<number> {
     if (!this.outbox || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve(0);
-    if (this.flushing) return this.flushing;
+    // A run in progress may already be past what was just queued (or just unheld): go again after it.
+    if (this.flushing) return this.flushing.then(() => this.flush());
     const outbox = this.outbox;
     const run = flushOutbox(outbox, async (item) => {
       const msg = await relay<ManagedServerMessage>("POST", `v1/conversations/${item.conversationId}/messages`, {
@@ -2709,7 +2731,7 @@ export class MessagingEngine {
       st.applyMessages([msg]);
       this.renderManaged(item.conversationId);
       this.bumpConversation(item.conversationId, st);
-    }).finally(() => {
+    }, 50, (item) => this.fileSendingBefore(item.conversationId, item.createdAt)).finally(() => {
       if (this.flushing === run) this.flushing = null;
     });
     this.flushing = run;
@@ -2717,6 +2739,11 @@ export class MessagingEngine {
   }
 
   // ------------------------------------------------------------------- send
+
+  /** A photo or file sent before this time is still uploading: text after it waits, so it never overtakes it. */
+  private fileSendingBefore(conversationId: string, createdAt: string): boolean {
+    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt);
+  }
 
   private addPending(conversationId: string, view: MessageView): void {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
@@ -2814,7 +2841,7 @@ export class MessagingEngine {
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
     await this.sync(conversationId);
   }
@@ -2937,8 +2964,10 @@ export class MessagingEngine {
       this.settlePending(conversationId, key, null);
     } catch (e) {
       this.failedFiles.set(key, { file, durationMs, caption });
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
+    // Text typed after this file was waiting for it.
+    if (conv.securityProfile === "MANAGED") void this.flush();
     await this.sync(conversationId);
   }
 

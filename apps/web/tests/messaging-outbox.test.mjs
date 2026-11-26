@@ -139,3 +139,14 @@ test("two tabs sharing one stored queue never overwrite each other's messages", 
   assert.deepEqual(JSON.parse(storage.peek()).map((i) => i.text), ["from tab one", "from tab two"]);
   assert.equal(one.all(A).length, 2);
 });
+
+test("a held item waits (a photo still uploading before it) and goes once released", async () => {
+  const box = new MessageOutbox(memory());
+  box.enqueue(item(A, "caption after photo"));
+  const sent = [];
+  let uploading = true;
+  assert.equal(await flushOutbox(box, async (i) => { sent.push(i.text); }, 50, () => uploading), 0);
+  uploading = false;
+  assert.equal(await flushOutbox(box, async (i) => { sent.push(i.text); }, 50, () => uploading), 1);
+  assert.deepEqual(sent, ["caption after photo"]);
+});

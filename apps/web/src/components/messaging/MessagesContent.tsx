@@ -1192,7 +1192,7 @@ function GroupInvitations({ engine, names, onOpen }: { engine: MessagingEngine; 
 }
 
 /** The chat list search's "Messages" section: matches in every chat (WhatsApp). */
-function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engine: MessagingEngine; q: string; conversations: ConversationView[]; names: Record<string, string>; me: string | null; onOpen: (id: string) => void }) {
+function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engine: MessagingEngine; q: string; conversations: ConversationView[]; names: Record<string, string>; me: string | null; onOpen: (id: string, messageId?: string) => void }) {
   const [hits, setHits] = useState<Awaited<ReturnType<MessagingEngine["searchAll"]>> | null>(null);
   useEffect(() => {
     let active = true;
@@ -1214,7 +1214,7 @@ function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engin
         const start = Math.max(0, at - 24);
         return (
           <li key={`${h.conversationId}:${h.messageId}`}>
-            <button type="button" onClick={() => onOpen(h.conversationId)} data-testid="search-message-hit"
+            <button type="button" onClick={() => onOpen(h.conversationId, h.messageId)} data-testid="search-message-hit"
               className="flex w-full flex-col gap-0.5 rounded-xl px-3 py-2.5 text-left hover:bg-muted/60">
               <span className="flex items-center justify-between gap-2"><span className="truncate text-[15px] font-medium">{chat.title}</span><span className="shrink-0 text-xs text-muted-foreground">{listTime(h.createdAt)}</span></span>
               <span className="truncate text-sm text-muted-foreground">
@@ -1284,7 +1284,7 @@ function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingE
   );
 }
 
-function ConversationPane({ engine, conversation, onBack, onOpenChat, onOpenStarred }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void; onOpenChat?: (id: string) => void; onOpenStarred?: () => void }) {
+function ConversationPane({ engine, conversation, focusMessageId, onFocused, onBack, onOpenChat, onOpenStarred }: { engine: MessagingEngine; conversation: ConversationView; focusMessageId?: string; onFocused?: () => void; onBack?: () => void; onOpenChat?: (id: string) => void; onOpenStarred?: () => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const client = useQueryClient();
   // Drafts stay with their chat (WhatsApp): kept in this browser, per account and chat.
@@ -1438,6 +1438,24 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat, onOpenStar
     setHighlight(messageId);
     setTimeout(() => setHighlight((h) => (h === messageId ? null : h)), 1600);
   };
+  // A search result: older pages load until it's on screen, then it's scrolled to and highlighted.
+  useEffect(() => {
+    if (!focusMessageId || !messages.length) return;
+    let cancelled = false;
+    void (async () => {
+      for (let page = 0; page < 20 && !cancelled; page++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        if (scroller.current?.querySelector(`[data-message-id="${CSS.escape(focusMessageId)}"]`)) break;
+        if (!engine.getSnapshot().hasOlder[conversation.id]) break;
+        await engine.loadOlder(conversation.id).catch(() => {});
+      }
+      if (cancelled) return;
+      jump(focusMessageId);
+      onFocused?.();
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusMessageId, messages.length > 0]);
   // Composer grows with the text, up to ~6 lines.
   useEffect(() => {
     const el = composer.current;
@@ -1785,6 +1803,8 @@ function PersonalMessages() {
   const params = useSearchParams();
   const requested = params.get("conversation");
   const [selected, setSelected] = useState<string | null>(requested);
+  /** A search result to show once its chat is open. */
+  const [focus, setFocus] = useState<{ conversationId: string; messageId: string } | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ListFilter>("ALL");
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -1801,6 +1821,8 @@ function PersonalMessages() {
     if (requested && !s.conversations.some((c) => c.id === requested) && s.phase !== "loading") void engine.refreshConversations().catch(() => {});
   }, [engine, requested, s.conversations, s.phase]);
   const current = s.conversations.find((c) => c.id === selected) ?? null;
+  // Someone took you out of the chat you had open: say so instead of it just vanishing.
+  const removedHere = !current && selected ? s.removedFrom?.find((r) => r.conversationId === selected) ?? null : null;
   const unreadTotal = s.conversations.filter((c) => c.unreadCount > 0 && c.id !== selected).length;
   // Keep the number on the Chats tab in step with this list.
   const tabCounter = useQueryClient();
@@ -1951,7 +1973,7 @@ function PersonalMessages() {
                 {!search && filter === "ALL" && s.identity ? <button type="button" onClick={() => setComposeOpen(true)} className="mt-4 h-10 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Start a chat</button> : null}
               </li>
             ) : null}
-            {search.trim().length >= 2 ? <AllChatsSearch engine={engine} q={search} conversations={s.conversations} names={s.names} me={s.identity?.principalId ?? null} onOpen={setSelected} /> : null}
+            {search.trim().length >= 2 ? <AllChatsSearch engine={engine} q={search} conversations={s.conversations} names={s.names} me={s.identity?.principalId ?? null} onOpen={(id, messageId) => { setSelected(id); setFocus(messageId ? { conversationId: id, messageId } : null); }} /> : null}
           </ul>
           {/* WhatsApp-style floating "new chat" button on phones. */}
           <button type="button" aria-label="New chat" title="New chat" disabled={!s.identity} onClick={() => setComposeOpen(true)}
@@ -1959,9 +1981,16 @@ function PersonalMessages() {
             <MessageSquarePlus className="size-6" />
           </button>
         </aside>
-        <main className={cn("min-w-0 min-h-0 flex-1", !current && "hidden md:flex md:items-center md:justify-center")} data-testid="conversation-pane">
+        <main className={cn("min-w-0 min-h-0 flex-1", !current && (removedHere ? "flex items-center justify-center" : "hidden md:flex md:items-center md:justify-center"))} data-testid="conversation-pane">
           {current ? (
-            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={() => setStarredOpen(true)} />
+            <ConversationPane key={current.id} engine={engine} conversation={current} focusMessageId={focus?.conversationId === current.id ? focus.messageId : undefined} onFocused={() => setFocus(null)} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={() => setStarredOpen(true)} />
+          ) : removedHere ? (
+            <div className="max-w-sm px-6 text-center" role="status" data-testid="removed-from-chat">
+              <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-muted"><MessageSquarePlus className="size-7 text-muted-foreground" /></div>
+              <h2 className="mt-5 text-lg font-semibold">You&apos;re no longer in &ldquo;{removedHere.title}&rdquo;</h2>
+              <p className="mt-2 text-sm text-muted-foreground">An admin removed you, so you can&apos;t see or send messages in it any more.</p>
+              <button type="button" onClick={() => setSelected(null)} className="mt-5 inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Back to chats</button>
+            </div>
           ) : (
             <div className="max-w-sm px-6 text-center">
               <div className="relative mx-auto flex size-24 items-center justify-center">

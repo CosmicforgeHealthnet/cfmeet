@@ -246,10 +246,12 @@ export async function flushOutbox(
   outbox: MessageOutbox,
   send: (item: OutboxItem) => Promise<void>,
   maxRounds = 50,
+  /** An item that must wait for something outside the queue (a file sent before it). */
+  held: (item: OutboxItem) => boolean = () => false,
 ): Promise<number> {
   let sent = 0;
   for (let round = 0; round < maxRounds; round++) {
-    const due = outbox.due();
+    const due = outbox.due().filter((item) => !held(item));
     if (!due.length) break;
     // `due` holds at most the oldest item of each conversation: conversations send in
     // parallel (a slow chat never holds up another) and each keeps its order.
