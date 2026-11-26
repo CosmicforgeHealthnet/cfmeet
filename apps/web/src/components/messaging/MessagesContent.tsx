@@ -973,9 +973,12 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
 
         {/* Media, links and docs; notifications; groups in common. */}
         <div className="border-t border-border px-4 pt-4"><ChatInfoExtras conversationId={conversation.id} direct={!isGroup} groupTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? null} /></div>
-        <div className="px-1">
-          {onOpenStarred ? <button type="button" className={row} onClick={onOpenStarred} data-testid="info-starred"><Star className="size-5 text-muted-foreground" />Starred messages</button> : null}
-        </div>
+        {/* Same row style as Pin / Archive below, so the icons line up. */}
+        {onOpenStarred ? (
+          <div className="px-4">
+            <button type="button" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" onClick={onOpenStarred} data-testid="info-starred"><Star className="size-4 text-muted-foreground" />Starred messages</button>
+          </div>
+        ) : null}
         <div className="space-y-3 px-4"><ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} /><DisappearingMessages engine={engine} conversation={conversation} canChange={!isGroup || manager} /></div>
 
         {isGroup && manager ? (
