@@ -13,6 +13,7 @@ import type {
   BreakoutAnnouncementRequest,
   CloseBreakoutRequest,
 } from "@/types/v2";
+import { roomPoll } from "@/lib/realtime-health";
 
 // Query Keys
 export const breakoutKeys = {
@@ -32,7 +33,7 @@ export function useBreakouts(conferenceId: string) {
     queryKey: breakoutKeys.list(conferenceId),
     queryFn: () => breakoutsService.list(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 3000,
+    refetchInterval: roomPoll(conferenceId, 3000),
   });
 }
 

@@ -37,7 +37,8 @@ import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture
 import type { SidebarPanel } from "./sidebar";
 import { useMediaDeviceSelect } from "@livekit/components-react";
 import Sidebar from "@/components/room/sidebar";
-import FooterControls from "@/components/room/footer-controls";
+import FooterControls, { mediaErrorText } from "@/components/room/footer-controls";
+import { toast } from "@/components/ui/toast";
 import { DeviceRecordingProvider } from "@/components/recording/DeviceRecording";
 import type { RoomJoinData } from "@/lib/prejoin";
 import { useRouter } from "next/navigation";
@@ -132,7 +133,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
     if (isDisconnectingRef.current) return;
     isDisconnectingRef.current = true;
     try {
-      await closeSession();
+      await closeSession().catch(() => {});
     } finally {
       storageStore.clearParticipantToken();
       storageStore.clearV2JoinData();
@@ -195,6 +196,11 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
         serverUrl={joinData.rtcUrl}
         data-lk-theme="default"
         style={{ height: "100vh" }}
+        onMediaDeviceFailure={(failure, kind) => {
+          // The mic or camera couldn't start on joining: say why instead of silently staying off.
+          const text = mediaErrorText(kind === "videoinput" ? "video" : "audio", { name: failure === "PermissionDenied" ? "NotAllowedError" : failure === "NotFound" ? "NotFoundError" : failure === "DeviceInUse" ? "NotReadableError" : "Error" });
+          if (text) toast(text, "error");
+        }}
         onDisconnected={() => {
           if (!isRefreshingCredentialRef.current) {
             void handleDisconnect().catch(() => { /* Session expiration also closes a disconnected session. */ });
@@ -210,8 +216,23 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
 }
 
 // Room content with participant notifications
-/** Collaboration state the tiles need: raised hands (order) and spotlights, matched by name for remote tiles. */
+/** Collaboration state the tiles need: raised hands (order) and spotlights, matched by participant id for remote tiles. */
 interface StageInfo { handOrder: Map<string, number>; spotlit: Set<string>; myId?: string; myHand?: number; mySpot?: boolean }
+
+/**
+ * The CF Meet participant behind a media tile: the media credential carries it as the
+ * `participantId` attribute (and in the metadata). Hands and spotlights are keyed by it, so two
+ * people with the same name are never confused; the name is only a fallback for old credentials.
+ */
+function stageKey(participant: { attributes?: Record<string, string>; metadata?: string; name?: string }): string {
+  const fromAttributes = participant.attributes?.participantId;
+  if (fromAttributes) return fromAttributes;
+  try {
+    const id = participant.metadata ? (JSON.parse(participant.metadata) as { participantId?: unknown }).participantId : null;
+    if (typeof id === "string" && id) return id;
+  } catch { /* not JSON */ }
+  return `name:${participant.name ?? ""}`;
+}
 const StageContext = createContext<StageInfo>({ handOrder: new Map(), spotlit: new Set() });
 
 interface RoomContentProps {
@@ -253,8 +274,8 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
   const hands = [...(collab.data?.raisedHands ?? [])].sort((a, b) => a.raisedAt.localeCompare(b.raisedAt));
   const myHandIndex = hands.findIndex((h) => h.participantId === me.data?.id);
   const stage: StageInfo = {
-    handOrder: new Map(hands.map((h, i) => [h.displayName, i + 1])),
-    spotlit: new Set((collab.data?.spotlights ?? []).map((spot) => spot.displayName)),
+    handOrder: new Map(hands.flatMap((h, i) => [[h.participantId, i + 1], [`name:${h.displayName}`, i + 1]] as [string, number][])),
+    spotlit: new Set((collab.data?.spotlights ?? []).flatMap((spot) => [spot.participantId, `name:${spot.displayName}`])),
     myId: me.data?.id,
     myHand: myHandIndex < 0 ? undefined : myHandIndex + 1,
     mySpot: (collab.data?.spotlights ?? []).some((spot) => spot.participantId === me.data?.id),
@@ -484,7 +505,7 @@ function VideoGridContent({ layout }: { layout: "grid" | "speaker" }) {
 
   // Speaker view: the current (or last) speaker large, everyone else in a strip.
   // A host spotlight overrides the layout for everyone: spotlighted person large.
-  const spotTrack = cameraTracks.find((t) => (t.participant.isLocal ? stage.mySpot : stage.spotlit.has(t.participant.name ?? "")));
+  const spotTrack = cameraTracks.find((t) => (t.participant.isLocal ? stage.mySpot : stage.spotlit.has(stageKey(t.participant))));
   if ((layout === "speaker" || spotTrack) && cameraTracks.length > 1) {
     const mainTrack = spotTrack ?? cameraTracks.find((t) => t.participant.identity === lastSpeaker.current)
       ?? cameraTracks.find((t) => !t.participant.isLocal)
@@ -561,8 +582,8 @@ function CustomTileContent({ compact = false }: { compact?: boolean }) {
   const roomIdentities = useParticipants().map((p) => p.identity);
   const participant = useParticipantContext();
   const stage = useContext(StageContext);
-  const handNumber = participant.isLocal ? stage.myHand : stage.handOrder.get(participant.name ?? "");
-  const spotlit = participant.isLocal ? stage.mySpot : stage.spotlit.has(participant.name ?? "");
+  const handNumber = participant.isLocal ? stage.myHand : stage.handOrder.get(stageKey(participant));
+  const spotlit = participant.isLocal ? stage.mySpot : stage.spotlit.has(stageKey(participant));
   const trackRef = useMaybeTrackRefContext();
   const tileRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
