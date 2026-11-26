@@ -2880,28 +2880,32 @@ export class MessagingEngine {
       this.beforeReady.push({ conversationId, key, text, options });
       return;
     }
-    // Not in the chat's encryption group yet: join it by itself first (nobody else has to be online).
-    let notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
-    if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
-    // The sender adds the others' newly registered devices before it encrypts, so the
-    // message reaches every device they have (from the KeyPackages they published).
-    if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {
-      this.set({ detail: "Some devices are waiting for synchronization. Device enrollment will retry." });
+    // The send takes its place in this chat's queue now, before any preparation (joining the
+    // group, adding others' new devices), so messages leave in the order they were written.
+    return this.enqueue(conversationId, async () => {
+      // Not in the chat's encryption group yet: join it by itself first (nobody else has to be online).
+      let notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
+      if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
+      // The sender adds the others' newly registered devices before it encrypts, so the
+      // message reaches every device they have (from the KeyPackages they published).
+      if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {
+        this.set({ detail: "Some devices are waiting for synchronization. Device enrollment will retry." });
+      });
+      // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
+      // hold it sealed on this device and send it automatically once it can (WhatsApp).
+      if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {
+        // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
+        this.settlePending(conversationId, key, null);
+        const clientMessageId = uuid();
+        const createdAt = new Date().toISOString();
+        await this.crypto.call("holdDraft", { conversationId, clientMessageId, text, createdAt });
+        this.addPending(conversationId, { key: `d${clientMessageId}`, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt, profile: conv.securityProfile, state: "pending-setup", text, file: null, note: null, transferred: false });
+        this.deviceChecks.delete(conversationId);
+        this.scheduleSync(conversationId);
+        return;
+      }
+      await this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null, options.mentionedPrincipalIds ?? []);
     });
-    // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
-    // hold it sealed on this device and send it automatically once it can (WhatsApp).
-    if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {
-      // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
-      this.settlePending(conversationId, key, null);
-      const clientMessageId = uuid();
-      const createdAt = new Date().toISOString();
-      await this.crypto.call("holdDraft", { conversationId, clientMessageId, text, createdAt });
-      this.addPending(conversationId, { key: `d${clientMessageId}`, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt, profile: conv.securityProfile, state: "pending-setup", text, file: null, note: null, transferred: false });
-      this.deviceChecks.delete(conversationId);
-      this.scheduleSync(conversationId);
-      return;
-    }
-    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null, options.mentionedPrincipalIds ?? []));
   }
 
   /**
