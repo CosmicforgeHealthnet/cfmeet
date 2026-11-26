@@ -1,7 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, Database, ShieldCheck, UserPlus } from "lucide-react";
+import { BellRing, Database, EyeOff, ShieldCheck, UserPlus } from "lucide-react";
+import { relay } from "@/services/v2/messaging.service";
+import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsService as hub, type NotificationPreferences } from "@/services/v2/communications.service";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,38 @@ function DirectContact() {
         <Switch on={on} />
       </button>
       {save.isError ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(save.error)}</p> : null}
+    </section>
+  );
+}
+
+type PresenceSettings = { visibility: "CONVERSATION_MEMBERS" | "HIDDEN"; shareLastSeen: boolean; shareReadReceipts: boolean };
+const PRESENCE_KEY = ["messaging", "presence-settings"] as const;
+
+/** WhatsApp's Privacy: online status, last seen and read receipts (Messaging presence settings). */
+function PresencePrivacy() {
+  const client = useQueryClient();
+  const settings = useQuery({ queryKey: PRESENCE_KEY, queryFn: () => relay<PresenceSettings>("GET", "v1/messaging/presence/settings"), retry: false });
+  const save = useMutation({
+    mutationFn: (next: PresenceSettings) => relay<PresenceSettings>("PUT", "v1/messaging/presence/settings", next),
+    onSuccess: (v) => client.setQueryData(PRESENCE_KEY, v),
+  });
+  const v = settings.data;
+  if (!v) return settings.isError ? <p role="alert" className="text-sm text-destructive">{messagingErrorMessage(settings.error)}</p> : null;
+  const rows: { key: string; on: boolean; label: string; hint: string; next: PresenceSettings }[] = [
+    { key: "online", on: v.visibility === "CONVERSATION_MEMBERS", label: "Show when I'm online", hint: "People you chat with see when you're online.", next: { ...v, visibility: v.visibility === "HIDDEN" ? "CONVERSATION_MEMBERS" : "HIDDEN" } },
+    { key: "lastSeen", on: v.shareLastSeen, label: "Share last seen", hint: "People you chat with see when you were last online.", next: { ...v, shareLastSeen: !v.shareLastSeen } },
+    { key: "receipts", on: v.shareReadReceipts, label: "Read receipts", hint: "Others see blue ticks when you've read their messages.", next: { ...v, shareReadReceipts: !v.shareReadReceipts } },
+  ];
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-5 sm:p-6" data-testid="presence-privacy">
+      <div className="flex items-center gap-2"><EyeOff className="size-4 text-muted-foreground" /><h2 className="text-base font-semibold">Privacy</h2></div>
+      {rows.map((r) => (
+        <button key={r.key} type="button" role="switch" aria-checked={r.on} disabled={save.isPending} onClick={() => save.mutate(r.next)} className="flex w-full items-center gap-3 text-left disabled:opacity-60" data-testid={`privacy-${r.key}`}>
+          <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{r.label}</span><span className="block text-xs text-muted-foreground">{r.hint}</span></span>
+          <Switch on={r.on} />
+        </button>
+      ))}
+      {save.isError ? <p role="alert" className="text-sm text-destructive">{messagingErrorMessage(save.error)}</p> : null}
     </section>
   );
 }
@@ -125,6 +159,7 @@ export default function ChatSettings() {
       </section>
 
       <DirectContact />
+      <PresencePrivacy />
 
       <section className="space-y-3 rounded-2xl border border-border bg-card p-5 sm:p-6">
         <div className="flex items-center gap-2"><Database className="size-4 text-muted-foreground" /><h2 className="text-base font-semibold">Storage</h2></div>
