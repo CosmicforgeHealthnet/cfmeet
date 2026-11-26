@@ -25,12 +25,12 @@ import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown, ArrowLeft, Bell, BellOff, Check, Clock3, Copy, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X, Camera, Mic, Headphones, Paperclip,
-  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown,
+  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -1026,6 +1026,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
                     <span className="flex items-center gap-1">
                       <NiceSelect className="w-28" value={role ?? "MEMBER"} onChange={(v) => run(engine.setMemberRole(conversation.id, p, v))} options={["ADMIN", "MODERATOR", "MEMBER", "READ_ONLY"].map((r) => ({ value: r, label: r === "READ_ONLY" ? "Read only" : r === "ADMIN" ? "Admin" : r.charAt(0) + r.slice(1).toLowerCase() }))} />
                       <button type="button" aria-label={`Remove ${label(p)}`} title="Remove" data-testid="remove-member" onClick={() => run(engine.removeMember(conversation.id, p))} className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><X className="size-4" /></button>
+                      {managed ? <button type="button" aria-label={`Remove and ban ${label(p)}`} title="Remove and ban" data-testid="ban-member" onClick={() => run(engine.ban(conversation.id, p).then(() => client.invalidateQueries({ queryKey: ["messaging", "bans", conversation.id] })))} className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Ban className="size-4" /></button> : null}
                     </span>
                   ) : null}
                 </li>
@@ -1041,6 +1042,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
           ) : null}
         </section>
 
+        {isGroup && manager && managed ? <BannedMembers engine={engine} conversationId={conversation.id} names={s.names} /> : null}
         {error ? <p role="alert" className="px-4 text-sm text-destructive">{error}</p> : null}
         {notice ? <p role="status" className="px-4 text-sm text-emerald-600">{notice}</p> : null}
 
@@ -1062,6 +1064,29 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
       </div>
       {reporting ? <ReportDialog engine={engine} conversationId={conversation.id} privateChat={!managed} onClose={() => setReporting(false)} /> : null}
     </aside>
+  );
+}
+
+/** Group info (admins): who is banned, with Unban. */
+function BannedMembers({ engine, conversationId, names }: { engine: MessagingEngine; conversationId: string; names: Record<string, string> }) {
+  const client = useQueryClient();
+  const key = ["messaging", "bans", conversationId];
+  const bans = useQuery({ queryKey: key, queryFn: () => engine.bans(conversationId), retry: false });
+  const unban = useMutation({ mutationFn: (p: string) => engine.unban(conversationId, p), onSettled: () => client.invalidateQueries({ queryKey: key }) });
+  if (!bans.data?.length) return null;
+  return (
+    <section className="border-t border-border px-4 pt-3" data-testid="banned-members">
+      <p className="mb-1 text-sm font-semibold text-muted-foreground">Banned</p>
+      <ul className="space-y-0.5">
+        {bans.data.map((b) => (
+          <li key={b.principalId} className="flex items-center gap-3 py-1.5 text-sm">
+            <Avatar name={names[b.principalId] ?? "CF Meet user"} seed={b.principalId} size="size-8" />
+            <span className="min-w-0 flex-1 truncate">{names[b.principalId] ?? "CF Meet user"}</span>
+            <button type="button" disabled={unban.isPending} onClick={() => unban.mutate(b.principalId)} className="rounded-full px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/10" data-testid="unban-member">Unban</button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

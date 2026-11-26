@@ -2552,6 +2552,18 @@ export class MessagingEngine {
     return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
   }
 
+  /** People banned from a group (admins): removed, and can't be added back until unbanned. */
+  bans(conversationId: string): Promise<{ principalId: string; reason: string | null; bannedAt: string }[]> {
+    return relay<{ bans: { principalId: string; reason: string | null; bannedAt: string }[] }>("GET", `v1/conversations/${conversationId}/bans`).then((r) => r.bans ?? []);
+  }
+  async ban(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/bans`, { principalId });
+    await this.refreshConversations();
+  }
+  unban(conversationId: string, principalId: string): Promise<unknown> {
+    return relay("DELETE", `v1/conversations/${conversationId}/bans/${principalId}`);
+  }
+
   /** Groups someone added you to that wait for your answer (newest first). */
   async groupInvitations(): Promise<{ conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[]> {
     const r = await relay<{ invitations: { conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[] }>("GET", "v1/messaging/invitations");
