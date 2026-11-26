@@ -266,6 +266,11 @@ export function isInlineImage(mediaType: string | null | undefined): boolean {
   return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp" || mediaType === "image/gif";
 }
 
+/** Videos the chat plays inline (WhatsApp); other video types stay a download. */
+export function isPlayableVideo(mediaType: string | null | undefined): boolean {
+  return mediaType === "video/mp4" || mediaType === "video/webm";
+}
+
 /** Voice notes and audio files the chat plays inline. */
 export function isPlayableAudio(mediaType: string | null | undefined): boolean {
   return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
@@ -279,7 +284,7 @@ const mediaUrls = new Map<string, string>();
 
 /** Remembers a file this device just sent, so its own photo shows without downloading it back. */
 function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
-  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
+  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType) || isPlayableVideo(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
 }
 
 /** Length of an audio or video file, read by the browser (null: it can't tell). */
@@ -2841,7 +2846,7 @@ export class MessagingEngine {
    */
   async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
     const aid = message.file?.attachmentId;
-    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType))) return null;
+    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType) || isPlayableVideo(message.file?.mediaType))) return null;
     const cached = mediaUrls.get(aid);
     if (cached) return cached;
     const { blob } = await this.download(conversationId, message);

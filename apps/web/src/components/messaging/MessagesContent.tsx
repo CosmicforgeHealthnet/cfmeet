@@ -14,9 +14,9 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, DisappearingMessages } from "./ChatListControls";
 import { AttachMenu, RichContentView } from "./RichMessages";
-import { ChatImage, LinkifiedText } from "./BubbleParts";
+import { ChatImage, ChatVideo, LinkifiedText } from "./BubbleParts";
 import { AttachmentPreview } from "./AttachmentPreview";
-import { isInlineImage, isPlayableAudio } from "@/lib/messaging/engine";
+import { isInlineImage, isPlayableAudio, isPlayableVideo } from "@/lib/messaging/engine";
 import { SecurityCode } from "./SecurityCode";
 import { MicButton, VoicePlayer, VoiceRecorder, voiceRecordingSupported } from "./VoiceNote";
 import PrivateShares from "./PrivateShares";
@@ -683,7 +683,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
               m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
-            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file ? (
+            {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
                 <span className="min-w-0"><span className="block truncate text-sm font-medium">{m.file.name}</span>{m.file.size ? <span className="block text-xs opacity-70">{Math.ceil(m.file.size / 1024)} KB · Download</span> : null}</span>
@@ -1272,7 +1272,7 @@ function ConversationPane({ engine, conversation, onBack, onOpenChat }: { engine
                   ) : null}
                   <MessageBubble m={m} managed={managed} names={s.names} name={senderName(m)} group={group} first={first} last={last} actions={bubbleActions(m)}
                     onDownload={() => { setError(null); void download(m).catch(fail); }}
-                    loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
+                    loadImage={m.file?.attachmentId && (isInlineImage(m.file.mediaType) || isPlayableAudio(m.file.mediaType) || isPlayableVideo(m.file.mediaType)) ? () => engine.imageUrl(conversation.id, m) : null}
                     cachedMedia={engine.cachedMediaUrl(m)}
                     onJump={jump} highlight={!!m.messageId && highlight === m.messageId} />
                 </Fragment>

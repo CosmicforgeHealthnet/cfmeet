@@ -31,6 +31,32 @@ export function LinkifiedText({ text, mine }: { text: string; mine: boolean }) {
 }
 
 /** A photo in the chat: a fixed-size placeholder while it loads, tap to open full screen. */
+/** A video in a chat bubble (WhatsApp): loaded when shown, played in place with controls. */
+export function ChatVideo({ load, name, onDownload, initial = null }: { load: () => Promise<string | null>; name: string; onDownload: () => void; initial?: string | null }) {
+  const [url, setUrl] = useState<string | null>(initial);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (initial) return;
+    let active = true;
+    load().then((u) => { if (active) { if (u) setUrl(u); else setFailed(true); } }, () => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [load, initial]);
+  if (failed) {
+    return (
+      <button type="button" onClick={onDownload} className="mt-1 flex h-40 w-60 max-w-full flex-col items-center justify-center gap-2 rounded-xl bg-black/10 text-sm opacity-80">
+        <ImageOff className="size-6" />Couldn&apos;t play this video · Download
+      </button>
+    );
+  }
+  return (
+    <span className="-mx-2 -mt-0.5 mb-1 block overflow-hidden rounded-[14px] bg-black/80" data-testid="chat-video">
+      {url
+        ? <video src={url} controls preload="metadata" playsInline aria-label={name} className="max-h-80 w-auto max-w-[min(18rem,70vw)]" />
+        : <span className="block h-48 w-60 max-w-[70vw] animate-pulse" />}
+    </span>
+  );
+}
+
 export function ChatImage({ load, name, onDownload, initial = null }: { load: () => Promise<string | null>; name: string; onDownload: () => void; initial?: string | null }) {
   const [url, setUrl] = useState<string | null>(initial);
   const [failed, setFailed] = useState(false);
