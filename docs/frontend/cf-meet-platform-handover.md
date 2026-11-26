@@ -112,10 +112,10 @@ Apps send users to this URL with the standard OAuth query (`client_id`, `redirec
   CallKit/PushKit and Android ConnectionService glue for partner ringing is still an open owner
   decision (plan, decision 10).
 
-## 5. What stays off until production activation
+## 5. Production status
 
-- The pages above can be built and tested against local or staging stacks now.
-- In production each one answers `404` / `FEATURE_DISABLED` until its activation runs (order: users,
-  user tokens, chat, calls, push, meetings, OAuth apps, OAuth, delegated apps, installs, app events,
-  directory, in-meeting apps).
-- Approving apps for the directory also needs the owner to name app reviewers.
+- **All 13 activations are live in production** (2026-11-21; final two-tenant acceptance 131/131
+  and production certification passed). Every page above can be built against production.
+- Full request/response contracts and TypeScript types for every endpoint on these pages, plus
+  the partner server and device APIs: `docs/platform/partner-api-frontend-guide.md`.
+- Approving apps for the directory still needs the owner to name app reviewers.
