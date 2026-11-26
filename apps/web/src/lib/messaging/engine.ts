@@ -2534,6 +2534,24 @@ export class MessagingEngine {
     this.renderManaged(conversationId);
   }
 
+  /**
+   * Search every chat (WhatsApp's search box): the server searches server-stored chats; the
+   * messages of older encrypted chats loaded on this device are searched here.
+   */
+  async searchAll(q: string): Promise<(SearchHit & { conversationId: string })[]> {
+    const query = q.trim();
+    if (query.length < 2) return [];
+    const needle = query.toLocaleLowerCase();
+    const local = [...this.server.values()]
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE")
+      .flatMap((c) => (this.snapshot.messages[c.conversationId] ?? [])
+        .filter((m) => m.sequence !== null && m.text?.toLocaleLowerCase().includes(needle))
+        .map((m) => ({ conversationId: c.conversationId, messageId: m.key, sequence: m.sequence!, senderPrincipalId: m.senderPrincipalId ?? "", createdAt: m.createdAt ?? "", text: m.text })));
+    const r = await relay<{ results: ManagedServerMessage[] }>("GET", `v1/messaging/search?q=${encodeURIComponent(query.slice(0, 200))}&limit=30`).catch(() => ({ results: [] as ManagedServerMessage[] }));
+    const remote = r.results.map((m) => ({ conversationId: m.conversationId, messageId: m.messageId, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId, createdAt: m.createdAt, text: m.managed?.text ?? null }));
+    return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
+  }
+
   /** MANAGED server search; PRIVATE_E2EE content is searched on this device only. */
   async search(conversationId: string, q: string): Promise<SearchHit[]> {
     const conv = this.server.get(conversationId);

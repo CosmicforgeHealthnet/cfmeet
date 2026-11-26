@@ -1131,6 +1131,44 @@ function ConversationSearch({ engine, conversation, onClose }: { engine: Messagi
 
 /* ─── Open chat ───────────────────────────────────────────────────────── */
 
+/** The chat list search's "Messages" section: matches in every chat (WhatsApp). */
+function AllChatsSearch({ engine, q, conversations, names, me, onOpen }: { engine: MessagingEngine; q: string; conversations: ConversationView[]; names: Record<string, string>; me: string | null; onOpen: (id: string) => void }) {
+  const [hits, setHits] = useState<Awaited<ReturnType<MessagingEngine["searchAll"]>> | null>(null);
+  useEffect(() => {
+    let active = true;
+    const t = setTimeout(() => { void engine.searchAll(q).then((h) => { if (active) setHits(h); }); }, 300);
+    return () => { active = false; clearTimeout(t); };
+  }, [engine, q]);
+  const shown = (hits ?? []).filter((h) => conversations.some((c) => c.id === h.conversationId));
+  if (hits === null) return <li className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Searching messages…</li>;
+  if (!shown.length) return null;
+  const needle = q.trim().toLocaleLowerCase();
+  return (
+    <>
+      <li className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground" data-testid="search-messages-heading">Messages</li>
+      {shown.map((h) => {
+        const chat = conversations.find((c) => c.id === h.conversationId)!;
+        const who = h.senderPrincipalId === me ? "You" : names[h.senderPrincipalId]?.split(" ")[0] ?? null;
+        const text = h.text ?? "";
+        const at = text.toLocaleLowerCase().indexOf(needle);
+        const start = Math.max(0, at - 24);
+        return (
+          <li key={`${h.conversationId}:${h.messageId}`}>
+            <button type="button" onClick={() => onOpen(h.conversationId)} data-testid="search-message-hit"
+              className="flex w-full flex-col gap-0.5 rounded-xl px-3 py-2.5 text-left hover:bg-muted/60">
+              <span className="flex items-center justify-between gap-2"><span className="truncate text-[15px] font-medium">{chat.title}</span><span className="shrink-0 text-xs text-muted-foreground">{listTime(h.createdAt)}</span></span>
+              <span className="truncate text-sm text-muted-foreground">
+                {chat.contextClass === "GROUP" && who ? `${who}: ` : who === "You" ? "You: " : ""}
+                {start > 0 ? "…" : ""}{text.slice(start, at < 0 ? 80 : at)}<mark className="rounded bg-primary/20 px-0.5 text-foreground">{at < 0 ? "" : text.slice(at, at + needle.length)}</mark>{at < 0 ? "" : text.slice(at + needle.length, at + needle.length + 60)}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
 /** WhatsApp Web's "Get notified of new messages" row, until the browser has decided. */
 function NotifyPrompt() {
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() =>
@@ -1846,6 +1884,7 @@ function PersonalMessages() {
                 {!search && filter === "ALL" && s.identity ? <button type="button" onClick={() => setComposeOpen(true)} className="mt-4 h-10 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Start a chat</button> : null}
               </li>
             ) : null}
+            {search.trim().length >= 2 ? <AllChatsSearch engine={engine} q={search} conversations={s.conversations} names={s.names} me={s.identity?.principalId ?? null} onOpen={setSelected} /> : null}
           </ul>
           {/* WhatsApp-style floating "new chat" button on phones. */}
           <button type="button" aria-label="New chat" title="New chat" disabled={!s.identity} onClick={() => setComposeOpen(true)}
