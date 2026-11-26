@@ -2718,7 +2718,7 @@ export class MessagingEngine {
   private flush(): Promise<number> {
     if (!this.outbox || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve(0);
     // A run in progress may already be past what was just queued (or just unheld): go again after it.
-    if (this.flushing) return this.flushing.then(() => this.flush());
+    if (this.flushing) { this.flushAgain = true; return this.flushing; }
     const outbox = this.outbox;
     const run = flushOutbox(outbox, async (item) => {
       const msg = await relay<ManagedServerMessage>("POST", `v1/conversations/${item.conversationId}/messages`, {
@@ -2733,6 +2733,7 @@ export class MessagingEngine {
       this.bumpConversation(item.conversationId, st);
     }, 50, (item) => this.fileSendingBefore(item.conversationId, item.createdAt)).finally(() => {
       if (this.flushing === run) this.flushing = null;
+      if (this.flushAgain) { this.flushAgain = false; void this.flush(); }
     });
     this.flushing = run;
     return run;
@@ -2740,10 +2741,15 @@ export class MessagingEngine {
 
   // ------------------------------------------------------------------- send
 
-  /** A photo or file sent before this time is still uploading: text after it waits, so it never overtakes it. */
+  /**
+   * A photo or file sent before this time is still uploading: text after it waits, so it never
+   * overtakes it — for up to two minutes, so a stalled upload can't hold the chat's text back.
+   */
   private fileSendingBefore(conversationId: string, createdAt: string): boolean {
-    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt);
+    const since = Date.now() - 120_000;
+    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt && Date.parse(m.createdAt ?? "") > since);
   }
+  private flushAgain = false;
 
   private addPending(conversationId: string, view: MessageView): void {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
