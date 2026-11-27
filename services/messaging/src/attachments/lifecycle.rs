@@ -190,8 +190,11 @@ pub async fn expire_unlinked(state: &AppState, batch: i64) -> Result<usize> {
     let due: Vec<AttachmentRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE state = 'READY' AND message_id IS NULL \
-               AND state_changed_at <= $1 ORDER BY state_changed_at LIMIT $2"
+            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments a WHERE state = 'READY' AND message_id IS NULL \
+               AND state_changed_at <= $1 \
+               AND NOT EXISTS (SELECT 1 FROM messaging_conversations c WHERE c.id = a.conversation_id \
+                    AND c.avatar_ref = 'attachment:' || a.id::text) \
+               ORDER BY state_changed_at LIMIT $2"
         ),
         vec![cutoff.into(), batch.into()],
     )

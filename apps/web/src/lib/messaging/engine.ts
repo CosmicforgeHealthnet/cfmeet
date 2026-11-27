@@ -38,8 +38,8 @@ import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
 import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
-import { inboxFlags, type InboxFlags } from "./chat-list";
-import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
+import { inboxFlags, moveList, sortLists, type ChatListView, type InboxFlags } from "./chat-list";
+import { linkPreviewFor, managedPoll, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 import { statusPostId } from "./private-shares";
 
@@ -82,7 +82,13 @@ export type ConversationView = {
   unreadCount: number;
   mentionCount: number;
   lastActivityAt: string;
-  lastMessage: { sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string } | null;
+  lastMessage: {
+    sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string;
+    /** MANAGED: POLL / ANNOUNCEMENT / STANDARD, and the first attachment's kind (chat list icons). */
+    presentation?: string | null; attachmentKind?: string | null;
+  } | null;
+  /** A MANAGED group's description (null: none). */
+  description: string | null;
   memberRoles: Record<string, MemberRole>;
   myRole: MemberRole | null;
   /** Only owners and admins can send (S13). */
@@ -161,6 +167,10 @@ export type EngineSnapshot = {
   pins: Record<string, PinView[]>;
   /** Older MANAGED history can be loaded (back-pagination). */
   hasOlder: Record<string, boolean>;
+  /** The account's own chat lists ("Family", "Work"), the same on every device. */
+  chatLists: ChatListView[];
+  /** The inbox stream is live (new chats and previews arrive without polling). */
+  inboxLive: boolean;
 };
 
 type ServerConversation = {
@@ -179,15 +189,17 @@ type ServerConversation = {
   ownerPrincipalId?: string;
   title?: string | null;
   avatarRef?: string | null;
+  description?: string | null;
   inbox?: {
     lastActivityAt: string;
-    lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null } | null;
+    lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null; presentation?: string | null; attachmentKind?: string | null } | null;
     unreadCount: number;
     mentionCount: number;
     /** F1: this member's own archive / pin of the chat. */
     archived?: boolean;
     pinned?: boolean;
     pinnedAt?: string | null;
+    favourite?: boolean;
   };
 };
 
@@ -204,7 +216,7 @@ type ServerMessage = {
   createdAt: string;
   attachmentIds: string[];
   e2ee?: { epoch: number; ciphertext: string | null } | null;
-  managed?: { text: string | null } | null;
+  managed?: { text: string | null; presentation?: string; poll?: unknown } | null;
   replyToMessageId?: string | null;
   targetMessageId?: string | null;
 };
@@ -250,6 +262,8 @@ const SEND_DEVICE_CHECK_MS = 10_000;
 const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
 
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
+/** The fallback poll while the inbox stream is live (covers missed signals only). */
+const SLOW_POLL_MS = Math.max(POLL_MS, 60_000);
 
 /** The API error code of an Account authority call (axios), if any. */
 function accountErrorCode(e: unknown): string | null {
@@ -287,6 +301,8 @@ export function isPlayableAudio(mediaType: string | null | undefined): boolean {
  * engine so leaving the chat and coming back doesn't download and decrypt them again.
  */
 const mediaUrls = new Map<string, string>();
+/** Group photos by conversation and avatar reference (object URLs, kept for the visit). */
+const avatarUrls = new Map<string, Promise<string | null>>();
 
 /** Remembers a file this device just sent, so its own photo shows without downloading it back. */
 function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
@@ -363,6 +379,8 @@ export class MessagingEngine {
     typing: {},
     pins: {},
     hasOlder: {},
+    chatLists: [],
+    inboxLive: false,
   };
   private readonly listeners = new Set<() => void>();
   private crypto: CryptoClient | null = null;
@@ -611,8 +629,13 @@ export class MessagingEngine {
 
   private async poll(): Promise<void> {
     if (this.stopped) return;
+    // With the inbox stream live, a synced-only account re-reads its chat list and chats
+    // slowly: only to cover gaps the socket can't (a missed signal). Device approvals and
+    // queued sends keep their pace; encrypted accounts keep their periodic device work.
+    const live = !this.crypto && this.snapshot.inboxLive && !!this.transport?.connected;
+    const fresh = live && Date.now() - this.lastListRefresh < SLOW_POLL_MS;
     try {
-      await this.refreshConversations();
+      if (!fresh) await this.refreshConversations();
       // A PRIVATE_E2EE chat appeared (an older client started one): start the encryption
       // device now, once, through the normal start path.
       if (!this.crypto && this.snapshot.phase === "ready" && this.hasPrivateChats() && !this.privateStarting) {
@@ -628,7 +651,7 @@ export class MessagingEngine {
       await this.checkIncomingLinks();
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
-      for (const id of this.server.keys()) this.scheduleSync(id);
+      if (!fresh) for (const id of this.server.keys()) this.scheduleSync(id);
       void this.flush();
       if (this.snapshot.phase === "needs-device" && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
       for (const id of Object.keys(this.snapshot.awaitingSetup)) void this.flushDrafts(id);
@@ -1025,9 +1048,16 @@ export class MessagingEngine {
       onSubscriptionRevoked: () => {
         void this.refreshConversations().catch(() => {});
       },
+      // The inbox stream: a chat this socket isn't subscribed to changed (a new chat, a
+      // message, a read position): the list is re-read at once instead of at the next poll.
+      onInboxEvent: () => this.scheduleInboxRefresh(),
+      onInboxResync: () => this.scheduleInboxRefresh(),
+      onInboxSubscribed: () => {
+        if (this.transport === transport) this.set({ inboxLive: true });
+      },
       onConnectionState: (state) => {
         if (this.transport !== transport) return;
-        this.set({ connection: state });
+        this.set({ connection: state, ...(state === "connected" ? {} : { inboxLive: false }) });
         if (state === "connected") {
           this.reconnectDelay = 1000;
           // Missed while offline: catch up every conversation from the Delivery Service.
@@ -1043,6 +1073,8 @@ export class MessagingEngine {
     });
     this.transport = transport;
     this.set({ realtime: mode });
+    // New chats, previews, unread counts and order arrive live (Messaging `inbox.subscribe`).
+    transport.subscribeInbox();
     for (const c of this.server.values()) this.subscribeConversation(c);
     this.set({ connection: "connecting" });
     transport.connect().catch((e) => {
@@ -1289,6 +1321,63 @@ export class MessagingEngine {
     for (const c of fresh) this.subscribeConversation(c);
     await this.renderConversations();
     for (const c of fresh) this.scheduleSync(c.conversationId);
+    this.lastListRefresh = Date.now();
+    void this.loadChatLists();
+  }
+
+  /** When the chat list was last read in full (the slow fallback poll skips while it's fresh). */
+  private lastListRefresh = 0;
+
+  /** The account's own chat lists (an older server without them: none). */
+  async loadChatLists(): Promise<void> {
+    try {
+      const r = await relay<{ chatLists: ChatListView[] }>("GET", "v1/messaging/chat-lists");
+      this.set({ chatLists: sortLists(r.chatLists.map((l) => ({ listId: l.listId, name: l.name, position: l.position, conversationIds: l.conversationIds }))) });
+    } catch {
+      // Lists are an organizing aid: the chat list works without them.
+    }
+  }
+
+  private putChatList(list: ChatListView): void {
+    const rest = this.snapshot.chatLists.filter((l) => l.listId !== list.listId);
+    this.set({ chatLists: sortLists([...rest, { listId: list.listId, name: list.name, position: list.position, conversationIds: list.conversationIds }]) });
+  }
+
+  /** A new chat list (at the end), optionally with chats in it. */
+  async createChatList(name: string, conversationIds: string[] = []): Promise<ChatListView> {
+    const list = await relay<ChatListView>("POST", "v1/messaging/chat-lists", { name, ...(conversationIds.length ? { conversationIds } : {}) });
+    this.putChatList(list);
+    return list;
+  }
+
+  async renameChatList(listId: string, name: string): Promise<void> {
+    this.putChatList(await relay<ChatListView>("PATCH", `v1/messaging/chat-lists/${listId}`, { name }));
+  }
+
+  /** Moves a list to `position` (its chip moves with it); the others keep their order. */
+  async moveChatList(listId: string, position: number): Promise<void> {
+    const before = this.snapshot.chatLists;
+    this.set({ chatLists: moveList(before, listId, position) });
+    try {
+      await relay<ChatListView>("PATCH", `v1/messaging/chat-lists/${listId}`, { position });
+    } catch (e) {
+      this.set({ chatLists: before });
+      throw e;
+    }
+    void this.loadChatLists();
+  }
+
+  /** Deletes a list; its chats stay where they are. */
+  async deleteChatList(listId: string): Promise<void> {
+    await relay("DELETE", `v1/messaging/chat-lists/${listId}`);
+    this.set({ chatLists: this.snapshot.chatLists.filter((l) => l.listId !== listId) });
+    void this.loadChatLists();
+  }
+
+  /** Adds a chat to (or removes it from) one of my lists; the chat itself is never touched. */
+  async setInChatList(listId: string, conversationId: string, member: boolean): Promise<void> {
+    const path = `v1/messaging/chat-lists/${listId}/conversations/${conversationId}`;
+    this.putChatList(await relay<ChatListView>(member ? "PUT" : "DELETE", path));
   }
 
   private async renderConversations(): Promise<void> {
@@ -1331,8 +1420,9 @@ export class MessagingEngine {
         mentionCount: c.inbox?.mentionCount ?? previous?.mentionCount ?? 0,
         lastActivityAt: c.inbox?.lastActivityAt ?? previous?.lastActivityAt ?? c.createdAt,
         lastMessage: last
-          ? { sequence: last.sequence, senderPrincipalId: last.senderPrincipalId, previewText: last.previewText, attachmentCount: last.attachmentCount, lifecycle: last.lifecycle, createdAt: last.createdAt }
+          ? { sequence: last.sequence, senderPrincipalId: last.senderPrincipalId, previewText: last.previewText, attachmentCount: last.attachmentCount, lifecycle: last.lifecycle, createdAt: last.createdAt, presentation: last.presentation ?? null, attachmentKind: last.attachmentKind ?? null }
           : (previous?.lastMessage ?? null),
+        description: c.description ?? null,
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
         announcementOnly: !!c.announcementOnly,
@@ -1719,7 +1809,7 @@ export class MessagingEngine {
   }
 
   /** F1: archive / pin this chat for me (WhatsApp); the list updates straight away. */
-  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean }): Promise<void> {
+  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean; favourite?: boolean }): Promise<void> {
     const r = await relay<InboxFlags>("PUT", `v1/conversations/${conversationId}/inbox-settings`, change);
     const flags = inboxFlags(r);
     const c = this.server.get(conversationId);
@@ -1732,6 +1822,129 @@ export class MessagingEngine {
     const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
     await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, retentionSeconds: seconds });
     await this.refreshConversations();
+  }
+
+  /** Re-reads the chat list after inbox signals (coalesced: a burst costs one read). */
+  private inboxTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleInboxRefresh(): void {
+    if (this.inboxTimer || this.stopped) return;
+    // At most one list read every couple of seconds, however many chats change at once.
+    const wait = Math.max(250, 2_000 - (Date.now() - this.lastListRefresh));
+    this.inboxTimer = setTimeout(() => {
+      this.inboxTimer = null;
+      void this.refreshConversations().catch(() => {});
+    }, wait);
+  }
+
+  /**
+   * A poll (WhatsApp): in a synced (MANAGED) chat it is a server message — members vote,
+   * see who voted for what, and the tally updates live; in a private chat it travels
+   * inside the end-to-end encrypted content (`sendRich`).
+   */
+  async sendPoll(conversationId: string, poll: { question: string; options: string[]; multiple: boolean }): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (conv.securityProfile === "PRIVATE_E2EE") return this.sendRich(conversationId, { t: "poll", ...poll });
+    const clientMessageId = uuid();
+    const body = { clientMessageId, text: poll.question, poll: { options: poll.options, allowsMultipleAnswers: poll.multiple } };
+    const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, body);
+    // A lost response is retried with the same clientMessageId (answered as a replay).
+    const msg = await send().catch((e) => (e instanceof MessagingApiError && (e.status === 0 || e.status >= 500) ? send() : Promise.reject(e)));
+    const st = this.stateFor(conversationId);
+    st.applyMessages([msg]);
+    this.renderManaged(conversationId);
+    this.bumpConversation(conversationId, st);
+  }
+
+  /** Votes (or changes / retracts the vote: no choices) on a poll of either kind of chat. */
+  async votePoll(conversationId: string, messageId: string, choices: number[]): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) return;
+    if (conv.securityProfile === "PRIVATE_E2EE") return this.sendRich(conversationId, { t: "vote", poll: messageId, choices });
+    const r = await relay<{ poll: unknown }>("PUT", `v1/conversations/${conversationId}/messages/${messageId}/poll/vote`, { optionIndexes: choices });
+    this.applyPollAnswer(conversationId, messageId, r.poll);
+  }
+
+  /** Closes a synced chat's poll (its sender or a group admin): votes stay, no new ones. */
+  async closePoll(conversationId: string, messageId: string): Promise<void> {
+    const r = await relay<{ poll: unknown }>("POST", `v1/conversations/${conversationId}/messages/${messageId}/poll/close`, {});
+    this.applyPollAnswer(conversationId, messageId, r.poll);
+  }
+
+  /** The tally a vote / close answered with, shown at once (the event confirms it). */
+  private applyPollAnswer(conversationId: string, messageId: string, poll: unknown): void {
+    const st = this.managed.get(conversationId);
+    const r = st?.get(messageId);
+    if (!st || !r || !poll || typeof poll !== "object") return;
+    st.applyMessages([{
+      messageId: r.messageId, conversationId, sequence: r.sequence, kind: "APPLICATION", securityProfile: "MANAGED",
+      senderPrincipalId: r.senderPrincipalId, clientMessageId: r.clientMessageId, lifecycle: r.lifecycle, editCount: r.editCount,
+      editedAt: r.editedAt, createdAt: r.createdAt, attachmentIds: r.attachmentIds, replyToMessageId: r.replyToMessageId,
+      threadRootId: r.threadRootId, forwarded: r.forwarded,
+      managed: { text: r.text, presentation: "POLL", poll: poll as NonNullable<ManagedRecord["poll"]> },
+    }]);
+    this.renderManaged(conversationId);
+  }
+
+  /** A synced group's description (null clears it); its owner or an admin. */
+  async setGroupDescription(conversationId: string, description: string | null): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    const text = description?.trim() ? description.trim().slice(0, 512) : null;
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, description: text });
+    await this.refreshConversations();
+  }
+
+  /**
+   * A synced group's photo: the image is uploaded to the group itself (the same scanned
+   * attachment flow as any photo) and named as its avatar (`attachment:<id>`); members read
+   * it like any attachment. null removes the photo.
+   */
+  async setGroupPhoto(conversationId: string, file: File | null): Promise<void> {
+    let avatarRef: string | null = null;
+    if (file) {
+      const mediaType = file.type;
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(mediaType)) throw new MessagingApiError(0, "VALIDATION_ERROR", null, "Choose a PNG, JPEG, WebP or GIF picture.");
+      const data = new Uint8Array(await file.arrayBuffer());
+      const intent = await relay<{ attachmentId: string; upload: { url: string; headers: { name: string; value: string }[] } }>("POST", `v1/conversations/${conversationId}/attachments`, {
+        kind: "IMAGE", size: data.length, sha256: await sha256Hex(data), mediaType, fileName: file.name.slice(0, 255) || "group-photo",
+      });
+      await this.uploadWithRetry(intent.upload, data);
+      let fin = await relay<{ state: string; stateReason?: string | null }>("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
+      for (let i = 0; i < 20 && (fin.state === "VERIFYING" || fin.state === "INTENT_CREATED"); i++) {
+        await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** i, 4000)));
+        fin = await relay<{ state: string; stateReason?: string | null }>("GET", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}`);
+      }
+      if (fin.state !== "READY") throw new MessagingApiError(0, `ATTACHMENT_${fin.state}`, fin.stateReason ?? null, "The picture couldn't be used.");
+      avatarRef = `attachment:${intent.attachmentId}`;
+      avatarUrls.set(`${conversationId}|${avatarRef}`, Promise.resolve(URL.createObjectURL(new Blob([data as BlobPart], { type: mediaType }))));
+    }
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, avatarRef });
+    await this.refreshConversations();
+  }
+
+  /** The group photo of a synced chat (cached per photo; null: none or not readable). */
+  avatarUrl(conversationId: string, avatarRef: string | null): Promise<string | null> {
+    if (!avatarRef?.startsWith("attachment:")) return Promise.resolve(null);
+    const key = `${conversationId}|${avatarRef}`;
+    let p = avatarUrls.get(key);
+    if (!p) {
+      const aid = avatarRef.slice("attachment:".length);
+      p = (async () => {
+        const grant = await relay<{ url: string }>("POST", `v1/conversations/${conversationId}/attachments/${aid}/download-grants`, {});
+        const r = await fetch(grant.url, { credentials: "omit", redirect: "error" });
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        // Plain raster pictures only (never SVG, which can carry script).
+        const type = /^image\/(png|jpeg|webp|gif)$/.test(blob.type) ? blob.type : "image/png";
+        return URL.createObjectURL(new Blob([blob], { type }));
+      })().catch(() => {
+        avatarUrls.delete(key);
+        return null;
+      });
+      avatarUrls.set(key, p);
+    }
+    return p;
   }
 
   async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {
@@ -2402,7 +2615,11 @@ export class MessagingEngine {
         ...c,
         unreadCount: unseen ? c.unreadCount + 1 : c.unreadCount,
         lastActivityAt: latest.createdAt > c.lastActivityAt ? latest.createdAt : c.lastActivityAt,
-        lastMessage: { sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt },
+        lastMessage: {
+          sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt,
+          presentation: latest.poll ? "POLL" : latest.announcement ? "ANNOUNCEMENT" : "STANDARD",
+          attachmentKind: latest.attachmentIds[0] ? (this.attachmentMeta.get(latest.attachmentIds[0])?.kind ?? null) : null,
+        },
       };
     });
     conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
@@ -2440,6 +2657,7 @@ export class MessagingEngine {
       seenBy: [],
       announcement: r.announcement,
       forwarded: r.forwarded,
+      rich: !removed && r.poll ? managedPoll(r.text ?? "", r.poll, me) : null,
     };
   }
 

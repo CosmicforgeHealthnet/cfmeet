@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 69,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 568,
+    "PUBLIC_CUSTOMER": 576,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -3546,6 +3546,38 @@
       "requiredScope": "messages.send"
     },
     {
+      "id": "messaging.closePoll",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/conversations/{conversationId}/messages/{messageId}/poll/close",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/conversations/{conversationId}/messages/{messageId}/poll/close",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.votePoll",
+      "domain": "messaging",
+      "method": "PUT",
+      "pattern": "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.send"
+    },
+    {
       "id": "messaging.listReactions",
       "domain": "messaging",
       "method": "GET",
@@ -6172,6 +6204,102 @@
         "cf-acting-principal"
       ],
       "requiredScope": "messages.send"
+    },
+    {
+      "id": "messaging.listChatLists",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/chat-lists",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.createChatList",
+      "domain": "messaging",
+      "method": "POST",
+      "pattern": "/v1/messaging/chat-lists",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.deleteChatList",
+      "domain": "messaging",
+      "method": "DELETE",
+      "pattern": "/v1/messaging/chat-lists/{listId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists/{listId}",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.updateChatList",
+      "domain": "messaging",
+      "method": "PATCH",
+      "pattern": "/v1/messaging/chat-lists/{listId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists/{listId}",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.removeChatListConversation",
+      "domain": "messaging",
+      "method": "DELETE",
+      "pattern": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.addChatListConversation",
+      "domain": "messaging",
+      "method": "PUT",
+      "pattern": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.revokeAllClientSessions",
@@ -15550,6 +15678,22 @@
     {
       "domain": "messaging",
       "contract": "cfmeet.messaging.http-api",
+      "operationId": "closePoll",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/poll/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "votePoll",
+      "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
       "operationId": "listReactions",
       "method": "GET",
       "path": "/v1/conversations/{conversationId}/messages/{messageId}/reactions",
@@ -15777,6 +15921,54 @@
       "operationId": "removeBlock",
       "method": "DELETE",
       "path": "/v1/messaging/blocks/{principalId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "listChatLists",
+      "method": "GET",
+      "path": "/v1/messaging/chat-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "createChatList",
+      "method": "POST",
+      "path": "/v1/messaging/chat-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "deleteChatList",
+      "method": "DELETE",
+      "path": "/v1/messaging/chat-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "updateChatList",
+      "method": "PATCH",
+      "path": "/v1/messaging/chat-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "removeChatListConversation",
+      "method": "DELETE",
+      "path": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "addChatListConversation",
+      "method": "PUT",
+      "path": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
       "class": "PUBLIC_CUSTOMER"
     },
     {
