@@ -62,6 +62,11 @@ jobs:
       - name: Messaging MANAGED sync, outbox and Communications tests
         run: node --experimental-strip-types --test tests/messaging-managed-sync.test.mjs tests/messaging-outbox.test.mjs tests/communications-core.test.mjs
 
+      # Non-blocking status publishing: order, idempotency keys, resumable parts, back-off,
+      # offline pause, cancel, recovery after a reload, concurrency, no duplicate creation.
+      - name: Status publishing queue tests
+        run: node --experimental-strip-types --test tests/status-publisher.test.mjs
+
       # Private chats (MLS) like WhatsApp: senders add every registered device, devices keep
       # KeyPackages published, removals never block a chat, unreadable messages show a label.
       - name: Messaging private-chat membership tests

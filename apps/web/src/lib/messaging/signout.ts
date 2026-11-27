@@ -39,6 +39,11 @@ export async function signOutMessaging(timeoutMs = 5000): Promise<void> {
   currentMessagingEngine()?.halt();
   // Queued MANAGED sends and the session-device id never outlive the sign-in.
   clearAllOutboxes();
+  // Pending status uploads (and their media) never outlive the sign-in either.
+  await Promise.race([
+    import("@/lib/status-publisher/client").then((m) => m.clearStatusQueue()).catch(() => {}),
+    new Promise<void>((r) => setTimeout(r, 2000)),
+  ]);
   // Unsent drafts of every chat leave with the sign-in too.
   try {
     for (const k of Object.keys(window.localStorage ?? {})) if (k.startsWith("cfmeet:draft:")) window.localStorage.removeItem(k);

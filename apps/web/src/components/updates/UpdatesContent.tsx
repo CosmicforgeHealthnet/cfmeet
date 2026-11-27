@@ -9,6 +9,7 @@ import { toast } from "@/components/ui/toast";
 import { useChannelDirectory, useFollow, useFollowedChannels, useMediaUrl, useSocialRefresh, useStatusFeed } from "@/hooks/v2/useSocial";
 import { useAccountProfile } from "@/hooks/useAccount";
 import { socialService, type Channel, type PersonView, type StatusPost } from "@/services/v2/social.service";
+import MyStatusCard from "./MyStatusCard";
 import StatusComposer from "./StatusComposer";
 import StatusViewer from "./StatusViewer";
 import { errorText, FONTS, PersonAvatar, shortWhen } from "./shared";
@@ -44,17 +45,9 @@ export default function UpdatesContent() {
       <section className="mt-5" aria-labelledby="status-heading">
         <h2 id="status-heading" className="text-lg font-bold">Status</h2>
         <div className="no-scrollbar -mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1" data-testid="status-row">
-          <button type="button" data-testid="my-status"
-            onClick={() => (mine.length ? setViewing({ person: me, posts: mine, mine: true, startAt: 0 }) : setComposer("media"))}
-            className="relative flex h-44 w-28 shrink-0 flex-col justify-between overflow-hidden rounded-2xl border border-border bg-card p-2.5 text-left">
-            {mine.length ? <StatusThumb post={mine[mine.length - 1]} /> : null}
-            <span className="relative self-start">
-              <PersonAvatar person={me} size="size-11" ring={mine.length ? "seen" : null} />
-              <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-card"
-                onClick={(e) => { e.stopPropagation(); setComposer("media"); }} role="presentation"><Plus className="size-3.5" strokeWidth={3} /></span>
-            </span>
-            <span className={cn("relative text-sm font-semibold", mine.length && "text-white drop-shadow")}>{mine.length ? "My status" : "Add status"}</span>
-          </button>
+          {/* Pending statuses (background queue) show here first: preview, "Adding…" + ring, or "Tap to retry". */}
+          <MyStatusCard me={me} postCount={mine.length} latest={<StatusThumb post={mine[mine.length - 1]} />}
+            onView={() => setViewing({ person: me, posts: mine, mine: true, startAt: 0 })} onAdd={() => setComposer("media")} />
           {feed.isPending ? [0, 1, 2].map((i) => <span key={i} className="h-44 w-28 shrink-0 animate-pulse rounded-2xl bg-muted" />) : null}
           {contacts.map((c) => (
             <button key={c.person.userId} type="button" data-testid="contact-status"
