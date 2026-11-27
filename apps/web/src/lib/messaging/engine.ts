@@ -1442,6 +1442,13 @@ export class MessagingEngine {
     return created;
   }
 
+  /** The older encrypted chats a synced chat continues (their readable history shows in it). */
+  legacyFor(managedId: string): string[] {
+    return this.snapshot.conversations
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE" && this.managedTwinOf(c.id) === managedId)
+      .map((c) => c.id);
+  }
+
   private continuing = new Map<string, Promise<string>>();
   private unnameable = new Set<string>();
 

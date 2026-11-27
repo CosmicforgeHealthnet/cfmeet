@@ -1295,7 +1295,25 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
   const mediaInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
+  // A synced chat that continues an older encrypted chat starts with that chat's history on a
+  // device that can read it (the older messages exist only on the devices that received them);
+  // nothing is shown for messages this device never had. Earlier history is read-only.
+  const legacy = useMemo(() => (conversation.securityProfile === "MANAGED" ? engine.legacyFor(conversation.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [engine, conversation.id, conversation.securityProfile, s.conversations]);
+  const legacyKey = legacy.join(",");
+  useEffect(() => {
+    for (const id of legacyKey ? legacyKey.split(",") : []) void engine.openConversation(id).catch(() => {});
+  }, [engine, legacyKey]);
+  const messages = useMemo(() => {
+    const own = s.messages[conversation.id] ?? [];
+    if (!legacy.length) return own;
+    const earlier = legacy.flatMap((id) => (s.messages[id] ?? [])
+      .filter((m) => (m.text || m.file) && !["before-join", "unreadable", "removed", "system"].includes(m.state))
+      .map((m) => ({ ...m, key: `l:${id}:${m.key}`, messageId: null, reactions: [], pinned: false })));
+    earlier.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+    return [...earlier, ...own];
+  }, [s.messages, conversation.id, legacy]);
   // "online" / "last seen" for a one-to-one chat (WhatsApp); groups keep the security badge.
   useEffect(() => { engine.watchPresence(conversation.id); return () => engine.watchPresence(null); }, [engine, conversation.id]);
   const others = Object.values(s.presence[conversation.id] ?? {});
