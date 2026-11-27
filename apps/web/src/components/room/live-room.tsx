@@ -22,7 +22,9 @@ import {
   useLocalParticipant,
   type TrackReference,
 } from "@livekit/components-react";
-import { Track, RoomEvent } from "livekit-client";
+import { Track, RoomEvent, DisconnectReason } from "livekit-client";
+import { useMediaCredential } from "@/hooks/v2/useCollaboration";
+import { RefreshCw, WifiOff } from "lucide-react";
 import Image from "next/image";
 import { Grid2X2, CircleHelp, ChartNoAxesColumn, GitFork, Clapperboard, Volume2, LayoutPanelTop, Lock, ShieldCheck, Users, MessageCircle, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,7 +42,8 @@ import Sidebar from "@/components/room/sidebar";
 import FooterControls, { mediaErrorText } from "@/components/room/footer-controls";
 import { toast } from "@/components/ui/toast";
 import { DeviceRecordingProvider } from "@/components/recording/DeviceRecording";
-import type { RoomJoinData } from "@/lib/prejoin";
+import { roomJoinData, type RoomJoinData } from "@/lib/prejoin";
+import type { JoinConferenceResponse } from "@/types/generated/meeting-service";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Maximize, Minimize, UserPlus, UserMinus, MicOff, Mic } from "lucide-react";
@@ -87,6 +90,10 @@ interface LiveRoomProps {
   joinData: RoomJoinData;
   initialVideo?: boolean;
   initialAudio?: boolean;
+  /** A dropped session was replaced by a new one: the room starts again with it. */
+  onRejoin?: (data: RoomJoinData, media: { audio: boolean; video: boolean }) => void;
+  /** Back to the pre-join screen (it asks for whatever joining again needs). */
+  onExitToPreJoin?: () => void;
 }
 
 /**
@@ -94,7 +101,7 @@ interface LiveRoomProps {
  * the backend-issued credential; chat, presence and controls use v2 conference endpoints only
  * (FE-014 / MTG-019: no legacy v1 meeting, chat or media writes).
  */
-export default function LiveRoom({ joinData, initialVideo = true, initialAudio = true }: LiveRoomProps) {
+export default function LiveRoom({ joinData, initialVideo = true, initialAudio = true, onRejoin, onExitToPreJoin }: LiveRoomProps) {
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isDisconnectingRef = useRef(false);
@@ -129,8 +136,58 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   }, []);
   const [endedStatus, setEndedStatus] = useState<string | null>(null);
 
+  // A phone pauses a page it is not showing (another tab, the chat list, the lock screen) and
+  // the media connection drops. That is not leaving: the person stays in the meeting and the
+  // room reconnects with a fresh media credential when the page is back (or on "Reconnect").
+  // Only Leave, a host's removal or the meeting ending takes someone out.
+  const leaving = useRef(false);
+  const [rtc, setRtc] = useState({ url: joinData.rtcUrl, token: joinData.rtcToken });
+  const [connection, setConnection] = useState<"ok" | "lost" | "reconnecting" | "failed">("ok");
+  const [attempt, setAttempt] = useState(0);
+  const credential = useMediaCredential(joinData.conferenceId);
+  const replaced = useRef(false);
+  const reconnect = async () => {
+    setConnection("reconnecting");
+    try {
+      if (!joinData.participantSessionId) throw new Error("no session");
+      const fresh = await credential.mutateAsync({ participantSessionId: joinData.participantSessionId });
+      setRtc({ url: fresh.rtc.url, token: fresh.rtc.credential });
+      setAttempt((n) => n + 1);
+      setConnection("ok");
+      return;
+    } catch { /* the server already closed the dropped session: join again below */ }
+    try {
+      const response = await conferencesService.join(joinData.conferenceId, { displayName: me.data?.displayName || undefined, previousSessionId: joinData.participantSessionId });
+      if (response.participantToken) storageStore.setParticipantToken(response.participantToken);
+      storageStore.setV2JoinData(response);
+      const next = roomJoinData(response as unknown as JoinConferenceResponse, joinData.isGuest);
+      if (next && onRejoin) {
+        replaced.current = true;
+        onRejoin(next, wantedMedia);
+        return;
+      }
+    } catch { /* passcode, consent or waiting room: the pre-join screen asks */ }
+    setConnection("failed");
+  };
+  const reconnectRef = useRef(reconnect);
+  useEffect(() => { reconnectRef.current = reconnect; });
+  const connectionRef = useRef(connection);
+  useEffect(() => { connectionRef.current = connection; }, [connection]);
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible" && connectionRef.current === "lost") void reconnectRef.current(); };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("online", back);
+    window.addEventListener("pageshow", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("online", back);
+      window.removeEventListener("pageshow", back);
+    };
+  }, []);
+
   const handleDisconnect = useCallback(async () => {
     if (isDisconnectingRef.current) return;
+    leaving.current = true;
     isDisconnectingRef.current = true;
     try {
       await closeSession().catch(() => {});
@@ -192,8 +249,9 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
       <LiveKitRoom
         video={wantedMedia.video && (joinData.permissions?.videoPublish ?? true)}
         audio={wantedMedia.audio && (joinData.permissions?.audioPublish ?? true)}
-        token={joinData.rtcToken}
-        serverUrl={joinData.rtcUrl}
+        key={attempt}
+        token={rtc.token}
+        serverUrl={rtc.url}
         data-lk-theme="default"
         style={{ height: "100vh" }}
         onMediaDeviceFailure={(failure, kind) => {
@@ -201,16 +259,47 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
           const text = mediaErrorText(kind === "videoinput" ? "video" : "audio", { name: failure === "PermissionDenied" ? "NotAllowedError" : failure === "NotFound" ? "NotFoundError" : failure === "DeviceInUse" ? "NotReadableError" : "Error" });
           if (text) toast(text, "error");
         }}
-        onDisconnected={() => {
-          if (!isRefreshingCredentialRef.current) {
+        onDisconnected={(reason) => {
+          if (isRefreshingCredentialRef.current || replaced.current || connectionRef.current === "reconnecting") return;
+          const out = leaving.current || sessionClosed.current || terminal.current
+            || reason === DisconnectReason.PARTICIPANT_REMOVED || reason === DisconnectReason.ROOM_DELETED;
+          if (out) {
             void handleDisconnect().catch(() => { /* Session expiration also closes a disconnected session. */ });
+            return;
           }
+          if (unloading.current) return;
+          // Dropped, not left: reconnect now if the page is showing, otherwise when it is back.
+          if (typeof document !== "undefined" && document.visibilityState === "visible" && navigator.onLine) void reconnect();
+          else setConnection("lost");
         }}
       >
         <RealtimeRoomSync conferenceId={joinData.conferenceId} />
-        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={(value, media) => { isRefreshingCredentialRef.current = value; if (media) setWantedMedia(media); }} />
+        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={async () => { leaving.current = true; await closeSession(); }} onCredentialRefreshStateChange={(value, media) => { isRefreshingCredentialRef.current = value; if (media) setWantedMedia(media); }} />
         <RoomAudioRenderer />
       </LiveKitRoom>
+      {connection !== "ok" ? (
+        <div role="status" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm" data-testid="room-connection-lost">
+          <div className="w-full max-w-sm rounded-3xl bg-[#202124] p-6 text-center text-white shadow-2xl">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/10">
+              {connection === "reconnecting" ? <RefreshCw className="size-5 animate-spin" /> : <WifiOff className="size-5" />}
+            </span>
+            <p className="mt-4 text-lg font-semibold">{connection === "reconnecting" ? "Reconnecting…" : connection === "failed" ? "Couldn't get you back in" : "You're still in the meeting"}</p>
+            <p className="mt-1 text-sm text-white/70">{connection === "reconnecting" ? "Getting you back into the call." : connection === "failed" ? "Join again to go back into the call." : "The connection dropped while the page was in the background."}</p>
+            {connection === "failed" ? (
+              <div className="mt-5 flex gap-2">
+                <button type="button" className="h-11 flex-1 rounded-full bg-white/10 text-sm font-semibold hover:bg-white/15" onClick={() => { setConnection("ok"); void handleDisconnect(); }}>Leave</button>
+                <button type="button" className="h-11 flex-1 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90" onClick={() => { replaced.current = true; storageStore.clearV2JoinData(); onExitToPreJoin?.(); }}>Join again</button>
+              </div>
+            ) : null}
+            {connection === "lost" ? (
+              <div className="mt-5 flex gap-2">
+                <button type="button" className="h-11 flex-1 rounded-full bg-white/10 text-sm font-semibold hover:bg-white/15" onClick={() => { setConnection("ok"); void handleDisconnect(); }}>Leave</button>
+                <button type="button" className="h-11 flex-1 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90" onClick={() => void reconnect()} data-testid="room-reconnect">Reconnect</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </LayoutContextProvider>
   );
 }

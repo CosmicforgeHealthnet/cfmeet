@@ -9,7 +9,11 @@ import type { RoomJoinData } from "@/lib/prejoin";
 export default function ConferenceRoom({ conferenceId, initialInvitationToken }: { conferenceId: string; initialInvitationToken?: string }) {
   const [joined, setJoined] = useState<{ data: RoomJoinData; prefs: MediaPreferences } | null>(null);
   if (joined && joined.data.conferenceId === conferenceId) {
-    return <LiveRoom joinData={joined.data} initialVideo={joined.prefs.isCameraOn} initialAudio={joined.prefs.isMicOn} />;
+    return (
+      <LiveRoom key={joined.data.participantSessionId ?? "room"} joinData={joined.data} initialVideo={joined.prefs.isCameraOn} initialAudio={joined.prefs.isMicOn}
+        onRejoin={(data, media) => setJoined({ data, prefs: { ...joined.prefs, isCameraOn: media.video, isMicOn: media.audio } })}
+        onExitToPreJoin={() => setJoined(null)} />
+    );
   }
   return <PreJoinScreen conferenceId={conferenceId} initialInvitationToken={initialInvitationToken} onJoin={(data, prefs) => setJoined({ data, prefs })} />;
 }
