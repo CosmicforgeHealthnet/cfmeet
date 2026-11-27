@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Mic, Palette, Send, Type, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
-import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, socialService, type MediaKind } from "@/services/v2/social.service";
+import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, type MediaKind } from "@/services/v2/social.service";
 import VideoEditor from "@/components/media-editor/VideoEditor";
-import { canProcessVideo, isAbortError, isVideoProcessingUnsupported, probeVideo, renderVideoEdit, type VideoEdit, type VideoProbe } from "@/lib/media-editor/video";
+import { canProcessVideo, probeVideo, type VideoEdit, type VideoProbe } from "@/lib/media-editor/video";
+import { enqueueStatus } from "@/lib/status-publisher/client";
+import { VIDEO_EDIT_PROCESSOR } from "@/lib/status-publisher/video-edit-processor";
 import { BACKGROUNDS, errorText, FONTS } from "./shared";
 
 type Mode = "text" | "media" | "voice";
@@ -31,20 +33,13 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   const [kind, setKind] = useState<MediaKind | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [caption, setCaption] = useState("");
-  const [busy, setBusy] = useState<number | null>(null);
-  /** What a video post is doing ("Processing 1 of 3…", "Uploading… 40%"). */
-  const [stage, setStage] = useState<string | null>(null);
   /** Set when the video can be edited and processed in this browser. */
   const [probe, setProbe] = useState<VideoProbe | null>(null);
   const [edit, setEdit] = useState<VideoEdit | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const work = useRef<AbortController | null>(null);
 
   useEffect(() => { if (initial === "media") picker.current?.click(); }, [initial]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-  useEffect(() => () => work.current?.abort(), []);
-
-  const close = () => { work.current?.abort(); onClose(); };
 
   const pick = async (f: File | undefined) => {
     if (!f) return;
@@ -65,98 +60,33 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
     setFile(f); setKind(k); setDuration(d); setProbe(p); setEdit(null); setPreview(URL.createObjectURL(f)); setMode("media");
   };
 
-  const post = async () => {
-    if (busy !== null) return;
-    setBusy(0);
-    try {
-      if (mode === "text") {
-        if (!text.trim()) return;
-        await socialService.postStatus({ kind: "TEXT", text: text.trim(), background: BACKGROUNDS[bg], font });
-      } else if (mode === "media" && file && kind === "VIDEO" && probe && edit) {
-        await postEditedVideo(file, probe, edit);
-      } else if (mode === "media" && file && kind) {
-        const media = await socialService.upload(file, "STATUS", kind, duration, (p) => setBusy(p));
-        if (kind === "VIDEO" && duration) {
-          const parts = segments(duration);
-          for (const [i, s] of parts.entries()) {
-            // The caption goes with the first part only, as WhatsApp does.
-            await socialService.postStatus({ kind: "VIDEO", mediaId: media.mediaId, startMs: s.startMs, endMs: s.endMs, caption: i === 0 && caption.trim() ? caption.trim() : undefined });
-          }
-        } else {
-          await socialService.postStatus({ kind: "IMAGE", mediaId: media.mediaId, caption: caption.trim() || undefined });
-        }
-      }
-      toast("Status posted");
-      onPosted();
-      onClose();
-    } catch (e) {
-      if (!isAbortError(e)) toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
-    } finally {
-      setBusy(null);
-      setStage(null);
-      work.current = null;
-    }
-  };
-
-  /** Edited video: each part is exported to a small MP4, uploaded, then posted in order. */
-  const postEditedVideo = async (source: File, info: VideoProbe, v: VideoEdit) => {
-    const ac = new AbortController();
-    work.current = ac;
-    const text = caption.trim() || undefined;
-    let blobs: Blob[];
-    try {
-      blobs = await renderVideoEdit(source, v, {
-        probe: info,
-        signal: ac.signal,
-        onProgress: ({ part, parts, overall }) => { setStage(parts > 1 ? `Processing ${part + 1} of ${parts}…` : "Processing…"); setBusy(overall * 0.5); },
-      });
-    } catch (e) {
-      if (!isVideoProcessingUnsupported(e)) throw e;
-      // Cannot encode here after all: send the original and post the chosen time ranges.
-      if (source.size > LIMITS.VIDEO) throw new Error("Videos can be at most 64 MB.");
-      setStage("Uploading…");
-      const media = await socialService.upload(source, "STATUS", "VIDEO", info.durationMs, (p) => { setStage(`Uploading… ${Math.round(p * 100)}%`); setBusy(p); });
-      for (const [i, s] of v.segments.entries()) {
-        await socialService.postStatus({ kind: "VIDEO", mediaId: media.mediaId, startMs: s.startMs, endMs: s.endMs, caption: i === 0 ? text : undefined });
-      }
-      return;
-    }
-    const total = blobs.reduce((sum, b) => sum + b.size, 0) || 1;
-    let sent = 0;
-    const mediaIds: string[] = [];
-    for (const [i, blob] of blobs.entries()) {
-      if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
-      const len = v.segments[i].endMs - v.segments[i].startMs;
-      const media = await socialService.upload(blob, "STATUS", "VIDEO", len, (p) => {
-        const overall = (sent + p * blob.size) / total;
-        setStage(`Uploading… ${Math.round(overall * 100)}%`);
-        setBusy(0.5 + overall * 0.5);
-      });
-      sent += blob.size;
-      mediaIds.push(media.mediaId);
-    }
-    // Posted only once every part is up, so the parts appear together and in order.
-    for (const [i, mediaId] of mediaIds.entries()) {
-      const len = v.segments[i].endMs - v.segments[i].startMs;
-      // The caption goes with the first part only, as WhatsApp does.
-      await socialService.postStatus({ kind: "VIDEO", mediaId, startMs: 0, endMs: len, caption: i === 0 ? text : undefined });
-    }
+  // Non-blocking (WhatsApp): queued, then processed / uploaded / published in the background
+  // (src/lib/status-publisher); the Updates card shows "Adding…" and its progress.
+  // An edited video is rendered to ≤ 60 s MP4 parts in the background too (named processor,
+  // so it resumes after a reload); otherwise the original goes up once, posted as time ranges.
+  const post = () => {
+    if (mode === "text" ? !text.trim() : !(mode === "media" && file && kind)) return;
+    void enqueueStatus({ items: [mode === "text" ? { kind: "TEXT", text: text.trim(), background: BACKGROUNDS[bg], font }
+      : kind === "VIDEO" && probe && edit ? { kind: "VIDEO", process: { processor: VIDEO_EDIT_PROCESSOR, input: file!, params: { edit, durationMs: probe.durationMs } }, caption }
+      : kind === "VIDEO" && duration ? { kind: "VIDEO", source: file!, durationMs: duration, ranges: segments(duration), caption } // caption: first part only
+      : { kind: "IMAGE", blob: file!, caption }] }).catch((e) => toast(errorText(e, "Your status couldn't be added. Try again."), "error"));
+    onPosted();
+    onClose();
   };
 
   const parts = kind === "VIDEO" && duration ? segments(duration).length : 1;
 
   if (mode === "media" && file && kind === "VIDEO" && probe) {
     return (
-      <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={close}
+      <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={onClose}
         footer={(
           <div className="space-y-2 bg-gradient-to-t from-black via-black/80 to-transparent p-3" data-testid="status-composer">
-            {stage ? <p className="text-center text-sm font-medium text-white/90" role="status" data-testid="status-progress">{stage}</p> : null}
             <div className="flex items-center gap-2">
-              <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…" disabled={busy !== null}
+              <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…"
                 className="h-12 min-w-0 flex-1 rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
-              <button type="button" aria-label="Post status" data-testid="status-send" disabled={busy !== null || !edit} onClick={() => void post()}
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={!edit} onClick={post}
                 className="relative flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
-                {busy !== null ? <span className="text-xs font-bold">{Math.round(busy * 100)}%</span> : <Send className="size-6" />}
+                <Send className="size-6" />
               </button>
             </div>
           </div>
@@ -218,9 +148,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
                   </button>
                 ))}
               </div>
-              <button type="button" aria-label="Post status" data-testid="status-send" disabled={busy !== null || (mode === "text" ? !text.trim() : !file)} onClick={() => void post()}
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={mode === "text" ? !text.trim() : !file} onClick={post}
                 className="relative flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
-                {busy !== null ? <span className="text-xs font-bold">{Math.round(busy * 100)}%</span> : <Send className="size-6" />}
+                <Send className="size-6" />
               </button>
             </div>
           </div>
@@ -235,7 +165,6 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
   const [recording, setRecording] = useState(false);
   const [clip, setClip] = useState<{ blob: Blob; url: string; ms: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [busy, setBusy] = useState(false);
   const rec = useRef<{ recorder: MediaRecorder; started: number; stream: MediaStream; timer: ReturnType<typeof setInterval> } | null>(null);
 
   useEffect(() => () => { const r = rec.current; if (r) { clearInterval(r.timer); r.stream.getTracks().forEach((t) => t.stop()); } }, []);
@@ -250,7 +179,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
     setRecording(false);
   };
   const start = async () => {
-    if (rec.current || busy) return;
+    if (rec.current) return;
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast("Allow the microphone to record a voice status.", "error"); return; }
     const recorder = new MediaRecorder(stream);
@@ -273,19 +202,10 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
     recorder.start();
     setRecording(true); setElapsed(0); setClip(null);
   };
-  const post = async () => {
-    if (!clip || busy) return;
-    setBusy(true);
-    try {
-      const media = await socialService.upload(clip.blob, "STATUS", "AUDIO", clip.ms);
-      await socialService.postStatus({ kind: "AUDIO", mediaId: media.mediaId });
-      toast("Status posted");
-      onPosted();
-    } catch (e) {
-      toast(errorText(e, "Your voice status couldn't be posted."), "error");
-    } finally {
-      setBusy(false);
-    }
+  const post = () => {
+    if (!clip) return;
+    void enqueueStatus({ items: [{ kind: "AUDIO", blob: clip.blob, durationMs: clip.ms, background: bg }] }).catch((e) => toast(errorText(e, "Your voice status couldn't be added."), "error"));
+    onPosted();
   };
   const secs = Math.floor((clip ? clip.ms : elapsed) / 1000);
 
@@ -305,7 +225,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
       </div>
       <div className="flex items-center justify-end gap-3 p-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
         {clip ? (
-          <button type="button" aria-label="Post voice status" disabled={busy} onClick={() => void post()} className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50"><Send className="size-6" /></button>
+          <button type="button" aria-label="Post voice status" onClick={post} className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50"><Send className="size-6" /></button>
         ) : null}
         <button type="button" aria-label="Hold to record" onPointerDown={(e) => { e.preventDefault(); void start(); }} onPointerUp={stop} onPointerLeave={() => { if (recording) stop(); }} onContextMenu={(e) => e.preventDefault()}
           className={cn("flex size-16 touch-none select-none items-center justify-center rounded-full bg-white text-black shadow-xl transition-transform", recording && "scale-110 bg-red-500 text-white")}>
