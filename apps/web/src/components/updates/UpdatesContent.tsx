@@ -48,9 +48,9 @@ export default function UpdatesContent() {
             onClick={() => (mine.length ? setViewing({ person: me, posts: mine, mine: true, startAt: 0 }) : setComposer("media"))}
             className="relative flex h-44 w-28 shrink-0 flex-col justify-between overflow-hidden rounded-2xl border border-border bg-card p-2.5 text-left">
             {mine.length ? <StatusThumb post={mine[mine.length - 1]} /> : null}
-            <span className="relative">
+            <span className="relative self-start">
               <PersonAvatar person={me} size="size-11" ring={mine.length ? "seen" : null} />
-              <span className="absolute -bottom-0.5 left-8 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-card"
+              <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-card"
                 onClick={(e) => { e.stopPropagation(); setComposer("media"); }} role="presentation"><Plus className="size-3.5" strokeWidth={3} /></span>
             </span>
             <span className={cn("relative text-sm font-semibold", mine.length && "text-white drop-shadow")}>{mine.length ? "My status" : "Add status"}</span>
@@ -61,7 +61,7 @@ export default function UpdatesContent() {
               onClick={() => setViewing({ person: c.person, posts: c.posts, mine: false, startAt: Math.max(0, c.posts.findIndex((p) => !p.viewed)) })}
               className="relative flex h-44 w-28 shrink-0 flex-col justify-between overflow-hidden rounded-2xl bg-muted p-2.5 text-left">
               <StatusThumb post={c.posts[c.posts.length - 1]} />
-              <PersonAvatar person={c.person} size="size-10" ring={c.allViewed ? "seen" : "unseen"} className="relative" />
+              <PersonAvatar person={c.person} size="size-10" ring={c.allViewed ? "seen" : "unseen"} className="relative self-start" />
               <span className="relative truncate text-sm font-semibold text-white drop-shadow">{c.person.name}</span>
             </button>
           ))}
