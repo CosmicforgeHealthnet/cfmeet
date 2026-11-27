@@ -102,6 +102,11 @@ jobs:
       - name: Avatar image shrinking tests
         run: node --experimental-strip-types --test tests/avatar-image.test.mjs
 
+      # Media editors (status photo / collage / text status): overlay geometry and hit-testing,
+      # undo / redo, crop / rotate maths, filters, encoding choice, collage layouts, gradients.
+      - name: Media editor tests
+        run: node --experimental-strip-types --test tests/media-editor.test.mjs
+
       # Status video editor: 60 s parts (plan / remove / reorder / trim), edit reducer with
       # undo / redo, crop geometry, <= 720p output plan, pass-through and size estimates.
       - name: Status video editor tests

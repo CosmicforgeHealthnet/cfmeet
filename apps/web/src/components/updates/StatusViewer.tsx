@@ -7,7 +7,9 @@ import { toast } from "@/components/ui/toast";
 import { currentMessagingEngine } from "@/lib/messaging/engine";
 import { useMediaUrl, useStatusViewers } from "@/hooks/v2/useSocial";
 import { socialService, type PersonView, type StatusPost } from "@/services/v2/social.service";
-import { errorText, FONTS, PersonAvatar, whenText } from "./shared";
+import TextStatusView from "@/components/media-editor/TextStatusView";
+import { errorText, PersonAvatar, whenText } from "./shared";
+import { textStatusOfPost } from "./status-adapter";
 
 const PHOTO_MS = 5000;
 
@@ -133,9 +135,7 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, onClose
       <div className="relative flex min-h-0 flex-1 items-center justify-center"
         onPointerDown={() => setPaused(true)} onPointerUp={() => setPaused(false)} onPointerLeave={() => setPaused(false)} onContextMenu={(e) => e.preventDefault()}>
         {post.kind === "TEXT" ? (
-          <div className="flex size-full items-center justify-center px-8" style={{ backgroundColor: post.background ?? "#128C7E" }}>
-            <p className={cn("whitespace-pre-wrap break-words text-center text-3xl leading-snug", FONTS[post.font] ?? FONTS[0])}>{post.text}</p>
-          </div>
+          <TextStatusView status={textStatusOfPost(post)} />
         ) : !url ? (
           <span className="size-10 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-label="Loading" />
         ) : post.kind === "IMAGE" ? (
