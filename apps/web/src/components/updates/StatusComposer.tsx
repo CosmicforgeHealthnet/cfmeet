@@ -4,9 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Mic, Palette, Send, Type, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
+import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, type MediaKind } from "@/services/v2/social.service";
 import PhotoEditor from "@/components/media-editor/PhotoEditor";
 import TextStatusEditor from "@/components/media-editor/TextStatusEditor";
-import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, socialService, type MediaKind } from "@/services/v2/social.service";
+import VideoEditor from "@/components/media-editor/VideoEditor";
+import { canProcessVideo, probeVideo, type VideoEdit, type VideoProbe } from "@/lib/media-editor/video";
+import type { TextStatus } from "@/lib/media-editor/text-status";
+import { enqueueStatus } from "@/lib/status-publisher/client";
+import type { StatusItemInput } from "@/lib/status-publisher/types";
+import { VIDEO_EDIT_PROCESSOR } from "@/lib/status-publisher/video-edit-processor";
 import { BACKGROUNDS, errorText } from "./shared";
 import { textStatusToCreate } from "./status-adapter";
 
@@ -15,14 +21,17 @@ type Mode = "text" | "media" | "voice";
 /** Wall-clock milliseconds (event handlers and timers only). */
 const now = () => Date.now();
 
-/** Photos are re-encoded by the editor (<= 2560 px, well under the upload limit), so larger originals are fine. */
+/** Photos are re-encoded by the photo editor (<= 2560 px, well under the upload limit), so larger originals are fine. */
 const MAX_PHOTO_INPUT = 64 * 1024 * 1024;
 
 /**
  * Add status (WhatsApp): text on a colour or gradient (TextStatusEditor), a photo edited in
- * PhotoEditor (crop, filters, text, stickers, drawing) with a caption, a video from the device
- * with a caption, or a voice note (hold to record, at most a minute). A video longer than a
- * minute is uploaded once and posted as consecutive one-minute statuses.
+ * PhotoEditor (crop, filters, text, stickers, drawing) with a caption, a video with a caption,
+ * or a voice note (hold to record, at most a minute). Where the browser can process video
+ * (WebCodecs), a picked video opens in the video editor (trim, parts, crop, rotate, sound) and
+ * is posted as small ≤ 720p MP4 parts of at most a minute each, one status per part. Elsewhere
+ * the original is uploaded once and posted as consecutive one-minute time ranges.
+ * Posting never blocks: items are queued (src/lib/status-publisher) and the editor closes.
  */
 export default function StatusComposer({ initial, onClose, onPosted }: { initial: Mode; onClose: () => void; onPosted: () => void }) {
   const [mode, setMode] = useState<Mode>(initial);
@@ -32,7 +41,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   const [kind, setKind] = useState<MediaKind | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [caption, setCaption] = useState("");
-  const [busy, setBusy] = useState<number | null>(null);
+  /** Set when the video can be edited and processed in this browser. */
+  const [probe, setProbe] = useState<VideoProbe | null>(null);
+  const [edit, setEdit] = useState<VideoEdit | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (initial === "media") picker.current?.click(); }, [initial]);
@@ -42,56 +53,48 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
     if (!f) return;
     const k = kindOf(f);
     if (!k || k === "AUDIO") { toast("Choose a photo or a video.", "error"); return; }
-    if (k === "IMAGE" ? f.size > MAX_PHOTO_INPUT : f.size > LIMITS[k]) { toast(k === "VIDEO" ? "Videos can be at most 64 MB." : "This photo is too big.", "error"); return; }
-    let d: number | null = null;
-    if (k === "VIDEO") {
+    if (k === "IMAGE") {
+      if (f.size > MAX_PHOTO_INPUT) { toast("This photo is too big.", "error"); return; }
+      setFile(f); setKind(k); setDuration(null); setProbe(null); setEdit(null); setPreview(null); setMode("media");
+      return;
+    }
+    // A video this browser can process is re-encoded small before upload, so the raw size limit
+    // only applies when the original itself has to go up.
+    let p: VideoProbe | null = null;
+    if (await canProcessVideo()) {
+      p = await probeVideo(f).catch(() => null);
+      if (p && !p.canDecode) p = null;
+    }
+    if (!p && f.size > LIMITS[k]) { toast("Videos can be at most 64 MB.", "error"); return; }
+    let d: number | null = p ? p.durationMs : null;
+    if (!p) {
       try { d = await durationOf(f); } catch { toast("This video can't be played here.", "error"); return; }
     }
-    setFile(f); setKind(k); setDuration(d); setPreview(k === "VIDEO" ? URL.createObjectURL(f) : null); setMode("media");
+    setFile(f); setKind(k); setDuration(d); setProbe(p); setEdit(null); setPreview(URL.createObjectURL(f)); setMode("media");
   };
 
-  const done = () => { toast("Status posted"); onPosted(); onClose(); };
-
-  const postText = async (body: Parameters<typeof textStatusToCreate>[0]) => {
-    try {
-      await socialService.postStatus(textStatusToCreate(body));
-      done();
-    } catch (e) {
-      toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
-    }
+  // Non-blocking (WhatsApp): queued, then processed / uploaded / published in the background
+  // (src/lib/status-publisher); the Updates card shows "Adding…" and its progress.
+  const enqueue = (item: StatusItemInput) => {
+    void enqueueStatus({ items: [item] }).catch((e) => toast(errorText(e, "Your status couldn't be added. Try again."), "error"));
+    onPosted();
+    onClose();
   };
 
-  const postPhoto = async (blob: Blob) => {
-    if (busy !== null) return;
-    setBusy(0);
-    try {
-      if (blob.size > LIMITS.IMAGE) { toast("Photos can be at most 8 MB.", "error"); return; }
-      const media = await socialService.upload(blob, "STATUS", "IMAGE", null, (p) => setBusy(p));
-      await socialService.postStatus({ kind: "IMAGE", mediaId: media.mediaId, caption: caption.trim() || undefined });
-      done();
-    } catch (e) {
-      toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
-    } finally {
-      setBusy(null);
-    }
+  // Text: today's API fields only (the adapter keeps the richer ones for later).
+  const postText = (s: TextStatus) => enqueue(textStatusToCreate(s));
+
+  const postPhoto = (blob: Blob) => {
+    if (blob.size > LIMITS.IMAGE) { toast("Photos can be at most 8 MB.", "error"); return; }
+    enqueue({ kind: "IMAGE", blob, caption: caption.trim() || undefined, preview: blob });
   };
 
-  const postVideo = async () => {
-    if (busy !== null || !file || kind !== "VIDEO" || !duration) return;
-    setBusy(0);
-    try {
-      const media = await socialService.upload(file, "STATUS", kind, duration, (p) => setBusy(p));
-      const parts = segments(duration);
-      for (const [i, s] of parts.entries()) {
-        // The caption goes with the first part only, as WhatsApp does.
-        await socialService.postStatus({ kind: "VIDEO", mediaId: media.mediaId, startMs: s.startMs, endMs: s.endMs, caption: i === 0 && caption.trim() ? caption.trim() : undefined });
-      }
-      done();
-    } catch (e) {
-      toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
-    } finally {
-      setBusy(null);
-    }
+  // An edited video is rendered to ≤ 60 s MP4 parts in the background (named processor, so it
+  // resumes after a reload); otherwise the original goes up once, posted as time ranges.
+  const postVideo = () => {
+    if (!file || kind !== "VIDEO") return;
+    if (probe && edit) enqueue({ kind: "VIDEO", process: { processor: VIDEO_EDIT_PROCESSOR, input: file, params: { edit, durationMs: probe.durationMs } }, caption });
+    else if (duration) enqueue({ kind: "VIDEO", source: file, durationMs: duration, ranges: segments(duration), caption }); // caption: first part only
   };
 
   const parts = kind === "VIDEO" && duration ? segments(duration).length : 1;
@@ -107,8 +110,25 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   );
   const captionField = (
     <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…" aria-label="Caption"
-      className="h-12 w-full rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+      className="h-12 min-w-0 w-full flex-1 rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
   );
+
+  if (mode === "media" && file && kind === "VIDEO" && probe) {
+    return (
+      <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={onClose}
+        footer={(
+          <div className="space-y-2 bg-gradient-to-t from-black via-black/80 to-transparent p-3" data-testid="status-composer">
+            <div className="flex items-center gap-2">
+              {captionField}
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={!edit} onClick={postVideo}
+                className="relative flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
+                <Send className="size-6" />
+              </button>
+            </div>
+          </div>
+        )} />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-label="Add status" data-testid="status-composer">
@@ -118,8 +138,7 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
       ) : mode === "text" ? (
         <TextStatusEditor onCancel={onClose} onDone={postText} footer={tabs} />
       ) : file && kind === "IMAGE" ? (
-        <PhotoEditor file={file} onCancel={() => { setFile(null); setKind(null); }} onDone={(r) => postPhoto(r.blob)} doneLabel="Post status"
-          footer={<>{captionField}{busy !== null ? <p className="text-center text-xs text-white/70">Uploading {Math.round(busy * 100)}%</p> : null}</>} />
+        <PhotoEditor file={file} onCancel={() => { setFile(null); setKind(null); }} onDone={(r) => postPhoto(r.blob)} doneLabel="Post status" footer={captionField} />
       ) : (
         <>
           <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
@@ -145,9 +164,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
             ) : null}
             <div className="flex items-center gap-2">
               {tabs}
-              <button type="button" aria-label="Post status" data-testid="status-send" disabled={busy !== null || !file} onClick={() => void postVideo()}
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={!file || kind !== "VIDEO"} onClick={postVideo}
                 className="relative flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
-                {busy !== null ? <span className="text-xs font-bold">{Math.round(busy * 100)}%</span> : <Send className="size-6" />}
+                <Send className="size-6" />
               </button>
             </div>
           </div>
@@ -162,7 +181,6 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
   const [recording, setRecording] = useState(false);
   const [clip, setClip] = useState<{ blob: Blob; url: string; ms: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [busy, setBusy] = useState(false);
   const rec = useRef<{ recorder: MediaRecorder; started: number; stream: MediaStream; timer: ReturnType<typeof setInterval> } | null>(null);
 
   useEffect(() => () => { const r = rec.current; if (r) { clearInterval(r.timer); r.stream.getTracks().forEach((t) => t.stop()); } }, []);
@@ -177,7 +195,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
     setRecording(false);
   };
   const start = async () => {
-    if (rec.current || busy) return;
+    if (rec.current) return;
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast("Allow the microphone to record a voice status.", "error"); return; }
     const recorder = new MediaRecorder(stream);
@@ -200,19 +218,10 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
     recorder.start();
     setRecording(true); setElapsed(0); setClip(null);
   };
-  const post = async () => {
-    if (!clip || busy) return;
-    setBusy(true);
-    try {
-      const media = await socialService.upload(clip.blob, "STATUS", "AUDIO", clip.ms);
-      await socialService.postStatus({ kind: "AUDIO", mediaId: media.mediaId });
-      toast("Status posted");
-      onPosted();
-    } catch (e) {
-      toast(errorText(e, "Your voice status couldn't be posted."), "error");
-    } finally {
-      setBusy(false);
-    }
+  const post = () => {
+    if (!clip) return;
+    void enqueueStatus({ items: [{ kind: "AUDIO", blob: clip.blob, durationMs: clip.ms, background: bg }] }).catch((e) => toast(errorText(e, "Your voice status couldn't be added."), "error"));
+    onPosted();
   };
   const secs = Math.floor((clip ? clip.ms : elapsed) / 1000);
 
@@ -232,7 +241,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
       </div>
       <div className="flex items-center justify-end gap-3 p-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
         {clip ? (
-          <button type="button" aria-label="Post voice status" disabled={busy} onClick={() => void post()} className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50"><Send className="size-6" /></button>
+          <button type="button" aria-label="Post voice status" onClick={post} className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50"><Send className="size-6" /></button>
         ) : null}
         <button type="button" aria-label="Hold to record" onPointerDown={(e) => { e.preventDefault(); void start(); }} onPointerUp={stop} onPointerLeave={() => { if (recording) stop(); }} onContextMenu={(e) => e.preventDefault()}
           className={cn("flex size-16 touch-none select-none items-center justify-center rounded-full bg-white text-black shadow-xl transition-transform", recording && "scale-110 bg-red-500 text-white")}>

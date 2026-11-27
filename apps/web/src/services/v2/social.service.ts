@@ -93,25 +93,44 @@ export const SEGMENT_MS = 60_000;
 export const LIMITS: Record<MediaKind, number> = { IMAGE: 8 * 1024 * 1024, AUDIO: 8 * 1024 * 1024, VIDEO: 64 * 1024 * 1024 };
 
 const id = (s: string) => encodeURIComponent(s);
+/** Pieces of one upload in flight at once. */
+const UPLOAD_PARALLELISM = 4;
 
 /** Upload a file in pieces; `onProgress` gets 0–1. */
 async function upload(file: Blob, purpose: "STATUS" | "CHANNEL", kind: MediaKind, durationMs: number | null, onProgress?: (p: number) => void): Promise<MediaView> {
   const contentType = (file.type || (kind === "AUDIO" ? "audio/webm" : kind === "VIDEO" ? "video/mp4" : "image/jpeg")).split(";")[0];
   const started = (await apiV2.post<MediaView>("/social/media", { purpose, kind, contentType, sizeBytes: file.size, durationMs: durationMs === null ? undefined : Math.round(durationMs) })).data;
-  for (let seq = 0; seq < started.chunkCount; seq++) {
+  // Pieces go up UPLOAD_PARALLELISM at a time (the server stores each by its number), each
+  // retried a few times; the first piece that keeps failing stops the others.
+  let next = 0;
+  let done = 0;
+  let failed = false;
+  const putPiece = async (seq: number) => {
     const piece = file.slice(seq * started.chunkBytes, Math.min(file.size, (seq + 1) * started.chunkBytes));
     const body = new Uint8Array(await piece.arrayBuffer());
     for (let attempt = 0; ; attempt++) {
       try {
         await apiV2.put(`/social/media/${id(started.mediaId)}/chunks/${seq}`, body, { headers: { "Content-Type": "application/octet-stream" }, transformRequest: [(d) => d] });
-        break;
+        return;
       } catch (e) {
-        if (attempt >= 2) throw e;
+        if (attempt >= 3 || failed) throw e;
         await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
       }
     }
-    onProgress?.((seq + 1) / started.chunkCount);
-  }
+  };
+  const worker = async () => {
+    while (!failed && next < started.chunkCount) {
+      const seq = next++;
+      try {
+        await putPiece(seq);
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
+      onProgress?.(++done / started.chunkCount);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLELISM, started.chunkCount) }, worker));
   return (await apiV2.post<MediaView>(`/social/media/${id(started.mediaId)}/complete`, {})).data;
 }
 

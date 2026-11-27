@@ -870,7 +870,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
   const [similar, setSimilar] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);
-  const [confirm, setConfirm] = useState<"clear" | "exit" | null>(null);
+  const [confirm, setConfirm] = useState<"clear" | "exit" | "delete" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const me = s.identity?.principalId;
   const manager = conversation.myRole === "OWNER" || conversation.myRole === "ADMIN";
@@ -1070,6 +1070,12 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
             <div className="flex items-center gap-2 px-3 py-2 text-sm"><span className="flex-1">Exit &ldquo;{title}&rdquo;?</span><button type="button" className={cn(small, "text-destructive hover:bg-destructive/10")} onClick={() => { setConfirm(null); run(engine.leaveConversation(conversation.id)); }} data-testid="leave-conversation">Exit</button><button type="button" className={small} onClick={() => setConfirm(null)}>Cancel</button></div>
           ) : (
             <button type="button" className={cn(row, "text-destructive")} onClick={() => setConfirm("exit")} data-testid="exit-group"><LogOut className="size-5" />Exit group</button>
+          )) : null}
+          {/* Only the person who created the group can delete it, for everyone. */}
+          {isGroup && me && conversation.ownerPrincipalId === me ? (confirm === "delete" ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-sm"><span className="flex-1">Delete &ldquo;{title}&rdquo; for everyone? All members lose the group and its messages. This can&apos;t be undone.</span><button type="button" className={cn(small, "text-destructive hover:bg-destructive/10")} onClick={() => { setConfirm(null); run(engine.deleteGroup(conversation.id)); }} data-testid="delete-group-confirm">Delete</button><button type="button" className={small} onClick={() => setConfirm(null)}>Cancel</button></div>
+          ) : (
+            <button type="button" className={cn(row, "text-destructive")} onClick={() => setConfirm("delete")} data-testid="delete-group"><Trash2 className="size-5" />Delete group</button>
           )) : null}
           <button type="button" className={cn(row, "text-destructive")} onClick={() => setReporting(true)} data-testid="report-chat"><ThumbsDown className="size-5" />{isGroup ? "Report group" : `Report ${title}`}</button>
         </section>
@@ -2029,8 +2035,8 @@ function PersonalMessages() {
           ) : removedHere ? (
             <div className="max-w-sm px-6 text-center" role="status" data-testid="removed-from-chat">
               <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-muted"><MessageSquarePlus className="size-7 text-muted-foreground" /></div>
-              <h2 className="mt-5 text-lg font-semibold">You&apos;re no longer in &ldquo;{removedHere.title}&rdquo;</h2>
-              <p className="mt-2 text-sm text-muted-foreground">An admin removed you, so you can&apos;t see or send messages in it any more.</p>
+              <h2 className="mt-5 text-lg font-semibold">{removedHere.deleted ? <>&ldquo;{removedHere.title}&rdquo; was deleted</> : <>You&apos;re no longer in &ldquo;{removedHere.title}&rdquo;</>}</h2>
+              <p className="mt-2 text-sm text-muted-foreground">{removedHere.deleted ? "The person who created this group deleted it for everyone." : "An admin removed you, so you can’t see or send messages in it any more."}</p>
               <button type="button" onClick={() => setSelected(null)} className="mt-5 inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Back to chats</button>
             </div>
           ) : (
