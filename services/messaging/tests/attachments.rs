@@ -3114,8 +3114,11 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     );
 
     // Upload + scan + download for a member of a CF Meet conversation.
-    let (conv, people) = e.managed_group(&cfmeet, 2).await;
+    let (conv, people) = e.managed_group(&cfmeet, 4).await;
     let (alice, bob) = (people[0], people[1]);
+    // Members who have uploaded nothing today: `cfmeet_uploaders_have_a_daily_volume`
+    // (same process) may lower the per-uploader daily cap to one maximum-size file.
+    let (carol, dave) = (people[2], people[3]);
     let outsider = e.h.principal(&cfmeet);
     let bytes = png(4096);
     let up = e
@@ -3162,9 +3165,9 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     // Exactly 25 MiB is admitted; one byte more is refused before anything is stored.
     let digest = "0".repeat(64);
     let document = |size: i64| json!({ "kind": "DOCUMENT", "size": size, "sha256": digest, "mediaType": "application/pdf", "fileName": "big.pdf" });
-    let at_limit = e.intent(&cfmeet, &conv, alice, document(26_214_400)).await;
+    let at_limit = e.intent(&cfmeet, &conv, carol, document(26_214_400)).await;
     assert_eq!(at_limit.status, StatusCode::CREATED, "{}", at_limit.text);
-    let over = e.intent(&cfmeet, &conv, alice, document(26_214_401)).await;
+    let over = e.intent(&cfmeet, &conv, dave, document(26_214_401)).await;
     assert_eq!(
         (over.code(), over.reason()),
         ("QUOTA_EXCEEDED", "ATTACHMENT_TOO_LARGE"),
