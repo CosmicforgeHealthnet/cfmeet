@@ -5,7 +5,7 @@ import { CalendarX2, Repeat } from "lucide-react";
 import type { MeetingSpaceResponse, RecurrenceResponse } from "@/types/v2";
 import { useSpaceRecurrence, useSpaceExceptions, useSetRecurrence, useDeleteRecurrence, useSetException } from "@/hooks/v2/useSpaces";
 import { recurrenceInput, conferencePermission } from "@/lib/meeting-scheduling";
-import { formatInZone, localTimeKind, occurrenceWindowInZone, zonedLocalToUtc } from "@/lib/meeting-time";
+import { formatInZone, localTimeKind, occurrenceWindowInZone, utcToZonedLocal, zonedLocalToUtc } from "@/lib/meeting-time";
 import { spaceZone } from "@/components/conferences/ConferencesPanel";
 import { ScheduleText, ZonedDateTimeField } from "@/components/meetings/ScheduleFields";
 import { cn } from "@/lib/utils";
@@ -19,7 +19,22 @@ const DAY_SHORT: Record<string, string> = { MO: "M", TU: "T", WE: "W", TH: "T", 
 const DAY_NAME: Record<string, string> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
 type Rule = { freq: Freq; interval: number; byday: string[]; count?: number; until?: string };
 
-function parseRule(rrule: string): Rule | null {
+/**
+ * UNTIL is a UTC instant (RFC 5545, with a zoned start). The editor's "last date" is a day in
+ * the meeting's own time zone: it ends at 23:59:59 there, so an evening meeting on that day is
+ * still included wherever the zone is.
+ */
+function untilToDate(until: string, zone: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z)?$/.exec(until);
+  if (!m) return `${until.slice(0, 4)}-${until.slice(4, 6)}-${until.slice(6, 8)}`;
+  if (!m[4]) return `${m[1]}-${m[2]}-${m[3]}`;
+  return utcToZonedLocal(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`, zone).slice(0, 10);
+}
+function dateToUntil(date: string, zone: string): string {
+  return `${zonedLocalToUtc(`${date}T23:59`, zone).replace(/[-:]/g, "").slice(0, 13)}59Z`;
+}
+
+function parseRule(rrule: string, zone: string): Rule | null {
   const parts = Object.fromEntries(rrule.split(";").map((p) => p.split("=") as [string, string]));
   const allowed = new Set(["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"]);
   if (Object.keys(parts).some((k) => !allowed.has(k))) return null;
@@ -31,21 +46,21 @@ function parseRule(rrule: string): Rule | null {
     interval: Number(parts.INTERVAL || 1),
     byday,
     count: parts.COUNT ? Number(parts.COUNT) : undefined,
-    until: parts.UNTIL ? `${parts.UNTIL.slice(0, 4)}-${parts.UNTIL.slice(4, 6)}-${parts.UNTIL.slice(6, 8)}` : undefined,
+    until: parts.UNTIL ? untilToDate(parts.UNTIL, zone) : undefined,
   };
 }
 
-function buildRule(r: Rule): string {
+function buildRule(r: Rule, zone: string): string {
   const out = [`FREQ=${r.freq}`];
   if (r.interval > 1) out.push(`INTERVAL=${r.interval}`);
   if (r.freq === "WEEKLY" && r.byday.length) out.push(`BYDAY=${DAYS.filter((d) => r.byday.includes(d)).join(",")}`);
-  if (r.until) out.push(`UNTIL=${r.until.replaceAll("-", "")}T235959Z`);
+  if (r.until) out.push(`UNTIL=${dateToUntil(r.until, zone)}`);
   else out.push(`COUNT=${r.count ?? 10}`);
   return out.join(";");
 }
 
-function describeRule(rrule: string): string {
-  const r = parseRule(rrule);
+function describeRule(rrule: string, zone: string): string {
+  const r = parseRule(rrule, zone);
   if (!r) return "Custom repeating schedule";
   const unit = { DAILY: "day", WEEKLY: "week", MONTHLY: "month" }[r.freq];
   let text = r.interval > 1 ? `Every ${r.interval} ${unit}s` : `Every ${unit}`;
@@ -80,7 +95,7 @@ export default function RecurrencePanel({ space }: { space: MeetingSpaceResponse
           <div className="flex items-start gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Repeat className="size-5" /></span>
             <div className="min-w-0">
-              <p className="font-semibold text-foreground">{describeRule(rule.data.rrule)}</p>
+              <p className="font-semibold text-foreground">{describeRule(rule.data.rrule, zone)}</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Starts {new Date(rule.data.startLocal).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} · {rule.data.durationMinutes} min each
               </p>
@@ -131,7 +146,7 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
 
 function RecurrenceEditor({ space, rule }: { space: MeetingSpaceResponse; rule: RecurrenceResponse | null | undefined }) {
   const zone = spaceZone(space);
-  const parsed = rule ? parseRule(rule.rrule) : { freq: "WEEKLY" as Freq, interval: 1, byday: ["MO"], count: 10 };
+  const parsed = rule ? parseRule(rule.rrule, zone) : { freq: "WEEKLY" as Freq, interval: 1, byday: ["MO"], count: 10 };
   const [advanced, setAdvanced] = useState(!parsed);
   const [r, setR] = useState<Rule>(parsed ?? { freq: "WEEKLY", interval: 1, byday: ["MO"], count: 10 });
   const [ends, setEnds] = useState<"COUNT" | "UNTIL">(parsed?.until ? "UNTIL" : "COUNT");
@@ -140,7 +155,7 @@ function RecurrenceEditor({ space, rule }: { space: MeetingSpaceResponse; rule: 
   const [duration, setDuration] = useState(rule?.durationMinutes || 60);
   const save = useSetRecurrence(space.id);
   const effective: Rule = { ...r, ...(ends === "COUNT" ? { until: undefined, count: r.count || 10 } : { count: undefined }) };
-  const rrule = advanced ? raw : buildRule(effective);
+  const rrule = advanced ? raw : buildRule(effective, zone);
 
   return <ActionDialog label={rule ? "Edit schedule" : "Make it repeat"} title={rule ? "Edit repeating schedule" : "Repeat this meeting"} description={rule ? "Changes apply to future sessions. Dates you changed by hand keep their changes; past sessions are never touched." : "Pick how often it happens and when it stops."} submit={async () => {
     if (local && localTimeKind(local, zone) !== "ok") throw new Error("A series can't start at a time skipped or repeated by a daylight saving change.");
@@ -170,7 +185,7 @@ function RecurrenceEditor({ space, rule }: { space: MeetingSpaceResponse; rule: 
       {ends === "COUNT"
         ? <label className="flex items-center gap-3 text-sm text-foreground"><input type="number" min={1} max={500} value={r.count ?? 10} onChange={e => setR({ ...r, count: Math.max(1, Number(e.target.value) || 1) })} className="h-10 w-24 rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 text-sm" /> meetings</label>
         : <Field label="Last date" type="date" value={r.until ?? ""} onChange={e => setR({ ...r, until: e.target.value })} />}
-      <p className="rounded-xl bg-primary/5 px-3 py-2.5 text-sm font-medium text-primary">{describeRule(rrule)}</p>
+      <p className="rounded-xl bg-primary/5 px-3 py-2.5 text-sm font-medium text-primary">{describeRule(rrule, zone)}</p>
     </>}
     <button type="button" onClick={() => setAdvanced(a => !a)} className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline">{advanced ? "Use the simple editor" : "Advanced: enter a rule"}</button>
   </ActionDialog>;

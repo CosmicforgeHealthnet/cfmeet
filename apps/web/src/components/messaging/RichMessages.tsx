@@ -8,7 +8,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import LinkPreviewDialog from "./LinkPreviewDialog";
-import { BarChart3, Check, ExternalLink, FileText, Link2, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
+import { BarChart3, Check, ExternalLink, FileText, Image as ImageIcon, Link2, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -104,21 +104,28 @@ const field = "h-10 w-full rounded-xl border border-border bg-background px-3 te
  * The chat's one attach button (WhatsApp): a file straight away in chats that only take files;
  * in a private chat a menu of Document, Link card, Poll, Location and Contact.
  */
-export function AttachMenu({ canAttach, canShare, disabled, onFile, onSend, fileTitle }: {
+export function AttachMenu({ canAttach, canShare, disabled, onFile, onMedia, onSend, fileTitle }: {
   canAttach: boolean;
   canShare: boolean;
   disabled: boolean;
   onFile: () => void;
+  /** Photos & videos picker (WhatsApp's first attach entry). */
+  onMedia?: () => void;
   onSend: (payload: RichPayload) => Promise<void>;
   fileTitle: string;
 }) {
   const [open, setOpen] = useState<"poll" | "location" | "contact" | "link" | null>(null);
   const [menu, setMenu] = useState(false);
   const button = "flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40";
-  if (!canShare) {
+  if (!canShare && !onMedia) {
     return <button type="button" className={button} disabled={disabled || !canAttach} onClick={onFile} aria-label="Attach a file" title={fileTitle}><Paperclip className="size-5" /></button>;
   }
-  const items: { key: string; label: string; icon: typeof FileText; tint: string; run: () => void; off?: boolean }[] = [
+  const media = onMedia ? [{ key: "media", label: "Photos & videos", icon: ImageIcon, tint: "bg-blue-600", run: onMedia, off: !canAttach }] : [];
+  const items: { key: string; label: string; icon: typeof FileText; tint: string; run: () => void; off?: boolean }[] = !canShare ? [
+    ...media,
+    { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
+  ] : [
+    ...media,
     { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
     { key: "link", label: "Link card", icon: Link2, tint: "bg-indigo-600", run: () => setOpen("link") },
     { key: "poll", label: "Poll", icon: BarChart3, tint: "bg-amber-500", run: () => setOpen("poll") },

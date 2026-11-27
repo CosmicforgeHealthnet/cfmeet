@@ -37,6 +37,7 @@ export type ServerMessage = {
   managed?: { text: string | null; presentation?: "STANDARD" | "ANNOUNCEMENT" } | null;
   replyToMessageId?: string | null;
   threadRootId?: string | null;
+  forwarded?: boolean;
 };
 
 export type ManagedRecord = {
@@ -53,6 +54,7 @@ export type ManagedRecord = {
   replyToMessageId: string | null;
   threadRootId: string | null;
   announcement: boolean;
+  forwarded: boolean;
 };
 
 /** A durable conversation event (`ConversationEvent`). */
@@ -111,6 +113,7 @@ export function toRecord(m: ServerMessage): ManagedRecord {
     replyToMessageId: m.replyToMessageId ?? null,
     threadRootId: m.threadRootId ?? null,
     announcement: m.managed?.presentation === "ANNOUNCEMENT",
+    forwarded: m.forwarded === true,
   };
 }
 

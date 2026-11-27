@@ -1462,8 +1462,8 @@ async fn breakout_and_private_chat_migrate_to_unified_messaging_across_real_serv
 /// The journey itself is `apps/web/tests/messaging-e2e.browser.mjs`; this test starts the
 /// services on the ports the web build was made for, seeds two colleagues (and a third
 /// person outside their organization), runs the journey, and then checks Messaging's own
-/// database: the conversation exists, its messages are MLS ciphertext, and the phrase the
-/// browsers exchanged appears nowhere on the server.
+/// database: chats are server-stored (MANAGED) with their text sealed at rest, the file is
+/// stored, and signing in registered no encryption device.
 ///
 /// Requires `WEB_MESSAGING_E2E_APP` (apps/web, built with NEXT_PUBLIC_API_URL
 /// http://127.0.0.1:18080/api/v1, NEXT_PUBLIC_MESSAGING_URL http://127.0.0.1:18090 and
@@ -1641,44 +1641,36 @@ async fn web_messaging_client_in_chromium_across_real_services() {
     assert!(status.success(), "the browser journey failed");
 
     // Server-side evidence, from Messaging's OWN database (Meeting never reads it).
-    let e2ee_messages = world
+    // Chats are server-stored (MANAGED): text is sealed at rest with the managed key ring.
+    let managed_messages = world
         .m_scalar(
-            "SELECT count(*) FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
-             WHERE c.security_profile = 'PRIVATE_E2EE' AND m.mls_ciphertext IS NOT NULL",
+            "SELECT count(*) FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id              WHERE c.security_profile = 'MANAGED' AND m.managed_sealed IS NOT NULL",
         )
         .await;
     assert!(
-        e2ee_messages >= 10,
-        "encrypted messages were stored as ciphertext: {e2ee_messages}"
+        managed_messages >= 60,
+        "the journey's messages are stored sealed: {managed_messages}"
     );
     let leaks = world
         .m_scalar(&format!(
-            "SELECT count(*) FROM messaging_messages WHERE position(convert_to('{secret}', 'UTF8') in coalesce(mls_ciphertext, ''::bytea)) > 0 \
-                OR position(convert_to('{secret}', 'UTF8') in coalesce(managed_sealed, ''::bytea)) > 0"
+            "SELECT count(*) FROM messaging_messages WHERE position(convert_to('{secret}', 'UTF8') in coalesce(managed_sealed, ''::bytea)) > 0"
         ))
         .await;
-    assert_eq!(
-        leaks, 0,
-        "the exchanged phrase never reached the server in the clear"
-    );
-    let e2ee_attachments = world
+    assert_eq!(leaks, 0, "message text is never stored unsealed");
+    let attachments = world
         .m_scalar(
-            "SELECT count(*) FROM messaging_attachments WHERE security_profile = 'PRIVATE_E2EE' AND state = 'READY' \
-               AND media_type = 'application/octet-stream' AND safe_file_name IS NULL AND crypto_format IS NOT NULL",
+            "SELECT count(*) FROM messaging_attachments WHERE security_profile = 'MANAGED' AND state = 'READY'",
         )
         .await;
-    assert!(
-        e2ee_attachments >= 1,
-        "the attachment is stored as nameless ciphertext"
-    );
+    assert!(attachments >= 1, "the file is stored and ready");
     let devices = world
-        .m_scalar("SELECT count(*) FROM messaging_devices WHERE status = 'REVOKED'")
+        .m_scalar("SELECT count(*) FROM messaging_devices")
         .await;
-    assert!(
-        devices >= 2,
-        "the removed device and the signed-out browser's device are revoked server-side"
+    assert_eq!(
+        devices, 0,
+        "signing in is enough: no encryption device was registered"
     );
     println!(
-        "EVIDENCE web-messaging-server e2ee_messages={e2ee_messages} plaintext_hits={leaks} e2ee_attachments={e2ee_attachments} revoked_devices={devices}"
+        "EVIDENCE web-messaging-server managed_messages={managed_messages} unsealed_hits={leaks} attachments={attachments} devices={devices}"
     );
 }

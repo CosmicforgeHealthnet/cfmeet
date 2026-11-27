@@ -1,13 +1,13 @@
 "use client";
 
 import { NiceSelect } from "@/components/ui/nice-select";
-import { Circle, Film, LayoutGrid, Square, User } from "lucide-react";
-import { artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
+import { Circle, Film, LayoutGrid, Play, Square, User } from "lucide-react";
+import { artifactAccessible, artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
-import { useRecordings, useStartRecording, useStopRecording } from "@/hooks/v2/useArtifacts";
+import { useArtifactAccess, useRecordings, useStartRecording, useStopRecording } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
 import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
 import type { ArtifactStatus, RecordingResponse, Role, RolePolicy } from "@/types/v2";
@@ -41,6 +41,8 @@ export default function ConferenceRecordingsPanel({
   const [layout, setLayout] = useState("GRID");
   const [feedback, setFeedback] = useState("");
   const me = useCurrentParticipant(conferenceId);
+  const access = useArtifactAccess(conferenceId);
+  const [openError, setOpenError] = useState<string | null>(null);
   const role = effectiveConferenceRole(spaceRole, me.data?.role, me.data?.admissionState);
   const recordingEnabled = MEETING_RECORDING_READY && recordingPolicy !== "DISABLED";
   const canStart = recordingEnabled && meetingAllows(role, "recording.start", rolePolicy);
@@ -141,6 +143,7 @@ export default function ConferenceRecordingsPanel({
           </div>
         ) : (
           <ul className="space-y-2">
+            {openError ? <li role="alert" className="text-sm text-destructive">{openError}</li> : null}
             {recordings.data.recordings.map(recording => (
               <li key={recording.id} className="flex items-center gap-3 rounded-xl border border-border p-3">
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Film className="size-4" /></span>
@@ -152,6 +155,18 @@ export default function ConferenceRecordingsPanel({
                     {formatBytes(recording.sizeBytes) ? ` · ${formatBytes(recording.sizeBytes)}` : ""}
                   </p>
                 </div>
+                {artifactAccessible(recording) ? (
+                  <Button size="sm" variant="outline" data-testid="open-recording" disabled={access.isPending}
+                    onClick={() => {
+                      // A short-lived signed link, opened in a new tab: the browser plays it there.
+                      const tab = window.open("", "_blank");
+                      access.mutateAsync(recording.id)
+                        .then((a) => { if (tab) { tab.opener = null; tab.location.href = a.url; } else window.location.assign(a.url); })
+                        .catch(() => { tab?.close(); setOpenError("This recording couldn't be opened. Try again."); });
+                    }}>
+                    <Play className="size-4" />Open
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>

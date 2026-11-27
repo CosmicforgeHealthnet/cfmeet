@@ -85,6 +85,14 @@ export const profilesService = {
     return response.data;
   },
 
+  /**
+   * Cancel my own registration with its admission token (public: no sign-in needed).
+   */
+  cancelOwnRegistration: async (token: string) => {
+    const response = await apiV2.post<RegistrationView>(`/registrations/cancel`, { token });
+    return response.data;
+  },
+
   // -------------------------------------------------------------------------
   // Backstage
   // -------------------------------------------------------------------------

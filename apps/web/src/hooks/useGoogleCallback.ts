@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { authService } from "@/services/auth.service";
+import { GOOGLE_NEXT_KEY, authService } from "@/services/auth.service";
+import { safeReturnPath } from "@/lib/organizations/organization-core";
+
+/** An active account goes back where sign-in started (validated again here); others follow their status. */
+function destination(status: unknown): string {
+  const route = postSignInRoute(status);
+  let next: string | null = null;
+  try {
+    next = window.sessionStorage.getItem(GOOGLE_NEXT_KEY);
+    window.sessionStorage.removeItem(GOOGLE_NEXT_KEY);
+  } catch { /* storage disabled */ }
+  return route === "/dashboard" ? safeReturnPath(next) || route : route;
+}
 import { googleErrorMessage, parseGoogleCallback, postSignInRoute } from "@/lib/account/account-core";
 
 interface GoogleCallbackResult {
@@ -47,7 +59,7 @@ export function useGoogleCallback(): GoogleCallbackResult {
         }
         pending
           .then((response) => {
-            if (!cancelled) router.replace(postSignInRoute(response.user.status));
+            if (!cancelled) router.replace(destination(response.user.status));
           })
           .catch(() => fail("The Google sign-in link expired or was already used. Please sign in again."));
         break;
@@ -60,7 +72,7 @@ export function useGoogleCallback(): GoogleCallbackResult {
             user: callback.user,
           })
           .then(() => {
-            if (!cancelled) router.replace(postSignInRoute(callback.user.status));
+            if (!cancelled) router.replace(destination(callback.user.status));
           })
           .catch(() => fail("Google sign-in could not be completed. Please try again."));
         break;

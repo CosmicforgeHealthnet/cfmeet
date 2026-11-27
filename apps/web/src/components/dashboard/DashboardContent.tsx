@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useArchiveSpace, useCreateInstantMeeting, useSpaces } from "@/hooks/v2/useSpaces";
 import { spacePermissions } from "@/lib/meeting-spaces";
-import { useAgendaPage, useMeetingCapabilities } from "@/hooks/v2/useCalendar";
+import { useMeetingCapabilities, useUpcomingMeetings } from "@/hooks/v2/useCalendar";
 import { useProfile } from "@/hooks";
 import type { MeetingSpaceResponse } from "@/types/v2";
 import type { AgendaItem } from "@/types/generated/meeting-service";
@@ -35,19 +35,7 @@ import { CalendarArt, RoomArt } from "./EmptyArt";
 
 function useUpcomingAgenda() {
   const { organizationId } = useMeetingCapabilities();
-  // Rounded to the minute so the query key is stable across renders.
-  const [from] = useState(() => new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60 * 60_000).toISOString());
-  const query = useMemo(
-    () => ({
-      from,
-      to: new Date(Date.parse(from) + 7 * 86_400_000).toISOString(),
-      status: "CREATED,PREPARING,WAITING,LIVE",
-      limit: 6,
-      ...(organizationId ? { organizationId } : {}),
-    }),
-    [from, organizationId],
-  );
-  return useAgendaPage(query);
+  return useUpcomingMeetings(6, organizationId);
 }
 
 function greeting(now: Date) {
@@ -407,9 +395,15 @@ function NextMeeting() {
   const agenda = useUpcomingAgenda();
   const { data: user } = useProfile();
   const [copied, setCopied] = useState(false);
+  // "In 12 min" counts down while the page is open.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
   const next = agenda.data?.items[0];
   const start = next ? new Date(next.scheduledStartAt) : null;
-  const minutes = start ? Math.round((start.getTime() - Date.now()) / 60_000) : 0;
+  const minutes = start ? Math.round((start.getTime() - now) / 60_000) : 0;
   const live = next?.status === "LIVE";
   const status = live ? "Live now" : minutes <= 0 ? "Starting now" : minutes < 60 ? `In ${minutes} min` : "Upcoming";
   const time = start?.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });

@@ -1,11 +1,11 @@
 "use client";
 
 /** Dashboard "Upcoming": the next scheduled occurrences from one agenda page (7 days). */
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { useAgendaPage, useMeetingCapabilities } from "@/hooks/v2/useCalendar";
+import { useMeetingCapabilities, useUpcomingMeetings } from "@/hooks/v2/useCalendar";
 import { agendaItemKey } from "@/lib/meeting-calendar";
 import { getErrorMessage } from "@/utils/error";
 import type { AgendaItem } from "@/types/generated/meeting-service";
@@ -14,16 +14,7 @@ import OccurrenceDialog from "./OccurrenceDialog";
 
 export default function UpcomingMeetings() {
   const { organizationId } = useMeetingCapabilities();
-  // Rounded to the minute so the query key is stable across renders.
-  const [from] = useState(() => new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60 * 60_000).toISOString());
-  const query = useMemo(() => ({
-    from,
-    to: new Date(Date.parse(from) + 7 * 86_400_000).toISOString(),
-    status: "CREATED,PREPARING,WAITING,LIVE",
-    limit: 5,
-    ...(organizationId ? { organizationId } : {}),
-  }), [from, organizationId]);
-  const agenda = useAgendaPage(query);
+  const agenda = useUpcomingMeetings(5, organizationId);
   const [selected, setSelected] = useState<AgendaItem | null>(null);
   const forbidden = (agenda.error as { response?: { status?: number } } | null)?.response?.status === 403;
   return <section className="mt-10 px-0 sm:px-4 md:px-20">

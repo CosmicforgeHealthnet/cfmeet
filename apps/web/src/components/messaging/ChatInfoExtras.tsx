@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { BellOff, FileText, Film, Image as ImageIcon, Mic, Users } from "lucide-react";
+import Link from "next/link";
+import { BellOff, FileText, Film, Image as ImageIcon, Mic, Users, Video } from "lucide-react";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { communicationsService as hub, type ChatPreferences } from "@/services/v2/communications.service";
 
@@ -25,6 +26,7 @@ export default function ChatInfoExtras({ conversationId, direct, groupTitle }: {
   const prefsKey = ["chat-info", conversationId, "prefs"];
   const prefs = useQuery({ queryKey: prefsKey, queryFn: () => hub.conversationPreferences(conversationId), retry: false });
   const media = useQuery({ queryKey: ["chat-info", conversationId, "media"], queryFn: () => hub.conversationMedia(conversationId), retry: false });
+  const meetings = useQuery({ queryKey: ["chat-info", conversationId, "meetings"], queryFn: () => hub.conversationMeetings(conversationId), retry: false });
   const shared = useQuery({ queryKey: ["chat-info", conversationId, "groups"], queryFn: () => hub.sharedGroups(conversationId), enabled: direct, retry: false });
   const save = useMutation({
     mutationFn: (choice: string) => {
@@ -59,6 +61,24 @@ export default function ChatInfoExtras({ conversationId, direct, groupTitle }: {
             <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><BellOff className="size-3.5" />Muted until {new Date(p.mutedUntil).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</p>
           ) : null}
           {save.isError ? <p className="mt-1.5 text-xs text-destructive">That didn&apos;t save. Try again.</p> : null}
+        </section>
+      ) : null}
+
+      {meetings.data?.data?.length ? (
+        <section data-testid="chat-meetings">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Meetings in this chat</p>
+          <ul className="space-y-1">
+            {meetings.data.data.slice(0, 5).map((m) => (
+              <li key={m.linkId} className="flex items-center gap-3 rounded-xl px-1 py-1.5 text-sm">
+                <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Video className="size-4" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-xs">{m.meetingCode}</span>
+                  <span className="block text-xs text-muted-foreground">{m.origin === "INSTANT" ? "Started here" : "Shared here"}{m.linkedAt ? ` · ${new Date(m.linkedAt).toLocaleDateString()}` : ""}</span>
+                </span>
+                <Link href={`/${encodeURIComponent(m.meetingCode)}`} className="rounded-full px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/10" data-testid="chat-meeting-join">Join</Link>
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
 

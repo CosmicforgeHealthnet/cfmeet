@@ -775,6 +775,45 @@ class AdminBridge(unittest.TestCase):
         self.assertEqual(calls[0], ('migrate', 'admin-bridge-migration'))
         self.assertEqual(calls[1], ('sql', 'cfmeet_admin_bridge', sql))
 
+    def test_same_host_relay_joins_hq_network_at_the_agreed_address_and_publishes_nothing(self):
+        # Agreed with HQ 2026-11-26: one VPS, no tunnel, no host port.
+        config = cr.admin_bridge_hq_relay_config(cr.ADMIN_BRIDGE_HQ_SAME_HOST_SOURCES)
+        self.assertIn('allow 10.231.14.3;\n        allow 10.231.14.4;\n        deny all;', config)
+        self.assertNotIn('10.231.14.1', config, 'the Docker gateway is never admitted')
+        self.assertNotIn('ssl', config, 'TLS passes straight through')
+        args = cr.admin_bridge_hq_relay_args('img', '/w/relay.conf', None)
+        self.assertNotIn('--publish', args)
+        self.assertEqual(args[args.index('--network') + 1], 'cf-staging-cfmeet-bridge')
+        self.assertEqual(args[args.index('--ip') + 1], '10.231.14.2')
+        self.assertEqual(args[args.index('--cap-drop') + 1], 'ALL')
+        with self.assertRaises(RuntimeError):
+            cr.admin_bridge_hq_relay_config(())
+        # HQ owns the network: it must exist, be internal and have exactly the agreed subnet.
+        good = {'Internal': True, 'IPAM': {'Config': [{'Subnet': '10.231.14.0/28'}]}}
+        cr.same_host_network_problems(['cf-staging-cfmeet-bridge'], lambda n: good)
+        for bad_net in ({'Internal': False, 'IPAM': good['IPAM']},
+                        {'Internal': True, 'IPAM': {'Config': [{'Subnet': '10.231.0.0/16'}]}},
+                        {'Internal': True, 'IPAM': {'Config': []}}):
+            with self.assertRaises(RuntimeError):
+                cr.same_host_network_problems(['cf-staging-cfmeet-bridge'], lambda n, b=bad_net: b)
+        with self.assertRaisesRegex(RuntimeError, 'HQ creates it first'):
+            cr.same_host_network_problems(['cfmeet-private'], lambda n: good)
+
+    def test_enable_record_selects_the_transport(self):
+        base = {'policy_revision': 1, 'policy_key_id': 'cfmeet-policy-1', 'policy_public_key_hex': 'ab' * 32,
+                'hq_workload_uri': 'cf://staging/product-admin/cfmeet', 'enrolled_markets': ['GLOBAL'],
+                'enrolled_tenants': ['0b7e7f0e-2b9c-4c8e-9d7a-1f2e3d4c5b6a']}
+        _, listen, source = cr.admin_bridge_enable_settings(dict(base, transport='same-host'))
+        self.assertEqual((listen, source), (None, ('10.231.14.3', '10.231.14.4')))
+        tunnel = dict(base, listen_address='10.250.0.1', allowed_source='10.250.0.2')
+        self.assertEqual(cr.admin_bridge_enable_settings(tunnel)[1:], ('10.250.0.1', '10.250.0.2'))
+        self.assertEqual(cr.admin_bridge_enable_settings(dict(tunnel, transport='tunnel'))[1:],
+                         ('10.250.0.1', '10.250.0.2'))
+        for bad in (dict(base), dict(base, transport='same-host', listen_address='10.250.0.1'),
+                    dict(base, transport='public'), dict(base, transport='same-host', allowed_source='10.0.0.9')):
+            with self.assertRaises(RuntimeError, msg=bad):
+                cr.admin_bridge_enable_settings(bad)
+
     def test_hq_port_is_a_passthrough_relay_admitting_only_hq(self):
         config = cr.admin_bridge_hq_relay_config('10.77.0.2')
         self.assertIn('listen %d;' % cr.ADMIN_BRIDGE_HQ_PORT, config)

@@ -201,7 +201,18 @@ jobs:
           MESSAGING_BIN: ${{ github.workspace }}/target/debug/messaging
           MESSAGING_MIGRATION_BIN: ${{ github.workspace }}/target/debug/messaging-migration
           WEB_MESSAGING_E2E_APP: ${{ github.workspace }}/apps/web
+          # Screenshots of the real chat UI (test data only) for review.
+          E2E_SCREENSHOTS: ${{ runner.temp }}/chat-screens
         run: cargo test --locked --test unified_messaging_e2e web_messaging_client -- --nocapture
+
+      - name: Chat UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-ui-screenshots
+          path: ${{ runner.temp }}/chat-screens
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Disk usage
         if: always()

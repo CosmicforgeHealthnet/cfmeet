@@ -27,6 +27,7 @@ import type { BusinessOrganization } from "@/types/generated/meeting-service";
 import { OrgError, Section, TextField } from "./shared";
 
 import { MeetingRules } from "./OrganizationModeration";
+import { OrganizationExport, OrganizationPolicies } from "./OrganizationExtras";
 
 export default function OrganizationSettings({ org }: { org: BusinessOrganization }) {
   return (
@@ -34,7 +35,9 @@ export default function OrganizationSettings({ org }: { org: BusinessOrganizatio
       {/* Remount the form when the authoritative version changes (save, conflict reload). */}
       {orgCan(org, ORG_CAPABILITIES.profileWrite) && <ProfileForm key={`${org.id}:${org.version}`} org={org} />}
       <MeetingRules org={org} />
+      {orgCan(org, ORG_CAPABILITIES.policiesManage) && <OrganizationPolicies organization={org} owner={orgCan(org, ORG_CAPABILITIES.ownershipTransfer)} />}
       {orgCan(org, ORG_CAPABILITIES.ownershipTransfer) && <OwnershipTransfer org={org} />}
+      {orgCan(org, ORG_CAPABILITIES.lifecycleManage) && <OrganizationExport organization={org} />}
       {orgCan(org, ORG_CAPABILITIES.lifecycleManage) && <Lifecycle org={org} />}
     </div>
   );

@@ -7,6 +7,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useCollaborationState } from "@/hooks/v2/useCollaboration";
 import { useEndConference } from "@/hooks/v2/useConferences";
 import { schedulingError } from "@/lib/meeting-scheduling";
+
+/** Why the mic, camera or screen didn't start, in words a person can act on. */
+export function mediaErrorText(kind: "audio" | "video" | "screen", cause: unknown): string | null {
+  const name = cause instanceof Error ? cause.name : (cause as { name?: string } | null)?.name;
+  const what = kind === "audio" ? "microphone" : kind === "video" ? "camera" : "screen sharing";
+  if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
+    return kind === "screen" ? null /* the person cancelled the picker */ : `Your browser is blocking the ${what}. Allow it from the icon in the address bar, then try again.`;
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") return `No ${what} was found. Plug one in or pick another in settings.`;
+  if (name === "NotReadableError" || name === "TrackStartError" || name === "AbortError") return `The ${what} is being used by another app. Close it and try again.`;
+  return null;
+}
 import type { SidebarPanel } from "./sidebar";
 import RoomEngagementControls from "./RoomEngagementControls";
 import MutedSpeechPrompt from "./MutedSpeechPrompt";
@@ -53,7 +65,9 @@ export default function FooterControls({ onOpenPanel, sidebarPanel, isSidebarOpe
       if (kind === "video") await localParticipant.setCameraEnabled(!isCameraEnabled);
       if (kind === "screen") await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
     } catch (cause) {
-      setError(schedulingError(cause));
+      const friendly = mediaErrorText(kind, cause);
+      const picked = kind === "screen" && friendly === null && (cause as { name?: string } | null)?.name === "NotAllowedError";
+      if (!picked) setError(friendly ?? schedulingError(cause));
     } finally {
       setPending(undefined);
     }
@@ -62,13 +76,10 @@ export default function FooterControls({ onOpenPanel, sidebarPanel, isSidebarOpe
   const leave = async () => {
     setBusy("leave");
     setError("");
-    try {
-      await onLeave?.();
-      await room.disconnect();
-    } catch (cause) {
-      setError(schedulingError(cause));
-      setBusy(null);
-    }
+    // Leave always leaves: if telling the server fails, the media room still disconnects
+    // (the server ends the stale session on its own when it stops hearing from it).
+    await onLeave?.().catch(() => {});
+    await room.disconnect().catch(() => {});
   };
 
   const endForEveryone = async () => {
@@ -76,7 +87,7 @@ export default function FooterControls({ onOpenPanel, sidebarPanel, isSidebarOpe
     setError("");
     try {
       await endConference.mutateAsync(conferenceId);
-      await onLeave?.();
+      await onLeave?.().catch(() => {});
       await room.disconnect();
     } catch (cause) {
       setError(schedulingError(cause));
