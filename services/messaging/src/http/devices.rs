@@ -238,7 +238,7 @@ async fn directory(
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = caller.require_scope(MESSAGES_READ)?;
     let acting = require_acting(&state, &caller, &headers).await?;
-    devices::directory_lookup_allowed(&state, ctx).await?;
+    devices::directory_lookup_allowed(&state, ctx, acting.principal_id).await?;
     crate::operations::verify_request_checkpoint(&state).await?;
     // Appendix K: a block (either direction) hides the other principal's keys — the same
     // answer as an unknown principal.
@@ -340,8 +340,8 @@ async fn proofs(
     Query(q): Query<ProofQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = caller.require_scope(MESSAGES_READ)?;
-    require_acting(&state, &caller, &headers).await?;
-    devices::directory_lookup_allowed(&state, ctx).await?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    devices::directory_lookup_allowed(&state, ctx, acting.principal_id).await?;
     crate::operations::verify_request_checkpoint(&state).await?;
     crate::operations::require_open(
         &state.db,
