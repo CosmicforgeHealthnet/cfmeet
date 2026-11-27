@@ -23,7 +23,7 @@ export const WAITING_NOTE = "Waiting for this message. This may take a while.";
 /** Chat-list preview of such a message (short, never a blank bar). */
 export const WAITING_PREVIEW = "Waiting for this message";
 /** A message sent before this browser joined the chat: it will never arrive here. */
-export const BEFORE_JOIN_PREVIEW = "Sent before this browser joined";
+export const BEFORE_JOIN_PREVIEW = "Encrypted message";
 
 export type DeviceLike = { deviceId: string; status: string; keyPackagesAvailable?: number };
 export type MemberLike = { principalId: string; state?: string };
@@ -87,9 +87,7 @@ export function joinerEntry(deviceId: string, signatureKey: Uint8Array): string 
  * reaches a new device). With another device of the account, history can be brought over.
  */
 export function beforeJoinNote(hasOtherDevice: boolean): string {
-  return hasOtherDevice
-    ? `${BEFORE_JOIN_PREVIEW}. You can bring over older messages from your other device under Security & devices.`
-    : `${BEFORE_JOIN_PREVIEW}.`;
+  return hasOtherDevice ? "Earlier messages are on your other device." : "Earlier messages are on the device they were sent to.";
 }
 
 /** What the chat list shows under a chat's title. */

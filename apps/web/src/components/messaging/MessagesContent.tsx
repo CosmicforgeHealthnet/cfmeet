@@ -1646,8 +1646,6 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
               const beforeJoin = (o?: (typeof items)[number]) => !!o && o.type === "message" && o.message.state === "before-join";
               if (m.state === "before-join") {
                 if (beforeJoin(prev)) return null;
-                let n = 1;
-                while (beforeJoin(items[index + n])) n++;
                 const more = m.note && /other device/.test(m.note);
                 return (
                   <Fragment key={item.key}>
@@ -1655,7 +1653,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
                     <li className="my-3 flex justify-center" data-testid="before-join-run">
                       <span className="flex max-w-[90%] items-start gap-2 rounded-xl bg-background/90 px-3 py-2 text-center text-xs text-muted-foreground shadow-sm ring-1 ring-border">
                         <Lock className="mt-0.5 size-3.5 shrink-0" />
-                        <span>{n === 1 ? "1 earlier message isn't on this browser." : `${n} earlier messages aren't on this browser.`}{more ? " You can bring them over from your other device under Security & devices." : ""}</span>
+                        <span>{more ? "Earlier messages are on your other device." : "Earlier messages are on the device they were sent to."}</span>
                       </span>
                     </li>
                   </Fragment>

@@ -68,9 +68,8 @@ test("a verified joiner is named to the worker with its exact key", () => {
 });
 
 test("older history: a clear placeholder, pointing to the other device when there is one", () => {
-  assert.match(beforeJoinNote(true), /^Sent before this browser joined\./);
-  assert.match(beforeJoinNote(true), /bring over older messages from your other device/);
-  assert.equal(beforeJoinNote(false), "Sent before this browser joined.");
+  assert.equal(beforeJoinNote(true), "Earlier messages are on your other device.");
+  assert.equal(beforeJoinNote(false), "Earlier messages are on the device they were sent to.");
   assert.doesNotMatch(beforeJoinNote(false), /other device|linked|Waiting/);
 });
 
