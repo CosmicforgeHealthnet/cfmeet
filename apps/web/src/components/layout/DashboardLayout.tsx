@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SessionEndedError } from "@/lib/auth/session-core";
 import { MessagingEngineProvider } from "@/components/messaging/MessagingEngineProvider";
 import { ChatAlerts } from "@/components/messaging/ChatAlerts";
+import { StatusQueueRoot } from "@/components/updates/StatusQueueRoot";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
@@ -98,6 +99,8 @@ export default function DashboardLayout({
         <CommandPalette />
         <Toaster />
         <ChatAlerts />
+        {/* Background status publishing (WhatsApp-style): resumes pending statuses, runs across pages. */}
+        <StatusQueueRoot ownerId={user.id} />
       </div>
      </MessagingEngineProvider>
     </WorkspaceProvider>
