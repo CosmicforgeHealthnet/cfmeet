@@ -893,9 +893,30 @@ impl ApplicationBaseline {
 
     /// The per-context settings this baseline contributes, under the application's own
     /// override of that context (`None`: the baseline leaves contexts alone).
-    fn context(self, own: Option<&ContextOverride>) -> Option<ContextOverride> {
+    fn context(self, class: ContextClass, own: Option<&ContextOverride>) -> Option<ContextOverride> {
         match self {
-            Self::CfMeetFirstParty => None,
+            // Product decision (26 November 2026): CF Meet's personal chats are server-stored
+            // (MANAGED) and sync on every device the person signs in on. One-to-one and group
+            // chats therefore always allow MANAGED; older PRIVATE_E2EE chats keep working, and
+            // an explicit default the application chose is kept.
+            Self::CfMeetFirstParty => {
+                if !matches!(class, ContextClass::Direct | ContextClass::Group) {
+                    return None;
+                }
+                let mut o = own.cloned().unwrap_or_default();
+                let mut allowed = o
+                    .allowed_profiles
+                    .clone()
+                    .unwrap_or_else(|| vec![SecurityProfile::PrivateE2ee]);
+                if !allowed.contains(&SecurityProfile::Managed) {
+                    allowed.insert(0, SecurityProfile::Managed);
+                }
+                o.allowed_profiles = Some(allowed);
+                if o.default_profile.is_none() {
+                    o.default_profile = Some(SecurityProfile::Managed);
+                }
+                Some(o)
+            }
             Self::PlatformPartner => {
                 let mut o = own.cloned().unwrap_or_default();
                 let managed_allowed = o
@@ -959,7 +980,7 @@ impl ApplicationBaseline {
             layered.backups = application.backups.clone();
         }
         for class in ContextClass::ALL {
-            if let Some(c) = self.context(application.contexts.get(class)) {
+            if let Some(c) = self.context(*class, application.contexts.get(class)) {
                 layered.contexts.insert(*class, c);
             }
         }
@@ -1479,6 +1500,36 @@ mod tests {
         assert!(r.attachments.enabled);
         assert_eq!(r.attachments.max_bytes, 1024);
         assert_eq!(r.attachments.allowed_kinds, vec!["IMAGE"]);
+    }
+
+    /// CF Meet's one-to-one and group chats always allow MANAGED (they sync on every device).
+    #[test]
+    fn the_cfmeet_baseline_always_allows_synced_personal_chats() {
+        let b = ApplicationBaseline::CfMeetFirstParty;
+        let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
+        for class in [ContextClass::Direct, ContextClass::Group] {
+            let c = r.contexts.get(&class).unwrap();
+            assert!(c.allowed_profiles.contains(&SecurityProfile::Managed));
+            assert!(c.allowed_profiles.contains(&SecurityProfile::PrivateE2ee));
+            assert_eq!(c.default_profile, Some(SecurityProfile::Managed));
+        }
+        // A stored policy that only lists PRIVATE_E2EE (the old default) still gets MANAGED.
+        let own: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": {
+                "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" },
+                "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"] }
+            }
+        }))
+        .unwrap();
+        let r = resolve(&b.under(&own), 1).unwrap();
+        let direct = r.contexts.get(&ContextClass::Direct).unwrap();
+        assert!(direct.allowed_profiles.contains(&SecurityProfile::Managed));
+        assert_eq!(direct.default_profile, Some(SecurityProfile::PrivateE2ee), "an explicit default is kept");
+        let group = r.contexts.get(&ContextClass::Group).unwrap();
+        assert_eq!(group.allowed_profiles, vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]);
+        // Other contexts are left to the application.
+        let support = r.contexts.get(&ContextClass::Support).unwrap();
+        assert_eq!(support.allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
     }
 
     /// ADR 0062: the partner baseline makes MANAGED the default of every context with
