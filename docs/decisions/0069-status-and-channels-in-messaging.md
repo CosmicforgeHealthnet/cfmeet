@@ -111,7 +111,21 @@ full CI, and nothing orders the two.
      recognised content, SHA-256) and stores it in 4 MiB parts in the protected bucket before
      recording it; every insert is `ON CONFLICT DO NOTHING`, so a repeated run reports
      everything `unchanged`; audited as `SOCIAL_LEGACY_IMPORT`; prints counts and ids only.
-   * Run once after the backend release (and again any time; it only adds what is new):
+   * **Release steps (the normal path).** After the backend release, dispatch
+     `cfmeet-coordinated-release.yml` with `social-channels-export`, then
+     `social-channels-import` (`infra/calling/production/coordinated_release.py`, in the
+     style of `org-cutover-export` / `org-cutover-import`). Both refuse unless every service
+     runs the released images. The export runs the Meeting backend image's
+     `export-social-channels` with only `DATABASE_URL` and the three communication scope ids,
+     into a 0600 root file, and reports counts and the checksum only. The import streams that
+     file on stdin to `messaging-admin` inside the running Messaging container, runs it a
+     second time, and fails the step unless the second run imports nothing and reports every
+     record `unchanged` (and the same refusals). The snapshot is overwritten and deleted
+     afterwards whatever the outcome; export again to retry. Refused records stop the step
+     unless the owner accepts them (`confirm: refusals-accepted`); their ids are in the
+     `SOCIAL_LEGACY_IMPORT` audit entry. Both steps may be repeated later; they only add
+     what is new.
+   * **Manual fallback** (only if the release workflow cannot be used), on the VPS:
 
      ```sh
      # on the VPS, as root (export file 0600, never mounted into a container)
