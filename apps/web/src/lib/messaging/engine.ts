@@ -32,7 +32,7 @@ import type { LinkView } from "@/lib/auth/account-device-core";
 import { accountSession } from "@/lib/auth/session";
 import type { Colleague, MessagingIdentity } from "@/types/messaging";
 import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
-import { ManagedConversationState, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
+import { ManagedConversationState, behindHead, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
 import { MessageOutbox, browserOutboxStorage, flushOutbox, type OutboxItem } from "./outbox";
 import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
@@ -1290,10 +1290,22 @@ export class MessagingEngine {
       this.loadedManaged.delete(id);
       this.outbox?.dropConversation(id);
     }
+    // A chat whose list preview moved past what it shows is synchronized again: a realtime
+    // event lost on a stale socket must not leave the open chat behind its own preview.
+    const behind = behindHead(
+      out.map((c) => [c.conversationId, c.inbox?.lastMessage?.sequence ?? 0] as const),
+      (id) => {
+        const before = this.server.get(id);
+        if (!before) return null;
+        if (before.securityProfile === "MANAGED") return this.loadedManaged.has(id) ? this.stateFor(id).maxSequence : null;
+        return before.inbox?.lastMessage?.sequence ?? 0;
+      },
+    );
     for (const c of out) this.server.set(c.conversationId, c);
     for (const c of fresh) this.subscribeConversation(c);
     await this.renderConversations();
     for (const c of fresh) this.scheduleSync(c.conversationId);
+    for (const id of behind) this.scheduleSync(id);
   }
 
   private async renderConversations(): Promise<void> {

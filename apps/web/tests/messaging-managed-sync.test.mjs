@@ -152,3 +152,15 @@ test("timeline cards merge by anchorSequence, then occurredAt, then entryId; sen
   assert.deepEqual(order, ["m1", "card:a", "card:b", "m2", "card:c", "q"]);
   assert.deepEqual(mergeTimeline(messages, cards, 1).map((i) => i.key), ["m1", "m2", "card:c", "q"], "cards under the watermark are hidden");
 });
+
+test("a chat whose list head moved past what it synchronized is synchronized again", async () => {
+  const { behindHead } = await import("../src/lib/messaging/managed-store.ts");
+  const known = { a: 5, b: 7 };
+  const heads = [["a", 6], ["b", 7], ["c", 9]];
+  assert.deepEqual(behindHead(heads, (id) => known[id] ?? null), ["a"], "only a chat behind its head; an unloaded one waits for its first open");
+  const st = new ManagedConversationState();
+  st.applyMessages([msg(1), msg(2)]);
+  assert.deepEqual(behindHead([[conv, 3]], () => st.maxSequence), [conv], "the open chat missed message 3");
+  st.applyMessages([msg(3)]);
+  assert.deepEqual(behindHead([[conv, 3]], () => st.maxSequence), [], "caught up: nothing to do");
+});

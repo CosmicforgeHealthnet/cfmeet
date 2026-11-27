@@ -324,3 +324,18 @@ function sequenceAt(messages: readonly { sequence: number | null; createdAt: str
   for (const m of messages) if (m.sequence !== null && m.createdAt && m.createdAt <= at) seq = Math.max(seq, m.sequence);
   return seq;
 }
+
+/**
+ * Chats whose server head (the chat list's last message) is ahead of what this tab has
+ * synchronized. The list is re-read on a timer while a chat's messages arrive over the
+ * realtime socket; an event the socket lost would otherwise leave the open chat behind
+ * its own list preview until a reload. `known` is null for a chat with nothing to heal.
+ */
+export function behindHead(heads: Iterable<readonly [string, number]>, known: (conversationId: string) => number | null): string[] {
+  const out: string[] = [];
+  for (const [id, head] of heads) {
+    const k = known(id);
+    if (k !== null && head > k) out.push(id);
+  }
+  return out;
+}
