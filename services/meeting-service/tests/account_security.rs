@@ -4,7 +4,7 @@
 //! * ACC-002/003: the revocation epoch applies on v1, v2 and refresh, without Communications
 //! * ACC-007/017: sessions, per-session logout, rotation with reuse detection, legacy upgrade
 //! * ACC-004: Google identity binding and the pending-account pre-hijack fix
-//! * ACC-014 / DATA-002: uniform recovery answers, case-insensitive email identity
+//! * ACC-014 / DATA-002: uniform sign-in answers, case-insensitive email identity
 //! * SEC-013: append-only security audit and its administrator read
 mod common;
 
@@ -14,8 +14,6 @@ use common::*;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
-
-const PASSWORD: &str = "Str0ng!Passw0rd";
 
 macro_rules! app_with_redis {
     () => {{
@@ -29,20 +27,19 @@ macro_rules! app_with_redis {
     }};
 }
 
-async fn password_user(app: &TestApp, email: &str, status: &str) -> Uuid {
+/// An existing email account (no password: sign-in is by emailed code).
+async fn email_user(app: &TestApp, email: &str, status: &str) -> Uuid {
     let id = Uuid::new_v4();
-    let hash = backend::services::auth::hash_password(PASSWORD).unwrap();
     app.db
         .conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "INSERT INTO users (id, username, email, password_hash, auth_type, role, status, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, 'local', 'user', $5::user_status, now(), now())",
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', $4::user_status, now(), now())",
             [
                 id.into(),
                 format!("u_{}", &id.simple().to_string()[..10]).into(),
                 email.into(),
-                hash.into(),
                 status.into(),
             ],
         ))
@@ -52,18 +49,7 @@ async fn password_user(app: &TestApp, email: &str, status: &str) -> Uuid {
 }
 
 async fn login(app: &TestApp, email: &str) -> (String, String) {
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": email, "password": PASSWORD }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    (
-        v["access_token"].as_str().unwrap().to_string(),
-        v["refresh_token"].as_str().unwrap().to_string(),
-    )
+    app.otp_tokens(email).await
 }
 
 async fn refresh(app: &TestApp, token: &str) -> (StatusCode, Value) {
@@ -89,7 +75,7 @@ fn claims(app: &TestApp, token: &str) -> backend::services::auth::Claims {
 #[tokio::test]
 async fn login_opens_a_session_with_typed_tokens_and_case_insensitive_email() {
     let app = app_with_redis!();
-    password_user(&app, "alice.typed@example.com", "active").await;
+    email_user(&app, "alice.typed@example.com", "active").await;
     let (access, refresh_token) = login(&app, "Alice.Typed@EXAMPLE.com").await;
 
     let a = claims(&app, &access);
@@ -115,7 +101,7 @@ async fn login_opens_a_session_with_typed_tokens_and_case_insensitive_email() {
 #[tokio::test]
 async fn refresh_rotates_and_reuse_ends_the_whole_session() {
     let app = app_with_redis!();
-    let id = password_user(&app, "rotate@example.com", "active").await;
+    let id = email_user(&app, "rotate@example.com", "active").await;
     let (_, r1) = login(&app, "rotate@example.com").await;
 
     let (s, v) = refresh(&app, &r1).await;
@@ -151,7 +137,7 @@ async fn refresh_rotates_and_reuse_ends_the_whole_session() {
 #[tokio::test]
 async fn logout_ends_only_the_current_session() {
     let app = app_with_redis!();
-    password_user(&app, "two.devices@example.com", "active").await;
+    email_user(&app, "two.devices@example.com", "active").await;
     let (laptop, laptop_refresh) = login(&app, "two.devices@example.com").await;
     let (phone, _) = login(&app, "two.devices@example.com").await;
 
@@ -173,14 +159,14 @@ async fn logout_ends_only_the_current_session() {
     );
 }
 
-/// ACC-002: password change, password reset, deactivation and logout-all end tokens on v1,
-/// v2 and refresh — including tokens issued before sessions existed — with no
-/// Communications integration configured (ACC-003).
+/// ACC-002: deactivation (by any writer) ends tokens on v1, v2 and refresh — including
+/// tokens issued before sessions existed — with no Communications integration
+/// configured (ACC-003).
 #[tokio::test]
 async fn credential_changes_revoke_every_token_on_every_ingress() {
     let app = app_with_redis!();
     assert!(app.state.communications.is_none());
-    let id = password_user(&app, "epoch@example.com", "active").await;
+    let id = email_user(&app, "epoch@example.com", "active").await;
     let (session_access, session_refresh) = login(&app, "epoch@example.com").await;
     let legacy_access = app
         .state
@@ -193,26 +179,19 @@ async fn credential_changes_revoke_every_token_on_every_ingress() {
         .generate_refresh_token(id, "user")
         .unwrap();
     assert_eq!(both_ingresses(&app, &legacy_access).await.0, StatusCode::OK);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
 
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/change-password",
-            Auth::Bearer(&session_access),
-            json!({
-                "current_password": PASSWORD,
-                "new_password": "N3w!Passw0rd-long",
-                "confirm_password": "N3w!Passw0rd-long",
-            }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-
+    // Deactivation by any writer (here: direct SQL, as an operator tool would).
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE users SET status = 'inactive' WHERE id = '{id}'"
+        ))
+        .await
+        .unwrap();
     for token in [&session_access, &legacy_access] {
-        assert_eq!(
-            both_ingresses(&app, token).await,
-            (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED),
-            "access token survived a password change"
-        );
+        let (v1, v2) = both_ingresses(&app, token).await;
+        assert!(v1.is_client_error() && v2.is_client_error(), "{v1} {v2}");
     }
     for token in [&session_refresh, &legacy_refresh] {
         assert_eq!(refresh(&app, token).await.0, StatusCode::UNAUTHORIZED);
@@ -224,32 +203,12 @@ async fn credential_changes_revoke_every_token_on_every_ingress() {
         .await,
         0
     );
-
-    // Deactivation by any writer (here: direct SQL, as an operator tool would) also ends tokens.
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": "epoch@example.com", "password": "N3w!Passw0rd-long" }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    let fresh = v["access_token"].as_str().unwrap().to_string();
-    app.db
-        .conn
-        .execute_unprepared(&format!(
-            "UPDATE users SET status = 'inactive' WHERE id = '{id}'"
-        ))
-        .await
-        .unwrap();
-    let (v1, v2) = both_ingresses(&app, &fresh).await;
-    assert!(v1.is_client_error() && v2.is_client_error(), "{v1} {v2}");
 }
 
 #[tokio::test]
 async fn sign_out_everywhere_and_per_session_revocation() {
     let app = app_with_redis!();
-    let id = password_user(&app, "sessions@example.com", "active").await;
+    let id = email_user(&app, "sessions@example.com", "active").await;
     let (a, _) = login(&app, "sessions@example.com").await;
     let (b, _) = login(&app, "sessions@example.com").await;
 
@@ -313,7 +272,7 @@ async fn sign_out_everywhere_and_per_session_revocation() {
 #[tokio::test]
 async fn a_legacy_refresh_token_upgrades_once_into_a_session() {
     let app = app_with_redis!();
-    let id = password_user(&app, "legacy@example.com", "active").await;
+    let id = email_user(&app, "legacy@example.com", "active").await;
     let legacy = app
         .state
         .jwt_service
@@ -337,174 +296,136 @@ async fn a_legacy_refresh_token_upgrades_once_into_a_session() {
     );
 }
 
-/// ACC-014: the recovery endpoints and login answer the same for unknown accounts.
+/// ACC-014: requesting a code answers the same for new, existing and deactivated
+/// addresses, and a wrong code answers the same whether or not an account exists.
 #[tokio::test]
-async fn recovery_and_login_answers_do_not_reveal_accounts() {
+async fn sign_in_answers_do_not_reveal_accounts() {
     let app = app_with_redis!();
-    password_user(&app, "known@example.com", "active").await;
+    email_user(&app, "known@example.com", "active").await;
+    email_user(&app, "gone@example.com", "inactive").await;
 
-    let forgot = |email: &'static str| {
+    let request = |email: &'static str| {
         let app = &app;
         async move {
             app.post(
-                "/api/v1/auth/forgot-password",
+                "/api/v1/auth/otp/request",
                 Auth::None,
                 json!({ "email": email }),
             )
             .await
         }
     };
-    let known = forgot("known@example.com").await;
-    let unknown = forgot("nobody@example.com").await;
-    assert_eq!(known, unknown);
-    assert_eq!(known.0, StatusCode::OK);
-
-    let resend = app
-        .post(
-            "/api/v1/auth/resend-verification",
-            Auth::None,
-            json!({ "email": "nobody@example.com" }),
-        )
-        .await;
-    assert_eq!(resend, known);
-
-    let wrong_password = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": "known@example.com", "password": "Wrong!Passw0rd" }),
-        )
-        .await;
-    let no_account = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": "nobody@example.com", "password": "Wrong!Passw0rd" }),
-        )
-        .await;
-    assert_eq!(wrong_password.0, StatusCode::UNAUTHORIZED);
+    let known = request("known@example.com").await;
+    assert_eq!(known.0, StatusCode::OK, "{}", known.1);
+    assert_eq!(request("nobody@example.com").await, known);
+    assert_eq!(request("gone@example.com").await, known);
+    // Nothing is mailed to a deactivated account.
     assert_eq!(
-        wrong_password.1["error"]["message"],
-        no_account.1["error"]["message"]
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'AUTH_VERIFICATION' \
+              AND recipient_hash = encode(sha256(convert_to('gone@example.com', 'UTF8')), 'hex')"
+        )
+        .await,
+        0
     );
-    assert_eq!(wrong_password.0, no_account.0);
 
-    let reset = |email: &'static str| {
+    let verify = |email: &'static str| {
         let app = &app;
         async move {
             app.post(
-                "/api/v1/auth/reset-password",
+                "/api/v1/auth/otp/verify",
                 Auth::None,
-                json!({
-                    "email": email, "token": "123456",
-                    "new_password": "N3w!Passw0rd-long", "confirm_password": "N3w!Passw0rd-long"
-                }),
+                json!({ "email": email, "code": "999999" }),
             )
             .await
         }
     };
-    let a = reset("nobody@example.com").await;
-    assert_eq!(a.0, StatusCode::BAD_REQUEST, "{}", a.1);
+    let wrong = verify("known@example.com").await;
+    let no_account = verify("never-requested@example.com").await;
+    assert_eq!(wrong.0, StatusCode::BAD_REQUEST, "{}", wrong.1);
+    assert_eq!(wrong.0, no_account.0);
+    assert_eq!(wrong.1["error"]["code"], no_account.1["error"]["code"]);
+    assert_eq!(
+        wrong.1["error"]["message"],
+        no_account.1["error"]["message"]
+    );
+    // No account is created by a failed verification.
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE email = 'never-requested@example.com'")
+            .await,
+        0
+    );
 }
 
-/// J-01 (final closure): the POSITIVE password-recovery path. A real reset code (as mailed,
-/// read from the store the mailer reads) sets a new password; every session and token issued
-/// before the reset — session and legacy, access and refresh, v1 and v2 — is refused; the new
-/// password signs in, the old one does not; the code is single-use; a security event is kept.
+/// The code as the user receives it: the line of the queued sign-in email that is exactly
+/// six digits (N0-8: Redis holds only a salted hash of it).
+async fn mailed_code(app: &TestApp, email: &str) -> String {
+    let text: String = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT text_body FROM email_deliveries WHERE category = 'AUTH_VERIFICATION' \
+              AND recipient_hash = encode(sha256(convert_to(lower($1), 'UTF8')), 'hex') \
+              ORDER BY created_at DESC LIMIT 1",
+            [email.into()],
+        ))
+        .await
+        .unwrap()
+        .expect("a sign-in code was queued for mailing")
+        .try_get("", "text_body")
+        .unwrap();
+    text.lines()
+        .map(str::trim)
+        .find(|l| l.len() == 6 && l.bytes().all(|b| b.is_ascii_digit()))
+        .expect("the sign-in email carries the code on its own line")
+        .to_string()
+}
+
+/// J-01 (passwordless): the mailed code signs in exactly once and records a LOGIN event;
+/// the mailed email names the requesting browser.
 #[tokio::test]
-async fn password_reset_with_a_valid_code_ends_every_earlier_session() {
+async fn the_mailed_code_signs_in_once() {
     let app = app_with_redis!();
     let email = format!(
-        "reset-{}@example.com",
+        "mailed-{}@example.com",
         &Uuid::new_v4().simple().to_string()[..10]
     );
-    let id = password_user(&app, &email, "active").await;
-    let (session_access, session_refresh) = login(&app, &email).await;
-    let (second_access, _) = login(&app, &email).await;
-    let legacy_access = app
-        .state
-        .jwt_service
-        .generate_access_token(id, "user")
-        .unwrap();
-    assert_eq!(
-        both_ingresses(&app, &session_access).await,
-        (StatusCode::OK, StatusCode::OK)
-    );
-
+    let id = email_user(&app, &email, "active").await;
     let (s, v) = app
         .post(
-            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/otp/request",
             Auth::None,
             json!({ "email": email }),
         )
         .await;
-    assert!(s.is_success(), "{v}");
-    let code = app
-        .state
-        .redis
-        .get(&format!("otp:reset:{}", email.to_lowercase()))
-        .await
-        .unwrap()
-        .expect("a reset code was issued for mailing");
-    let new_password = "Reset!Passw0rd-long";
-    let body = |token: &str| {
-        json!({ "email": email, "token": token,
-                "new_password": new_password, "confirm_password": new_password })
-    };
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let code = mailed_code(&app, &email).await;
+    let body = json!({ "email": email.to_uppercase(), "code": code });
     let (s, v) = app
-        .post("/api/v1/auth/reset-password", Auth::None, body(&code))
+        .post("/api/v1/auth/otp/verify", Auth::None, body.clone())
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-
-    for token in [&session_access, &second_access, &legacy_access] {
-        assert_eq!(
-            both_ingresses(&app, token).await,
-            (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED),
-            "a token issued before the reset survived it"
-        );
-    }
+    assert_eq!(v["is_new_account"], false);
+    assert_eq!(uuid(&v["user"]["id"]), id);
+    let access = v["access_token"].as_str().unwrap().to_string();
     assert_eq!(
-        refresh(&app, &session_refresh).await.0,
-        StatusCode::UNAUTHORIZED
-    );
-    assert_eq!(
-        app.scalar(&format!(
-            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}' AND revoked_at IS NULL"
-        ))
-        .await,
-        0,
-        "every session closed"
-    );
-    // The old password no longer signs in; the new one does (a fresh, working session).
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": email, "password": PASSWORD }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": email, "password": new_password }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    let fresh = v["access_token"].as_str().unwrap().to_string();
-    assert_eq!(
-        both_ingresses(&app, &fresh).await,
+        both_ingresses(&app, &access).await,
         (StatusCode::OK, StatusCode::OK)
     );
-    // Single use: the same code cannot reset again.
-    let (s, _) = app
-        .post("/api/v1/auth/reset-password", Auth::None, body(&code))
-        .await;
+    // Single use.
+    let (s, _) = app.post("/api/v1/auth/otp/verify", Auth::None, body).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}' AND auth_method = 'EMAIL_OTP'"
+        ))
+        .await,
+        1
+    );
     assert!(
         app.scalar(&format!(
-            "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'PASSWORD_RESET'"
+            "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'LOGIN' AND outcome = 'SUCCESS'"
         ))
         .await
             >= 1
@@ -512,31 +433,44 @@ async fn password_reset_with_a_valid_code_ends_every_earlier_session() {
 }
 
 #[tokio::test]
-async fn registration_normalizes_email_and_refuses_case_variants() {
+async fn first_sign_in_creates_one_account_and_normalizes_email() {
     let app = app_with_redis!();
-    let body = |email: &str, username: &str| {
-        json!({
-            "username": username, "email": email,
-            "password": PASSWORD, "confirm_password": PASSWORD,
-        })
-    };
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/register",
-            Auth::None,
-            body("Mixed.Case@Example.COM", "mixedcase"),
+    let first = app.otp_sign_in("Mixed.Case@Example.COM").await;
+    assert_eq!(first["is_new_account"], true);
+    assert_eq!(first["user"]["status"], "active");
+    let username = first["user"]["username"].as_str().unwrap();
+    assert!(username.starts_with("user_"), "{username}");
+    assert!(
+        !username.contains("mixed"),
+        "usernames never reveal the address"
+    );
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM users WHERE email = 'mixed.case@example.com' \
+              AND password_hash IS NULL AND email_verified_at IS NOT NULL"
         )
-        .await;
-    assert_eq!(s, StatusCode::CREATED, "{v}");
-    assert_eq!(v["email"], "mixed.case@example.com");
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/register",
-            Auth::None,
-            body("mixed.case@example.com", "mixedcase2"),
-        )
-        .await;
-    assert_eq!(s, StatusCode::CONFLICT);
+        .await,
+        1
+    );
+    // A case variant signs in to the same account.
+    let again = app.otp_sign_in("mixed.case@example.com").await;
+    assert_eq!(again["is_new_account"], false);
+    assert_eq!(again["user"]["id"], first["user"]["id"]);
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE lower(email) = 'mixed.case@example.com'")
+            .await,
+        1
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'AUTH_WELCOME' \
+              AND idempotency_key = 'welcome:{}'",
+            first["user"]["id"].as_str().unwrap()
+        ))
+        .await,
+        1,
+        "one welcome email for the new account"
+    );
 }
 
 /// ACC-004: a Google identity never inherits an unverified account's password, never
@@ -544,9 +478,26 @@ async fn registration_normalizes_email_and_refuses_case_variants() {
 #[tokio::test]
 async fn google_identity_resolution_closes_the_pending_account_takeover() {
     let app = app_with_redis!();
-    // Someone registered the victim's address with their own password and never verified it.
-    let pending = password_user(&app, "victim@example.com", "pending_verification").await;
-    let (attacker_access, attacker_refresh) = login(&app, "victim@example.com").await;
+    // Someone registered the victim's address with their own password (before sign-in
+    // became passwordless) and never verified it.
+    let pending = email_user(&app, "victim@example.com", "pending_verification").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE users SET password_hash = 'legacy-hash' WHERE id = '{pending}'"
+        ))
+        .await
+        .unwrap();
+    let attacker_access = app
+        .state
+        .jwt_service
+        .generate_access_token(pending, "user")
+        .unwrap();
+    let attacker_refresh = app
+        .state
+        .jwt_service
+        .generate_refresh_token(pending, "user")
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
 
     let google = |sub: &str, email: &str| GoogleIdentity {
@@ -580,15 +531,6 @@ async fn google_identity_resolution_closes_the_pending_account_takeover() {
         refresh(&app, &attacker_refresh).await.0,
         StatusCode::UNAUTHORIZED
     );
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": "victim@example.com", "password": PASSWORD }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
-
     // Same subject again resolves the same account; a different subject is refused.
     let (again, event) =
         resolve_google_account(&app.state, &google("sub-victim", "victim@example.com"))
@@ -601,8 +543,15 @@ async fn google_identity_resolution_closes_the_pending_account_takeover() {
             .is_err()
     );
 
-    // A verified password account is linked, keeping its password.
-    let active = password_user(&app, "linked@example.com", "active").await;
+    // A verified account is linked, keeping its (legacy) credential.
+    let active = email_user(&app, "linked@example.com", "active").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE users SET password_hash = 'legacy-hash' WHERE id = '{active}'"
+        ))
+        .await
+        .unwrap();
     let (linked, event) =
         resolve_google_account(&app.state, &google("sub-linked", "Linked@Example.com"))
             .await
@@ -628,7 +577,7 @@ async fn google_identity_resolution_closes_the_pending_account_takeover() {
 #[tokio::test]
 async fn the_security_audit_is_append_only_and_admin_readable() {
     let app = app_with_redis!();
-    let id = password_user(&app, "audited@example.com", "active").await;
+    let id = email_user(&app, "audited@example.com", "active").await;
     login(&app, "audited@example.com").await;
 
     let user = app.user("plain").await;
@@ -688,4 +637,336 @@ async fn session_operations_require_a_signed_in_user() {
         .0,
         StatusCode::UNAUTHORIZED
     );
+}
+
+/// A3 / F1: every `400 VALIDATION_ERROR` lists `{field, code, message}` per problem under
+/// `error.details` with the public field names, while `error.message` stays.
+#[tokio::test]
+async fn validation_errors_name_the_public_field_with_structured_details() {
+    let app = app_with_redis!();
+    let issues = |v: &Value| -> Vec<(String, String)> {
+        v["error"]["details"]
+            .as_array()
+            .unwrap_or_else(|| panic!("details missing: {v}"))
+            .iter()
+            .map(|i| {
+                assert!(i["message"].as_str().is_some_and(|m| !m.is_empty()), "{i}");
+                (
+                    i["field"].as_str().unwrap_or("<null>").to_string(),
+                    i["code"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let pair = |f: &str, c: &str| (f.to_string(), c.to_string());
+
+    // Several problems at once: one issue each, sorted by field.
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({ "email": "not-an-email", "code": "12a456" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["success"], false);
+    assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        issues(&v),
+        vec![pair("code", "regex"), pair("email", "email")]
+    );
+    let message = v["error"]["message"].as_str().unwrap();
+    assert!(message.contains("code: The code must be 6 digits"), "{v}");
+    assert!(message.contains("email: Invalid email address"), "{v}");
+    assert!(
+        !v.to_string().contains("12a456"),
+        "the code is never echoed"
+    );
+
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": "nope" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(issues(&v), vec![pair("email", "email")]);
+
+    // Meeting creation: the title rule names `title`.
+    let email = "validator@example.com";
+    email_user(&app, email, "active").await;
+    let (access, _) = login(&app, email).await;
+    let (s, v) = app
+        .post(
+            "/api/v1/meetings",
+            Auth::Bearer(&access),
+            json!({
+                "title": "", "start_time": "2030-01-25T14:00:00", "timezone": "UTC",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(issues(&v), vec![pair("title", "length")]);
+    assert_eq!(
+        v["error"]["message"],
+        "title: Title must be between 1 and 200 characters"
+    );
+}
+
+/// Gap audit A24: a wrong sign-in code for an existing account is audited (off the request
+/// path); an unknown address leaves no event.
+#[tokio::test]
+async fn wrong_sign_in_codes_are_audited_for_existing_accounts() {
+    let app = app_with_redis!();
+    let email = format!(
+        "wrongcode-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(&app, &email).await;
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({ "email": email, "code": wrong }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let sql = format!(
+        "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
+          AND event_type = 'SIGN_IN_CODE' AND outcome = 'FAILURE'"
+    );
+    let mut seen = 0;
+    for _ in 0..50 {
+        seen = app.scalar(&sql).await;
+        if seen > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(seen, 1);
+}
+
+/// Gap audit A17: usernames differ by more than case; the database enforces
+/// case-insensitive uniqueness of emails and usernames, and administrators see the report.
+#[tokio::test]
+async fn identities_are_unique_regardless_of_case() {
+    let app = app_with_redis!();
+    let a = format!(
+        "caseA-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let id = email_user(&app, &a, "active").await;
+    // The same address in another case cannot become a second account.
+    let dup = app
+        .db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', 'active'::user_status, now(), now())",
+            [
+                Uuid::new_v4().into(),
+                format!("u_{}", &Uuid::new_v4().simple().to_string()[..10]).into(),
+                a.to_uppercase().into(),
+            ],
+        ))
+        .await;
+    assert!(dup.is_err(), "case-only duplicate email accepted");
+    let name: String = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT username FROM users WHERE id = $1",
+            [id.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "username")
+        .unwrap();
+    assert!(backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        None
+    )
+    .await
+    .unwrap());
+    assert!(!backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        Some(id)
+    )
+    .await
+    .unwrap());
+    let admin = app.admin("identity-admin").await;
+    let (s, v) = app
+        .get(
+            "/api/v2/admin/identity-duplicates",
+            Auth::Bearer(&admin.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["email"]["enforced"], true, "{v}");
+    assert_eq!(v["username"]["enforced"], true, "{v}");
+    let (s, v) = app
+        .post(
+            "/api/v2/admin/identity-duplicates/enforce",
+            Auth::Bearer(&admin.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = app
+        .get("/api/v2/admin/identity-duplicates", Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+async fn verify_with_code(app: &TestApp, email: &str) -> (StatusCode, Value) {
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(app, email).await;
+    app.post(
+        "/api/v1/auth/otp/verify",
+        Auth::None,
+        json!({ "email": email, "code": code }),
+    )
+    .await
+}
+
+/// Gap audit A1: an authenticator app is enrolled with a current code; sign-in then needs
+/// it (or a single-use recovery code); a code's time step is accepted once; turning it off
+/// needs a DISABLE_MFA step-up.
+#[tokio::test]
+async fn an_authenticator_app_guards_sign_in() {
+    use backend::services::mfa;
+    let app = app_with_redis!();
+    let email = format!(
+        "mfa-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+
+    let (s, setup) = app
+        .post(
+            "/api/v2/me/mfa/totp/setup",
+            Auth::Bearer(&access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{setup}");
+    assert!(setup["otpauthUri"]
+        .as_str()
+        .unwrap()
+        .starts_with("otpauth://totp/"));
+    let secret = mfa::base32_decode(setup["secret"].as_str().unwrap()).unwrap();
+    // Not on until confirmed: sign-in still answers tokens.
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": "000000" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let step = mfa::step_now();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let recovery: Vec<String> = serde_json::from_value(v["recoveryCodes"].clone()).unwrap();
+    assert_eq!(recovery.len(), 10);
+    let (_, status) = app.get("/api/v2/me/mfa", Auth::Bearer(&access)).await;
+    assert_eq!(status["totpEnabled"], true);
+
+    // Sign-in now stops at the second factor.
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(code(&v), "MFA_REQUIRED");
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": "123456" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // The code used to confirm (same step) is not accepted again; a recovery code works once.
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["access_token"].is_string());
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "a recovery code is single use");
+
+    // Turning it off needs the step-up.
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": "x" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let token = app.step_up_token(&access, id, "DISABLE_MFA").await;
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
 }

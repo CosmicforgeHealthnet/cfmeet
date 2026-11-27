@@ -29,7 +29,6 @@ use developer_platform::{
     platform_access::{AuthorityUnavailable, CanonicalContext, ContextOutcome, PlatformAccessPort},
     state::AppState,
 };
-use developer_platform_migration::MigratorTrait;
 use http_body_util::BodyExt;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 use serde_json::{json, Value};
@@ -112,7 +111,7 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
-            developer_platform_migration::Migrator::up(&tmpl, None)
+            developer_platform_migration::up_all(&tmpl)
                 .await
                 .expect("migrations apply");
             tmpl.close().await.ok();
@@ -202,6 +201,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the gateway.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
+    /// The admin bridge (ADR 0068); granted `developer-platform.administer` and
+    /// `pricing.administer` only in the [`Control`] harness bundle.
+    pub bridge: Arc<ServiceTokenSigner>,
 }
 
 fn signer(id: ServiceId, k: ServiceSigningKey) -> Arc<ServiceTokenSigner> {
@@ -220,6 +222,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let bundle = json!({
         "bundle_version": 1,
         "receiver": cf_service_auth::services::DEVELOPER_PLATFORM,
@@ -253,6 +256,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
     )
 }
@@ -470,7 +474,9 @@ pub fn conforms(reference: &str, value: &Value) {
 // ---------------------------------------------------------------------------
 
 use developer_platform::{
-    platform_access::{Delegated, DelegationActor, DelegationCall},
+    platform_access::{
+        Delegated, DelegationActor, DelegationCall, EndUserCall, EndUsersReply, ForwardedCredential,
+    },
     session::{HumanSessions, HumanUser, SessionAuthorityUnavailable, SessionOutcome},
     webhooks::{WebhookService, WebhookSettings},
 };
@@ -538,9 +544,16 @@ pub const FAKE_REGISTRY: &[(&str, &str)] = &[
     ("projects.read", "STANDARD"),
     ("production_access.request", "STANDARD"),
     ("organizations.read", "STANDARD"),
+    // ADR 0062: the partner Users API.
+    ("principals.read", "STANDARD"),
+    ("principals.write", "STANDARD"),
+    ("user_tokens.issue", "STANDARD"),
     ("events.private_delivery", "FIRST_PARTY_ONLY"),
     ("numbers.admin", "PRIVILEGED_OPERATOR"),
 ];
+
+/// A held owner-delivered key: (environment, credential, secret, expires at).
+pub type HeldDelivery = (Uuid, Uuid, String, chrono::DateTime<chrono::Utc>);
 
 #[derive(Default)]
 pub struct MemoryPlatformAccess {
@@ -561,9 +574,91 @@ pub struct MemoryPlatformAccess {
     /// Delegated mutations: (actor header, call).
     pub audit: StdMutex<Vec<(String, DelegationCall)>>,
     pub down: std::sync::atomic::AtomicBool,
+    /// ADR 0062: partner users (§2.1).
+    pub end_users: StdMutex<std::collections::HashMap<Uuid, MemEndUser>>,
+    /// ADR 0062: every Partner Users API call (forwarded credential, call).
+    pub end_user_calls: StdMutex<Vec<(Uuid, EndUserCall)>>,
+    /// A scripted refusal of the next Partner Users API calls (status, code).
+    pub end_users_refusal: StdMutex<Option<(u16, String)>>,
+    /// ADR 0062 §2.3: environment -> allowed origins.
+    pub origins: StdMutex<std::collections::HashMap<Uuid, Vec<String>>>,
+    /// ADR 0068 A4: owner-delivered keys held for one reveal: ref -> (env, credential,
+    /// secret, expires at).
+    pub deliveries: StdMutex<std::collections::HashMap<Uuid, HeldDelivery>>,
+}
+
+/// A partner user of the fake (§2.1).
+#[derive(Debug, Clone)]
+pub struct MemEndUser {
+    pub env: Uuid,
+    pub external_id: String,
+    pub display_name: Option<String>,
+    pub image_url: Option<String>,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl MemEndUser {
+    fn view(&self, id: Uuid) -> Value {
+        json!({ "id": id, "externalId": self.external_id, "displayName": self.display_name,
+            "imageUrl": self.image_url, "status": self.status,
+            "createdAt": self.created_at.to_rfc3339(), "updatedAt": self.created_at.to_rfc3339() })
+    }
 }
 
 impl MemoryPlatformAccess {
+    /// The partner user of `env` with `external_id` (created if new): `(id, created)`.
+    fn upsert_end_user(&self, env: Uuid, body: &Value) -> (Uuid, bool) {
+        let external = body["externalId"].as_str().unwrap_or_default().to_string();
+        let mut users = self.end_users.lock().unwrap();
+        if let Some((id, _)) = users
+            .iter()
+            .find(|(_, u)| u.env == env && u.external_id == external)
+        {
+            return (*id, false);
+        }
+        let id = Uuid::new_v4();
+        users.insert(
+            id,
+            MemEndUser {
+                env,
+                external_id: external,
+                display_name: body["displayName"].as_str().map(str::to_string),
+                image_url: body["imageUrl"].as_str().map(str::to_string),
+                status: "ACTIVE".into(),
+                created_at: chrono::Utc::now(),
+            },
+        );
+        (id, true)
+    }
+
+    fn mint(&self, env: Uuid) -> Value {
+        let kind = self
+            .envs
+            .lock()
+            .unwrap()
+            .get(&env)
+            .map(|e| e.kind.clone())
+            .unwrap_or_default();
+        let tag = match kind.as_str() {
+            "PRODUCTION" => "live",
+            "TEST" => "test",
+            _ => "sbx",
+        };
+        json!({ "token": format!("cfut_{tag}_eyJhbGciOiJFZERTQSJ9.e30.{}", Uuid::new_v4().simple()),
+            "tokenId": Uuid::new_v4(),
+            "expiresAt": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339() })
+    }
+
+    /// Platform Access's own §2.1 scope rule for a call.
+    fn end_user_scopes(call: &EndUserCall) -> &'static [&'static str] {
+        match call {
+            EndUserCall::List { .. } | EndUserCall::Get { .. } => &["principals.read"],
+            EndUserCall::IssueToken { .. } => &["user_tokens.issue"],
+            EndUserCall::UpsertToken { .. } => &["principals.write", "user_tokens.issue"],
+            _ => &["principals.write"],
+        }
+    }
     pub fn first_party_tenant(&self) -> Uuid {
         let id = Uuid::new_v4();
         self.tenants.lock().unwrap().insert(
@@ -676,6 +771,26 @@ impl MemoryPlatformAccess {
     /// Whether delegated machine-identity changes are allowed in `env` (PA's rule).
     fn delegable(&self, env: &MemEnv, env_id: Uuid) -> bool {
         env.kind != "PRODUCTION" || self.activated.lock().unwrap().get(&env.app) == Some(&env_id)
+    }
+
+    /// ADR 0068 A4: a key HQ staff issued through the admin bridge, held for ONE reveal:
+    /// (delivery ref, credential id, secret).
+    pub fn hold_delivery(&self, env: Uuid, service_account: Uuid) -> (Uuid, Uuid, String) {
+        let (id, _) = self
+            .issue(env, service_account, vec![], Some("HQ issued".into()))
+            .expect("issuable");
+        let r = Uuid::new_v4();
+        let secret = format!("cfmk_test_{}", Uuid::new_v4().simple());
+        self.deliveries.lock().unwrap().insert(
+            r,
+            (
+                env,
+                id,
+                secret.clone(),
+                chrono::Utc::now() + chrono::Duration::days(7),
+            ),
+        );
+        (r, id, secret)
     }
 
     fn issue(
@@ -818,6 +933,125 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             return Ok(false);
         };
         Ok(scopes.iter().all(|s| held.iter().any(|h| h == s)))
+    }
+
+    async fn end_users(
+        &self,
+        call: EndUserCall,
+        forwarded: &ForwardedCredential,
+        _correlation: &CorrelationId,
+    ) -> Result<EndUsersReply, AuthorityUnavailable> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        self.end_user_calls
+            .lock()
+            .unwrap()
+            .push((forwarded.credential_id, call.clone()));
+        let refused = |status: u16, code: &str| {
+            Ok(EndUsersReply::Refused {
+                status,
+                code: code.into(),
+            })
+        };
+        if let Some((status, code)) = self.end_users_refusal.lock().unwrap().clone() {
+            return refused(status, &code);
+        }
+        // The forwarded credential is re-verified live; the environment comes from it.
+        let Some(held) = self
+            .credential_scopes
+            .lock()
+            .unwrap()
+            .get(&forwarded.credential_id)
+            .cloned()
+        else {
+            return refused(403, "CREDENTIAL_INVALID");
+        };
+        if !Self::end_user_scopes(&call)
+            .iter()
+            .all(|s| held.iter().any(|h| h == s))
+        {
+            return refused(403, "SCOPE_REQUIRED");
+        }
+        let env = forwarded.delegated.application_environment_id();
+        let ok = |status: u16, body: Value| Ok(EndUsersReply::Ok { status, body });
+        let own = |id: Uuid| {
+            self.end_users
+                .lock()
+                .unwrap()
+                .get(&id)
+                .filter(|u| u.env == env)
+                .cloned()
+        };
+        match call {
+            EndUserCall::Create { body } => {
+                let (id, created) = self.upsert_end_user(env, &body);
+                let u = own(id).unwrap();
+                ok(
+                    if created { 201 } else { 200 },
+                    json!({ "user": u.view(id) }),
+                )
+            }
+            EndUserCall::List { external_id, .. } => {
+                let users = self.end_users.lock().unwrap();
+                let items: Vec<Value> = users
+                    .iter()
+                    .filter(|(_, u)| u.env == env)
+                    .filter(|(_, u)| external_id.as_ref().is_none_or(|e| &u.external_id == e))
+                    .map(|(id, u)| u.view(*id))
+                    .collect();
+                ok(200, json!({ "items": items, "nextCursor": null }))
+            }
+            EndUserCall::Get { user_id } => match own(user_id) {
+                Some(u) => ok(200, json!({ "user": u.view(user_id) })),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::Update { user_id, body } => {
+                if own(user_id).is_none() {
+                    return refused(404, "NOT_FOUND");
+                }
+                let mut users = self.end_users.lock().unwrap();
+                let u = users.get_mut(&user_id).unwrap();
+                if let Some(v) = body.get("displayName") {
+                    u.display_name = v.as_str().map(str::to_string);
+                }
+                if let Some(v) = body.get("imageUrl") {
+                    u.image_url = v.as_str().map(str::to_string);
+                }
+                if let Some(v) = body.get("status").and_then(Value::as_str) {
+                    u.status = v.into();
+                }
+                ok(200, json!({ "user": u.view(user_id) }))
+            }
+            EndUserCall::Delete { user_id } => {
+                if own(user_id).is_none() {
+                    return refused(404, "NOT_FOUND");
+                }
+                let mut users = self.end_users.lock().unwrap();
+                let u = users.get_mut(&user_id).unwrap();
+                u.status = "DEACTIVATED".into();
+                u.display_name = None;
+                u.image_url = None;
+                ok(204, Value::Null)
+            }
+            EndUserCall::RevokeSessions { user_id } => match own(user_id) {
+                Some(_) => ok(
+                    200,
+                    json!({ "tokensNotBefore": chrono::Utc::now().to_rfc3339() }),
+                ),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::IssueToken { user_id, .. } => match own(user_id) {
+                Some(_) => ok(201, self.mint(env)),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::UpsertToken { body } => {
+                let (id, _) = self.upsert_end_user(env, &body);
+                let mut t = self.mint(env);
+                t["user"] = own(id).unwrap().view(id);
+                ok(201, t)
+            }
+        }
     }
 
     async fn delegate(
@@ -1351,6 +1585,108 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                     json!({ "id": environment_id, "liveTelecomAllowed": allowed }),
                 ))
             }
+            DelegationCall::ListEnvironmentEndUsers { environment_id, .. } => {
+                let users = self.end_users.lock().unwrap();
+                let items: Vec<Value> = users
+                    .iter()
+                    .filter(|(_, u)| u.env == environment_id)
+                    .map(|(id, u)| u.view(*id))
+                    .collect();
+                Ok(Delegated::Ok(json!({ "items": items, "nextCursor": null })))
+            }
+            DelegationCall::GetAllowedOrigins { environment_id } => {
+                if !self.envs.lock().unwrap().contains_key(&environment_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                let origins = self
+                    .origins
+                    .lock()
+                    .unwrap()
+                    .get(&environment_id)
+                    .cloned()
+                    .unwrap_or_default();
+                Ok(Delegated::Ok(
+                    json!({ "environmentId": environment_id, "origins": origins }),
+                ))
+            }
+            DelegationCall::PutAllowedOrigins {
+                environment_id,
+                origins,
+                ..
+            } => {
+                if !self.envs.lock().unwrap().contains_key(&environment_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                self.origins
+                    .lock()
+                    .unwrap()
+                    .insert(environment_id, origins.clone());
+                Ok(Delegated::Ok(
+                    json!({ "environmentId": environment_id, "origins": origins }),
+                ))
+            }
+            DelegationCall::IssueTestUserToken {
+                environment_id,
+                body,
+                ..
+            } => {
+                let Some(env) = self.envs.lock().unwrap().get(&environment_id).cloned() else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if env.kind != "SANDBOX" {
+                    return refused(403, "POLICY_VIOLATION");
+                }
+                let (id, _) = self.upsert_end_user(environment_id, &body);
+                let user = self.end_users.lock().unwrap()[&id].view(id);
+                let mut t = self.mint(environment_id);
+                t["user"] = user;
+                Ok(Delegated::Ok(t))
+            }
+            DelegationCall::ListCredentialDeliveries { environment_id } => {
+                let list: Vec<Value> = self
+                    .deliveries
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, d)| d.0 == environment_id)
+                    .map(|(r, d)| {
+                        let c = self.credentials.lock().unwrap().get(&d.1).cloned().unwrap();
+                        let v = self.view_credential(d.1, &c);
+                        json!({ "deliveryRef": r, "delivery": "OWNER_DELIVERED",
+                                "deliveryChannel": "CONSOLE_REVEAL_ONCE", "state": "PENDING",
+                                "credentialId": d.1, "publicId": v["publicId"],
+                                "serviceAccountId": c.sa, "createdAt": v["createdAt"],
+                                "expiresAt": d.3 })
+                    })
+                    .collect();
+                Ok(Delegated::Ok(json!({ "deliveries": list })))
+            }
+            DelegationCall::RevealCredentialDelivery {
+                environment_id,
+                delivery_ref,
+                actor,
+            } => {
+                if !actor.header_value().starts_with("u-") {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                let held = self.deliveries.lock().unwrap().remove(&delivery_ref);
+                match held {
+                    Some((env, credential, secret, _)) if env == environment_id => {
+                        let c = self
+                            .credentials
+                            .lock()
+                            .unwrap()
+                            .get(&credential)
+                            .cloned()
+                            .unwrap();
+                        Ok(Delegated::Ok(json!({
+                            "credential": self.view_credential(credential, &c),
+                            "secret": secret,
+                        })))
+                    }
+                    _ => refused(404, "NOT_FOUND"),
+                }
+            }
         }
     }
 }
@@ -1650,6 +1986,61 @@ impl Control {
             .map(|(c, w)| (c, w.expect("producers").producers))
     }
 
+    /// A request from the admin bridge with the given headers and body (ADR 0068 A3).
+    pub async fn bridge_send(
+        &self,
+        method: Method,
+        path: &str,
+        extra: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Response {
+        let signed = self
+            .peers
+            .bridge
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        for (k, v) in extra {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        self.send(method, path, headers, body).await
+    }
+
+    /// A GET from the admin bridge with the given attribution headers (ADR 0068).
+    pub async fn bridge(&self, path: &str, attribution: &[(&str, &str)]) -> Response {
+        self.signed_with(&self.peers.bridge, path, attribution)
+            .await
+    }
+
+    /// A GET signed by `signer` with extra headers (attribution tests).
+    pub async fn signed_with(
+        &self,
+        signer: &ServiceTokenSigner,
+        path: &str,
+        extra: &[(&str, &str)],
+    ) -> Response {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        for (k, v) in extra {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        self.send(Method::GET, path, headers, None).await
+    }
+
     pub async fn operator(&self, method: Method, path: &str, body: Option<Value>) -> Response {
         let signed = self
             .operator
@@ -1697,6 +2088,7 @@ pub fn service_auth_with_producers() -> (
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let operator = key("operator-test-1");
     let producer_keys: Vec<(&str, ServiceSigningKey)> = [
         svc::CALLING,
@@ -1734,9 +2126,20 @@ pub fn service_auth_with_producers() -> (
             &operator,
             &["developer-platform.administer"],
         ),
+        issuer(
+            svc::ADMIN_BRIDGE,
+            &bridge,
+            &["developer-platform.administer", "pricing.administer"],
+        ),
     ];
     for (s, k) in &producer_keys {
-        issuers.push(issuer(s, k, &["developer-event.publish"]));
+        // ADR 0068 A6: the Meeting Service and Messaging also read plan limits.
+        let perms: &[&str] = if *s == svc::MEETING_SERVICE || *s == svc::MESSAGING {
+            &["developer-event.publish", "developer-entitlement.read"]
+        } else {
+            &["developer-event.publish"]
+        };
+        issuers.push(issuer(s, k, perms));
     }
     let bundle = json!({
         "bundle_version": 1, "receiver": svc::DEVELOPER_PLATFORM, "runtime_environment": ENV,
@@ -1774,6 +2177,7 @@ pub fn service_auth_with_producers() -> (
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
         signer(ServiceId::operator_console(), operator),
         producers,
@@ -1787,6 +2191,7 @@ pub fn service_auth_with_operator() -> (ServiceAuthRuntime, Peers, Arc<ServiceTo
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let operator = key("operator-test-1");
     let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
         json!({
@@ -1818,6 +2223,7 @@ pub fn service_auth_with_operator() -> (ServiceAuthRuntime, Peers, Arc<ServiceTo
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
         signer(ServiceId::operator_console(), operator),
     )

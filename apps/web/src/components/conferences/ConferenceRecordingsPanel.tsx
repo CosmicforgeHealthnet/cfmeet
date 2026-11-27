@@ -1,12 +1,15 @@
 "use client";
 
-import { artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
+import { NiceSelect } from "@/components/ui/nice-select";
+import { Circle, Film, LayoutGrid, Play, Square, User } from "lucide-react";
+import { artifactAccessible, artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
-import { useRecordings, useStartRecording, useStopRecording } from "@/hooks/v2/useArtifacts";
+import { useArtifactAccess, useRecordings, useStartRecording, useStopRecording } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
+import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
 import type { ArtifactStatus, RecordingResponse, Role, RolePolicy } from "@/types/v2";
 
 const activeRecordingStatuses: ArtifactStatus[] = ["REQUESTED", "RECORDING", "STOPPING", "PROCESSING"];
@@ -38,8 +41,10 @@ export default function ConferenceRecordingsPanel({
   const [layout, setLayout] = useState("GRID");
   const [feedback, setFeedback] = useState("");
   const me = useCurrentParticipant(conferenceId);
+  const access = useArtifactAccess(conferenceId);
+  const [openError, setOpenError] = useState<string | null>(null);
   const role = effectiveConferenceRole(spaceRole, me.data?.role, me.data?.admissionState);
-  const recordingEnabled = recordingPolicy !== "DISABLED";
+  const recordingEnabled = MEETING_RECORDING_READY && recordingPolicy !== "DISABLED";
   const canStart = recordingEnabled && meetingAllows(role, "recording.start", rolePolicy);
   const canStop = recordingEnabled && meetingAllows(role, "recording.stop", rolePolicy);
   const canList = meetingAllows(role, "artifact.list", rolePolicy) || canStart || canStop;
@@ -81,80 +86,91 @@ export default function ConferenceRecordingsPanel({
   if (!canList && !recordings.isLoading && !recordings.isError) return null;
 
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <header>
-        <h2 className="font-semibold">Recordings</h2>
-        <p className="text-sm text-muted-foreground">
-          Recording status changes only after the provider confirms capture and finalization.
-        </p>
-      </header>
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">Recordings</h2>
+        {live && activeRecording && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-semibold text-destructive">
+            <span className="size-1.5 animate-pulse rounded-full bg-destructive" /> Recording
+          </span>
+        )}
+      </div>
 
       {me.isError && (me.error as { response?: { status?: number } })?.response?.status !== 404 && (
         <RequestError error={me.error} retry={() => void me.refetch()} />
       )}
-      {recordings.isLoading && <p role="status" className="text-sm">Loading recordings…</p>}
+      {recordings.isLoading && <div aria-busy="true" className="h-16 animate-pulse rounded-xl bg-muted" />}
       {recordings.isError && <RequestError error={recordings.error} retry={() => void recordings.refetch()} />}
 
-      {feedback && <p role="status" className="rounded-md bg-muted p-3 text-sm">{feedback}</p>}
+      {feedback && <p role="status" className="rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground">{feedback}</p>}
       {start.isError && <RequestError error={start.error} />}
       {stop.isError && <RequestError error={stop.error} />}
 
-      {(canStart || canStop) && (
-        <div className="flex flex-wrap items-end gap-2">
+      {/* Recording controls only while the session is live. */}
+      {live && (canStart || canStop) && (
+        <div className="flex flex-wrap items-end gap-2 rounded-xl border border-border p-4">
           {canStart && !activeRecording && (
             <>
-              <label className="grid gap-1 text-sm font-medium">
-                Layout
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-2"
-                  value={layout}
-                  onChange={event => setLayout(event.target.value)}
-                >
-                  <option value="GRID">Grid</option>
-                  <option value="SPEAKER">Speaker</option>
-                </select>
-              </label>
-              <Button
-                type="button"
-                disabled={!live || start.isPending || recordings.isLoading}
-                onClick={() => void startRecording()}
-              >
-                {start.isPending ? "Requesting…" : "Start recording"}
+              <NiceSelect
+                label="Layout"
+                className="w-40"
+                value={layout}
+                onChange={setLayout}
+                options={[
+                  { value: "GRID", label: "Grid", icon: LayoutGrid },
+                  { value: "SPEAKER", label: "Speaker", icon: User },
+                ]}
+              />
+              <Button type="button" className="h-11 rounded-xl shadow-none" disabled={start.isPending || recordings.isLoading} onClick={() => void startRecording()}>
+                <Circle className="size-3.5 fill-current" /> {start.isPending ? "Starting…" : "Start recording"}
               </Button>
-              {!live && <p className="text-xs text-muted-foreground">The conference must be live to start recording.</p>}
             </>
           )}
           {canStopActive && (
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={stop.isPending}
-              onClick={() => void stopRecording()}
-            >
-              {stop.isPending ? "Stopping…" : "Stop recording"}
+            <Button type="button" variant="destructive" className="h-11 rounded-xl shadow-none" disabled={stop.isPending} onClick={() => void stopRecording()}>
+              <Square className="size-3.5 fill-current" /> {stop.isPending ? "Stopping…" : "Stop recording"}
             </Button>
           )}
         </div>
       )}
 
       {canList && recordings.data && (
-        <div className="space-y-2">
-          {recordings.data.recordings.length === 0 && (
-            <p className="text-sm text-muted-foreground">No recordings yet.</p>
-          )}
-          {recordings.data.recordings.map(recording => (
-            <article key={recording.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
-              <div>
-                <p className="text-sm font-medium">{artifactDisplayName(recording)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {artifactStateLabel(recording)}
-                  {formatDurationMs(recording.durationMs) ? ` · ${formatDurationMs(recording.durationMs)}` : ""}
-                  {formatBytes(recording.sizeBytes) ? ` · ${formatBytes(recording.sizeBytes)}` : ""}
-                </p>
-              </div>
-            </article>
-          ))}
-        </div>
+        recordings.data.recordings.length === 0 ? (
+          <div className="flex flex-col items-center py-8 text-center">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><Film className="size-5" /></span>
+            <p className="mt-3 text-sm font-medium text-foreground">No recordings</p>
+            <p className="text-sm text-muted-foreground">{live ? "Start a recording and it will appear here." : "This session wasn't recorded."}</p>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {openError ? <li role="alert" className="text-sm text-destructive">{openError}</li> : null}
+            {recordings.data.recordings.map(recording => (
+              <li key={recording.id} className="flex items-center gap-3 rounded-xl border border-border p-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Film className="size-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{artifactDisplayName(recording)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {artifactStateLabel(recording)}
+                    {formatDurationMs(recording.durationMs) ? ` · ${formatDurationMs(recording.durationMs)}` : ""}
+                    {formatBytes(recording.sizeBytes) ? ` · ${formatBytes(recording.sizeBytes)}` : ""}
+                  </p>
+                </div>
+                {artifactAccessible(recording) ? (
+                  <Button size="sm" variant="outline" data-testid="open-recording" disabled={access.isPending}
+                    onClick={() => {
+                      // A short-lived signed link, opened in a new tab: the browser plays it there.
+                      const tab = window.open("", "_blank");
+                      access.mutateAsync(recording.id)
+                        .then((a) => { if (tab) { tab.opener = null; tab.location.href = a.url; } else window.location.assign(a.url); })
+                        .catch(() => { tab?.close(); setOpenError("This recording couldn't be opened. Try again."); });
+                    }}>
+                    <Play className="size-4" />Open
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </section>
   );

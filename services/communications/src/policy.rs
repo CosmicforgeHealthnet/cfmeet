@@ -20,10 +20,12 @@ pub fn messaging_capability(v: &Value, e2ee_available: bool, e2ee_reason: &str) 
     let security = v["securityReady"] == true;
     let private = json!({"available":e2ee_available && security,
         "reason":if security {e2ee_reason} else {"DEVICE_SECURITY_SETUP_REQUIRED"}});
+    let attachments = attachment_capability(&v["attachments"]);
     let managed = &v["managed"];
     let Some(managed_available) = managed["available"].as_bool() else {
         return json!({"available":e2ee_available && security,"reason":private["reason"],"securityReady":security,
-            "managed":{"available":false,"reason":"BACKEND_UNAVAILABLE","realtime":"NONE"},"privateE2ee":private});
+            "managed":{"available":false,"reason":"BACKEND_UNAVAILABLE","realtime":"NONE"},"privateE2ee":private,
+            "attachments":attachments});
     };
     let reason = managed["reason"]
         .as_str()
@@ -36,7 +38,54 @@ pub fn messaging_capability(v: &Value, e2ee_available: bool, e2ee_reason: &str) 
         _ => "NONE",
     };
     json!({"available":available,"reason":reason,"securityReady":security,
-        "managed":{"available":available,"reason":reason,"realtime":realtime},"privateE2ee":private})
+        "managed":{"available":available,"reason":reason,"realtime":realtime},"privateE2ee":private,
+        "attachments":attachments})
+}
+
+const ATTACHMENT_KINDS: [&str; 5] = ["IMAGE", "DOCUMENT", "FILE", "VOICE_NOTE", "VIDEO"];
+
+/// CF Meet chat M1: whether the client may offer sending files (Messaging's effective
+/// attachment policy, private storage and kill switch). Only Messaging's own vocabulary
+/// is relayed; anything unknown, missing or inconsistent reads as unavailable, so an
+/// older Messaging image never makes the attach control appear. Advisory only:
+/// Messaging authorizes and validates every upload itself.
+pub fn attachment_capability(a: &Value) -> Value {
+    let reason = a["reason"]
+        .as_str()
+        .filter(|r| {
+            [
+                "AVAILABLE",
+                "DISABLED_BY_POLICY",
+                "STORAGE_NOT_CONFIGURED",
+                "TEMPORARILY_DISABLED",
+            ]
+            .contains(r)
+        })
+        .unwrap_or("BACKEND_UNAVAILABLE");
+    let kinds: Vec<&str> = a["allowedKinds"]
+        .as_array()
+        .map(|k| {
+            k.iter()
+                .filter_map(Value::as_str)
+                .filter(|k| ATTACHMENT_KINDS.contains(k))
+                .collect()
+        })
+        .unwrap_or_default();
+    let max_bytes = a["maxBytes"].as_i64().filter(|n| *n > 0);
+    let per_message = a["maxPerMessage"].as_i64().filter(|n| *n > 0);
+    let enabled = a["enabled"] == true
+        && reason == "AVAILABLE"
+        && max_bytes.is_some()
+        && per_message.is_some()
+        && !kinds.is_empty();
+    let reason = match reason {
+        "AVAILABLE" if !enabled => "BACKEND_UNAVAILABLE",
+        r => r,
+    };
+    json!({"enabled":enabled,"reason":reason,"maxBytes":max_bytes.unwrap_or(0),
+        "maxPerMessage":per_message.unwrap_or(0),"allowedKinds":kinds,
+        "contexts":{"DIRECT":enabled && a["contexts"]["DIRECT"] == true,
+            "GROUP":enabled && a["contexts"]["GROUP"] == true}})
 }
 
 impl State {
@@ -48,7 +97,7 @@ impl State {
     ) -> Result<bool> {
         // Fresh owner queries preserve legacy domain blocks and close propagation races.
         // These read-only adapters never call this policy endpoint recursively.
-        for service in [ServiceId::calling(), ServiceId::messaging()] {
+        let check = |service: ServiceId| async move {
             let req = OutboundServiceRequest::new_operation(service.clone())
                 .with_delegated_context(scope.clone());
             let r = self
@@ -65,13 +114,16 @@ impl State {
                 return Err(Error::Unavailable);
             }
             let v: Value = r.json().map_err(|_| Error::Unavailable)?;
-            match v["blocked"].as_bool() {
-                Some(true) => return Ok(true),
-                Some(false) => {}
-                None => return Err(Error::Unavailable),
-            }
+            v["blocked"].as_bool().ok_or(Error::Unavailable)
+        };
+        // B2: both authorities are read afresh, concurrently. An allow is never cached:
+        // a block must take effect on the next send, before its outbox event arrives.
+        let (calling, messaging) =
+            tokio::join!(check(ServiceId::calling()), check(ServiceId::messaging()));
+        if calling? {
+            return Ok(true);
         }
-        Ok(false)
+        messaging
     }
     pub async fn active_account(
         &self,
@@ -92,14 +144,12 @@ impl State {
     ) -> Result<Decision> {
         auth::validate_scope(self, scope).await?;
         let s = cf_communications_policy::Scope::of(scope);
-        let actor = self
-            .store
-            .principal(&self.store.db, s, check.actor_principal_id)
-            .await;
-        let target = self
-            .store
-            .principal(&self.store.db, s, check.target_principal_id)
-            .await;
+        let (actor, target) = tokio::join!(
+            self.store
+                .principal(&self.store.db, s, check.actor_principal_id),
+            self.store
+                .principal(&self.store.db, s, check.target_principal_id),
+        );
         let deny = |reason, version| Decision {
             schema_version: 1,
             allowed: false,
@@ -116,17 +166,29 @@ impl State {
         };
         let privacy = self.store.privacy(&self.store.db, target.id).await?;
         let version = actor.version.max(target.version).max(privacy.version);
-        if !auth::principals_active(self, scope, &[&actor, &target]).await? {
+        // The checks have independent owners. Start their reads together instead of
+        // making every message wait for five successive network/database round trips.
+        // Evaluate their answers in the same order as before (a refusal wins over a
+        // later owner's outage); none of the decisions outlives this request.
+        let profiles = [&actor, &target];
+        let (principals, actor_account, target_account, actor_held, target_held) = tokio::join!(
+            auth::principals_active(self, scope, &profiles),
+            self.active_account(scope, &actor),
+            self.active_account(scope, &target),
+            self.held(&actor),
+            self.held(&target),
+        );
+        if !principals? {
             return Ok(deny(DecisionReason::NotPermitted, version));
         }
         if actor.activation_state != Activation::Active
             || target.activation_state != Activation::Active
-            || !self.active_account(scope, &actor).await?
-            || !self.active_account(scope, &target).await?
+            || !actor_account?
+            || !target_account?
         {
             return Ok(deny(DecisionReason::AccountInactive, version));
         }
-        if self.held(&actor).await? || self.held(&target).await? {
+        if actor_held? || target_held? {
             return Ok(deny(DecisionReason::AccountInactive, version));
         }
         if let Some(issued) = check.credential_issued_at {
@@ -200,10 +262,15 @@ impl State {
             // The recipient's per-conversation mute (MENTIONS cannot be inferred from
             // opaque ciphertext, so it suppresses ordinary pushes too).
             if let Some(conversation) = check.conversation_id {
+                // Gap audit S10: "mentions only" lets through a message that mentions the
+                // recipient (Messaging says so for MANAGED messages; never inferred from
+                // ciphertext, so without that signal it suppresses like a mute).
                 let muted: Option<Value> = store::one(&self.store.db,
-                    "SELECT jsonb_build_object('muted',notifications<>'ALL' AND (muted_until IS NULL OR muted_until>now())) doc FROM communication_conversation_preferences WHERE owner_profile_id=$1 AND conversation_id=$2",
+                    "SELECT jsonb_build_object('muted',notifications<>'ALL' AND (muted_until IS NULL OR muted_until>now()),'mentionsOnly',notifications='MENTIONS') doc FROM communication_conversation_preferences WHERE owner_profile_id=$1 AND conversation_id=$2",
                     vec![target.id.into(), conversation.into()]).await?;
-                allowed = allowed && muted.is_none_or(|m| m["muted"] != true);
+                let mention_passes = check.mentioned == Some(true)
+                    && muted.as_ref().is_some_and(|m| m["mentionsOnly"] == true);
+                allowed = allowed && (mention_passes || muted.is_none_or(|m| m["muted"] != true));
             }
         }
         Ok(Decision {
@@ -231,7 +298,8 @@ impl State {
         let mut calling = json!({"available":false,"reason":"BACKEND_UNAVAILABLE"});
         let mut messaging = json!({"available":false,"reason":"BACKEND_UNAVAILABLE","securityReady":false,
             "managed":{"available":false,"reason":"BACKEND_UNAVAILABLE","realtime":"NONE"},
-            "privateE2ee":{"available":false,"reason":"BACKEND_UNAVAILABLE"}});
+            "privateE2ee":{"available":false,"reason":"BACKEND_UNAVAILABLE"},
+            "attachments":attachment_capability(&Value::Null)});
         for (service, value) in [
             (ServiceId::calling(), &mut calling),
             (ServiceId::messaging(), &mut messaging),
@@ -276,7 +344,9 @@ impl State {
             calling = json!({"available":false,"reason":"ACCOUNT_INACTIVE"});
             messaging = json!({"available":false,"reason":"ACCOUNT_INACTIVE","securityReady":false,
                 "managed":{"available":false,"reason":"ACCOUNT_INACTIVE","realtime":"NONE"},
-                "privateE2ee":{"available":false,"reason":"ACCOUNT_INACTIVE"}});
+                "privateE2ee":{"available":false,"reason":"ACCOUNT_INACTIVE"},
+                "attachments":{"enabled":false,"reason":"ACCOUNT_INACTIVE","maxBytes":0,"maxPerMessage":0,
+                    "allowedKinds":[],"contexts":{"DIRECT":false,"GROUP":false}}});
         }
         json!({"schemaVersion":1,"activationState":p.activation_state,"personalCalling":calling,"messaging":messaging,
             "contacts":{"available":p.activation_state==Activation::Active},"phoneVerification":{"status":"PROVIDER_BLOCKED","required":false},
@@ -332,6 +402,13 @@ impl State {
         Ok(result)
     }
 }
+/// K11: whether "Mentions only" can be chosen for private chats (a contact's level, and
+/// the level of an end-to-end encrypted conversation). Mentions cannot be read from
+/// encrypted messages yet, so the level would silently behave like MUTED; it is refused
+/// (and not offered by the clients, which read `mentionsAvailable`) until encrypted
+/// mentions exist. Flip this, and pass the mention signal to the notification checks, to
+/// offer it again.
+pub const MENTIONS_IN_PRIVATE_CHATS: bool = false;
 pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
     match action {
         Action::DirectCall => connected && p.incoming_call_policy == Audience::Connections,
@@ -343,8 +420,11 @@ pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
         Action::GroupNotification => true,
         Action::ContactRequest => p.contact_request_permissions == RequestPermission::Everyone,
         Action::PersonalActivity => false, // handled only for a verified active self above
+        // Gap audit S9: its own setting, no longer the contact-request permission.
         Action::GroupInvitation => {
-            connected && p.contact_request_permissions == RequestPermission::Everyone
+            connected
+                && p.group_invitation_policy.unwrap_or(Audience::Connections)
+                    == Audience::Connections
         }
         Action::Presence => connected && p.presence_visibility == Audience::Connections,
         Action::ProfileDiscovery => {
@@ -375,6 +455,24 @@ mod tests {
             assert!(decide(action, true, &p));
         }
     }
+    #[test]
+    fn group_invitations_follow_their_own_setting() {
+        // Gap audit S9: closing contact requests no longer closes group invitations.
+        let closed_requests = Privacy {
+            contact_request_permissions: RequestPermission::Nobody,
+            ..Privacy::default()
+        };
+        assert!(decide(Action::GroupInvitation, true, &closed_requests));
+        assert!(!decide(Action::ContactRequest, true, &closed_requests));
+        let no_groups = Privacy {
+            group_invitation_policy: Some(Audience::Nobody),
+            ..Privacy::default()
+        };
+        assert!(!decide(Action::GroupInvitation, true, &no_groups));
+        assert!(decide(Action::ContactRequest, true, &no_groups));
+        assert!(!decide(Action::GroupInvitation, false, &Privacy::default()));
+    }
+
     #[test]
     fn privacy_restrictions_stay_effective_after_connection_acceptance() {
         let p = Privacy {
@@ -435,6 +533,41 @@ mod capability_tests {
             messaging_capability(&odd, false, "DISABLED")["available"],
             false
         );
+    }
+
+    /// M1: Messaging's effective attachment availability is relayed in its own
+    /// vocabulary; anything missing, unknown or inconsistent reads as unavailable.
+    #[test]
+    fn attachment_availability_is_relayed_and_fails_closed() {
+        let on = json!({"securityReady":false,"managed":{"available":true,"reason":"AVAILABLE","realtime":"POLLING"},
+            "attachments":{"enabled":true,"reason":"AVAILABLE","maxBytes":26214400,"maxPerMessage":10,
+                "allowedKinds":["DOCUMENT","FILE","IMAGE","VIDEO","VOICE_NOTE","SCRIPT"],
+                "contexts":{"DIRECT":true,"GROUP":false}}});
+        let c = messaging_capability(&on, false, "DISABLED");
+        assert_eq!(
+            c["attachments"],
+            json!({"enabled":true,"reason":"AVAILABLE","maxBytes":26214400,"maxPerMessage":10,
+                "allowedKinds":["DOCUMENT","FILE","IMAGE","VIDEO","VOICE_NOTE"],
+                "contexts":{"DIRECT":true,"GROUP":false}})
+        );
+        let off = json!({"managed":{"available":true,"reason":"AVAILABLE"},
+            "attachments":{"enabled":false,"reason":"DISABLED_BY_POLICY","maxBytes":26214400,"maxPerMessage":10,
+                "allowedKinds":["IMAGE"],"contexts":{"DIRECT":false,"GROUP":false}}});
+        let c = messaging_capability(&off, false, "DISABLED");
+        assert_eq!(c["attachments"]["enabled"], false);
+        assert_eq!(c["attachments"]["reason"], "DISABLED_BY_POLICY");
+        // An older Messaging image (no attachments block) and odd values never enable it.
+        for v in [
+            json!({"securityReady":false}),
+            json!({"managed":{"available":true,"reason":"AVAILABLE"},"attachments":{"enabled":true,"reason":"MAYBE","maxBytes":1,"maxPerMessage":1,"allowedKinds":["IMAGE"]}}),
+            json!({"managed":{"available":true,"reason":"AVAILABLE"},"attachments":{"enabled":true,"reason":"AVAILABLE","maxBytes":0,"maxPerMessage":1,"allowedKinds":["IMAGE"]}}),
+            json!({"managed":{"available":true,"reason":"AVAILABLE"},"attachments":{"enabled":true,"reason":"AVAILABLE","maxBytes":5,"maxPerMessage":1,"allowedKinds":["SCRIPT"]}}),
+        ] {
+            let c = messaging_capability(&v, false, "DISABLED");
+            assert_eq!(c["attachments"]["enabled"], false, "{v}");
+            assert_eq!(c["attachments"]["reason"], "BACKEND_UNAVAILABLE", "{v}");
+            assert_eq!(c["attachments"]["contexts"]["DIRECT"], false);
+        }
     }
 
     #[test]

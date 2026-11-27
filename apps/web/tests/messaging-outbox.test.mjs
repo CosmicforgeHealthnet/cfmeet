@@ -3,7 +3,7 @@
 // permanent refusals, and survival across reloads.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MessageOutbox, flushOutbox, isRetryable, backoffMs } from "../src/lib/messaging/outbox.ts";
+import { MessageOutbox, flushOutbox, isRetryable, backoffMs, MAX_AUTO_ATTEMPTS } from "../src/lib/messaging/outbox.ts";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -99,4 +99,54 @@ test("retry classification and back-off bounds", () => {
   assert.equal(isRetryable(409, "IDEMPOTENCY_KEY_REUSED"), false);
   assert.equal(backoffMs(1), 1000);
   assert.equal(backoffMs(30), 60_000);
+});
+
+test("a transient failure stops retrying on its own after the cap and shows as failed", async () => {
+  let now = 1000;
+  const box = new MessageOutbox(memory(), () => now);
+  box.enqueue(item(A, "never"));
+  const send = async () => { throw { status: 503, code: "SERVICE_UNAVAILABLE" }; };
+  for (let i = 0; i < MAX_AUTO_ATTEMPTS + 2; i++) {
+    await flushOutbox(box, send);
+    now += 120_000;
+  }
+  assert.equal(box.all()[0].state, "failed", "the user can retry or delete it");
+  assert.equal(box.all()[0].attempts, MAX_AUTO_ATTEMPTS);
+});
+
+test("after sign-out closes the outbox, a send that finishes late writes nothing back", () => {
+  const storage = memory();
+  const box = new MessageOutbox(storage);
+  const queued = box.enqueue(item(A, "hello"));
+  box.enqueue(item(A, "second"));
+  assert.ok(storage.peek());
+  storage.clear(); // sign-out clears the browser's storage…
+  box.close();
+  box.markFailed(queued.key, "NETWORK", true); // …and an in-flight send settles afterwards
+  box.markSent(queued.key);
+  assert.equal(storage.peek(), null);
+  assert.equal(box.all(A).length, 0);
+});
+
+test("two tabs sharing one stored queue never overwrite each other's messages", () => {
+  const storage = memory();
+  const tabs = [];
+  const shared = { ...storage, watch: (fn) => { tabs.push(fn); return () => {}; }, save: (v) => { storage.save(v); for (const fn of tabs) fn(); } };
+  const one = new MessageOutbox(shared);
+  const two = new MessageOutbox(shared);
+  one.enqueue(item(A, "from tab one"));
+  two.enqueue(item(A, "from tab two"));
+  assert.deepEqual(JSON.parse(storage.peek()).map((i) => i.text), ["from tab one", "from tab two"]);
+  assert.equal(one.all(A).length, 2);
+});
+
+test("a held item waits (a photo still uploading before it) and goes once released", async () => {
+  const box = new MessageOutbox(memory());
+  box.enqueue(item(A, "caption after photo"));
+  const sent = [];
+  let uploading = true;
+  assert.equal(await flushOutbox(box, async (i) => { sent.push(i.text); }, 50, () => uploading), 0);
+  uploading = false;
+  assert.equal(await flushOutbox(box, async (i) => { sent.push(i.text); }, 50, () => uploading), 1);
+  assert.deepEqual(sent, ["caption after photo"]);
 });

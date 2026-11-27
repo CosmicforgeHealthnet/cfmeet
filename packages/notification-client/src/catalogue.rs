@@ -1,0 +1,972 @@
+//! The closed event catalogue (Document 4 §5.2): 42 inbound types (30 core, the optional
+//! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
+//! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
+//! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
+//! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
+//! Developer Platform's first-party workspace owner invitation #41, and since 1.7.0 the
+//! organization export notice #42) and the control event
+//! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
+//! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
+//! the two ever differ.
+
+use serde::{Deserialize, Serialize};
+
+/// A producer allowed to publish notification events (closed allowlist).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Producer {
+    #[serde(rename = "cfmeet.meeting-service")]
+    MeetingService,
+    #[serde(rename = "cfmeet.organizations")]
+    Organizations,
+    #[serde(rename = "cfmeet.communications")]
+    Communications,
+    #[serde(rename = "cfmeet.calling")]
+    Calling,
+    #[serde(rename = "cfmeet.messaging")]
+    Messaging,
+    #[serde(rename = "cfmeet.developer-platform")]
+    DeveloperPlatform,
+    /// Only the I12 wrapper of Alertmanager webhooks (static bearer, private listener).
+    #[serde(rename = "alertmanager")]
+    Alertmanager,
+}
+
+impl Producer {
+    pub const ALL: &'static [Producer] = &[
+        Producer::MeetingService,
+        Producer::Organizations,
+        Producer::Communications,
+        Producer::Calling,
+        Producer::Messaging,
+        Producer::DeveloperPlatform,
+        Producer::Alertmanager,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Producer::MeetingService => "cfmeet.meeting-service",
+            Producer::Organizations => "cfmeet.organizations",
+            Producer::Communications => "cfmeet.communications",
+            Producer::Calling => "cfmeet.calling",
+            Producer::Messaging => "cfmeet.messaging",
+            Producer::DeveloperPlatform => "cfmeet.developer-platform",
+            Producer::Alertmanager => "alertmanager",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|p| p.as_str() == value)
+    }
+}
+
+/// Envelope priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Priority {
+    Critical,
+    High,
+    Normal,
+}
+
+impl Priority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Priority::Critical => "CRITICAL",
+            Priority::High => "HIGH",
+            Priority::Normal => "NORMAL",
+        }
+    }
+
+    /// The service lane an event of this priority is processed in.
+    pub fn lane(self) -> Lane {
+        match self {
+            Priority::Critical => Lane::Critical,
+            Priority::High => Lane::High,
+            Priority::Normal => Lane::Standard,
+        }
+    }
+}
+
+/// Processing lane (P7: lanes isolate criticality).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Lane {
+    Critical,
+    High,
+    Standard,
+}
+
+impl Lane {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Lane::Critical => "CRITICAL",
+            Lane::High => "HIGH",
+            Lane::Standard => "STANDARD",
+        }
+    }
+}
+
+/// What a sealed part may (and for codes / tokens must) contain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SealedField {
+    Code,
+    Token,
+    Address,
+    /// A masked address (`n***@example.com`, contract 1.3.0).
+    MaskedAddress,
+    /// The client label of the request an account notice reports (contract 1.3.0).
+    RequestClient,
+    /// The masked network of that request (contract 1.3.0).
+    RequestNetwork,
+}
+
+impl SealedField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SealedField::Code => "code",
+            SealedField::Token => "token",
+            SealedField::Address => "address",
+            SealedField::MaskedAddress => "maskedAddress",
+            SealedField::RequestClient => "requestClient",
+            SealedField::RequestNetwork => "requestNetwork",
+        }
+    }
+}
+
+/// Today's idempotency-key formats (Document 4 §5.1): the new ledger keeps the same
+/// dedupe behaviour as the Meeting ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyKey {
+    OtpVerify,
+    OtpReset,
+    /// `otp:signin:` — passwordless sign-in / sign-up code (PR #97).
+    OtpSignIn,
+    /// `otp:emailchange:` — code to the new address of an email change (PR #97).
+    OtpEmailChange,
+    /// `otp:stepup:` — action step-up code (PR #97).
+    OtpStepUp,
+    DeviceStepUp,
+    PasswordChanged,
+    DeviceLinked,
+    MeetingInvitation,
+    OrgInvitation,
+    MeetingNotification,
+    DevplatAccess,
+    /// `welcome:<account id>` — the welcome email (once per account; contract 1.3.0).
+    Welcome,
+    /// `new-sign-in:<session id>` — the new sign-in alert (contract 1.3.0).
+    NewSignIn,
+    /// `email-in-use:<recipient hash>:<hour>` — the email-change attempt notice to an
+    /// address that already has an account (contract 1.3.0).
+    EmailInUse,
+    /// `email-changed:{old,new}:<change id>` — the email-changed notices (contract 1.3.0).
+    EmailChanged,
+}
+
+fn free_suffix(s: &str) -> bool {
+    (1..=140).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'.' | b'-'))
+}
+
+fn uuid_like(s: &str) -> bool {
+    s.len() == 36 && s.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+impl LegacyKey {
+    pub const ALL: &'static [LegacyKey] = &[
+        LegacyKey::OtpVerify,
+        LegacyKey::OtpReset,
+        LegacyKey::OtpSignIn,
+        LegacyKey::OtpEmailChange,
+        LegacyKey::OtpStepUp,
+        LegacyKey::DeviceStepUp,
+        LegacyKey::PasswordChanged,
+        LegacyKey::DeviceLinked,
+        LegacyKey::MeetingInvitation,
+        LegacyKey::OrgInvitation,
+        LegacyKey::MeetingNotification,
+        LegacyKey::DevplatAccess,
+        LegacyKey::Welcome,
+        LegacyKey::NewSignIn,
+        LegacyKey::EmailInUse,
+        LegacyKey::EmailChanged,
+    ];
+
+    /// The contract's key name (`x-cfmeet-legacy-idempotency-keys`).
+    pub fn name(self) -> &'static str {
+        match self {
+            LegacyKey::OtpVerify => "otp-verify",
+            LegacyKey::OtpReset => "otp-reset",
+            LegacyKey::OtpSignIn => "otp-signin",
+            LegacyKey::OtpEmailChange => "otp-emailchange",
+            LegacyKey::OtpStepUp => "otp-stepup",
+            LegacyKey::DeviceStepUp => "device-step-up",
+            LegacyKey::PasswordChanged => "password-changed",
+            LegacyKey::DeviceLinked => "device-linked",
+            LegacyKey::MeetingInvitation => "meeting-invitation",
+            LegacyKey::OrgInvitation => "org-invitation",
+            LegacyKey::MeetingNotification => "meeting-notification",
+            LegacyKey::DevplatAccess => "devplat-access",
+            LegacyKey::Welcome => "welcome",
+            LegacyKey::NewSignIn => "new-sign-in",
+            LegacyKey::EmailInUse => "email-in-use",
+            LegacyKey::EmailChanged => "email-changed",
+        }
+    }
+
+    pub fn prefix(self) -> &'static str {
+        match self {
+            LegacyKey::OtpVerify => "otp:verify:",
+            LegacyKey::OtpReset => "otp:reset:",
+            LegacyKey::OtpSignIn => "otp:signin:",
+            LegacyKey::OtpEmailChange => "otp:emailchange:",
+            LegacyKey::OtpStepUp => "otp:stepup:",
+            LegacyKey::DeviceStepUp => "device-step-up:",
+            LegacyKey::PasswordChanged => "password-changed:",
+            LegacyKey::DeviceLinked => "device-linked:",
+            LegacyKey::MeetingInvitation => "meeting-invitation:",
+            LegacyKey::OrgInvitation => "org-invitation:",
+            LegacyKey::MeetingNotification => "meeting-notification:",
+            LegacyKey::DevplatAccess => "devplat-access:",
+            LegacyKey::Welcome => "welcome:",
+            LegacyKey::NewSignIn => "new-sign-in:",
+            LegacyKey::EmailInUse => "email-in-use:",
+            LegacyKey::EmailChanged => "email-changed:",
+        }
+    }
+
+    /// Whether `key` has this format (the same rule as the contract's pattern).
+    pub fn matches(self, key: &str) -> bool {
+        let Some(rest) = key.strip_prefix(self.prefix()) else {
+            return false;
+        };
+        match self {
+            LegacyKey::DeviceLinked
+            | LegacyKey::MeetingInvitation
+            | LegacyKey::Welcome
+            | LegacyKey::NewSignIn => uuid_like(rest),
+            LegacyKey::EmailChanged => rest
+                .strip_prefix("old:")
+                .or_else(|| rest.strip_prefix("new:"))
+                .is_some_and(uuid_like),
+            LegacyKey::OrgInvitation => match rest.split_once(':') {
+                Some((id, version)) => {
+                    uuid_like(id)
+                        && (1..=9).contains(&version.len())
+                        && version.bytes().all(|b| b.is_ascii_digit())
+                }
+                None => false,
+            },
+            _ => free_suffix(rest),
+        }
+    }
+}
+
+/// The kind of a recipient reference (`<kind>:<id>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientKind {
+    /// `cfmeet-user:<account id>`.
+    Account,
+    /// `meeting-email-principal:<id>`: an address, sealed in the event or resolved by Meeting.
+    EmailPrincipal,
+    /// `platform-principal:<environmentId>:<principalId>` (contract 1.4.0, ADR 0063 N-P4): a
+    /// partner's end user, reached only through the partner's own push credentials and
+    /// only for the metadata-only [`PARTNER_EVENT_TYPES`].
+    PlatformPrincipal,
+}
+
+/// Event types that may address `platform-principal:<environmentId>:<principalId>`
+/// recipients (metadata-only partner pushes, ADR 0063 N-P4).
+pub const PARTNER_EVENT_TYPES: &[&str] = &["messaging.message.created"];
+
+/// The recipient reference of a partner end user (`platform-principal:<env>:<principal>`).
+pub fn platform_principal_ref(environment_id: uuid::Uuid, principal_id: uuid::Uuid) -> String {
+    format!("platform-principal:{environment_id}:{principal_id}")
+}
+
+/// `(environmentId, principalId)` of a partner recipient reference
+/// (`platform-principal:<env>:<principal>`, lowercase hyphenated UUIDs); `None` for any
+/// other reference, including the single-id `platform-principal:<id>` form.
+pub fn parse_platform_principal(reference: &str) -> Option<(uuid::Uuid, uuid::Uuid)> {
+    let rest = reference.strip_prefix("platform-principal:")?;
+    let (env, principal) = rest.split_once(':')?;
+    let parse = |s: &str| {
+        uuid::Uuid::parse_str(s)
+            .ok()
+            .filter(|u| u.hyphenated().to_string() == s)
+    };
+    Some((parse(env)?, parse(principal)?))
+}
+
+impl RecipientKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecipientKind::Account => "cfmeet-user",
+            RecipientKind::EmailPrincipal => "meeting-email-principal",
+            RecipientKind::PlatformPrincipal => "platform-principal",
+        }
+    }
+
+    /// Whether `reference` is of this kind (the id itself is checked separately).
+    pub fn matches(self, reference: &str) -> bool {
+        reference
+            .strip_prefix(self.as_str())
+            .is_some_and(|rest| rest.starts_with(':'))
+    }
+}
+
+/// The closed `purpose` values of `account.step-up-code.requested` (contract
+/// `StepUpPurpose`).
+pub const STEP_UP_PURPOSES: &[&str] = &["DEACTIVATE_ACCOUNT", "CHANGE_EMAIL"];
+
+/// The closed `side` values of `account.security.email-changed` (contract
+/// `EmailChangedSide`): the notice to the previous address (`OLD`, with the masked new
+/// address and, for a self-service change, the undo token) or to the new one (`NEW`).
+pub const EMAIL_CHANGED_SIDES: &[&str] = &["OLD", "NEW"];
+
+/// One catalogue entry.
+#[derive(Debug, Clone, Copy)]
+pub struct EventSpec {
+    pub number: u8,
+    pub event_type: &'static str,
+    /// `None` only for the control event (any of [`CONTROL_PRODUCERS`]).
+    pub producer: Option<Producer>,
+    pub priority: Priority,
+    /// `None` only for the control event.
+    pub category: Option<&'static str>,
+    pub subject_kind: Option<&'static str>,
+    /// Fields the sealed part must contain (empty: `sealed` is refused).
+    pub sealed: &'static [SealedField],
+    /// Fields the sealed part may also contain (contract `sealedOptional`, 1.3.0): what
+    /// the legacy email shows only sometimes (an undo link, the request's client label).
+    pub sealed_optional: &'static [SealedField],
+    pub idempotency_key: Option<LegacyKey>,
+    pub optional: bool,
+    pub required_data: &'static [&'static str],
+    pub optional_data: &'static [&'static str],
+    /// `Some(kind)`: exactly one recipient, of this kind (contract `recipient`).
+    pub recipient: Option<RecipientKind>,
+    /// Data keys whose value is a string from a closed set.
+    pub closed_data: &'static [(&'static str, &'static [&'static str])],
+}
+
+impl EventSpec {
+    pub fn lane(&self) -> Lane {
+        self.priority.lane()
+    }
+
+    pub fn is_control(&self) -> bool {
+        self.event_type == CONTROL_EVENT
+    }
+
+    pub fn sealed_allowed(&self) -> bool {
+        !self.sealed.is_empty()
+    }
+
+    /// Whether `field` may appear in this type's sealed part (required or optional).
+    pub fn seals(&self, field: SealedField) -> bool {
+        self.sealed.contains(&field) || self.sealed_optional.contains(&field)
+    }
+
+    pub fn allows_producer(&self, producer: Producer) -> bool {
+        match self.producer {
+            Some(p) => p == producer,
+            None => CONTROL_PRODUCERS.contains(&producer),
+        }
+    }
+}
+
+pub const CONTROL_EVENT: &str = "notifications.cancel";
+
+/// Producers that may publish the control event.
+pub const CONTROL_PRODUCERS: &[Producer] = &[
+    Producer::MeetingService,
+    Producer::Organizations,
+    Producer::Communications,
+    Producer::Calling,
+    Producer::Messaging,
+    Producer::DeveloperPlatform,
+];
+
+use LegacyKey as K;
+use Priority::{Critical, High, Normal};
+use Producer::{
+    Alertmanager as AM, Calling as CAL, Communications as HUB, DeveloperPlatform as DEV,
+    MeetingService as MEET, Messaging as MSG, Organizations as ORG,
+};
+use SealedField::{Address, Code, MaskedAddress, RequestClient, RequestNetwork, Token};
+
+const fn e(
+    number: u8,
+    event_type: &'static str,
+    producer: Producer,
+    priority: Priority,
+    category: &'static str,
+    subject_kind: &'static str,
+    required_data: &'static [&'static str],
+) -> EventSpec {
+    EventSpec {
+        number,
+        event_type,
+        producer: Some(producer),
+        priority,
+        category: Some(category),
+        subject_kind: Some(subject_kind),
+        sealed: &[],
+        sealed_optional: &[],
+        idempotency_key: None,
+        optional: false,
+        required_data,
+        optional_data: &[],
+        recipient: None,
+        closed_data: &[],
+    }
+}
+
+const ORG_INV: &[&str] = &["invitationId", "organizationId"];
+const MEMBERSHIP: &[&str] = &["membershipId", "organizationId"];
+const CONNECTION: &[&str] = &["actorRef", "connectionId"];
+const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
+const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
+
+/// The catalogue, in contract order (#1–#42, then the control event).
+pub const CATALOGUE: &[EventSpec] = &[
+    EventSpec {
+        optional_data: &["role"],
+        ..e(
+            1,
+            "organizations.invitation.created",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    EventSpec {
+        optional_data: &["role"],
+        ..e(
+            2,
+            "organizations.invitation.accepted",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    EventSpec {
+        optional_data: &["role"],
+        ..e(
+            3,
+            "organizations.invitation.declined",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    EventSpec {
+        optional_data: &["role"],
+        ..e(
+            4,
+            "organizations.invitation.revoked",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    EventSpec {
+        optional_data: &["role"],
+        ..e(
+            5,
+            "organizations.invitation.expired",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    e(
+        6,
+        "organizations.membership.role_changed",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION_MEMBERSHIP",
+        &["membershipId", "organizationId", "role"],
+    ),
+    e(
+        7,
+        "organizations.membership.suspended",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION_MEMBERSHIP",
+        MEMBERSHIP,
+    ),
+    e(
+        8,
+        "organizations.membership.removed",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION_MEMBERSHIP",
+        MEMBERSHIP,
+    ),
+    e(
+        9,
+        "organizations.ownership.transferred",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
+    e(
+        10,
+        "organizations.organization.suspended",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
+    e(
+        11,
+        "communications.connection.requested",
+        HUB,
+        Normal,
+        "CONTACT_REQUESTS",
+        "CONNECTION",
+        CONNECTION,
+    ),
+    e(
+        12,
+        "communications.connection.connected",
+        HUB,
+        Normal,
+        "CONTACT_REQUESTS",
+        "CONNECTION",
+        CONNECTION,
+    ),
+    // `sequence` (optional, 1.1.0, roadmap N9): the message sequence, so the wake-up keeps
+    // Messaging's 5-key metadata payload.
+    EventSpec {
+        optional_data: &["sequence"],
+        ..e(
+            13,
+            "messaging.message.created",
+            MSG,
+            High,
+            "MESSAGES",
+            "CONVERSATION",
+            &[
+                "conversationId",
+                "conversationKind",
+                "eventSequence",
+                "securityProfile",
+            ],
+        )
+    },
+    e(
+        14,
+        "messaging.member.invited",
+        MSG,
+        Normal,
+        "GROUP_INVITATIONS",
+        "CONVERSATION",
+        &["conversationId", "eventSequence"],
+    ),
+    e(
+        15,
+        "calling.call.participant-missed",
+        CAL,
+        High,
+        "MISSED_CALLS",
+        "CALL",
+        &["callId", "callKind"],
+    ),
+    e(
+        16,
+        "calling.voicemail.ready",
+        CAL,
+        Normal,
+        "VOICEMAIL",
+        "CALL",
+        &["callId", "voiceMessageId"],
+    ),
+    e(
+        17,
+        "calling.recording.ready",
+        CAL,
+        Normal,
+        "VOICEMAIL",
+        "CALL",
+        &["callId", "recordingId"],
+    ),
+    EventSpec {
+        idempotency_key: Some(K::MeetingNotification),
+        ..e(
+            18,
+            "meeting-service.conference.scheduled",
+            MEET,
+            Normal,
+            "MEETING_INVITATIONS",
+            "CONFERENCE",
+            CONFERENCE,
+        )
+    },
+    EventSpec {
+        idempotency_key: Some(K::MeetingNotification),
+        ..e(
+            19,
+            "meeting-service.conference.rescheduled",
+            MEET,
+            Normal,
+            "MEETING_INVITATIONS",
+            "CONFERENCE",
+            CONFERENCE,
+        )
+    },
+    EventSpec {
+        idempotency_key: Some(K::MeetingNotification),
+        ..e(
+            20,
+            "meeting-service.conference.cancelled",
+            MEET,
+            Normal,
+            "MEETING_INVITATIONS",
+            "CONFERENCE",
+            CONFERENCE,
+        )
+    },
+    EventSpec {
+        sealed: &[Token],
+        idempotency_key: Some(K::MeetingInvitation),
+        ..e(
+            21,
+            "meeting-service.invitation.email-requested",
+            MEET,
+            Normal,
+            "MEETING_INVITATIONS",
+            "MEETING_INVITATION",
+            &["conferenceId", "invitationId"],
+        )
+    },
+    EventSpec {
+        sealed: &[Token, Address],
+        idempotency_key: Some(K::OrgInvitation),
+        ..e(
+            22,
+            "meeting-service.organization-invitation.email-requested",
+            MEET,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_INVITATION",
+            ORG_INV,
+        )
+    },
+    EventSpec {
+        sealed: &[Code],
+        idempotency_key: Some(K::OtpVerify),
+        ..e(
+            23,
+            "account.verification-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code],
+        idempotency_key: Some(K::OtpReset),
+        ..e(
+            24,
+            "account.password-reset-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code],
+        idempotency_key: Some(K::DeviceStepUp),
+        ..e(
+            25,
+            "account.device-step-up-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["accountDeviceId", "ttlMinutes"],
+        )
+    },
+    EventSpec {
+        idempotency_key: Some(K::PasswordChanged),
+        ..e(
+            26,
+            "account.security.password-changed",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["changedAt"],
+        )
+    },
+    EventSpec {
+        idempotency_key: Some(K::DeviceLinked),
+        ..e(
+            27,
+            "account.security.device-linked",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["accountDeviceId", "linkId"],
+        )
+    },
+    e(
+        28,
+        "developer-platform.credential.expiring-soon",
+        DEV,
+        Normal,
+        "DEVELOPER_UPDATES",
+        "CREDENTIAL",
+        CREDENTIAL,
+    ),
+    e(
+        29,
+        "developer-platform.credential.expired",
+        DEV,
+        Normal,
+        "DEVELOPER_UPDATES",
+        "CREDENTIAL",
+        CREDENTIAL,
+    ),
+    EventSpec {
+        idempotency_key: Some(K::DevplatAccess),
+        ..e(
+            30,
+            "developer-platform.production-access.decided",
+            DEV,
+            Normal,
+            "DEVELOPER_UPDATES",
+            "PRODUCTION_ACCESS_REQUEST",
+            &["decision", "requestId"],
+        )
+    },
+    EventSpec {
+        optional: true,
+        ..e(
+            31,
+            "operator.alert.fired",
+            AM,
+            High,
+            "OPERATOR_ALERTS",
+            "OPERATOR_ALERT",
+            &["alertName", "severity", "status"],
+        )
+    },
+    // Passwordless account codes (contract 1.2.0, PR #97). The sign-in code may be for an
+    // address with no account yet and the email-change code goes to an address that is not
+    // (yet) the account's: both name one email principal and seal its address.
+    EventSpec {
+        sealed: &[Code, Token, Address],
+        idempotency_key: Some(K::OtpSignIn),
+        optional_data: &["requestClient", "requestNetwork"],
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            32,
+            "account.sign-in-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["requestedAt", "ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code, Address],
+        idempotency_key: Some(K::OtpEmailChange),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            33,
+            "account.email-change-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code],
+        idempotency_key: Some(K::OtpStepUp),
+        recipient: Some(RecipientKind::Account),
+        closed_data: &[("purpose", STEP_UP_PURPOSES)],
+        ..e(
+            34,
+            "account.step-up-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["purpose", "ttlMinutes"],
+        )
+    },
+    // Account notices (contract 1.3.0): the emails Meeting sent only through its legacy
+    // ledger. Each names one email principal with its address sealed (the exact legacy
+    // recipient, which a later address change cannot redirect); the account, when there is
+    // one, is the ACCOUNT subject (X1 authorizes the send and names the greeting). What the
+    // email shows beyond ids and times — the undo token, the masked new address, the
+    // request's client label and network — is sealed too, never in data.
+    EventSpec {
+        sealed: &[Address],
+        idempotency_key: Some(K::Welcome),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            35,
+            "account.welcome.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &[],
+        )
+    },
+    EventSpec {
+        sealed: &[Address],
+        sealed_optional: &[RequestClient, RequestNetwork],
+        idempotency_key: Some(K::NewSignIn),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            36,
+            "account.security.new-sign-in",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["requestedAt"],
+        )
+    },
+    // To an address that already belongs to an account: no subject (the event must not
+    // reveal which account).
+    EventSpec {
+        sealed: &[Address],
+        idempotency_key: Some(K::EmailInUse),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            37,
+            "account.security.email-in-use",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &[],
+        )
+    },
+    EventSpec {
+        sealed: &[Address],
+        sealed_optional: &[MaskedAddress, Token],
+        idempotency_key: Some(K::EmailChanged),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        closed_data: &[("side", EMAIL_CHANGED_SIDES)],
+        ..e(
+            38,
+            "account.security.email-changed",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["changedAt", "side"],
+        )
+    },
+    // Gap audit G19 (contract 1.4.0): organization lifecycle notices, mirroring
+    // #10 organizations.organization.suspended. Organizations publishes them only with
+    // ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED (default off).
+    e(
+        39,
+        "organizations.organization.archived",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
+    e(
+        40,
+        "organizations.organization.reactivated",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
+    // ADR 0068 A4 (contract 1.6.0): the one-time owner invitation of a first-party
+    // workspace HQ registers through the admin bridge, delivered ONLY to the invited address
+    // as a single-use claim link (owner-delivered secret: HQ never sees the token). The token
+    // and the address are sealed; one email principal keyed by the invitation (the owner may
+    // have no account yet); the ORGANIZATION_INVITATION subject is the invitation.
+    EventSpec {
+        sealed: &[Token, Address],
+        optional_data: &["expiresAt"],
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            41,
+            "developer-platform.workspace.owner-invitation.email-requested",
+            DEV,
+            Normal,
+            "DEVELOPER_UPDATES",
+            "ORGANIZATION_INVITATION",
+            &["invitationId", "organizationId"],
+        )
+    },
+    // ADR 0068 A4 (contract 1.7.0): an organization export HQ requested through the admin
+    // bridge is ready; its single-use download link goes ONLY to the organization owner's
+    // account (the service resolves the verified address). The link token is sealed; the
+    // ORGANIZATION_EXPORT subject is the export.
+    EventSpec {
+        sealed: &[Token],
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            42,
+            "organizations.organization.export_ready",
+            ORG,
+            Normal,
+            "ORGANIZATION_UPDATES",
+            "ORGANIZATION_EXPORT",
+            &["deliveryId", "expiresAt", "exportId", "organizationId"],
+        )
+    },
+    EventSpec {
+        number: 0,
+        event_type: CONTROL_EVENT,
+        producer: None,
+        priority: Normal,
+        category: None,
+        subject_kind: None,
+        sealed: &[],
+        sealed_optional: &[],
+        idempotency_key: None,
+        optional: false,
+        required_data: &[],
+        optional_data: &[],
+        recipient: None,
+        closed_data: &[],
+    },
+];
+
+/// The catalogue entry for `event_type`, if it exists.
+pub fn spec(event_type: &str) -> Option<&'static EventSpec> {
+    CATALOGUE.iter().find(|s| s.event_type == event_type)
+}

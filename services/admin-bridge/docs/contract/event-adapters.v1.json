@@ -1,0 +1,98 @@
+{
+  "contract": "cfmeet.admin-events.v1",
+  "export_schema": "cosmicforge.product-admin-event.v1",
+  "max_event_bytes": 16384,
+  "status": "ACTIVE (A7): the source service posts {event_id, type, subject {kind, id}, state, version, occurred_at} to the bridge's private event listener (POST /internal/v1/hq-bridge/events, cf-service+jwt with hq-bridge-events.publish); the producer is the authenticated service; an event of a type its source does not publish here is quarantined; ids, states, versions and times only",
+  "exportable_classifications": [
+    "INTERNAL",
+    "OPERATIONS_MINIMIZED",
+    "FINANCIAL_SENSITIVE",
+    "SAFETY_EVIDENCE"
+  ],
+  "adapters": [
+    {
+      "source_service": "developer-platform",
+      "export_type": "verification.case.changed.v1",
+      "entity_type": "verification_case",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "messaging",
+      "export_type": "abuse.report.changed.v1",
+      "entity_type": "abuse_report",
+      "classification": "SAFETY_EVIDENCE",
+      "fields": {}
+    },
+    {
+      "source_service": "calling",
+      "export_type": "abuse.report.changed.v1",
+      "entity_type": "abuse_report",
+      "classification": "SAFETY_EVIDENCE",
+      "fields": {}
+    },
+    {
+      "source_service": "communications",
+      "export_type": "abuse.report.changed.v1",
+      "entity_type": "abuse_report",
+      "classification": "SAFETY_EVIDENCE",
+      "fields": {}
+    },
+    {
+      "source_service": "meeting-service",
+      "export_type": "abuse.report.changed.v1",
+      "entity_type": "abuse_report",
+      "classification": "SAFETY_EVIDENCE",
+      "fields": {}
+    },
+    {
+      "source_service": "developer-platform",
+      "export_type": "partner.workspace.changed.v1",
+      "entity_type": "partner_workspace",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "developer-platform",
+      "export_type": "app.review.changed.v1",
+      "entity_type": "app",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "messaging",
+      "export_type": "incident.changed.v1",
+      "entity_type": "incident",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "calling",
+      "export_type": "incident.changed.v1",
+      "entity_type": "incident",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "meeting-service",
+      "export_type": "incident.changed.v1",
+      "entity_type": "incident",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "developer-platform",
+      "export_type": "incident.changed.v1",
+      "entity_type": "incident",
+      "classification": "OPERATIONS_MINIMIZED",
+      "fields": {}
+    },
+    {
+      "source_service": "developer-platform",
+      "export_type": "pricing.version.changed.v1",
+      "entity_type": "price_version",
+      "classification": "FINANCIAL_SENSITIVE",
+      "fields": {}
+    }
+  ]
+}

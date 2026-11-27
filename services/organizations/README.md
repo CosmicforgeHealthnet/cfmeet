@@ -7,7 +7,9 @@ It owns organizations, profiles, memberships (with history), invitations, teams 
 members (Section 6), typed organization policies (Section 6), their audit events and
 outbox, and organization ↔ Platform Access scope mappings with the provisioning saga
 (Section 7, [ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md);
-off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`).
+off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`), including the automatic Calling and
+Messaging service bindings of each organization (ADR 0058 Amendment A2; off by default:
+`ORGANIZATIONS_SERVICE_BINDINGS_ENABLED`, see `docs/OPERATIONS.md`).
 
 * **Contract:** [`docs/api/organizations-internal-v1.md`](../../docs/api/organizations-internal-v1.md)
   (machine-readable: `packages/contracts/organizations/internal/v1.openapi.json`, served at
@@ -31,6 +33,7 @@ off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`).
 | `src/import.rs` | export format, checksum, import, reconciliation |
 | `src/store.rs` | rows, audit / history / outbox writers |
 | `src/outbox.rs`, `src/worker.rs` | outbox lease protocol (delivery disabled), maintenance loop |
+| `src/notification_publications.rs` | Notification Service producer (roadmap N7): `organizations.*` catalogue envelopes from the committed outbox record rows to I1; only with `CF_NOTIFICATIONS_BASE_URL` |
 | `migration/` | own migration history (`organizations_seaql_migrations`) |
 | `src/bin/organizations-import.rs` | operator import CLI |
 | `docs/` | [API](docs/API.md), [operations](docs/OPERATIONS.md), [data ownership](docs/DATA_OWNERSHIP.md) |

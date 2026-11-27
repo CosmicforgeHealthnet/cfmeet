@@ -1,0 +1,66 @@
+{
+  "description": "One operator command in the workspace's activity (who, what, outcome, when). The command's free-form summary is not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "scope",
+    "workspace_id",
+    "operator",
+    "action",
+    "target_type",
+    "target_id",
+    "outcome",
+    "occurred_at"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope": {
+      "enum": [
+        "ORGANIZATION",
+        "PLATFORM"
+      ]
+    },
+    "workspace_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "operator": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+    },
+    "target_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "target_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "outcome": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

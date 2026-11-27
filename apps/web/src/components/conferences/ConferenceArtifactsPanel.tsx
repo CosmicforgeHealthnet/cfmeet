@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { ActionDialog, Field, RequestError } from "@/components/meeting-spaces/ManagementUI";
+import { useMemo, useState } from "react";
+import { BarChart3, Captions, CheckCircle2, ClipboardList, Download, FileText, Languages, ListChecks, Loader2, MessageSquare, Search, ShieldCheck, Sparkles, Square, Users } from "lucide-react";
+import { NiceSelect } from "@/components/ui/nice-select";
+import apiV2 from "@/services/v2/api";
+import { ActionDialog, RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
+import { useParticipantsV2 } from "@/hooks/v2";
 import {
-  useArtifact,
   useArtifactAccess,
   useArtifacts,
   useAttendance,
@@ -22,554 +24,370 @@ import {
   useWithdrawConsent,
 } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
-import { artifactAccessible, artifactDetailRows, artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
-import type {
-  ArtifactType,
-  GenerateReportRequest,
-  ConsentKind,
-  ProfilePolicy,
-  Role,
-  TranscriptQuery,
-  WithdrawalResponse,
-} from "@/types/v2";
+import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
+import { artifactAccessible, artifactDisplayName, artifactStateLabel, formatBytes } from "@/lib/artifact-display";
+import { cn } from "@/lib/utils";
+import type { ConsentKind, GenerateReportRequest, ProfilePolicy, Role, WithdrawalResponse } from "@/types/v2";
 
 type ReportType = GenerateReportRequest["artifactType"];
+type Tab = "transcript" | "attendance" | "reports" | "consent";
 
-const reportOptions: { value: ReportType; label: string }[] = [
-  { value: "ATTENDANCE_REPORT", label: "Attendance report" },
-  { value: "POLL_REPORT", label: "Poll report" },
-  { value: "CHAT_EXPORT", label: "Chat export" },
+const REPORTS: { value: ReportType; label: string; hint: string; icon: typeof Users }[] = [
+  { value: "ATTENDANCE_REPORT", label: "Attendance", hint: "Who joined and for how long", icon: Users },
+  { value: "POLL_REPORT", label: "Poll results", hint: "Every poll and its answers", icon: BarChart3 },
+  { value: "CHAT_EXPORT", label: "Chat", hint: "All in-call messages", icon: MessageSquare },
 ];
 
-const consentLabels: Record<ConsentKind, string> = {
+const LANGUAGES = [
+  { value: "en", label: "English" }, { value: "fr", label: "French" }, { value: "es", label: "Spanish" },
+  { value: "pt", label: "Portuguese" }, { value: "de", label: "German" }, { value: "ar", label: "Arabic" },
+  { value: "zh", label: "Chinese" }, { value: "hi", label: "Hindi" }, { value: "sw", label: "Swahili" },
+  { value: "yo", label: "Yoruba" }, { value: "ha", label: "Hausa" }, { value: "ig", label: "Igbo" },
+];
+const languageName = (code?: string) => LANGUAGES.find((l) => l.value === code?.split("-")[0])?.label ?? code ?? "";
+
+const CONSENT_LABEL: Record<ConsentKind, string> = {
   RECORDING: "Recording",
   TRANSCRIPTION: "Transcription",
-  AI_PROCESSING: "AI processing",
+  AI_PROCESSING: "AI summaries",
   DATA_SHARING: "Data sharing",
   HEALTHCARE_TERMS: "Healthcare terms",
   PRIVACY_NOTICE: "Privacy notice",
 };
 
-function withdrawalDescription(result: WithdrawalResponse) {
-  if (result.effect === "PROCESSING_STOPPED") {
-    return "Consent withdrawn. Processing that depended on it was stopped; existing artifacts are not deleted.";
-  }
-  if (result.effect === "PARTICIPANT_EXITED") {
-    return "Consent withdrawn. The meeting policy returned you to the waiting room; existing artifacts are not deleted.";
-  }
-  return "Consent withdrawal recorded. Existing artifacts are not deleted.";
+const JOB_STATUS: Record<string, string> = {
+  REQUESTED: "Starting…", ACTIVE: "Transcribing now", STOPPING: "Stopping…", PROCESSING: "Finishing up…", READY: "Ready", FAILED: "Failed", STOPPED: "Stopped",
+};
+
+function withdrawalText(result: WithdrawalResponse) {
+  if (result.effect === "PROCESSING_STOPPED") return "Withdrawn. Anything that depended on it has stopped. Existing files stay.";
+  if (result.effect === "PARTICIPANT_EXITED") return "Withdrawn. This meeting's rules moved you back to the waiting room. Existing files stay.";
+  return "Withdrawn. Existing files stay.";
 }
 
-export default function ConferenceArtifactsPanel({
-  conferenceId,
-  spaceRole,
-  rolePolicy,
-  recordingPolicy,
-  live,
-}: {
+const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const btn = "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors disabled:opacity-50";
+
+/** Download a report straight away as a file (no stored copy). */
+async function downloadReport(conferenceId: string, type: string, label: string) {
+  const data = (await apiV2.get<unknown>(`/conferences/${encodeURIComponent(conferenceId)}/exports/${type}`)).data;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${conferenceId.slice(0, 8)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export default function ConferenceArtifactsPanel({ conferenceId, spaceRole, rolePolicy, live }: {
   conferenceId: string;
   spaceRole?: Role;
   rolePolicy?: ProfilePolicy extends never ? never : import("@/types/v2").RolePolicy;
   recordingPolicy?: string;
   live: boolean;
 }) {
-  const [reportType, setReportType] = useState<ReportType>("ATTENDANCE_REPORT");
-  const [feedback, setFeedback] = useState("");
-  const [attendanceVisible, setAttendanceVisible] = useState(false);
-  const [selectedArtifactId, setSelectedArtifactId] = useState("");
   const me = useCurrentParticipant(conferenceId);
   const role = effectiveConferenceRole(spaceRole, me.data?.role, me.data?.admissionState);
-  const canList = meetingAllows(role, "artifact.list", rolePolicy) ||
-    meetingAllows(role, "artifact.read", rolePolicy) ||
-    meetingAllows(role, "recording.start", rolePolicy);
-  const canRead = meetingAllows(role, "artifact.read", rolePolicy);
-  const canDelete = meetingAllows(role, "artifact.delete", rolePolicy);
-  const canExport = meetingAllows(role, "artifact.export", rolePolicy);
-  const canReadTranscripts = meetingAllows(role, "transcript.read", rolePolicy);
-  const canRequestIntelligence = meetingAllows(role, "intelligence.request", rolePolicy);
-  const canUseOwnConsent = me.data?.admissionState === "ADMITTED";
-  const artifacts = useArtifacts(conferenceId, undefined, canList);
-  const attendance = useAttendance(conferenceId, attendanceVisible && canExport);
-  const selectedArtifact = useArtifact(conferenceId, selectedArtifactId);
-  const generate = useGenerateReport(conferenceId);
-  const access = useArtifactAccess(conferenceId);
-  const remove = useDeleteArtifact(conferenceId);
-  const items = artifacts.data?.artifacts ?? [];
+  const can = (permission: string) => meetingAllows(role, permission as never, rolePolicy);
+  const canList = can("artifact.list") || can("artifact.read") || can("recording.start");
+  const canExport = can("artifact.export");
+  const canTranscripts = MEETING_AI_READY && (can("transcript.read") || can("transcription.start"));
+  const canConsent = me.data?.admissionState === "ADMITTED";
+  const consent = useConsentRequirements(conferenceId, canConsent);
+  const hasConsent = !!consent.data?.requirements.length;
 
-  const generateReport = async () => {
-    setFeedback("");
-    try {
-      const artifact = await generate.mutateAsync({ artifactType: reportType });
-      setFeedback(`${reportType.replaceAll("_", " ")} generated (${artifact.status}).`);
-    } catch {
-      setFeedback("");
-    }
-  };
+  const tabs = ([
+    canTranscripts && { id: "transcript", label: "Transcript", icon: Captions },
+    canExport && { id: "attendance", label: "Attendance", icon: Users },
+    (canList || canExport) && { id: "reports", label: "Reports", icon: ClipboardList },
+    hasConsent && { id: "consent", label: "Your consent", icon: ShieldCheck },
+  ].filter(Boolean)) as { id: Tab; label: string; icon: typeof Users }[];
+  const [picked, setPicked] = useState<Tab>();
+  const tab = tabs.find((t) => t.id === picked)?.id ?? tabs[0]?.id;
 
-  const mintAccess = async (artifactId: string) => {
-    setFeedback("");
-    try {
-      const grant = await access.mutateAsync(artifactId);
-      setFeedback(`Access link expires ${new Date(grant.expiresAt).toLocaleString()}.`);
-      setSelectedArtifactId("");
-      setAccessUrl(grant.url);
-    } catch {
-      setFeedback("");
-      setAccessUrl("");
-    }
-  };
-
-  const [accessUrl, setAccessUrl] = useState("");
+  if (!tabs.length) return null;
 
   return (
-    <div className="space-y-4">
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <header>
-          <h2 className="font-semibold">Artifacts and reports</h2>
-          <p className="text-sm text-muted-foreground">
-            Downloads use short-lived, read-only links. Artifact status reflects confirmed storage state.
-          </p>
-        </header>
-        {artifacts.isLoading && <p role="status" className="text-sm">Loading artifacts…</p>}
-        {artifacts.isError && <RequestError error={artifacts.error} retry={() => void artifacts.refetch()} />}
-        {feedback && <p role="status" className="rounded-md bg-muted p-3 text-sm">{feedback}</p>}
-        {generate.isError && <RequestError error={generate.error} />}
-        {access.isError && <RequestError error={access.error} />}
-        {remove.isError && <RequestError error={remove.error} />}
-        {accessUrl && (
-          <a className="inline-flex text-sm text-primary underline" href={accessUrl} target="_blank" rel="noopener noreferrer">
-            Open secure artifact link
-          </a>
-        )}
+    <section>
+      <h2 className="text-lg font-semibold text-foreground">Notes and reports</h2>
+      <p className="mt-0.5 text-sm text-muted-foreground">Transcript, attendance and exports from this session.</p>
+      <div role="tablist" className="no-scrollbar mt-4 flex gap-1 overflow-x-auto border-b border-border">
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => setPicked(id)}
+            className={cn("-mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors", tab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+            <Icon className="size-4" />{label}
+          </button>
+        ))}
+      </div>
+      <div className="pt-5">
+        {tab === "transcript" && <TranscriptTab conferenceId={conferenceId} live={live} canRead={can("transcript.read")} canStart={can("transcription.start")} canStop={can("transcription.stop")} canAi={can("intelligence.request")} canList={canList} />}
+        {tab === "attendance" && <AttendanceTab conferenceId={conferenceId} />}
+        {tab === "reports" && <ReportsTab conferenceId={conferenceId} canList={canList} canExport={canExport} canRead={can("artifact.read")} canDelete={can("artifact.delete")} />}
+        {tab === "consent" && <ConsentTab conferenceId={conferenceId} />}
+      </div>
+    </section>
+  );
+}
 
-        {canExport && (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="grid gap-1 text-sm font-medium">
-              Generate report
-              <select
-                className="h-9 rounded-md border border-input bg-background px-2"
-                value={reportType}
-                onChange={event => setReportType(event.target.value as ReportType)}
-              >
-                {reportOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <Button type="button" disabled={generate.isPending} onClick={() => void generateReport()}>
-              {generate.isPending ? "Generating…" : "Generate"}
-            </Button>
-          </div>
-        )}
-
-        {canExport && (
-          <div className="space-y-2 border-t border-border pt-3">
-            <Button type="button" variant="outline" size="sm" onClick={() => setAttendanceVisible(value => !value)}>
-              {attendanceVisible ? "Hide attendance" : "View attendance"}
-            </Button>
-            {attendanceVisible && (
-              <>
-                {attendance.isLoading && <p role="status" className="text-sm">Loading attendance…</p>}
-                {attendance.isError && <RequestError error={attendance.error} retry={() => void attendance.refetch()} />}
-                {attendance.data && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      {attendance.data.participants.length} participants · {attendance.data.sessionCount} sessions · generated {new Date(attendance.data.generatedAt).toLocaleString()}
-                    </p>
-                    {attendance.data.participants.map(person => (
-                      <div key={person.participantId} className="flex flex-wrap justify-between gap-2 rounded-md border border-border p-2 text-sm">
-                        <span>{person.displayName} · {person.role.replaceAll("_", " ")}</span>
-                        <span className="text-muted-foreground">{person.admissionState} · {Math.floor(person.attendanceSeconds / 60)} min</span>
-                      </div>
-                    ))}
-                    {attendance.data.participants.length === 0 && <p className="text-sm text-muted-foreground">No participants recorded.</p>}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {canList && (
-          <div className="space-y-2 border-t border-border pt-3">
-            {items.length === 0 && !artifacts.isLoading && <p className="text-sm text-muted-foreground">No artifacts yet.</p>}
-            {items.map(item => (
-              <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
-                <div className="min-w-0">
-                  <p className="break-all text-sm font-medium">{artifactDisplayName(item)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {artifactStateLabel(item)}
-                    {formatDurationMs(item.durationMs) ? ` · ${formatDurationMs(item.durationMs)}` : ""}
-                    {formatBytes(item.sizeBytes) ? ` · ${formatBytes(item.sizeBytes)}` : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => setSelectedArtifactId(item.id)}>
-                    Details
-                  </Button>
-                  {canRead && artifactAccessible(item) && (
-                    <Button type="button" size="sm" variant="outline" disabled={access.isPending} onClick={() => void mintAccess(item.id)}>
-                      Get secure link
-                    </Button>
-                  )}
-                  {canDelete && item.status !== "DELETED" && !item.deletionPending && (
-                    <ActionDialog
-                      label="Delete"
-                      destructive
-                      description="Deletion is complete only after storage confirms the object is absent. A pending deletion will be retried."
-                      submit={async () => {
-                        const deleted = await remove.mutateAsync(item.id);
-                        setFeedback(deleted.status === "DELETED" ? "Artifact deleted and storage absence confirmed." : "Deletion is pending storage confirmation and will be retried.");
-                      }}
-                    />
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-
-        {selectedArtifactId && (
-          <section className="space-y-2 rounded-md border border-border p-3">
-            {selectedArtifact.isLoading && <p role="status" className="text-sm">Loading artifact details…</p>}
-            {selectedArtifact.isError && <RequestError error={selectedArtifact.error} retry={() => void selectedArtifact.refetch()} />}
-            {selectedArtifact.data && (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold">Artifact details</h3>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedArtifactId("")}>Close</Button>
-                </div>
-                <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-                  {artifactDetailRows(selectedArtifact.data).map(([label, value]) => <div key={label} className="contents"><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd></div>)}
-                </dl>
-              </>
-            )}
-          </section>
-        )}
-      </section>
-
-      <ConsentControls conferenceId={conferenceId} enabled={canUseOwnConsent} />
-      <TranscriptionControls
-        conferenceId={conferenceId}
-        enabled={canReadTranscripts}
-        canStart={meetingAllows(role, "transcription.start", rolePolicy)}
-        canStop={meetingAllows(role, "transcription.stop", rolePolicy)}
-        canTranslate={meetingAllows(role, "transcription.start", rolePolicy)}
-        canRequestIntelligence={canRequestIntelligence}
-        live={live}
-        artifacts={items}
-      />
+function Empty({ icon: Icon, title, text, children }: { icon: typeof Users; title: string; text: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-dashed border-border px-6 py-10 text-center">
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Icon className="size-5" /></span>
+      <p className="mt-3 font-semibold text-foreground">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{text}</p>
+      {children}
     </div>
   );
 }
 
-function ConsentControls({ conferenceId, enabled }: { conferenceId: string; enabled: boolean }) {
-  const [feedback, setFeedback] = useState("");
-  const requirements = useConsentRequirements(conferenceId, enabled);
-  const record = useRecordConsents(conferenceId);
-  const withdraw = useWithdrawConsent(conferenceId);
-
-  const decide = async (consentType: ConsentKind, decision: "ACCEPTED" | "DECLINED", version: string) => {
-    setFeedback("");
-    try {
-      await record.mutateAsync({ consentVersion: version, decisions: [{ consentType, decision }] });
-      setFeedback(`${consentLabels[consentType]} consent ${decision.toLowerCase()}.`);
-    } catch {
-      setFeedback("");
-    }
-  };
-
-  if (!enabled) return null;
-
-  return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <header>
-        <h2 className="font-semibold">Your consent</h2>
-        <p className="text-sm text-muted-foreground">Each processing type has an independent decision. Only your own decisions can be recorded.</p>
-      </header>
-      {requirements.isLoading && <p role="status" className="text-sm">Loading consent requirements…</p>}
-      {requirements.isError && <RequestError error={requirements.error} retry={() => void requirements.refetch()} />}
-      {record.isError && <RequestError error={record.error} />}
-      {withdraw.isError && <RequestError error={withdraw.error} />}
-      {feedback && <p role="status" className="rounded-md bg-muted p-3 text-sm">{feedback}</p>}
-      {requirements.data?.recordingNotice && <p className="rounded-md bg-muted p-3 text-sm">Recording is active. This notice does not imply consent to transcription or other processing.</p>}
-      {requirements.data?.requirements.map(item => (
-        <article key={item.consentType} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
-          <div>
-            <p className="text-sm font-medium">{consentLabels[item.consentType]}</p>
-            <p className="text-xs text-muted-foreground">
-              {item.mode.replaceAll("_", " ")} · {item.active ? "active" : "inactive"} · {item.decision || "no decision"}
-              {item.required ? " · required" : ""}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {item.decision !== "ACCEPTED" && (
-              <Button type="button" size="sm" disabled={record.isPending} onClick={() => void decide(item.consentType, "ACCEPTED", item.consentVersion)}>Accept</Button>
-            )}
-            {item.decision !== "DECLINED" && (
-              <Button type="button" size="sm" variant="outline" disabled={record.isPending} onClick={() => void decide(item.consentType, "DECLINED", item.consentVersion)}>Decline</Button>
-            )}
-            {item.decision === "ACCEPTED" && (
-              <ActionDialog
-                label="Withdraw"
-                destructive
-                description="The meeting profile determines whether withdrawal only records the choice, stops processing, or returns you to the waiting room. Retained artifacts are not deleted."
-                submit={async () => {
-                  const result = await withdraw.mutateAsync(item.consentType);
-                  setFeedback(withdrawalDescription(result));
-                }}
-              />
-            )}
-          </div>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function TranscriptionControls({
-  conferenceId,
-  enabled,
-  canStart,
-  canStop,
-  canTranslate,
-  canRequestIntelligence,
-  live,
-  artifacts,
-}: {
-  conferenceId: string;
-  enabled: boolean;
-  canStart: boolean;
-  canStop: boolean;
-  canTranslate: boolean;
-  canRequestIntelligence: boolean;
-  live: boolean;
-  artifacts: { id: string; status: string; artifactType: ArtifactType }[];
-}) {
-  const [mode, setMode] = useState<"LIVE" | "POST_MEETING">("LIVE");
-  const [language, setLanguage] = useState("en");
-  const [sourceRecordingId, setSourceRecordingId] = useState("");
-  const [selectedArtifactId, setSelectedArtifactId] = useState("");
-  const [after, setAfter] = useState<number>();
-  const [targetLanguage, setTargetLanguage] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const transcripts = useTranscripts(conferenceId, enabled);
+function TranscriptTab({ conferenceId, live, canRead, canStart, canStop, canAi, canList }: { conferenceId: string; live: boolean; canRead: boolean; canStart: boolean; canStop: boolean; canAi: boolean; canList: boolean }) {
+  const transcripts = useTranscripts(conferenceId, canRead || canStart);
+  const artifacts = useArtifacts(conferenceId, undefined, canList && canStart);
   const start = useStartTranscription(conferenceId);
   const stop = useStopTranscription(conferenceId);
-  const transcript = useTranscript(conferenceId, selectedArtifactId, { after, limit: 200 }, enabled);
   const translate = useTranslateTranscript(conferenceId);
-  const intelligence = useRequestIntelligence(conferenceId);
-  const recordings = artifacts.filter(item => item.artifactType === "RECORDING" && item.status === "READY");
-  const selectedJob = transcripts.data?.jobs.find(job => job.artifactId === selectedArtifactId);
-  const transcriptReady = transcript.data?.artifact.status === "READY";
+  const ai = useRequestIntelligence(conferenceId);
+  const people = useParticipantsV2(conferenceId);
+  const names = useMemo(() => new Map((people.data ?? []).map((p) => [p.id, p.displayName])), [people.data]);
+
+  const jobs = transcripts.data?.jobs ?? [];
+  const running = jobs.find((job) => ["REQUESTED", "ACTIVE", "STOPPING", "PROCESSING"].includes(job.status));
+  const withText = jobs.filter((job) => job.artifactId);
+  const [jobId, setJobId] = useState<string>();
+  const job = withText.find((j) => j.id === jobId) ?? withText[0];
+  const [after, setAfter] = useState<number>();
+  const transcript = useTranscript(conferenceId, job?.artifactId ?? "", { after, limit: 200 }, canRead && !!job?.artifactId);
+  const ready = transcript.data?.artifact.status === "READY";
+  const [query, setQuery] = useState("");
+  const [language, setLanguage] = useState("en");
+  const [target, setTarget] = useState("fr");
+  const [recordingId, setRecordingId] = useState<string>();
+  const [notice, setNotice] = useState("");
+  const recordings = (artifacts.data?.artifacts ?? []).filter((a) => a.artifactType === "RECORDING" && a.status === "READY");
+  const failure = [start, stop, translate, ai].find((m) => m.isError)?.error;
+
+  const segments = (transcript.data?.segments ?? []).filter((s) => !query.trim() || s.text.toLowerCase().includes(query.trim().toLowerCase()));
 
   const begin = async () => {
-    setFeedback("");
+    setNotice("");
+    const source = recordingId ?? recordings[0]?.id;
     try {
-      const job = await start.mutateAsync({
-        mode,
-        language: language.trim() || "en",
-        ...(mode === "POST_MEETING" ? { sourceRecordingId } : {}),
-      });
-      setFeedback(`Transcription job created (${job.status}).`);
-    } catch {
-      setFeedback("");
-    }
+      await start.mutateAsync(live ? { mode: "LIVE", language } : { mode: "POST_MEETING", language, sourceRecordingId: source });
+      setNotice(live ? "Live transcription started. Captions are available in the call." : "Transcribing the recording. This can take a few minutes.");
+    } catch { /* shown below */ }
   };
 
-  if (!enabled && !canStart) return null;
-
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <header>
-        <h2 className="font-semibold">Transcription and intelligence</h2>
-        <p className="text-sm text-muted-foreground">Transcription requires an enabled provider and profile authorization. Generated intelligence is currently disabled by default.</p>
-      </header>
-      {feedback && <p role="status" className="rounded-md bg-muted p-3 text-sm">{feedback}</p>}
-      {start.isError && <RequestError error={start.error} />}
-      {stop.isError && <RequestError error={stop.error} />}
-      {translate.isError && <RequestError error={translate.error} />}
-      {intelligence.isError && <RequestError error={intelligence.error} />}
+    <div className="space-y-4">
       {transcripts.isError && <RequestError error={transcripts.error} retry={() => void transcripts.refetch()} />}
+      {failure && <RequestError error={failure} />}
+      {notice && <p role="status" className="flex items-start gap-2 rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />{notice}</p>}
 
-      {canStart && (
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-sm font-medium">
-            Mode
-            <select className="h-9 rounded-md border border-input bg-background px-2" value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
-              <option value="LIVE">Live</option>
-              <option value="POST_MEETING">Post-meeting</option>
-            </select>
-          </label>
-          <Field label="Language tag" value={language} maxLength={16} onChange={event => setLanguage(event.target.value)} />
-          {mode === "POST_MEETING" && (
-            <label className="grid gap-1 text-sm font-medium">
-              Ready recording
-              <select className="h-9 rounded-md border border-input bg-background px-2" value={sourceRecordingId} onChange={event => setSourceRecordingId(event.target.value)}>
-                <option value="">Select recording</option>
-                {recordings.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
-              </select>
+      {running && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-muted/40 p-4">
+          <span className="relative flex size-2.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" /><span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">{JOB_STATUS[running.status] ?? running.status}</p><p className="text-xs text-muted-foreground">{languageName(running.language)} · {running.segmentCount} lines so far</p></div>
+          {canStop && ["REQUESTED", "ACTIVE"].includes(running.status) && <button type="button" onClick={() => stop.mutate(running.id)} disabled={stop.isPending} className={cn(btn, "border border-border bg-background text-foreground hover:bg-muted")}><Square className="size-3.5" />Stop</button>}
+        </div>
+      )}
+
+      {canStart && !running && (live || recordings.length > 0) && (
+        <div className="grid gap-3 rounded-2xl border border-border p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <NiceSelect label="Spoken language" value={language} onChange={setLanguage} options={LANGUAGES} />
+          {!live && recordings.length > 1
+            ? <NiceSelect label="Recording" value={recordingId ?? recordings[0].id} onChange={setRecordingId} options={recordings.map((r, i) => ({ value: r.id, label: `Recording ${i + 1}`, hint: artifactStateLabel(r) }))} />
+            : <p className="text-sm text-muted-foreground sm:pb-3">{live ? "Transcribes the call as people speak." : "Transcribes this session's recording."}</p>}
+          <button type="button" onClick={() => void begin()} disabled={start.isPending} className={cn(btn, "h-11 bg-primary text-primary-foreground hover:bg-primary/90")}>{start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Captions className="size-4" />}{live ? "Start transcribing" : "Transcribe recording"}</button>
+        </div>
+      )}
+
+      {transcripts.isLoading && <div className="h-40 animate-pulse rounded-2xl bg-muted" />}
+
+      {!transcripts.isLoading && !withText.length && !running && (
+        <Empty icon={Captions} title="No transcript yet" text={canStart ? (live ? "Start transcribing to get live captions now and a searchable transcript after." : recordings.length ? "Transcribe the recording to get a searchable transcript." : "Transcripts come from live transcription or a recording. This session has neither.") : "If a host transcribes this session, the transcript shows up here."} />
+      )}
+
+      {job && canRead && (
+        <div className="overflow-hidden rounded-2xl border border-border">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 p-3">
+            {withText.length > 1
+              ? <NiceSelect className="w-56" value={job.id} onChange={(id) => { setJobId(id); setAfter(undefined); }} options={withText.map((j) => ({ value: j.id, label: `${languageName(j.language)} transcript`, hint: JOB_STATUS[j.status] ?? j.status }))} />
+              : <p className="px-1 text-sm font-semibold text-foreground">{languageName(job.language)} transcript <span className="font-normal text-muted-foreground">· {JOB_STATUS[job.status] ?? job.status}</span></p>}
+            <label className="relative ml-auto w-full sm:w-56">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search transcript" className="h-9 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" />
             </label>
+          </div>
+          {transcript.isError && <div className="p-3"><RequestError error={transcript.error} retry={() => void transcript.refetch()} /></div>}
+          <div className="max-h-[28rem] space-y-4 overflow-y-auto p-4">
+            {transcript.isLoading && <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="h-10 animate-pulse rounded-lg bg-muted" />)}</div>}
+            {segments.map((segment) => (
+              <div key={segment.sequence} className="flex gap-3">
+                <span className="w-11 shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">{clock(segment.startMs)}</span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-primary">{(segment.speakerParticipantId && names.get(segment.speakerParticipantId)) || "Speaker"}</p>
+                  <p className="text-sm leading-relaxed text-foreground">{segment.text}</p>
+                </div>
+              </div>
+            ))}
+            {transcript.data && !segments.length && <p className="text-sm text-muted-foreground">{query ? "Nothing matches your search." : "No lines yet."}</p>}
+            {transcript.data?.nextAfter != null && <button type="button" onClick={() => setAfter(transcript.data?.nextAfter ?? undefined)} className={cn(btn, "w-full border border-border text-foreground hover:bg-muted")}>Show more</button>}
+          </div>
+          {ready && (canStart || canAi) && (
+            <div className="flex flex-wrap items-end gap-2 border-t border-border bg-muted/40 p-3">
+              {canStart && (
+                <div className="flex items-end gap-2">
+                  <NiceSelect className="w-40" value={target} onChange={setTarget} options={LANGUAGES.filter((l) => l.value !== job.language)} />
+                  <button type="button" disabled={translate.isPending} onClick={() => job.artifactId && translate.mutate({ artifactId: job.artifactId, data: { targetLanguage: target } }, { onSuccess: (r) => setNotice(`Translated into ${languageName(r.targetLanguage)}. The original stays as it is.`) })} className={cn(btn, "h-11 border border-border bg-background text-foreground hover:bg-muted")}><Languages className="size-4" />{translate.isPending ? "Translating…" : "Translate"}</button>
+                </div>
+              )}
+              {canAi && (
+                <div className="flex gap-2 sm:ml-auto">
+                  <button type="button" disabled={ai.isPending} onClick={() => job.artifactId && ai.mutate({ sourceArtifactId: job.artifactId, kind: "SUMMARY" }, { onSuccess: () => setNotice("Summary requested. It shows under Reports when it's ready.") })} className={cn(btn, "h-11 bg-primary text-primary-foreground hover:bg-primary/90")}><Sparkles className="size-4" />Summary</button>
+                  <button type="button" disabled={ai.isPending} onClick={() => job.artifactId && ai.mutate({ sourceArtifactId: job.artifactId, kind: "ACTION_ITEMS" }, { onSuccess: () => setNotice("Action items requested. They show under Reports when ready.") })} className={cn(btn, "h-11 border border-border bg-background text-foreground hover:bg-muted")}><ListChecks className="size-4" />Action items</button>
+                </div>
+              )}
+            </div>
           )}
-          <Button type="button" disabled={start.isPending || (mode === "LIVE" && !live) || (mode === "POST_MEETING" && !sourceRecordingId)} onClick={() => void begin()}>
-            {start.isPending ? "Starting…" : "Start transcription"}
-          </Button>
         </div>
       )}
-      {canStart && mode === "LIVE" && !live && <p className="text-xs text-muted-foreground">Live transcription requires a live conference.</p>}
-
-      {transcripts.isLoading && enabled && <p role="status" className="text-sm">Loading transcription jobs…</p>}
-      {enabled && transcripts.data && (
-        <div className="space-y-2 border-t border-border pt-3">
-          {transcripts.data.jobs.length === 0 && <p className="text-sm text-muted-foreground">No transcription jobs yet.</p>}
-          {transcripts.data.jobs.map(job => (
-            <article key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
-              <div>
-                <p className="text-sm font-medium">{job.mode.replaceAll("_", " ")} · {job.language}</p>
-                <p className="text-xs text-muted-foreground">{job.status} · {job.segmentCount} segments{job.failureCode ? ` · ${job.failureCode}` : ""}</p>
-              </div>
-              <div className="flex gap-2">
-                {!!job.artifactId && <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedArtifactId(job.artifactId); setAfter(undefined); }}>View transcript</Button>}
-                {canStop && ["REQUESTED", "ACTIVE"].includes(job.status) && (
-                  <Button type="button" size="sm" variant="destructive" disabled={stop.isPending} onClick={() => void stop.mutateAsync(job.id).then(() => setFeedback("Transcription stop requested.")).catch(() => undefined)}>Stop</Button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {selectedArtifactId && (
-        <TranscriptDetail
-          conferenceId={conferenceId}
-          artifactId={selectedArtifactId}
-          after={after}
-          transcript={transcript.data}
-          loading={transcript.isLoading}
-          error={transcript.error}
-          hasError={transcript.isError}
-          retry={() => void transcript.refetch()}
-          next={() => setAfter(transcript.data?.nextAfter)}
-          close={() => { setSelectedArtifactId(""); setAfter(undefined); }}
-          canTranslate={canTranslate && !!transcriptReady}
-          canRequestIntelligence={canRequestIntelligence && !!transcriptReady}
-          targetLanguage={targetLanguage}
-          setTargetLanguage={setTargetLanguage}
-          onTranslate={async () => {
-            const result = await translate.mutateAsync({
-              artifactId: selectedArtifactId,
-              data: { targetLanguage: targetLanguage.trim() },
-            });
-            setFeedback(`Translated ${result.translatedSegments} segments into ${result.targetLanguage}. Original transcript remains unchanged.`);
-          }}
-          onIntelligence={async (kind: "SUMMARY" | "ACTION_ITEMS") => {
-            const artifact = await intelligence.mutateAsync({ sourceArtifactId: selectedArtifactId, kind });
-            setFeedback(`Intelligence artifact created (${artifact.status}).`);
-          }}
-          translatePending={translate.isPending}
-          intelligencePending={intelligence.isPending}
-          selectedJob={selectedJob}
-        />
-      )}
-    </section>
+    </div>
   );
 }
 
-function TranscriptDetail({
-  conferenceId,
-  artifactId,
-  after,
-  transcript,
-  loading,
-  error,
-  hasError,
-  retry,
-  next,
-  close,
-  canTranslate,
-  canRequestIntelligence,
-  targetLanguage,
-  setTargetLanguage,
-  onTranslate,
-  onIntelligence,
-  translatePending,
-  intelligencePending,
-  selectedJob,
-}: {
-  conferenceId: string;
-  artifactId: string;
-  after?: number;
-  transcript?: ReturnType<typeof useTranscript>["data"];
-  loading: boolean;
-  error: unknown;
-  hasError: boolean;
-  retry: () => void;
-  next: () => void;
-  close: () => void;
-  canTranslate: boolean;
-  canRequestIntelligence: boolean;
-  targetLanguage: string;
-  setTargetLanguage: (value: string) => void;
-  onTranslate: () => Promise<void>;
-  onIntelligence: (kind: "SUMMARY" | "ACTION_ITEMS") => Promise<void>;
-  translatePending: boolean;
-  intelligencePending: boolean;
-  selectedJob?: { language: string };
-}) {
-  const [kind, setKind] = useState<"SUMMARY" | "ACTION_ITEMS">("SUMMARY");
-
+function AttendanceTab({ conferenceId }: { conferenceId: string }) {
+  const attendance = useAttendance(conferenceId, true);
+  const people = attendance.data?.participants ?? [];
+  const total = people.reduce((sum, p) => sum + p.attendanceSeconds, 0);
+  const minutes = (s: number) => (s < 60 ? "<1 min" : `${Math.round(s / 60)} min`);
   return (
-    <div className="space-y-3 rounded-md border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">Transcript</h3>
-          <p className="break-all font-mono text-xs text-muted-foreground">{artifactId}</p>
-        </div>
-        <Button type="button" size="sm" variant="ghost" onClick={close}>Close</Button>
-      </div>
-      {loading && <p role="status" className="text-sm">Loading transcript…</p>}
-      {hasError && <RequestError error={error} retry={retry} />}
-      {transcript && (
+    <div className="space-y-4">
+      {attendance.isError && <RequestError error={attendance.error} retry={() => void attendance.refetch()} />}
+      {attendance.isLoading && <div className="h-40 animate-pulse rounded-2xl bg-muted" />}
+      {attendance.data && (
         <>
-          <p className="text-xs text-muted-foreground">{transcript.artifact.status} · {selectedJob?.language || transcript.job?.language}</p>
-          {transcript.segments.map(segment => (
-            <article key={segment.sequence} className="rounded-md bg-muted/50 p-2 text-sm">
-              <p className="mb-1 text-xs text-muted-foreground">
-                {segment.speakerParticipantId || "Speaker"} · {Math.floor(segment.startMs / 1000)}s–{Math.floor(segment.endMs / 1000)}s
-              </p>
-              <p>{segment.text}</p>
-            </article>
-          ))}
-          {transcript.segments.length === 0 && <p className="text-sm text-muted-foreground">No final transcript segments are available.</p>}
-          {transcript.nextAfter != null && <Button type="button" size="sm" variant="outline" disabled={loading} onClick={next}>Load next page</Button>}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Stat label="People" value={String(people.length)} />
+            <Stat label="Average time" value={people.length ? minutes(total / people.length) : "—"} />
+            <Stat label="Joins" value={String(attendance.data.sessionCount)} className="hidden sm:block" />
+          </div>
+          {people.length === 0 ? <Empty icon={Users} title="No one has joined" text="Attendance appears once people join this session." /> : (
+            <ul className="divide-y divide-border rounded-2xl border border-border">
+              {people.map((person) => (
+                <li key={person.participantId} className="flex items-center gap-3 px-4 py-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{person.displayName.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{person.displayName}</p>
+                    <p className="text-xs capitalize text-muted-foreground">{person.role.replaceAll("_", " ").toLowerCase()}</p>
+                  </div>
+                  <span className="text-sm tabular-nums text-foreground">{minutes(person.attendanceSeconds)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       )}
-      {(canTranslate || canRequestIntelligence) && (
-        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
-          {canTranslate && (
-            <>
-              <Field label="Translation language" value={targetLanguage} maxLength={16} onChange={event => setTargetLanguage(event.target.value)} placeholder="e.g. fr-CA" />
-              <Button type="button" variant="outline" disabled={!targetLanguage.trim() || translatePending} onClick={() => void onTranslate().catch(() => undefined)}>
-                {translatePending ? "Translating…" : "Translate"}
-              </Button>
-            </>
-          )}
-          {canRequestIntelligence && (
-            <>
-              <label className="grid gap-1 text-sm font-medium">
-                Output
-                <select className="h-9 rounded-md border border-input bg-background px-2" value={kind} onChange={event => setKind(event.target.value as typeof kind)}>
-                  <option value="SUMMARY">Summary</option>
-                  <option value="ACTION_ITEMS">Action items</option>
-                </select>
-              </label>
-              <Button type="button" variant="outline" disabled={intelligencePending} onClick={() => void onIntelligence(kind).catch(() => undefined)}>
-                {intelligencePending ? "Requesting…" : "Request intelligence"}
-              </Button>
-            </>
-          )}
+    </div>
+  );
+}
+
+function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
+  return <div className={cn("rounded-2xl border border-border p-4", className)}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{value}</p></div>;
+}
+
+function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { conferenceId: string; canList: boolean; canExport: boolean; canRead: boolean; canDelete: boolean }) {
+  const artifacts = useArtifacts(conferenceId, undefined, canList);
+  const generate = useGenerateReport(conferenceId);
+  const access = useArtifactAccess(conferenceId);
+  const remove = useDeleteArtifact(conferenceId);
+  const [notice, setNotice] = useState("");
+  // Recordings live in their own panel; here: reports, transcripts files and AI notes.
+  const items = (artifacts.data?.artifacts ?? []).filter((a) => a.artifactType !== "RECORDING" && a.status !== "DELETED");
+  const [downloadError, setFailure] = useState<Error | null>(null);
+  const failure = [generate, access, remove].find((m) => m.isError)?.error ?? downloadError;
+
+  const open = async (id: string) => {
+    setNotice("");
+    try {
+      const grant = await access.mutateAsync(id);
+      window.open(grant.url, "_blank", "noopener,noreferrer");
+    } catch { /* shown below */ }
+  };
+
+  return (
+    <div className="space-y-4">
+      {failure && <RequestError error={failure} />}
+      {notice && <p role="status" className="flex items-center gap-2 rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground"><CheckCircle2 className="size-4 text-primary" />{notice}</p>}
+      {canExport && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {REPORTS.map(({ value, label, hint, icon: Icon }) => (
+            <div key={value} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon className="size-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-foreground">{label}</span>
+                <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+                {MEETING_RECORDING_READY ? <button type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report saved below.`) })}
+                  className="mt-0.5 text-xs font-semibold text-primary hover:underline disabled:opacity-50">Save a copy</button> : null}
+              </span>
+              <button type="button" aria-label={`Download ${label.toLowerCase()}`} title="Download" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="size-4" /></button>
+            </div>
+          ))}
         </div>
       )}
-      <span className="sr-only">Transcript page offset: {after ?? 0}</span>
-      <span className="sr-only">Conference: {conferenceId}</span>
+      {artifacts.isError && <RequestError error={artifacts.error} retry={() => void artifacts.refetch()} />}
+      {artifacts.isLoading && <div className="h-24 animate-pulse rounded-2xl bg-muted" />}
+      {canList && !artifacts.isLoading && items.length === 0 && <Empty icon={FileText} title="No reports yet" text={canExport ? "Create one above. It's saved here so you can open it any time." : "Reports a host creates show up here."} />}
+      {items.length > 0 && (
+        <ul className="divide-y divide-border rounded-2xl border border-border">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center gap-3 px-4 py-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground"><FileText className="size-4" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">{artifactDisplayName(item)}</p>
+                <p className="text-xs text-muted-foreground">{artifactStateLabel(item)}{formatBytes(item.sizeBytes) ? ` · ${formatBytes(item.sizeBytes)}` : ""}{item.createdAt ? ` · ${new Date(item.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""}</p>
+              </div>
+              {canRead && artifactAccessible(item) && <button type="button" aria-label={`Open ${artifactDisplayName(item)}`} disabled={access.isPending} onClick={() => void open(item.id)} className={cn(btn, "border border-border text-foreground hover:bg-muted")}><Download className="size-4" /><span className="max-sm:hidden">Open</span></button>}
+              {canDelete && !item.deletionPending && (
+                <ActionDialog label="Delete" destructive description="This removes the file for everyone. It can't be undone."
+                  submit={async () => { const r = await remove.mutateAsync(item.id); setNotice(r.status === "DELETED" ? "Deleted." : "Deleting… this can take a moment."); }} />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ConsentTab({ conferenceId }: { conferenceId: string }) {
+  const requirements = useConsentRequirements(conferenceId, true);
+  const record = useRecordConsents(conferenceId);
+  const withdraw = useWithdrawConsent(conferenceId);
+  const [notice, setNotice] = useState("");
+  const failure = [record, withdraw].find((m) => m.isError)?.error;
+
+  return (
+    <div className="space-y-3">
+      {requirements.isError && <RequestError error={requirements.error} retry={() => void requirements.refetch()} />}
+      {failure && <RequestError error={failure} />}
+      {notice && <p role="status" className="rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground">{notice}</p>}
+      <p className="text-sm text-muted-foreground">Each choice is separate and only applies to you.</p>
+      {requirements.data?.requirements.map((item) => (
+        <div key={item.consentType} className="flex flex-wrap items-center gap-3 rounded-2xl border border-border p-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">{CONSENT_LABEL[item.consentType]}{item.required && <span className="ml-2 text-xs font-normal text-muted-foreground">Required</span>}</p>
+            <p className="text-xs text-muted-foreground">{item.active ? "In use in this session" : "Not in use right now"} · {item.decision === "ACCEPTED" ? "You agreed" : item.decision === "DECLINED" ? "You declined" : "No choice yet"}</p>
+          </div>
+          {item.decision === "ACCEPTED" ? (
+            <ActionDialog label="Withdraw" destructive description="Depending on this meeting's rules, withdrawing may stop processing or move you to the waiting room. Files already made stay."
+              submit={async () => setNotice(withdrawalText(await withdraw.mutateAsync(item.consentType)))} />
+          ) : (
+            <div className="flex gap-2">
+              {item.decision !== "DECLINED" && <button type="button" disabled={record.isPending} onClick={() => record.mutate({ consentVersion: item.consentVersion, decisions: [{ consentType: item.consentType, decision: "DECLINED" }] }, { onSuccess: () => setNotice(`${CONSENT_LABEL[item.consentType]}: declined.`) })} className={cn(btn, "border border-border text-foreground hover:bg-muted")}>Decline</button>}
+              <button type="button" disabled={record.isPending} onClick={() => record.mutate({ consentVersion: item.consentVersion, decisions: [{ consentType: item.consentType, decision: "ACCEPTED" }] }, { onSuccess: () => setNotice(`${CONSENT_LABEL[item.consentType]}: agreed.`) })} className={cn(btn, "bg-primary text-primary-foreground hover:bg-primary/90")}>Agree</button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

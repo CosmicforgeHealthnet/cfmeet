@@ -84,6 +84,40 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
+    // Roadmap N7: publications to the Notification Service (missed call, voicemail and
+    // recording ready) only with CF_NOTIFICATIONS_BASE_URL; unset, nothing is written or
+    // sent and the notification-publications history is not required.
+    let notifications_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::NOTIFICATIONS);
+    if notifications_configured
+        && !calling_migration::notification_publications_ready(&db)
+            .await
+            .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?
+    {
+        return Err(anyhow!(
+            "CF_NOTIFICATIONS_BASE_URL needs the notification-publications migration history; \
+             run `calling-migration up` first"
+        ));
+    }
+    tracing::info!(
+        notification_publications = notifications_configured,
+        "notification service publications (CF_NOTIFICATIONS_BASE_URL)"
+    );
+    // ADR 0068 A7: owner events to the HQ admin bridge only with CF_ADMIN_BRIDGE_BASE_URL;
+    // unset, nothing is written or sent (the outbox table is in the admin-operations
+    // history, which `pending_migrations` already requires).
+    let admin_bridge_events = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::ADMIN_BRIDGE);
+    calling::admin_bridge_events::set_enabled(admin_bridge_events);
+    tracing::info!(
+        admin_bridge_events,
+        "owner events to the HQ admin bridge (CF_ADMIN_BRIDGE_BASE_URL)"
+    );
+
     // Application calling (Part C §20–§25): no fallback signaling key or provider
     // credential exists; an invalid configuration stops the service before it serves.
     let lookup = |key: &str| std::env::var(key).ok();
@@ -437,6 +471,38 @@ async fn main() -> anyhow::Result<()> {
     }
     let authority: Arc<dyn IdentityAuthority> =
         Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
+    // Notification Service roadmap N9: the call fast lane. `none` (default) keeps
+    // today's behaviour (no incoming-call push is sent).
+    let push: Arc<dyn calling::signaling::PushDispatcher> =
+        match calling::signaling::PushTransportSetting::from_lookup(|k| std::env::var(k).ok()) {
+            Ok(calling::signaling::PushTransportSetting::None) => Arc::new(NoPushTransport),
+            Ok(calling::signaling::PushTransportSetting::Notifications { timeout }) => {
+                if !service_auth_settings
+                    .targets
+                    .iter()
+                    .any(|(s, _)| s.as_str() == cf_service_auth::services::NOTIFICATIONS)
+                {
+                    tracing::error!(
+                        "CALLING_PUSH_TRANSPORT=notifications needs CF_NOTIFICATIONS_BASE_URL"
+                    );
+                    std::process::exit(2);
+                }
+                tracing::info!(
+                    timeout_ms = timeout.as_millis() as u64,
+                    "incoming-call pushes of first-party recipients go to the Notification Service (I3)"
+                );
+                Arc::new(calling::signaling::NotificationsPushTransport::new(
+                    Arc::new(calling::signaling::NotificationServiceCallPush::new(
+                        service_auth.client_arc(),
+                    )),
+                    timeout,
+                ))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "push transport configuration error");
+                std::process::exit(2);
+            }
+        };
     let clock: SharedClock = Arc::new(SystemClock);
     let mut state = AppState::new(
         db,
@@ -450,9 +516,12 @@ async fn main() -> anyhow::Result<()> {
             media_gateway: media.gateway,
             credential_policy: media_settings.credential_policy,
             bus,
-            push: Arc::new(NoPushTransport),
+            push,
             app_config,
-            call_config: CallServiceConfig::default(),
+            call_config: CallServiceConfig {
+                notification_publications: notifications_configured,
+                ..CallServiceConfig::default()
+            },
             privacy_relay,
             numbering,
             contact_delegation,
@@ -484,6 +553,51 @@ async fn main() -> anyhow::Result<()> {
     state = state.with_communications(personal);
     state.communications_launch_credential = launch_credential;
     state.legacy_usage_retired = config.legacy_usage_retired;
+    // P6: direct-route platform API request accounting into the Developer Platform.
+    match calling::usage::direct::enabled_from(
+        std::env::var(calling::usage::direct::ENV_SWITCH)
+            .ok()
+            .as_deref(),
+    ) {
+        Ok(true) if developer_platform_configured => {
+            let accountant = Arc::new(calling::usage::direct::DirectUsageAccounting::new(Some(
+                state.service_auth.client_arc(),
+            )));
+            tokio::spawn(accountant.clone().run());
+            state.direct_usage = Some(accountant);
+            tracing::info!("direct-route API requests are counted into the Developer Platform");
+        }
+        Ok(true) => tracing::warn!(
+            "direct-route API request accounting needs CF_DEVELOPER_PLATFORM_BASE_URL: off"
+        ),
+        Ok(false) => tracing::info!("direct-route API request accounting is off"),
+        Err(e) => {
+            tracing::error!(error = %e, "direct usage accounting configuration error");
+            std::process::exit(2);
+        }
+    }
+    // ADR 0062: the device exchange of CF Meet user tokens (verified live with Platform
+    // Access, `platform-user-token.verify`). Off by default: the route does not exist.
+    if config.user_token_exchange_enabled {
+        let verifier = calling::platform::user_tokens::UserTokenVerifier::new(
+            Arc::new(calling::platform::user_tokens::HttpUserTokenAuthority::new(
+                state.service_auth.client_arc(),
+            )),
+            clock.clone(),
+        );
+        state = state.with_user_sessions(Some(Arc::new(verifier)));
+    }
+    tracing::info!(
+        user_token_exchange = config.user_token_exchange_enabled,
+        "CF Meet user-token device exchange (CALLING_USER_TOKEN_EXCHANGE_ENABLED)"
+    );
+    // ADR 0063: partner users' ring offers through the Notification Service (only sent
+    // by the `notifications` push transport).
+    state = state.with_partner_push(config.partner_push_enabled);
+    tracing::info!(
+        partner_push = config.partner_push_enabled,
+        "partner call push as platform-principal recipients (CALLING_PARTNER_PUSH_ENABLED)"
+    );
     state.organization_forwarding_enabled = config.organization_forwarding_enabled;
     tracing::info!(
         organization_forwarding = config.organization_forwarding_enabled,
@@ -530,6 +644,27 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Roadmap N7: the notification publication relay (SKIP LOCKED: every instance).
+    if notifications_configured {
+        let sink: Arc<dyn calling::notification_publications::NotificationEventSink> = Arc::new(
+            calling::notification_publications::NotificationServiceEvents::new(
+                state.service_auth.client_arc(),
+            ),
+        );
+        tokio::spawn(calling::notification_publications::run(
+            state.db.clone(),
+            sink,
+        ));
+    }
+
+    // ADR 0068 A7: the owner event relay to the admin bridge (SKIP LOCKED: every instance).
+    if admin_bridge_events {
+        let sink: Arc<dyn calling::admin_bridge_events::AdminBridgeEventSink> = Arc::new(
+            calling::admin_bridge_events::AdminBridgeEvents::new(state.service_auth.client_arc()),
+        );
+        tokio::spawn(calling::admin_bridge_events::run(state.db.clone(), sink));
+    }
+
     // The identity projection follows the Platform Access change feed (every instance;
     // the cursor row lock serializes pages).
     tokio::spawn(state.identity.clone().run(config.identity_sync_interval));
@@ -548,6 +683,9 @@ async fn main() -> anyhow::Result<()> {
     // Public customer API (call reads, creation, control, endpoints, signaling credentials,
     // the Privacy Relay ingress) and the internal API (Privacy Relay enforcement), which
     // like every /internal/v1/* path requires service authentication.
+    // C1: media clean-up still running after the last answer is given a moment on shutdown
+    // (reconciliation repairs whatever it does not finish).
+    let calls = state.app.clone();
     let app = routes::app(state, routes::public_api(), routes::internal_api());
     // Optional separate metrics listener (never the customer API).
     if let Some(address) = std::env::var("CALLING_METRICS_ADDRESS")
@@ -570,6 +708,12 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    if tokio::time::timeout(Duration::from_secs(10), calls.settle_background())
+        .await
+        .is_err()
+    {
+        tracing::warn!("media clean-up still running at shutdown; reconciliation finishes it");
+    }
     Ok(())
 }
 

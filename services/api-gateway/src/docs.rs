@@ -11,6 +11,14 @@
 //! at build time: only allow-listed public operations, no internal security scheme,
 //! every reference resolved offline. The engineering Swagger selector of the Meeting
 //! Service is unchanged.
+//!
+//! P11: what is SERVED is the embedded document reduced to the operations this
+//! deployment actually routes (the route table: disabled families such as numbering /
+//! SMS / privacy relay removed, WebSocket channels only with WebSockets on, nothing at
+//! all while public routing is off). A family without a routable operation is served
+//! with empty `paths` and `info.x-cfmeet-family-enabled: false`. The static contracts in
+//! `packages/contracts` are unchanged; components stay as published (unreferenced ones
+//! are harmless).
 
 use axum::{
     extract::{Path, State},
@@ -57,14 +65,14 @@ pub const DOCS: &[(&str, &str, &str)] = &[
     ("sms", "SMS", public_doc!("sms")),
     (
         "developer-platform",
-        "Developer Platform",
+        "Developer Console",
         public_doc!("developer-platform"),
     ),
     ("gateway", "Gateway", public_doc!("gateway")),
 ];
 pub const AGGREGATE: &str = public_doc!("aggregate");
 
-fn json_doc(body: &'static str) -> Response {
+fn json_doc(body: String) -> Response {
     (
         [
             (header::CONTENT_TYPE, "application/json"),
@@ -75,16 +83,91 @@ fn json_doc(body: &'static str) -> Response {
         .into_response()
 }
 
-pub async fn aggregate() -> Response {
-    json_doc(AGGREGATE)
+/// The served documents of one deployment: `(domain or "aggregate", JSON)`.
+#[derive(Debug, Clone, Default)]
+pub struct PublishedDocs {
+    docs: Vec<(&'static str, String)>,
 }
 
-pub async fn domain_doc(Path(file): Path<String>) -> Response {
+impl PublishedDocs {
+    pub fn get(&self, domain: &str) -> Option<&str> {
+        self.docs
+            .iter()
+            .find(|(d, _)| *d == domain)
+            .map(|(_, b)| b.as_str())
+    }
+}
+
+const METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
+
+/// `body` with only the `(method, path)` operations in `routable`; `None` = keep the
+/// document's own enabled marker unset (aggregate).
+pub fn reduce(
+    body: &str,
+    routable: &std::collections::HashSet<(String, String)>,
+    family: Option<bool>,
+) -> String {
+    let mut doc: Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return body.to_string(),
+    };
+    if let Some(paths) = doc.get_mut("paths").and_then(Value::as_object_mut) {
+        paths.retain(|path, item| {
+            if let Some(ops) = item.as_object_mut() {
+                ops.retain(|key, _| {
+                    !METHODS.contains(&key.as_str())
+                        || routable.contains(&(key.to_ascii_uppercase(), path.clone()))
+                });
+                ops.keys().any(|k| METHODS.contains(&k.as_str()))
+            } else {
+                false
+            }
+        });
+    }
+    if let Some(enabled) = family {
+        doc["info"]["x-cfmeet-family-enabled"] = json!(enabled);
+    }
+    serde_json::to_string(&doc).unwrap_or_else(|_| body.to_string())
+}
+
+/// Builds the served documents from the route table.
+pub fn publish(routes: &crate::routing::RouteTable) -> PublishedDocs {
+    let routable: std::collections::HashSet<(String, String)> = routes
+        .definitions()
+        .map(|r| (r.method.as_str().to_string(), r.pattern.clone()))
+        .collect();
+    let mut docs = vec![("aggregate", reduce(AGGREGATE, &routable, None))];
+    for (domain, _, body) in DOCS {
+        let enabled = routes.definitions().any(|r| r.domain == *domain);
+        docs.push((domain, reduce(body, &routable, Some(enabled))));
+    }
+    PublishedDocs { docs }
+}
+
+fn published(state: &AppState) -> &PublishedDocs {
+    state.published_docs.get_or_init(|| publish(&state.routes))
+}
+
+pub async fn aggregate(State(state): State<AppState>) -> Response {
+    json_doc(
+        published(&state)
+            .get("aggregate")
+            .unwrap_or("{}")
+            .to_string(),
+    )
+}
+
+pub async fn domain_doc(State(state): State<AppState>, Path(file): Path<String>) -> Response {
     let Some(domain) = file.strip_suffix(".json") else {
         return ApiError::Code(ErrorCode::NotFound).into_response();
     };
-    match DOCS.iter().find(|(d, _, _)| *d == domain) {
-        Some((_, _, body)) => json_doc(body),
+    match published(&state)
+        .get(domain)
+        .filter(|_| domain != "aggregate")
+    {
+        Some(body) => json_doc(body.to_string()),
         None => ApiError::Code(ErrorCode::NotFound).into_response(),
     }
 }
@@ -166,8 +249,27 @@ fn page() -> String {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CF Meet public API reference</title>
+  <title>CF Meet Platform API reference</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui.css" integrity="{css}" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    html {{ color-scheme: dark; background: #111827; }}
+    body {{ margin: 0; background: #111827; color: #e5e7eb; }}
+    select, input, textarea {{ background: #1f2937; color: #f9fafb; border: 1px solid #6b7280; }}
+    .swagger-ui, .swagger-ui .info .title, .swagger-ui .info p, .swagger-ui .info li,
+    .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-description,
+    .swagger-ui .opblock .opblock-summary-path, .swagger-ui .opblock .opblock-summary-operation-id,
+    .swagger-ui .parameter__name, .swagger-ui .parameter__type, .swagger-ui .response-col_status,
+    .swagger-ui .response-col_description, .swagger-ui table thead tr td,
+    .swagger-ui table thead tr th, .swagger-ui .markdown p, .swagger-ui .renderedMarkdown p,
+    .swagger-ui section.models h4, .swagger-ui .model-title, .swagger-ui .model,
+    .swagger-ui .tab li, .swagger-ui .response-col_links {{ color: #e5e7eb; }}
+    .swagger-ui .scheme-container, .swagger-ui .opblock .opblock-section-header,
+    .swagger-ui section.models, .swagger-ui .model-box, .swagger-ui .highlight-code {{ background: #1f2937; }}
+    .swagger-ui .opblock .opblock-summary, .swagger-ui .opblock-tag {{ border-color: #4b5563; }}
+    .swagger-ui .btn {{ color: #f9fafb; border-color: #9ca3af; }}
+    .swagger-ui svg {{ fill: #e5e7eb; }}
+    .swagger-ui .info a, .swagger-ui a.nostyle, .swagger-ui .link {{ color: #93c5fd; }}
+  </style>
 </head>
 <body>
   <div style="padding:12px 20px;font:14px sans-serif"><label for="api-family">API: </label><select id="api-family">{options}</select></div>

@@ -1588,6 +1588,11 @@ async fn main() -> ExitCode {
         }
     };
     telemetry::init_cli();
+    // ADR 0068 A7: abuse-report reviews and incident resolutions made here are owner
+    // events too (the server's relay posts them) when the deployment configures the bridge.
+    calling::admin_bridge_events::set_enabled(calling::admin_bridge_events::configured_in(|k| {
+        std::env::var(k).ok()
+    }));
 
     let mut options = ConnectOptions::new(config.database_url().to_string());
     options

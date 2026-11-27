@@ -107,7 +107,8 @@ async fn media_credentials_are_issued_only_to_authorized_sessions() {
     assert_eq!(
         r.json["capabilities"],
         json!({
-            "canPublishAudio": true, "canPublishVideo": false, "canPublishData": false, "canSubscribe": true
+            "canPublishAudio": true, "canPublishVideo": false, "canPublishData": true, "canSubscribe": true,
+            "canShareScreen": false
         })
     );
     let (granted_room, identity, generation) = a.media().grant_of(&token).unwrap();

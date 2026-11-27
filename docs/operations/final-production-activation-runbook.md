@@ -16,7 +16,7 @@ Related, authoritative for their own scope (this runbook orders them, it does no
 | # | Check | Evidence |
 |---|---|---|
 | P1 | The release commit is on `staging` and its full matrix is green (incl. Part VI certification, Unified Messaging, Enterprise calling, RTC Egress capture, backup drill). | CI run ids in the closure register |
-| P2 | Off-host backup target and age key custody chosen by the owner; a restore drill against that target passed (the CI real-schema drill `real-schema-drill.sh` proves the tooling over every service's real migrated schema; the owner target is the remaining input). | backup-and-restore.md §Owner setup, §Restore drill |
+| P2 | *Not a prerequisite of the empty-dataset first activation (owner decision 2026-11-13, ADR 0059 Amendment 1; recovery risk accepted).* For the standard cutover: off-host backup target and age key custody chosen by the owner; a restore drill against that target passed (the CI real-schema drill `real-schema-drill.sh` proves the tooling over every service's real migrated schema; the owner target is the remaining input). | backup-and-restore.md §Owner setup, §Restore drill |
 | P3 | A fresh pre-migration snapshot of **every** service database exists and was verified (checksum + isolated restore of at least the Meeting Service and Organizations databases). | snapshot manifest |
 | P4 | Production secrets present and never logged: service signing keys (one per identity), trust bundles, `JWT_SECRET` length confirmed, credential pepper, Messaging token / KT keys. | secret inventory (names only) |
 | P5 | Owner approval recorded for each *owner* step below that will be executed in this release. | approval log |
@@ -71,7 +71,9 @@ Grant `meeting-organization-events.apply` in the Meeting Service bundle; set `OR
 Follow organizations-cutover-runbook.md exactly (export → import → reconciliation → shadow with the zero-mismatch criterion → quiesce → final import → authoritative). Rehearsed across real processes in CI (`organizations_cutover_shadow_and_rollback_rehearsal`).
 
 ### 4.4 Per-organization Enterprise Calling and Messaging
-For each organization that opts in: an operator creates a service account and credential **inside that organization's own FIRST_PARTY triple** in Platform Access, then records them: `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling` and `/messaging`. Bootstrap the organization environment's Messaging policy to allow MANAGED (delegated `PUT /v1/messaging/policy`). Then set `ORGANIZATION_CALLING_SCOPE=organization` (+ `CF_MESSAGING_BASE_URL`) on Meeting and `CALLING_ORGANIZATION_FORWARDING_ENABLED=true` on Calling.
+**Automatic since ADR 0058 Amendment A2:** run `activate-organization-bindings` (grants Platform Access `platform-identity.bind-organization-services` to Organizations, sets `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true`). Every organization then receives its Calling and Messaging service account and credential inside its own triple automatically and becomes READY only after both are verified; the Meeting Service applies the organization environment's Messaging baseline (MANAGED) on first use. Then `activate-enterprise-calling`. The manual procedure below remains only as break-glass.
+
+Manual (break-glass) — for each organization that opts in: an operator creates a service account and credential **inside that organization's own FIRST_PARTY triple** in Platform Access, then records them: `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling` and `/messaging`. Bootstrap the organization environment's Messaging policy to allow MANAGED (delegated `PUT /v1/messaging/policy`). Then set `ORGANIZATION_CALLING_SCOPE=organization` (+ `CF_MESSAGING_BASE_URL`) on Meeting and `CALLING_ORGANIZATION_FORWARDING_ENABLED=true` on Calling.
 
 ## 5. Health verification
 

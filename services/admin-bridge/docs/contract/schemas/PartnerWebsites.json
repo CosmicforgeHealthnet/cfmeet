@@ -1,0 +1,53 @@
+{
+  "description": "The allowed websites (origins) of one environment of a partner workspace; empty when none were set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment_id",
+    "application_id",
+    "environment_kind",
+    "origins",
+    "revision",
+    "updated_at"
+  ],
+  "properties": {
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_kind": {
+      "enum": [
+        "SANDBOX",
+        "TEST",
+        "PRODUCTION"
+      ]
+    },
+    "origins": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 253
+      }
+    },
+    "revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  areasForDomains, callHref, chatHref, colleaguesOfOrganization, communicationsAreas, connectedContacts,
+  areasForDomains, attachmentAvailability, attachmentSizeRefusal, callHref, chatHref, colleaguesOfOrganization, communicationsAreas, connectedContacts,
   contactLabel, conversationPeopleSource, inviteTokenFromPayload, meetingJoinHref, meetingShareLine,
   normalizeCfMeetId, syncStep,
 } from "../src/lib/communications/comms-core.ts";
@@ -33,10 +33,13 @@ test("invite payloads: only the connect path's token is accepted", () => {
   assert.equal(inviteTokenFromPayload("short"), null);
 });
 
-test("CF Meet IDs are normalized and validated", () => {
-  const raw = "abcdefghijklmnopqrstuvwxyz".toUpperCase().replace(/[01890]/g, "A");
-  assert.equal(normalizeCfMeetId(` cf-${raw.toLowerCase()} `), `CF-${raw}`);
+test("CF Meet IDs are short, normalized and validated", () => {
+  assert.equal(normalizeCfMeetId(" cf-ab7k3q "), "CF-AB7K3Q");
+  assert.equal(normalizeCfMeetId("cfab7k3q"), "CF-AB7K3Q");
+  assert.equal(normalizeCfMeetId("ab7k3q"), "CF-AB7K3Q");
   assert.equal(normalizeCfMeetId("CF-123"), null);
+  assert.equal(normalizeCfMeetId("CF-AB7K3O"), null, "no look-alike letters");
+  assert.equal(normalizeCfMeetId("CF-ABCDEFGHJKLMNPQRSTUVWXYZ23"), null, "old long IDs no longer work");
 });
 
 test("Hub change-feed domains map to refetch areas; resync is never a silent ack", () => {
@@ -56,6 +59,22 @@ test("capability gating: default deny; MANAGED availability is not E2EE readines
   });
   assert.deepEqual([a.contacts, a.managedMessaging, a.privateE2ee, a.calling, a.realtime], [true, true, false, false, "SESSION_DEVICE"]);
   assert.equal(communicationsAreas({ activationState: "SUSPENDED", contacts: { available: true } }).contacts, false);
+});
+
+test("attach control follows Messaging's effective attachment policy (CF Meet chat M1)", () => {
+  const on = { messaging: { attachments: { enabled: true, reason: "AVAILABLE", maxBytes: 26214400, maxPerMessage: 10,
+    allowedKinds: ["DOCUMENT", "FILE", "IMAGE", "VIDEO", "VOICE_NOTE"], contexts: { DIRECT: true, GROUP: false } } } };
+  assert.deepEqual(attachmentAvailability(on, "DIRECT"), { enabled: true, maxBytes: 26214400, reason: "AVAILABLE" });
+  assert.equal(attachmentAvailability(on, "GROUP").enabled, false, "a context switched off disables it there");
+  const off = { messaging: { attachments: { ...on.messaging.attachments, enabled: false, reason: "DISABLED_BY_POLICY", contexts: { DIRECT: false, GROUP: false } } } };
+  assert.deepEqual(attachmentAvailability(off, "DIRECT"), { enabled: false, maxBytes: null, reason: "DISABLED_BY_POLICY" });
+  // Unknown (loading, older Hub): unchanged; Messaging still refuses what it does not accept.
+  assert.equal(attachmentAvailability(undefined, "DIRECT").enabled, true);
+  assert.equal(attachmentAvailability({ messaging: {} }, "GROUP").maxBytes, null);
+  const a = attachmentAvailability(on, "DIRECT");
+  assert.equal(attachmentSizeRefusal(26214400, a), null, "exactly 25 MB is allowed");
+  assert.equal(attachmentSizeRefusal(26214401, a), "Files can be up to 25 MB");
+  assert.equal(attachmentSizeRefusal(10 ** 9, attachmentAvailability(undefined, "DIRECT")), null);
 });
 
 test("workspace awareness: Personal offers contacts, an organization only its own colleagues", () => {

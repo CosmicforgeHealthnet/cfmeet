@@ -1,16 +1,16 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — messaging",
-    "version": "1.16.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011).",
+    "title": "CF Meet Platform API — messaging",
+    "version": "1.23.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4).",
     "x-cfmeet-source-contract": "cfmeet.messaging.http-api",
-    "x-cfmeet-source-version": "1.16.0"
+    "x-cfmeet-source-version": "1.23.0"
   },
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {
@@ -576,6 +576,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "Keyset-paginated (limit 1-100, cursor). orderBy=createdAt (default): newest first. orderBy=lastActivity: the inbox order, latest application message first (Section 13, MSG-007); a cursor is valid only with the orderBy that produced it. With CF-Acting-Principal: that principal's conversations with ACTIVE membership (messages.read), each carrying its inbox summary (last activity, last visible message preview metadata, unread and mention counts); without: the environment's conversations (conversations.manage), without summaries.",
@@ -668,7 +671,8 @@
         "x-cfmeet-route-id": "messaging.listConversations",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -685,6 +689,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "One conversation of the credential's environment; for a member principal (messages.read) or the administration (conversations.manage). Others: NOT_FOUND.",
@@ -741,7 +748,8 @@
         "x-cfmeet-route-id": "messaging.getConversation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "patch": {
@@ -756,7 +764,7 @@
           }
         ],
         "x-cfmeet-required-scope": "conversations.manage",
-        "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE).",
+        "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE). S13: announcementOnly (GROUP / CHANNEL) restricts sending, editing and forwarding to OWNER / ADMIN members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -945,6 +953,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "ACTIVE members. With an acting member (messages.read) or the administration (conversations.manage); a non-member is NOT_FOUND. Keyset-paginated in join order (limit 1-500, default 100; cursor = the previous page's nextCursor).",
@@ -1024,7 +1035,8 @@
         "x-cfmeet-route-id": "messaging.listMembers",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "post": {
@@ -1320,6 +1332,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -1418,7 +1433,8 @@
         "x-cfmeet-route-id": "messaging.listMessages",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "post": {
@@ -1433,10 +1449,13 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content.",
+        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content. S13: SEND_RESTRICTED / ANNOUNCEMENT_ONLY for a non-admin member of an announcement-only conversation. S2: PRIVATE_E2EE sends may carry frankingCommitment (verifiable reports).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1516,7 +1535,8 @@
         "x-cfmeet-route-id": "messaging.sendMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -1533,6 +1553,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -1601,7 +1624,8 @@
         "x-cfmeet-route-id": "messaging.resolveMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "patch": {
@@ -1616,6 +1640,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -1697,7 +1724,8 @@
         "x-cfmeet-route-id": "messaging.editManagedMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "delete": {
@@ -1712,6 +1740,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -1791,7 +1822,8 @@
         "x-cfmeet-route-id": "messaging.deleteMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -1896,6 +1928,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -1966,7 +2001,99 @@
         "x-cfmeet-route-id": "messaging.setReadCursor",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/inbox-settings": {
+      "put": {
+        "operationId": "setConversationInboxSettings",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "set Conversation Inbox Settings",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. F1: the acting member archives / pins this chat for itself (never visible to other members). At most three pinned chats per principal (409 CONFLICT / PIN_LIMIT_REACHED); pinning un-archives, archiving un-pins; an archived chat stays archived when new messages arrive. GET /v1/conversations returns both in each inbox summary. A non-member is 404.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ConversationInboxSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.ConversationInboxSettingsRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.setConversationInboxSettings",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -1983,6 +2110,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -2063,7 +2193,8 @@
         "x-cfmeet-route-id": "messaging.replayConversationEvents",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -2083,7 +2214,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only).",
+        "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only). A commit may carry the GroupInfo of the epoch it creates (stored and served by getMlsGroupState while current). An external commit (sender new_member_commit) is the acting principal's own ACTIVE device joining by itself, without any other member online: never with welcome or removedDeviceIds (422 EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE), never while a removal of a device still in the tree is pending (409 MLS_REKEY_REQUIRED, reason REMOVALS_PENDING_BEFORE_JOIN).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -2183,7 +2314,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read, acting member: the group's current epoch and pending removals.",
+        "description": "Scope messages.read, acting member: the group's current epoch, pending removals and the current epoch's GroupInfo (null when none was published for it), from which a member's device that is not in the tree joins by an external commit.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -3272,6 +3403,62 @@
         ]
       }
     },
+    "/v1/messaging/push/configuration": {
+      "get": {
+        "operationId": "getPushConfiguration",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "get Push Configuration",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read, a verified acting principal: the push platforms this deployment delivers to and the Web Push application-server (VAPID) public key a browser needs before pushManager.subscribe (null while Web Push is not configured). Nothing secret and nothing per user; push payloads are metadata only.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.PushConfiguration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.getPushConfiguration",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
     "/v1/conversations/{conversationId}/attachments": {
       "post": {
         "operationId": "createAttachmentIntent",
@@ -3285,6 +3472,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.write",
@@ -3368,7 +3558,8 @@
         "x-cfmeet-route-id": "messaging.createAttachmentIntent",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -3385,6 +3576,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
@@ -3453,7 +3647,8 @@
         "x-cfmeet-route-id": "messaging.getAttachment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -3470,6 +3665,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.write",
@@ -3541,7 +3739,8 @@
         "x-cfmeet-route-id": "messaging.finalizeAttachment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -3558,6 +3757,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
@@ -3626,7 +3828,8 @@
         "x-cfmeet-route-id": "messaging.grantAttachmentDownload",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -3988,6 +4191,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -4076,7 +4282,8 @@
         "x-cfmeet-route-id": "messaging.searchConversation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -4093,6 +4300,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -4165,7 +4375,8 @@
         "x-cfmeet-route-id": "messaging.searchMessages",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -4182,6 +4393,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -4252,7 +4466,8 @@
         "x-cfmeet-route-id": "messaging.createReport",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -5661,6 +5876,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -5732,7 +5950,8 @@
         "x-cfmeet-route-id": "messaging.listReactions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -5749,6 +5968,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -5831,7 +6053,8 @@
         "x-cfmeet-route-id": "messaging.addReaction",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "delete": {
@@ -5846,6 +6069,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -5928,7 +6154,8 @@
         "x-cfmeet-route-id": "messaging.removeReaction",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -6201,6 +6428,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -6264,7 +6494,8 @@
         "x-cfmeet-route-id": "messaging.getUnreadCount",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -6906,7 +7137,7 @@
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
-        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
+        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED PNG, JPEG, WebP or GIF image (S14; an animated image's first frame; videos have no poster frame) (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -7458,6 +7689,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -7521,7 +7755,8 @@
         "x-cfmeet-route-id": "messaging.acceptInvitation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -7538,6 +7773,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -7601,7 +7839,8 @@
         "x-cfmeet-route-id": "messaging.declineInvitation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
-          "CLIENT_TOKEN"
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -7676,6 +7915,752 @@
           "CLIENT_TOKEN"
         ]
       }
+    },
+    "/v1/messaging/user-sessions": {
+      "post": {
+        "operationId": "exchangeUserSession",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "exchange User Session",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0062 (build contract §4): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.UserSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.UserSessionRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.exchangeUserSession",
+        "x-cfmeet-auth": [
+          "USER_TOKEN"
+        ]
+      }
+    },
+    "/v1/messaging/user-push-registrations/{installationId}": {
+      "put": {
+        "operationId": "registerUserPush",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "register User Push",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0063 (§6 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (§6 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.UserPushRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.UserPushRegistrationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.registerUserPush",
+        "x-cfmeet-auth": [
+          "USER_TOKEN"
+        ]
+      },
+      "delete": {
+        "operationId": "unregisterUserPush",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "unregister User Push",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0063 (§6 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{8,128}$"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "APNS",
+                "APNS_VOIP",
+                "FCM"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.unregisterUserPush",
+        "x-cfmeet-auth": [
+          "USER_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/owner": {
+      "post": {
+        "operationId": "transferConversationOwnership",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "Transfer conversation ownership",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Gap audit S3: the owner (or the application acting without a principal) hands a GROUP/MANAGED conversation to another ACTIVE member that may hold an administrative role (not BOT_SERVICE or READ_ONLY); the previous owner becomes ADMIN. Members other than the owner get PRINCIPAL_NOT_AUTHORIZED (OWNER_ONLY); DIRECT conversations are fixed. An owner who leaves (DELETE .../members/{self}) hands ownership to the most senior active member (ADMIN, MODERATOR, MEMBER; earliest joined), or is refused OWNER_SUCCESSOR_REQUIRED when only non-eligible members remain. Requires conversations.manage.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration (scope conversations.manage).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ownership state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "conversationId",
+                    "ownerPrincipalId",
+                    "changed"
+                  ],
+                  "properties": {
+                    "conversationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "ownerPrincipalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalId"
+                ],
+                "properties": {
+                  "principalId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The new owner (an ACTIVE member)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.transferConversationOwnership",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/forward": {
+      "post": {
+        "operationId": "forwardMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "forward Message",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. S11: copies a MANAGED message the acting member can read (ACTIVE, in its history window, no attachments) into another MANAGED conversation it may send to, as a new message of the acting member marked forwarded. Every send rule of the TARGET applies (membership, read-only and muted members, announcement-only, blocks, personal policy, rate limits); the policy can turn forwarding off (FEATURE_DISABLED / FORWARDING_DISABLED). The source conversation and message are never disclosed; the original sender only with messages.forwardShowsOriginalSender. PRIVATE_E2EE messages are forwarded client-side (decrypt, re-send as new ciphertext): the server refuses them, and E2EE targets, with CONTENT_REJECTED / E2EE_FORWARD_CLIENT_SIDE. Idempotent per clientMessageId (200).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.ForwardMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Message"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.forwardMessage",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/invite-links": {
+      "post": {
+        "operationId": "createInviteLink",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "create Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: an expiring (60 s - 30 days, default 7 days), optionally use-capped (1-10000) join link of a GROUP / CHANNEL conversation (MEMBER or READ_ONLY). The token is returned ONLY in this response and stored as its SHA-256. At most 100 open links per conversation (CONFLICT / TOO_MANY_INVITE_LINKS).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CreateInviteLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.InviteLinkCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.createInviteLink",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "get": {
+        "operationId": "listInviteLinks",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "list Invite Links",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: the conversation's links, newest first (at most 200), never a token.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.InviteLinkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.listInviteLinks",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke": {
+      "post": {
+        "operationId": "revokeInviteLink",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "revoke Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: revokes the link for good (idempotent).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "inviteLinkId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.InviteLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.revokeInviteLink",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/messaging/invite-links/join": {
+      "post": {
+        "operationId": "joinInviteLink",
+        "tags": [
+          "Conversation Invitations"
+        ],
+        "summary": "join Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. S12: the authenticated acting principal joins a conversation with a link token (201 Member, authoritySource INVITE_LINK; 200 when already a member, no use consumed). Unknown, expired, revoked or used-up links are NOT_FOUND / INVITE_LINK_UNAVAILABLE alike; bans (PRINCIPAL_BANNED), the personal policy's group invitation rule (from the link's creator), the conversation's state and member limit apply as for any admission.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.JoinInviteLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Member"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already a member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.joinInviteLink",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN"
+        ]
+      }
     }
   },
   "components": {
@@ -7691,11 +8676,23 @@
         "scheme": "bearer",
         "description": "A CF Meet API credential, verified by Platform Access (never by Messaging)."
       },
+      "oauthAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfoa | cfob",
+        "description": "A CF Meet App's OAuth access token (`cfoa_…`, acting for the granting CF Meet user) or bot token (`cfob_…`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) — ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
+      },
       "realtimeTicket": {
         "type": "apiKey",
         "in": "header",
         "name": "Sec-WebSocket-Protocol",
         "description": "`cfmeet.messaging.v1, cfmeet.ticket.<ticket>`: the single-use ticket travels as a subprotocol entry; the server answers `cfmeet.messaging.v1` only."
+      },
+      "userToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfut",
+        "description": "A CF Meet user token (`cfut_<sbx|test|live>_<JWS>`, at most 2048 bytes) minted by the partner's server for one partner user (ADR 0062). Messaging never verifies it itself: Platform Access does, live (a positive answer is reused at most 30 s). Accepted only by the operations that list it."
       }
     },
     "responses": {
@@ -7734,7 +8731,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           }
         },
@@ -7995,6 +8992,14 @@
               },
               "pins": {
                 "type": "boolean"
+              },
+              "forwarding": {
+                "type": "boolean",
+                "description": "S11: server-side forwarding of MANAGED messages (default true)."
+              },
+              "forwardShowsOriginalSender": {
+                "type": "boolean",
+                "description": "S11: forwarded copies show their original sender (default false)."
               }
             }
           },
@@ -9293,6 +10298,11 @@
             "type": "integer",
             "minimum": 60,
             "maximum": 86400
+          },
+          "accountSessionRef": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other."
           }
         },
         "required": [
@@ -9334,6 +10344,11 @@
             "items": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          "groupInfo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "description": "base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1."
           }
         },
         "required": [
@@ -9342,7 +10357,7 @@
           "epoch",
           "commit"
         ],
-        "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all."
+        "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or removedDeviceIds, and not while a removal of a device still in the tree is pending; every member's client verifies the joining leaf against the device directory before merging it."
       },
       "messaging.common.v1.ContextClass": {
         "type": "string",
@@ -9653,6 +10668,10 @@
           },
           "inbox": {
             "$ref": "#/components/schemas/messaging.common.v1.ConversationInbox"
+          },
+          "announcementOnly": {
+            "type": "boolean",
+            "description": "S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -9791,9 +10810,78 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first)."
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
           }
         }
+      },
+      "messaging.common.v1.ConversationInboxSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "archived",
+          "pinned",
+          "pinnedAt"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary)."
+      },
+      "messaging.common.v1.ConversationInboxSettingsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "archived": {
+            "type": "boolean",
+            "description": "Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED."
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true."
       },
       "messaging.common.v1.ConversationLastMessage": {
         "type": "object",
@@ -9934,7 +11022,7 @@
           },
           "counterpartCfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           },
           "title": {
@@ -10004,6 +11092,29 @@
             }
           }
         ]
+      },
+      "messaging.common.v1.CreateInviteLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expiresInSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 2592000,
+            "description": "Default 604800 (7 days)."
+          },
+          "maxUses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "role": {
+            "enum": [
+              "MEMBER",
+              "READ_ONLY"
+            ]
+          }
+        }
       },
       "messaging.common.v1.CreateSmsBridgeRequest": {
         "description": "Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE).",
@@ -10254,6 +11365,11 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "keyPackagesAvailable": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline."
           }
         },
         "description": "A Messaging device: PUBLIC key material only (never a private key)."
@@ -10471,6 +11587,14 @@
               },
               "pins": {
                 "type": "boolean"
+              },
+              "forwarding": {
+                "type": "boolean",
+                "description": "S11: server-side forwarding of MANAGED messages (default true)."
+              },
+              "forwardShowsOriginalSender": {
+                "type": "boolean",
+                "description": "S11: forwarded copies show their original sender (default false)."
               }
             }
           },
@@ -11015,6 +12139,22 @@
           "conversationId"
         ]
       },
+      "messaging.common.v1.ForwardMessageRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "targetConversationId",
+          "clientMessageId"
+        ],
+        "properties": {
+          "targetConversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "clientMessageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
       "messaging.common.v1.HistoryTransfer": {
         "type": "object",
         "additionalProperties": false,
@@ -11234,6 +12374,208 @@
         },
         "description": "The acting principal's open (unexpired) invitations to ACTIVE conversations, newest first."
       },
+      "messaging.common.v1.InviteLink": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "S12: a group join link (never its token).",
+        "properties": {
+          "inviteLinkId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "role": {
+            "enum": [
+              "MEMBER",
+              "READ_ONLY"
+            ]
+          },
+          "maxUses": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "useCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdByPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "EXHAUSTED",
+              "REVOKED"
+            ]
+          }
+        },
+        "required": [
+          "inviteLinkId",
+          "conversationId",
+          "role",
+          "maxUses",
+          "useCount",
+          "expiresAt",
+          "createdByPrincipalId",
+          "createdAt",
+          "revokedAt",
+          "status"
+        ]
+      },
+      "messaging.common.v1.InviteLinkCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "S12: a new join link with its token, returned only here (stored as SHA-256).",
+        "properties": {
+          "inviteLinkId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "role": {
+            "enum": [
+              "MEMBER",
+              "READ_ONLY"
+            ]
+          },
+          "maxUses": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "useCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdByPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "EXHAUSTED",
+              "REVOKED"
+            ]
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^mil_[A-Za-z0-9_-]{43}$"
+          }
+        },
+        "required": [
+          "inviteLinkId",
+          "conversationId",
+          "role",
+          "maxUses",
+          "useCount",
+          "expiresAt",
+          "createdByPrincipalId",
+          "createdAt",
+          "revokedAt",
+          "status",
+          "token"
+        ]
+      },
+      "messaging.common.v1.InviteLinkList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inviteLinks"
+        ],
+        "properties": {
+          "inviteLinks": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.InviteLink"
+            }
+          }
+        }
+      },
+      "messaging.common.v1.JoinInviteLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
       "messaging.common.v1.KeyPackageClaim": {
         "type": "object",
         "additionalProperties": false,
@@ -11282,6 +12624,15 @@
             "items": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          "deviceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            },
+            "description": "Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched."
           }
         },
         "required": [
@@ -11614,9 +12965,11 @@
             "enum": [
               "API",
               "INVITATION",
-              "MEETING"
+              "MEETING",
+              "INVITE_LINK",
+              "ORGANIZATION_TEAM"
             ],
-            "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration."
+            "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7)."
           },
           "invitedByPrincipalId": {
             "oneOf": [
@@ -11864,6 +13217,18 @@
               },
               "environmentId": {
                 "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              "frankingCommitment": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "S2: the sender's franking commitment (HMAC-SHA256, see SendMessageRequest.frankingCommitment)."
               }
             },
             "required": [
@@ -11956,6 +13321,25 @@
               }
             ],
             "description": "The root of the reply thread (the first message replied to)."
+          },
+          "forwarded": {
+            "type": "boolean",
+            "description": "S11: a server-side forward (the source conversation and message are never disclosed)."
+          },
+          "forwardedFromPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender)."
+          },
+          "viaApplicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "ADR 0064: the CF Meet App (OAuth client id = application id) whose OAuth access or bot credential sent this message; absent on every other message."
           }
         },
         "required": [
@@ -12158,6 +13542,30 @@
                 "reason"
               ]
             }
+          },
+          "groupInfo": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit."
+          },
+          "groupInfoEpoch": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The epoch of groupInfo (always mlsEpoch when present)."
           }
         },
         "required": [
@@ -12245,6 +13653,17 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "moderatorPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential."
           }
         },
         "required": [
@@ -12457,7 +13876,8 @@
           "policy",
           "effective",
           "digest",
-          "platformPolicyVersion"
+          "platformPolicyVersion",
+          "deployment"
         ],
         "properties": {
           "version": {
@@ -12477,6 +13897,167 @@
           "platformPolicyVersion": {
             "type": "integer",
             "minimum": 1
+          },
+          "deployment": {
+            "description": "What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused (VALIDATION_ERROR). 1.24.0: e2eeProductionRelease is the owner's production release decision for personal E2EE (decision id, date, the ACTUAL independent-assessment status and the accepted residual risks); null outside production or while E2EE devices are disabled. It is never a certification claim.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profiles",
+              "usableProfiles",
+              "contextsWithoutUsableProfile"
+            ],
+            "properties": {
+              "profiles": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "PRIVATE_E2EE",
+                  "MANAGED"
+                ],
+                "properties": {
+                  "PRIVATE_E2EE": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "available",
+                      "reason"
+                    ],
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "oneOf": [
+                          {
+                            "enum": [
+                              "E2EE_DEVICES_DISABLED",
+                              "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "MANAGED": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "available",
+                      "reason"
+                    ],
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "oneOf": [
+                          {
+                            "enum": [
+                              "E2EE_DEVICES_DISABLED",
+                              "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "usableProfiles": {
+                "type": "object",
+                "propertyNames": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ContextClass"
+                },
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/messaging.common.v1.SecurityProfile"
+                  }
+                }
+              },
+              "contextsWithoutUsableProfile": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ContextClass"
+                }
+              },
+              "e2eeProductionRelease": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "decisionId",
+                      "decidedAt",
+                      "independentAssessment",
+                      "assessmentReference",
+                      "acceptedResidualRisks"
+                    ],
+                    "properties": {
+                      "decisionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "decidedAt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      },
+                      "independentAssessment": {
+                        "enum": [
+                          "NOT_PERFORMED",
+                          "IN_PROGRESS",
+                          "COMPLETED"
+                        ]
+                      },
+                      "assessmentReference": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "acceptedResidualRisks": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "applicationBaseline": {
+            "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document. 1.31.0: CFMEET_PLATFORM_PARTNER (ADR 0062) for EXTERNAL environments while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on: every context class allows [MANAGED, PRIVATE_E2EE] with MANAGED as the default, attachments enabled; an explicit application setting still wins.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "CFMEET_FIRST_PARTY",
+              "CFMEET_PLATFORM_PARTNER",
+              null
+            ]
           }
         }
       },
@@ -12594,6 +14175,63 @@
             }
           }
         }
+      },
+      "messaging.common.v1.PushConfiguration": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "1.25.0: the push platforms THIS deployment delivers to, and the Web Push application-server (VAPID) public key a browser passes to pushManager.subscribe. Nothing secret and nothing per user; payloads are always metadata only (conversation id and sequences; never content, ciphertext, keys or sender).",
+        "properties": {
+          "platforms": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "APNS": {
+                "type": "boolean"
+              },
+              "FCM": {
+                "type": "boolean"
+              },
+              "WEB_PUSH": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH"
+            ]
+          },
+          "webPush": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "applicationServerKey": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{87}$",
+                    "description": "base64url (no padding) uncompressed P-256 point (65 bytes)."
+                  }
+                },
+                "required": [
+                  "applicationServerKey"
+                ]
+              }
+            ],
+            "description": "null while Web Push is not configured."
+          },
+          "payload": {
+            "const": "METADATA_ONLY"
+          }
+        },
+        "required": [
+          "platforms",
+          "webPush",
+          "payload"
+        ]
       },
       "messaging.common.v1.PushRegistration": {
         "type": "object",
@@ -13051,8 +14689,21 @@
                     },
                     "verification": {
                       "enum": [
+                        "FRANKING_VERIFIED",
+                        "FRANKING_MISMATCH",
                         "REPORTER_ATTESTED_UNVERIFIABLE",
                         "NO_PLAINTEXT_AVAILABLE"
+                      ]
+                    },
+                    "frankingCommitment": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
                       ]
                     }
                   },
@@ -13228,6 +14879,11 @@
                 "text": {
                   "type": "string",
                   "maxLength": 4000
+                },
+                "frankingKey": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "description": "S2: the message's franking key the reporter's device decrypted (unpadded base64url, 32 bytes); with it the disclosure is verified against the sender's commitment."
                 }
               },
               "required": [
@@ -13235,7 +14891,7 @@
                 "text"
               ]
             },
-            "description": "PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable)."
+            "description": "PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest). Unverifiable unless the message was franked and the disclosure carries its frankingKey (S2)."
           }
         },
         "required": [
@@ -13567,7 +15223,12 @@
             "items": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             },
-            "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+            "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+          },
+          "frankingCommitment": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY)."
           }
         },
         "required": [
@@ -14182,10 +15843,17 @@
             "format": "date-time"
           },
           "retentionSeconds": {
-            "type": "integer",
-            "minimum": 60,
-            "maximum": 3153600000,
-            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit — by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
           },
           "title": {
             "oneOf": [
@@ -14211,6 +15879,10 @@
               }
             ],
             "description": "Section 13: a new avatar reference; null clears it (MANAGED only, owner)."
+          },
+          "announcementOnly": {
+            "type": "boolean",
+            "description": "S13 (owner): announcement-only on / off; GROUP and CHANNEL only."
           }
         },
         "description": "Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE)."
@@ -14295,6 +15967,111 @@
           "pricing"
         ],
         "description": "Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost."
+      },
+      "messaging.common.v1.UserPushRegistration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "installationId",
+          "platform",
+          "status"
+        ],
+        "description": "ADR 0063: a partner push registration as the Notification Service accepted it (never the handle).",
+        "properties": {
+          "installationId": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._-]{8,128}$",
+            "description": "Stable per app installation, generated by the SDK."
+          },
+          "platform": {
+            "enum": [
+              "APNS",
+              "APNS_VOIP",
+              "FCM"
+            ]
+          },
+          "status": {
+            "const": "ACTIVE"
+          }
+        }
+      },
+      "messaging.common.v1.UserPushRegistrationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "platform",
+          "handle"
+        ],
+        "description": "ADR 0063: a partner device's push handle (an APNs / APNs VoIP device token or an FCM registration token). Synchronised to the Notification Service; Messaging never stores, echoes or logs it.",
+        "properties": {
+          "platform": {
+            "enum": [
+              "APNS",
+              "APNS_VOIP",
+              "FCM"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "messaging.common.v1.UserSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principalId",
+          "sessionDeviceId",
+          "sessionDeviceExpiresAt",
+          "clientToken",
+          "clientTokenExpiresAt"
+        ],
+        "description": "ADR 0062: a MANAGED-only partner session device and a short-lived client token bound to it (scopes: the user token's effective msg grants; read -> messages.read / attachments.read, send -> messages.send / attachments.write). Present it as `Authorization: CF-Client-Token <clientToken>` to POST /v1/realtime/tickets and to the partner REST allowlist; renew through this exchange.",
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sessionDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sessionDeviceExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clientToken": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "clientTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "messaging.common.v1.UserSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "installationId"
+        ],
+        "description": "ADR 0062: the body of POST /v1/messaging/user-sessions (Authorization: Bearer cfut_...).",
+        "properties": {
+          "installationId": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._-]{8,128}$",
+            "description": "Stable per app installation, generated by the SDK."
+          },
+          "sessionDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "Renew this ACTIVE partner session device of the same principal and installation (NOT_FOUND otherwise)."
+          }
+        }
       },
       "messaging.common.v1.WelcomeConsumed": {
         "type": "object",

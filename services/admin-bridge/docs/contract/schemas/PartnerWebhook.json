@@ -1,0 +1,95 @@
+{
+  "description": "One live webhook subscription: the endpoint HOST only (never the URL path or query, the signing material or the description).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscription_id",
+    "project_id",
+    "environment_id",
+    "environment_kind",
+    "endpoint_host",
+    "event_types",
+    "status",
+    "consecutive_failures",
+    "last_success_at",
+    "last_failure_at",
+    "disabled_reason",
+    "origin",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "subscription_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "endpoint_host": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9.-]{1,253}$"
+    },
+    "event_types": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+      }
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "consecutive_failures": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_success_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_failure_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "disabled_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "origin": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

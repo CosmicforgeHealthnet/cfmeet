@@ -2,6 +2,7 @@
 !packages/service-auth
 !packages/migration-guard
 !packages/communications-policy
+!packages/notification-client
 !services/communications
 **/target
 **/.env

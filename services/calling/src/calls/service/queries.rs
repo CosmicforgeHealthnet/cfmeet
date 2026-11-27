@@ -64,6 +64,12 @@ pub struct CallDetail {
     pub connected_duration_ms: Option<i64>,
     /// Instant open intervals were measured up to.
     pub as_of: DateTime<Utc>,
+    /// C6: the Call's current presenter (participant, since when), if any.
+    pub screen_share: Option<(uuid::Uuid, DateTime<Utc>)>,
+    /// C4: the Call's effective host participant (none once nobody is active).
+    pub host: Option<uuid::Uuid>,
+    /// C4: participants the host muted.
+    pub host_muted: Vec<uuid::Uuid>,
 }
 
 /// Bounded list filters. Scope always comes from the caller, never from here.
@@ -161,6 +167,9 @@ impl CallService {
             })
             .collect();
         let connected_duration_ms = call.timestamps.connected_at.map(|c| millis(as_of - c));
+        let screen_share = self.presenter_in(&self.db, call_id.as_uuid()).await?;
+        let host = super::effective_host_in(&self.db, call_id.as_uuid()).await?;
+        let host_muted = super::host_muted_in(&self.db, call_id.as_uuid()).await?;
         Ok(CallDetail {
             call,
             participants,
@@ -169,6 +178,9 @@ impl CallService {
             transfers,
             connected_duration_ms,
             as_of,
+            screen_share,
+            host,
+            host_muted,
         })
     }
 

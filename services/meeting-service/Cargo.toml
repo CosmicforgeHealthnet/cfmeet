@@ -55,6 +55,8 @@ livekit-protocol = "0.7"
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
 deadpool-redis = "0.15"
 sha2 = "0.10"
+# Multi-device policy: device-key proofs of possession (already locked through cf-service-auth).
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 # Part G: S3-compatible SigV4 signing + integrity digests (artefact storage)
 hmac = "0.12"
 md-5 = "0.10"
@@ -63,10 +65,21 @@ url = "2"
 # Part V H: signed internal service calls to Platform Access and Messaging (no service
 # credential ever reaches a browser or mobile client).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Notification Service producer client (roadmap N7/N11): builds, seals and validates the
+# cfmeet.notifications.event envelopes of Meeting's publications. Never the `open` feature
+# (producers seal, never open).
+cf-notification-client = { path = "../../packages/notification-client" }
+# Notification Service N12: the Account fallback key seals each CRITICAL message's legacy
+# email (XChaCha20-Poly1305; `aes-gcm` is reserved to the Contact Vault by the service
+# boundary guard) so the retained Meeting email path can send the same code when the
+# service cannot (Document 4 §9.8, §10.4). Already locked (openmls).
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
+zeroize = { version = "1.8", features = ["derive"] }
 # Part VI §55: unified usage facts (participant minutes, recordings, artefact storage).
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 # Blueprint Section 16 (SEC-019): the one shared S3 SigV4 signer (artefact storage).
 cf-object-storage = { path = "../../packages/object-storage" }
+sha1 = "0.10"
 
 [[bin]]
 name = "test_email"

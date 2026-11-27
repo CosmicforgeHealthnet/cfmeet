@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.4.0",
-    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging."
+    "version": "1.11.0",
+    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer). 1.8.0 (ADR 0064, CF Meet Apps; ORGANIZATIONS_APP_INSTALLS_ENABLED, default off): the policy section apps {installTier ADMINS | MEMBERS (default ADMINS), allowList [appId] | null (default null), userInstallsAllowed (default true)} (refused while the flag is off) and POST /internal/v1/organizations/{id}/app-install-check (organization-apps.evaluate, Meeting Service only): may this account install this app for the whole organization; off: 404 like any unknown route. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller (403 ACTOR_NOT_ALLOWED); the admin bridge's operator reads GET /internal/v1/operator/organizations/{id} and its /members, /teams and /policies and GET /internal/v1/operator/audit-events (cross-organization, newest first, window at most 31 days), each requiring organization.operator-read and X-CF-Operator. 1.10.0 (ADR 0068 phase A4, admin bridge commands): with organization.administer and verified X-CF-Operator attribution (cfmeet.admin-bridge only), the bridge runs operator commands under its own contract: Idempotency-Key (a UUID) required; expectedVersion where the subject is versioned (the change happens only at that version, else 409 VERSION_CONFLICT); R3 commands require X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest (403 APPROVAL_REQUIRED); the applied command is recorded in organization_admin_operations in the same transaction and read back with GET /internal/v1/operator/operations/{idempotencyKey}; a repeated key answers the current state without applying again (another command or subject: 409 IDEMPOTENCY_CONFLICT); the answer is BridgeCommandResult {status, version (string or null), resource}. Shared routes (organization create, suspend / reactivate / archive, owner recovery, provisioning retry, event replay) keep their answers for every other caller; the staff changes POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change, .../teams/{teamId}/change, .../policies/change and .../scopes/primary/service-bindings/{service}/change are the bridge's alone. New error code APPROVAL_REQUIRED. 1.11.0 (ADR 0068 phase A4, owner-delivered exports): the admin bridge's R4 POST /internal/v1/admin/organizations/{id}/exports (adminRequestOrganizationExport: Idempotency-Key, two-person approval, recorded; HQ gets a reference only — exportId, state, delivery OWNER_DELIVERED, deliveryChannel DOWNLOAD_LINK_EMAIL, deliveryRef, recipientMasked null, expiresAt, sizeBytes, sha256); the export is kept encrypted for 7 days and delivered to the organization's ACTIVE OWNERs as single-use links by email through the Notification Service; the owner's POST /internal/v1/organizations/{id}/exports/{exportId}/download; the bridge's reads GET /internal/v1/operator/organizations/{id}/exports and .../exports/{exportId}; the operator export GET /internal/v1/admin/organizations/{id}/export refused to the admin bridge. New error codes EXPORT_DELIVERY_UNAVAILABLE, EXPORT_NO_RECIPIENT, EXPORT_LINK_INVALID, EXPORT_LINK_EXPIRED."
   },
   "tags": [
     {
@@ -964,7 +964,7 @@
       "get": {
         "operationId": "listInvitations",
         "summary": "List invitations",
-        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED.",
+        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED. Newest first, paged: limit 1-200 (default 50 when paging, 200 when neither limit nor cursor is given) and nextCursor while more remain. status is the effective status (a PENDING invitation past its expiry counts as EXPIRED).",
         "tags": [
           "Invitations"
         ],
@@ -996,6 +996,19 @@
               ]
             },
             "description": "Status filter."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's nextCursor (opaque).",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
           }
         ],
         "responses": {
@@ -1400,7 +1413,7 @@
       "post": {
         "operationId": "suspendOrganization",
         "summary": "Suspend an organization",
-        "description": "ACTIVE to SUSPENDED (idempotent). By an OWNER (organization.write + acting user; reason OWNER_REQUEST) or by an operator holding organization.administer without an acting user (reason OPERATOR_ACTION). A suspended organization grants nothing but organization.read to its OWNERs. Emits organization.suspended.",
+        "description": "ACTIVE to SUSPENDED (idempotent). By an OWNER (organization.write + acting user; reason OWNER_REQUEST) or by an operator holding organization.administer without an acting user (reason OPERATOR_ACTION). A suspended organization grants nothing but organization.read to its OWNERs. Emits organization.suspended. Admin bridge (R3): Idempotency-Key and the approval headers required, expectedVersion (the organization's version) required; answers BridgeCommandResult (status ACTIVE / SUSPENDED / ARCHIVED, the organization's version); recorded in organization_admin_operations.",
         "tags": [
           "Lifecycle"
         ],
@@ -1419,6 +1432,21 @@
           },
           {
             "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
           }
         ],
         "requestBody": {
@@ -1433,11 +1461,18 @@
         },
         "responses": {
           "200": {
-            "description": "The organization.",
+            "description": "The organization. The admin bridge gets BridgeCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Organization"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Organization"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -1463,7 +1498,7 @@
             }
           },
           "403": {
-            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, MEMBERSHIP_REQUIRED or APPROVAL_REQUIRED (an admin bridge R3 command without X-CF-Approver).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1509,7 +1544,7 @@
       "post": {
         "operationId": "reactivateOrganization",
         "summary": "Reactivate an organization",
-        "description": "SUSPENDED to ACTIVE (idempotent). OWNERs may lift only a suspension they requested; an operator or import suspension is lifted by an operator (organization.administer, no acting user). Emits organization.reactivated.",
+        "description": "SUSPENDED to ACTIVE (idempotent). OWNERs may lift only a suspension they requested; an operator or import suspension is lifted by an operator (organization.administer, no acting user). Emits organization.reactivated. Admin bridge (R3): Idempotency-Key and the approval headers required, expectedVersion (the organization's version) required; answers BridgeCommandResult (status ACTIVE / SUSPENDED / ARCHIVED, the organization's version); recorded in organization_admin_operations.",
         "tags": [
           "Lifecycle"
         ],
@@ -1528,6 +1563,21 @@
           },
           {
             "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
           }
         ],
         "requestBody": {
@@ -1542,11 +1592,18 @@
         },
         "responses": {
           "200": {
-            "description": "The organization.",
+            "description": "The organization. The admin bridge gets BridgeCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Organization"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Organization"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -1572,7 +1629,7 @@
             }
           },
           "403": {
-            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, MEMBERSHIP_REQUIRED or APPROVAL_REQUIRED (an admin bridge R3 command without X-CF-Approver).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1618,7 +1675,7 @@
       "post": {
         "operationId": "archiveOrganization",
         "summary": "Archive an organization",
-        "description": "To ARCHIVED (terminal; idempotent). By an OWNER of an ACTIVE (or owner-suspended) organization, or by an operator. Emits organization.archived.",
+        "description": "To ARCHIVED (terminal; idempotent). By an OWNER of an ACTIVE (or owner-suspended) organization, or by an operator. Emits organization.archived. Admin bridge (R3): Idempotency-Key and the approval headers required, expectedVersion (the organization's version) required; answers BridgeCommandResult (status ACTIVE / SUSPENDED / ARCHIVED, the organization's version); recorded in organization_admin_operations.",
         "tags": [
           "Lifecycle"
         ],
@@ -1637,6 +1694,21 @@
           },
           {
             "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
           }
         ],
         "requestBody": {
@@ -1651,11 +1723,18 @@
         },
         "responses": {
           "200": {
-            "description": "The organization.",
+            "description": "The organization. The admin bridge gets BridgeCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Organization"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Organization"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -1681,7 +1760,7 @@
             }
           },
           "403": {
-            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, MEMBERSHIP_REQUIRED or APPROVAL_REQUIRED (an admin bridge R3 command without X-CF-Approver).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1727,7 +1806,7 @@
       "get": {
         "operationId": "listAuditEvents",
         "summary": "List audit events",
-        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token.",
+        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token. Filters: action, actorUserId, from, to. OWNERs and ADMINs keep organization.audit.read while the organization is SUSPENDED or ARCHIVED.",
         "tags": [
           "Organizations"
         ],
@@ -1755,6 +1834,45 @@
               "type": "integer"
             },
             "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -2120,6 +2238,17 @@
               ]
             },
             "description": "Lifecycle status filter."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Gap audit G10: case-insensitive substring of the organization name or slug (1-100 characters; LIKE wildcards match literally).",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
         ],
         "responses": {
@@ -2178,7 +2307,7 @@
       "post": {
         "operationId": "adminCreateOrganization",
         "summary": "Create an organization (operator)",
-        "description": "creationSource PLATFORM_ADMIN with an optional first OWNER (joinedVia OPERATOR). A platform administrator relayed by the Meeting Service facade (X-CF-Acting-User) is recorded as createdBy and as the audit actor (kind OPERATOR).",
+        "description": "creationSource PLATFORM_ADMIN with an optional first OWNER (joinedVia OPERATOR). A platform administrator relayed by the Meeting Service facade (X-CF-Acting-User) is recorded as createdBy and as the audit actor (kind OPERATOR). Admin bridge (R2): Idempotency-Key (a UUID) required, no expectedVersion (a new organization); answers 200 BridgeCommandResult (status ACTIVE, version 1; resource.organizationId) and a repeated key answers the organization it created; createdBy is null.",
         "tags": [
           "Operator administration"
         ],
@@ -2194,6 +2323,9 @@
           },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
           }
         ],
         "requestBody": {
@@ -2263,6 +2395,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The admin bridge's answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
                 }
               }
             }
@@ -4068,7 +4210,7 @@
       "post": {
         "operationId": "retryProvisioning",
         "summary": "Retry a failed provisioning",
-        "description": "Operator retry: a FAILED (or CANCELLED) workflow becomes PENDING with attempts reset and is due now; a failed mapping keeps its ids so the retry must confirm the same triple. READY and in-flight workflows are left unchanged (idempotent). ARCHIVED organizations: 409 ORGANIZATION_ARCHIVED. Audited (provisioning.retry_requested).",
+        "description": "Operator retry: a FAILED (or CANCELLED) workflow becomes PENDING with attempts reset and is due now; a failed mapping keeps its ids so the retry must confirm the same triple. READY and in-flight workflows are left unchanged (idempotent). ARCHIVED organizations: 409 ORGANIZATION_ARCHIVED. Audited (provisioning.retry_requested). Admin bridge (R2): Idempotency-Key required, body {} (no version); answers BridgeCommandResult (status: the provisioningState, version null).",
         "tags": [
           "Operator administration"
         ],
@@ -4084,15 +4226,28 @@
           },
           {
             "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
           }
         ],
         "responses": {
           "200": {
-            "description": "The provisioning state.",
+            "description": "The provisioning state. The admin bridge gets BridgeCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Provisioning"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Provisioning"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -4157,6 +4312,16 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeEmptyRequest"
+              }
+            }
+          }
         }
       }
     },
@@ -4164,7 +4329,7 @@
       "get": {
         "operationId": "getCallingServiceBinding",
         "summary": "Read the Calling service binding",
-        "description": "The Platform Access service account and credential (ids only) an operator recorded for Enterprise Calling inside the organization's own FIRST_PARTY triple. 404 ORGANIZATION_NOT_FOUND for an unknown organization, 404 NOT_FOUND when no binding is recorded.",
+        "description": "The Platform Access service account and credential (ids only) an operator recorded for Enterprise Calling inside the organization's own FIRST_PARTY triple. 404 ORGANIZATION_NOT_FOUND for an unknown organization, 404 NOT_FOUND when no binding is recorded. The binding is created automatically by the provisioning saga when automatic service bindings are enabled (source AUTOMATIC) or recorded by an operator (source OPERATOR).",
         "tags": [
           "Operator administration"
         ],
@@ -4248,7 +4413,7 @@
       "put": {
         "operationId": "setCallingServiceBinding",
         "summary": "Record the Calling service binding",
-        "description": "Create or replace the binding. Organizations stores identifiers only (never a credential value) and does not verify them: Platform Access re-verifies the credential against the organization's triple on every forwarded request, so a wrong binding can only refuse. Repeating the recorded ids is a no-op (same version, nothing audited); expectedVersion (0 = none yet) guards replacement (409 VERSION_CONFLICT). Refused while the organization has no recorded triple (409 PROVISIONING_PENDING) and for ARCHIVED organizations (409 ORGANIZATION_ARCHIVED). A relayed acting user is recorded as boundBy. Audited (scope.service_binding_set).",
+        "description": "Create or replace the binding. Organizations stores identifiers only (never a credential value) and does not verify them: Platform Access re-verifies the credential against the organization's triple on every forwarded request, so a wrong binding can only refuse. Repeating the recorded ids is a no-op (same version, nothing audited); expectedVersion (0 = none yet) guards replacement (409 VERSION_CONFLICT). Refused while the organization has no recorded triple (409 PROVISIONING_PENDING) and for ARCHIVED organizations (409 ORGANIZATION_ARCHIVED). A relayed acting user is recorded as boundBy. Audited (scope.service_binding_set). Records an OPERATOR binding (break-glass), which automation never replaces; refused with 409 VERSION_CONFLICT while the revocation of a previous automatic binding is still being applied.",
         "tags": [
           "Operator administration"
         ],
@@ -4352,7 +4517,7 @@
       "delete": {
         "operationId": "clearCallingServiceBinding",
         "summary": "Clear the Calling service binding",
-        "description": "Remove the binding (idempotent; also allowed for ARCHIVED organizations because removal only narrows). Organization calling forwarding stops at once (resolveScope answers serviceBindings.calling = null). Audited (scope.service_binding_cleared) when a binding was removed.",
+        "description": "Remove the binding (idempotent; also allowed for ARCHIVED organizations because removal only narrows). Organization calling forwarding stops at once (resolveScope answers serviceBindings.calling = null). Audited (scope.service_binding_cleared) when a binding was removed. For an AUTOMATIC binding the credential and service account are revoked at Platform Access (retried until applied, audited scope.service_binding_revoked / scope.service_binding_revocation_applied) and automation does not recreate it.",
         "tags": [
           "Operator administration"
         ],
@@ -4434,11 +4599,107 @@
         }
       }
     },
+    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling/rotate": {
+      "post": {
+        "operationId": "rotateCallingServiceBinding",
+        "summary": "Rotate the automatic Calling binding credential",
+        "description": "Operator credential rotation of an AUTOMATIC Calling binding: Platform Access issues a successor credential for the same service account and revokes the predecessor; Organizations verifies the answer server-side and records the new credential id (version + 1). Audited (scope.service_binding_rotated). 404 NOT_FOUND when no binding is recorded, 400 VALIDATION_ERROR for an OPERATOR binding (replace it with PUT), 409 ORGANIZATION_ARCHIVED, 503 SERVICE_UNAVAILABLE while automatic bindings are not enabled or Platform Access is unavailable.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The binding with the new credential id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (unknown organization) or NOT_FOUND (no binding recorded).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED or PROVISIONING_PENDING.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/messaging": {
       "get": {
         "operationId": "getMessagingServiceBinding",
         "summary": "Read the Messaging service binding",
-        "description": "The Platform Access service account and credential (ids only) an operator recorded for organization-scope Messaging (the Meeting relay) inside the organization's own FIRST_PARTY triple. 404 ORGANIZATION_NOT_FOUND for an unknown organization, 404 NOT_FOUND when no binding is recorded.",
+        "description": "The Platform Access service account and credential (ids only) an operator recorded for organization-scope Messaging (the Meeting relay) inside the organization's own FIRST_PARTY triple. 404 ORGANIZATION_NOT_FOUND for an unknown organization, 404 NOT_FOUND when no binding is recorded. The binding is created automatically by the provisioning saga when automatic service bindings are enabled (source AUTOMATIC) or recorded by an operator (source OPERATOR).",
         "tags": [
           "Operator administration"
         ],
@@ -4522,7 +4783,7 @@
       "put": {
         "operationId": "setMessagingServiceBinding",
         "summary": "Record the Messaging service binding",
-        "description": "Create or replace the binding. Organizations stores identifiers only (never a credential value) and does not verify them: Platform Access re-verifies the credential against the organization's triple on every forwarded request, so a wrong binding can only refuse. Repeating the recorded ids is a no-op (same version, nothing audited); expectedVersion (0 = none yet) guards replacement (409 VERSION_CONFLICT). Refused while the organization has no recorded triple (409 PROVISIONING_PENDING) and for ARCHIVED organizations (409 ORGANIZATION_ARCHIVED). A relayed acting user is recorded as boundBy. Audited (scope.service_binding_set).",
+        "description": "Create or replace the binding. Organizations stores identifiers only (never a credential value) and does not verify them: Platform Access re-verifies the credential against the organization's triple on every forwarded request, so a wrong binding can only refuse. Repeating the recorded ids is a no-op (same version, nothing audited); expectedVersion (0 = none yet) guards replacement (409 VERSION_CONFLICT). Refused while the organization has no recorded triple (409 PROVISIONING_PENDING) and for ARCHIVED organizations (409 ORGANIZATION_ARCHIVED). A relayed acting user is recorded as boundBy. Audited (scope.service_binding_set). Records an OPERATOR binding (break-glass), which automation never replaces; refused with 409 VERSION_CONFLICT while the revocation of a previous automatic binding is still being applied.",
         "tags": [
           "Operator administration"
         ],
@@ -4626,7 +4887,7 @@
       "delete": {
         "operationId": "clearMessagingServiceBinding",
         "summary": "Clear the Messaging service binding",
-        "description": "Remove the binding (idempotent; also allowed for ARCHIVED organizations because removal only narrows). Organization calling forwarding stops at once (resolveScope answers serviceBindings.calling = null). Audited (scope.service_binding_cleared) when a binding was removed.",
+        "description": "Remove the binding (idempotent; also allowed for ARCHIVED organizations because removal only narrows). Organization calling forwarding stops at once (resolveScope answers serviceBindings.calling = null). Audited (scope.service_binding_cleared) when a binding was removed. For an AUTOMATIC binding the credential and service account are revoked at Platform Access (retried until applied, audited scope.service_binding_revoked / scope.service_binding_revocation_applied) and automation does not recreate it.",
         "tags": [
           "Operator administration"
         ],
@@ -4687,6 +4948,102 @@
           },
           "404": {
             "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/messaging/rotate": {
+      "post": {
+        "operationId": "rotateMessagingServiceBinding",
+        "summary": "Rotate the automatic Messaging binding credential",
+        "description": "Operator credential rotation of an AUTOMATIC Messaging binding: Platform Access issues a successor credential for the same service account and revokes the predecessor; Organizations verifies the answer server-side and records the new credential id (version + 1). Audited (scope.service_binding_rotated). 404 NOT_FOUND when no binding is recorded, 400 VALIDATION_ERROR for an OPERATOR binding (replace it with PUT), 409 ORGANIZATION_ARCHIVED, 503 SERVICE_UNAVAILABLE while automatic bindings are not enabled or Platform Access is unavailable.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The binding with the new credential id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (unknown organization) or NOT_FOUND (no binding recorded).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED or PROVISIONING_PENDING.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4770,7 +5127,7 @@
       "post": {
         "operationId": "replayDeadLetteredEvents",
         "summary": "Replay dead-lettered organization events",
-        "description": "Returns dead-lettered events (all, one consumer's, or the listed events) to PENDING with a fresh attempt budget; delivery resumes in aggregate-version order. Audited (event_delivery.replayed).",
+        "description": "Returns dead-lettered events (all, one consumer's, or the listed events) to PENDING with a fresh attempt budget; delivery resumes in aggregate-version order. Audited (event_delivery.replayed). Admin bridge (R2): Idempotency-Key required (no version); answers BridgeCommandResult (status REPLAYED, version null; resource destination, requestedEventCount, replayedCount — null when a repeated key answers without replaying again).",
         "tags": [
           "Operator administration"
         ],
@@ -4792,11 +5149,18 @@
         },
         "responses": {
           "200": {
-            "description": "The number of events returned to PENDING.",
+            "description": "The number of events returned to PENDING. The admin bridge gets BridgeCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EventDeliveryReplay"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/EventDeliveryReplay"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -4823,6 +5187,2325 @@
           },
           "403": {
             "description": "INTERNAL_PERMISSION_DENIED (organization.administer required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
+          }
+        ]
+      }
+    },
+    "/internal/v1/organization-invitations/{invitationId}/accept": {
+      "post": {
+        "operationId": "acceptInvitationById",
+        "summary": "Accept an invitation addressed to the acting user",
+        "description": "In-product answer without the emailed token. The invitation must be addressed to the acting user: its recorded invitee account (`inviteeUserId`, set when the caller resolved the account at creation) or X-CF-Acting-User-Verified-Email equal to the invited email; anyone else gets 404 INVITATION_INVALID exactly as for an unknown id. An invitation whose inviter is no longer an ACTIVE member allowed to invite at its role is recorded REVOKED and answers 404 INVITATION_INVALID. Expiry, lifecycle and guest-policy rules are those of acceptInvitation.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InvitationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Empty object (or no body)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The acting user's membership.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-invitations/{invitationId}/decline": {
+      "post": {
+        "operationId": "declineInvitationById",
+        "summary": "Decline an invitation addressed to the acting user",
+        "description": "As acceptInvitationById, declining. Anyone the invitation is not addressed to gets 404 INVITATION_INVALID.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InvitationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Empty object (or no body)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The declined invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-invitations/mine": {
+      "get": {
+        "operationId": "listMyInvitations",
+        "summary": "The acting user's pending invitations",
+        "description": "PENDING, unexpired invitations to ACTIVE organizations addressed to the acting user: recorded for their account (`inviteeUserId`) or sent to X-CF-Acting-User-Verified-Email. Newest first, at most 100. Each item adds `organization` {id, name, slug}. Never another person's data.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's pending invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/owners": {
+      "post": {
+        "operationId": "adminAppointOwner",
+        "summary": "Appoint an organization owner (operator recovery)",
+        "description": "Operator recovery of an organization that lost its owner (for example the only owner's account was deactivated): makes userId an ACTIVE OWNER. An existing membership is promoted and re-activated; otherwise one is created (joinedVia OPERATOR). The reason is recorded in the audit event membership.owner_appointed. Archived organizations are refused (409 ORGANIZATION_ARCHIVED). Idempotent for an ACTIVE OWNER. Admin bridge (R3): Idempotency-Key, the approval headers and expectedVersion (the user's current membership version, 0 for none) required; answers BridgeCommandResult (the OWNER membership: status ACTIVE and its version; subject recorded: the organization).",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/OperatorOptional"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointOwnerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The appointed OWNER membership. The admin bridge gets BridgeCommandResult.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Membership"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BridgeCommandResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, MEMBERSHIP_REQUIRED or APPROVAL_REQUIRED (an admin bridge R3 command without X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/audit-events": {
+      "get": {
+        "operationId": "adminListAuditEvents",
+        "summary": "An organization's audit history (operator)",
+        "description": "The operator read of an organization's audit history in any lifecycle state, with the filters and paging of listAuditEvents. Requires organization.administer; no acting user.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of audit events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/export": {
+      "get": {
+        "operationId": "exportOrganization",
+        "summary": "Export an organization",
+        "description": "Gap audit G11: everything the Organizations Service holds about the organization as one JSON document (organization, profile, policies, memberships and their history, teams and team memberships, invitations without their token, the newest 10000 audit events). People appear by user id only. Requires organization.lifecycle.manage (OWNER) for the acting user; recorded as organization.exported.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/export": {
+      "get": {
+        "operationId": "adminExportOrganization",
+        "summary": "Export an organization (operator)",
+        "description": "Gap audit G11: the operator's export of an organization in any lifecycle state, archived included (organization.administer). Same document as exportOrganization; recorded as organization.exported. Never for the admin bridge (403 ACTOR_NOT_ALLOWED): HQ never receives exported personal data; the bridge uses adminRequestOrganizationExport (owner-delivered).",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, or ACTOR_NOT_ALLOWED (the admin bridge, or attribution malformed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/app-install-check": {
+      "post": {
+        "operationId": "checkAppInstall",
+        "summary": "Organization app install policy check",
+        "description": "ADR 0064: may accountId install appId for the whole organization (an ORGANIZATION grant)? Decided under the organization policy apps section: membership (ACTIVE), organization ACTIVE and provisioning READY, role at least apps.installTier, appId on apps.allowList when set. Asked by the Meeting Service before it relays an organization install to Platform Access. Only while ORGANIZATIONS_APP_INSTALLS_ENABLED (otherwise 404 NOT_FOUND). An acting user, when relayed, must be accountId.",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization-apps.evaluate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInstallCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstallCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED or PERMISSION_DENIED (a relayed acting user other than accountId).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (app installs are disabled).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}": {
+      "get": {
+        "operationId": "operatorGetOrganization",
+        "summary": "Get organization (admin bridge)",
+        "description": "The admin bridge's read of one organization: the same object as an item of adminListOrganizations (no viewer, no acting user). Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/members": {
+      "get": {
+        "operationId": "operatorListMembers",
+        "summary": "List members (admin bridge)",
+        "description": "The admin bridge's read of an organization's non-removed memberships in id order (keyset cursor), the same rows as the service read of listMembers. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator; no acting user.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of memberships.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/teams": {
+      "get": {
+        "operationId": "operatorListTeams",
+        "summary": "List teams (admin bridge)",
+        "description": "The admin bridge's read of an organization's teams in id order with active member counts (status ACTIVE by default, or ARCHIVED), the same rows as the service read of listTeams. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/TeamStatus"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of teams.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/policies": {
+      "get": {
+        "operationId": "operatorGetPolicies",
+        "summary": "Get policies (admin bridge)",
+        "description": "The admin bridge's read of an organization's stored policy document, the same document as the service read of getPolicies. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's policies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/audit-events": {
+      "get": {
+        "operationId": "operatorListAuditEvents",
+        "summary": "Audit history of every organization (admin bridge)",
+        "description": "The admin bridge's read of the audit history of every organization, newest first (seq order). since / until bound occurredAt; when both are given the window is at most 31 days. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Return events with seq below this cursor (nextCursor of the previous page).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound of occurredAt (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound of occurredAt (RFC 3339); after since, at most 31 days later.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of audit events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/members/{membershipId}/change": {
+      "post": {
+        "operationId": "adminChangeMember",
+        "summary": "Change a membership (admin bridge)",
+        "description": "The admin bridge's staff change of a membership (R3, two people; cfmeet.admin-bridge only): any role or status at the membership's version; REMOVED ends the membership and its team memberships; the last active OWNER is kept (409 LAST_OWNER); a removed membership is not found; an archived organization is refused. Same history, events and audit (membership.updated, actor OPERATOR) as an owner's change. Answers status ACTIVE / SUSPENDED / REMOVED with the membership's version.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/MembershipId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminMemberChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a missing or invalid expectedVersion, an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for an unknown or removed membership).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT, LAST_OWNER, ORGANIZATION_ARCHIVED or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/teams/{teamId}/change": {
+      "post": {
+        "operationId": "adminChangeTeam",
+        "summary": "Change a team (admin bridge)",
+        "description": "The admin bridge's staff change of a team (R3, two people; cfmeet.admin-bridge only), at the team's version: rename / describe an ACTIVE team, or archive it (status ARCHIVED: idempotent, refused while ACTIVE child teams exist, every team membership ends). An archived organization is refused. Same events and audit as an owner's change (actor OPERATOR). Answers status ACTIVE / ARCHIVED with the team's version.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTeamChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a missing or invalid expectedVersion, an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, ORGANIZATION_ARCHIVED or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/policies/change": {
+      "post": {
+        "operationId": "adminChangePolicies",
+        "summary": "Change the organization policy (admin bridge)",
+        "description": "The admin bridge's staff change of the typed policy (R3, two people; cfmeet.admin-bridge only): the same partial merge and strict validation as updatePolicy, compare-and-swap on the revision (expectedVersion; 0 = defaults never stored). Staff may change every section, delegatedAdministration included; updatedBy is null. An archived organization is refused. Answers UPDATED (or UNCHANGED) with the revision; resource.changedKeys lists the changed policy keys.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPolicyChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a missing or invalid expectedVersion, an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT, ORGANIZATION_ARCHIVED or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/change": {
+      "post": {
+        "operationId": "adminChangeServiceBinding",
+        "summary": "Set or clear a service binding (admin bridge)",
+        "description": "The admin bridge's binding change (R3, two people; cfmeet.admin-bridge only), at the binding's version (0 = none): SET records the OPERATOR binding (the PUT rules: archived 409, no recorded triple 409 PROVISIONING_PENDING, a pending revocation 409 VERSION_CONFLICT; the same ids are a no-op), CLEAR removes it (the DELETE rules: an AUTOMATIC binding is revoked at Platform Access). Answers BOUND with the binding's version, or REMOVED / REVOKED with version null (the next SET expects 0). Platform Access ids are not echoed. Credential rotation is not offered to the bridge.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calling",
+                "messaging"
+              ]
+            },
+            "description": "The bound service (any other value: 404 NOT_FOUND)."
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminBindingChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a missing or invalid expectedVersion, an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND, or NOT_FOUND for an unknown service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT, PROVISIONING_PENDING, ORGANIZATION_ARCHIVED or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "operationId": "operatorOperationRecord",
+        "summary": "Read back an admin bridge command (admin bridge)",
+        "description": "The admin bridge's settlement read of a command it sent (ADR 0068 A3.0): the record written in the command's own transaction, with the status and version the command answered. Requires organization.administer and X-CF-Operator; any other caller and an unknown key get 404 NOT_FOUND (a key that is not recorded was never applied).",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The command's Idempotency-Key."
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeOperationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer) or ACTOR_NOT_ALLOWED (operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: unknown key, or not the admin bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/exports": {
+      "post": {
+        "operationId": "adminRequestOrganizationExport",
+        "summary": "Request an owner-delivered export (admin bridge)",
+        "description": "The admin bridge's organizations.organization.export (R4, two people; cfmeet.admin-bridge only). HQ never receives the export: Organizations builds the same document as exportOrganization (it carries invitation addresses), keeps only an XChaCha20-Poly1305 encrypted copy for 7 days, and queues one single-use download link per ACTIVE OWNER (at most 20), sent by email through the Notification Service (organizations.organization.export_ready, the link's token HPKE-sealed to the service; Organizations stores only its SHA-256). The link works once, until expiry, and only for its owner after sign-in (downloadOrganizationExport). Expiry means the command is issued again; nothing is resent. Recorded in organization_admin_operations (subject ORGANIZATION_EXPORT) in the same transaction and audited as organization.export.requested. Answers status READY, version \"1\" and an OrganizationExportReference. No expectedVersion: the export is a new resource. Off by default (ORGANIZATIONS_EXPORT_DELIVERY_ENABLED; it needs the Notification Service catalogue type): 409 EXPORT_DELIVERY_UNAVAILABLE, nothing built or stored.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIdempotencyKeyRequired"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The admin bridge's answer (resource: OrganizationExportReference).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no Idempotency-Key, a body field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.administer), ACTOR_NOT_ALLOWED (not the admin bridge: X-CF-Operator required, or attribution malformed) or APPROVAL_REQUIRED (no X-CF-Approver).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXPORT_DELIVERY_UNAVAILABLE (exports not configured, or the notice cannot be built), EXPORT_NO_RECIPIENT (no ACTIVE OWNER) or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/exports": {
+      "get": {
+        "operationId": "operatorListOrganizationExports",
+        "summary": "List an organization's exports (admin bridge)",
+        "description": "The admin bridge's read of an organization's owner-delivered exports, newest first: the reference each command answered, with the current state and row version (never the document, a token, a URL or an address). Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ExportCursor"
+          },
+          {
+            "$ref": "#/components/parameters/ExportLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of export references.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExportReferenceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): limit outside 1-100, a malformed cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{id}/exports/{exportId}": {
+      "get": {
+        "operationId": "operatorGetOrganizationExport",
+        "summary": "Read an export's state (admin bridge)",
+        "description": "The admin bridge's read of one owner-delivered export: the reference the command answered, with the current state (READY, DELIVERED, EXPIRED, FAILED), each link's state and the row version. Requires organization.operator-read (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.operator-read",
+        "tags": [
+          "Operator administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          },
+          {
+            "$ref": "#/components/parameters/Operator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export reference.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExportReference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no organization.operator-read) or ACTOR_NOT_ALLOWED (X-CF-Operator missing, or operator attribution malformed or not from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND or NOT_FOUND (no such export of this organization, or deleted after 90 days).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/exports/{exportId}/download": {
+      "post": {
+        "operationId": "downloadOrganizationExport",
+        "summary": "Download an owner-delivered export",
+        "description": "The OWNER behind an emailed export link (ADR 0068 A4), relayed with the verified acting user: the acting user must be the link's recipient and still an ACTIVE OWNER (in any lifecycle state of the organization), and the link unused and unexpired. Answers the export document exactly as stored (the same document as exportOrganization; its SHA-256 in X-CF-Export-Sha256) and uses the link up; the export becomes DELIVERED. Recorded as organization.export.downloaded.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationExportDownloadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The organization's data (Cache-Control: no-store).",
+            "headers": {
+              "X-CF-Export-Sha256": {
+                "description": "SHA-256 (hex) of the body.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR): no acting user, a missing or unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED or ACTOR_NOT_ALLOWED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "EXPORT_LINK_INVALID: unknown token, someone else's link, no longer an ACTIVE OWNER, already used or undeliverable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXPORT_DELIVERY_UNAVAILABLE (exports not configured).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "EXPORT_LINK_EXPIRED.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4989,6 +7672,108 @@
           ]
         },
         "description": "Team status filter (default ACTIVE)."
+      },
+      "Operator": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": true,
+        "description": "The HQ staff member the admin bridge reads for (hq:<staff id>, ADR 0068). Accepted only from cfmeet.admin-bridge; the attribution headers from any other caller are refused on every route (403 ACTOR_NOT_ALLOWED).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "BridgeIdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Admin bridge commands only (required from cfmeet.admin-bridge, 400 VALIDATION_ERROR otherwise): HQ's command key, recorded with the change in organization_admin_operations and the key of GET /internal/v1/operator/operations/{idempotencyKey}. Ignored for other callers on shared routes."
+      },
+      "BridgeIdempotencyKeyRequired": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "HQ's command key (a UUID; 400 VALIDATION_ERROR when absent), recorded with the change in organization_admin_operations and the key of GET /internal/v1/operator/operations/{idempotencyKey}."
+      },
+      "OperatorOptional": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": false,
+        "description": "The HQ staff member the admin bridge acts for (hq:<staff id>, ADR 0068): present exactly when the caller is cfmeet.admin-bridge, which then gets the bridge contract (BridgeCommandResult). Refused from any other caller (403 ACTOR_NOT_ALLOWED).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "Approver": {
+        "name": "X-CF-Approver",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "description": "The second person of HQ's two-person approval (a different staff member than X-CF-Operator); with X-CF-Approval-Ref and X-CF-Intent-Digest, all three or none. Required by the admin bridge's R3 and R4 commands (403 APPROVAL_REQUIRED). Accepted only from cfmeet.admin-bridge."
+      },
+      "ApprovalRef": {
+        "name": "X-CF-Approval-Ref",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "description": "HQ's reference of the single-use approval (recorded as approval_ref). See X-CF-Approver."
+      },
+      "IntentDigest": {
+        "name": "X-CF-Intent-Digest",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "description": "Hex SHA-256 of the approved intent. See X-CF-Approver."
+      },
+      "ExportId": {
+        "name": "exportId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Export id (exportId of OrganizationExportReference)."
+      },
+      "ExportCursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+        },
+        "description": "Keyset cursor (opaque nextCursor of the previous page)."
+      },
+      "ExportLimit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        },
+        "description": "Page size."
       }
     },
     "schemas": {
@@ -5014,6 +7799,37 @@
               "TEAM_MANAGER",
               "TEAM_MEMBER"
             ]
+          }
+        }
+      },
+      "AdminBindingChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "action"
+        ],
+        "description": "SET needs serviceAccountId and credentialId; CLEAR takes neither.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The binding's version (0 = no binding)."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "SET",
+              "CLEAR"
+            ]
+          },
+          "serviceAccountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credentialId": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5043,6 +7859,89 @@
           "slug"
         ]
       },
+      "AdminMemberChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "description": "role and / or status (at least one).",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The membership's version."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MANAGER",
+              "MEMBER",
+              "GUEST"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REMOVED"
+            ]
+          }
+        }
+      },
+      "AdminPolicyChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "policy"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The policy revision (0 = never stored: the defaults)."
+          },
+          "policy": {
+            "type": "object",
+            "description": "A partial PolicyDocument merged into the current one and validated strictly (as UpdatePolicyRequest.policy)."
+          }
+        }
+      },
+      "AdminTeamChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "description": "name and / or description, or status ARCHIVED alone.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The team's version."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "null or empty clears it."
+          },
+          "status": {
+            "const": "ARCHIVED"
+          }
+        }
+      },
       "AdminUpdateOrganizationRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5063,6 +7962,72 @@
         "required": [
           "status"
         ]
+      },
+      "AppInstallCheckRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "appId"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The CF Meet account asking to install."
+          },
+          "appId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The app (OAuth client id = Platform Access application id)."
+          }
+        }
+      },
+      "AppInstallCheckResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "NOT_A_MEMBER",
+              "ROLE_REQUIRED",
+              "NOT_ALLOWLISTED",
+              "ORGANIZATION_NOT_READY"
+            ],
+            "description": "Present only when allowed is false. NOT_A_MEMBER also covers unknown organizations and suspended or removed memberships (non-enumerating); ORGANIZATION_NOT_READY: the organization is not ACTIVE or its technical provisioning is not READY."
+          }
+        }
+      },
+      "AppointOwnerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "reason"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The version of the user's current (non-removed) membership, 0 when they have none. Required from the admin bridge; checked when given (409 VERSION_CONFLICT)."
+          }
+        }
       },
       "ArchiveTeamRequest": {
         "type": "object",
@@ -5190,6 +8155,69 @@
           "nextCursor"
         ]
       },
+      "BridgeCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "description": "The admin bridge's answer to a command: the resulting state (UPPER_SNAKE), the resulting row version as a string of the integer (null when the subject is unversioned) and a small closed object of ids, states and timestamps (never a name, email or credential value). Organization: lifecycleStatus (ACTIVE, SUSPENDED, ARCHIVED). Membership: status (ACTIVE, SUSPENDED, REMOVED). Team: status (ACTIVE, ARCHIVED). Policy: UPDATED or UNCHANGED with the revision. Binding: BOUND with its version, REMOVED or REVOKED (version null). Provisioning retry: the provisioningState (version null). Event replay: REPLAYED (version null). Organization export (owner-delivered): READY with version \"1\" and an OrganizationExportReference as resource.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,23}$"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+$"
+          },
+          "resource": {
+            "type": "object"
+          }
+        }
+      },
+      "BridgeEmptyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "description": "The admin bridge sends an empty object (the subject has no version HQ holds)."
+      },
+      "BridgeOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "description": "The settlement record of an admin bridge command (ADR 0068 A3.0): the same status and version the command answered.",
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "const": "APPLIED"
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,23}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+$"
+          }
+        }
+      },
       "CreateInvitationRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5213,6 +8241,11 @@
             "maxLength": 120,
             "pattern": "^[^@]+$",
             "description": "Optional display hint stored instead of the masked email (inviteeEmailHint) for an invitation addressed by another identifier; the Meeting Service sends `CF Meet ID <id>` so the invitee's email is never disclosed to the inviter, even masked. 1.4.0."
+          },
+          "inviteeUserId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The invitee's CF Meet account when the caller already resolved it (the Meeting Service does for invitations addressed by CF Meet ID). The invitee can then list and answer the invitation in the product, and the invitation.created notification reaches them."
           }
         },
         "required": [
@@ -5411,6 +8444,11 @@
                   "TEAM_NOT_FOUND",
                   "TEAM_ARCHIVED",
                   "TEAM_NAME_TAKEN",
+                  "APPROVAL_REQUIRED",
+                  "EXPORT_DELIVERY_UNAVAILABLE",
+                  "EXPORT_NO_RECIPIENT",
+                  "EXPORT_LINK_INVALID",
+                  "EXPORT_LINK_EXPIRED",
                   "NOT_FOUND",
                   "METHOD_NOT_ALLOWED",
                   "PAYLOAD_TOO_LARGE",
@@ -5897,6 +8935,13 @@
             "items": {
               "$ref": "#/components/schemas/Invitation"
             }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the next page; null on the last page."
           }
         },
         "required": [
@@ -6248,6 +9293,55 @@
           }
         }
       },
+      "MyInvitation": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Invitation"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "organization": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "slug"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "MyInvitationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MyInvitation"
+            }
+          }
+        }
+      },
       "Organization": {
         "type": "object",
         "additionalProperties": false,
@@ -6345,6 +9439,267 @@
           "memberCount"
         ],
         "description": "An organization. Imported legacy slugs keep the Meeting Service rule; new and changed slugs follow the contract pattern."
+      },
+      "OrganizationExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "exportedAt",
+          "organization",
+          "policies",
+          "memberships",
+          "membershipHistory",
+          "teams",
+          "teamMemberships",
+          "invitations",
+          "auditEvents"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "exportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "organization": {
+            "type": "object"
+          },
+          "profile": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "memberships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "membershipHistory": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "teamMemberships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "invitations": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "auditEvents": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 10000
+          }
+        }
+      },
+      "OrganizationExportDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryRef",
+          "state",
+          "sentAt",
+          "claimedAt"
+        ],
+        "description": "One OWNER's single-use download link, by reference only (never the recipient, the address, the token or the link). PENDING: the notice is being relayed to the Notification Service; SENT: acknowledged; CLAIMED: the owner downloaded the export; FAILED: the notice could not be delivered; EXPIRED: unused at expiry.",
+        "properties": {
+          "deliveryRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "SENT",
+              "CLAIMED",
+              "FAILED",
+              "EXPIRED"
+            ]
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "claimedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationExportDownloadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "description": "The token of the owner's emailed link (never logged, stored only as its SHA-256).",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 512
+          }
+        }
+      },
+      "OrganizationExportReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "exportId",
+          "state",
+          "delivery",
+          "deliveryChannel",
+          "deliveryRef",
+          "recipientMasked",
+          "recipientCount",
+          "deliveries",
+          "sizeBytes",
+          "sha256",
+          "createdAt",
+          "expiresAt",
+          "deliveredAt",
+          "purgedAt"
+        ],
+        "description": "An owner-delivered export as HQ sees it (ADR 0068 A4): ids, states, size, digest and times only. Never the document, a token, a sealed part, a URL or an address. state: READY (stored encrypted, links queued or sent), DELIVERED (an owner downloaded it), EXPIRED (unused at expiresAt, 7 days after createdAt), FAILED (no owner could be notified); REQUESTED is reserved (the document is built in the command's transaction). deliveryRef is the first entry of deliveries (one per ACTIVE OWNER, at most 20). recipientMasked is always null: Organizations holds no address (the Notification Service resolves each owner's verified address). sizeBytes and sha256 describe the clear document the owner downloads. purgedAt: when the encrypted copy was removed (at expiry, on FAILED, or once every link is settled). version (reads only): the export row version.",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "REQUESTED",
+              "READY",
+              "DELIVERED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "delivery": {
+            "const": "OWNER_DELIVERED"
+          },
+          "deliveryChannel": {
+            "const": "DOWNLOAD_LINK_EMAIL"
+          },
+          "deliveryRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "recipientMasked": {
+            "type": "null"
+          },
+          "recipientCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "deliveries": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationExportDelivery"
+            }
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationExportReferenceList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "description": "A page of export references, newest first.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationExportReference"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "OrganizationList": {
         "type": "object",
@@ -6530,6 +9885,38 @@
               "adminsMayManagePolicies": {
                 "type": "boolean",
                 "description": "Default true."
+              }
+            }
+          },
+          "apps": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "ADR 0064 workspace app installs (only while ORGANIZATIONS_APP_INSTALLS_ENABLED; absent when never set: the defaults apply).",
+            "properties": {
+              "installTier": {
+                "type": "string",
+                "enum": [
+                  "ADMINS",
+                  "MEMBERS"
+                ],
+                "description": "Who may install an app for the organization. Default ADMINS (ADMIN and OWNER); MEMBERS admits MEMBER and above (never GUEST)."
+              },
+              "allowList": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 200,
+                "uniqueItems": true,
+                "description": "null (default): any app; otherwise only these app ids (Developer Console app = Platform Access application id)."
+              },
+              "userInstallsAllowed": {
+                "type": "boolean",
+                "description": "Whether members may connect apps to their own accounts (a hint for the account authority). Default true."
               }
             }
           }
@@ -7438,7 +10825,10 @@
           "version",
           "boundBy",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "source",
+          "verifiedAt",
+          "credentialExpiresAt"
         ],
         "properties": {
           "organizationId": {
@@ -7484,6 +10874,30 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "AUTOMATIC",
+              "OPERATOR"
+            ],
+            "description": "AUTOMATIC: created and verified by the provisioning saga (ADR 0058 A2); OPERATOR: recorded with PUT (break-glass), never replaced by automation."
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last server-side verification of an AUTOMATIC binding against Platform Access (null for OPERATOR bindings)."
+          },
+          "credentialExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Expiry of the bound credential as Platform Access reported it (AUTOMATIC bindings; renewed by reconciliation before expiry)."
           }
         }
       },

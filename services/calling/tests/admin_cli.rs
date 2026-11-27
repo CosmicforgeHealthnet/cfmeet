@@ -624,7 +624,10 @@ async fn retention_holds_tombstones_and_reseals_are_operator_audited() {
     let policies = cli.run_raw(&["retention", "policies"], &[]);
     assert_eq!(policies.code, 0, "{}", policies.stderr);
     let policies = policies.json();
-    assert_eq!(policies["policies"].as_array().unwrap().len(), 14);
+    assert_eq!(policies["policies"].as_array().unwrap().len(), 15);
+    assert!(policies["policies"].as_array().unwrap().iter().any(|p| {
+        p["dataClass"] == "CALL_HISTORY" && p["action"] == "MINIMIZE" && p["days"] == 400
+    }));
     assert!(policies["policies"]
         .as_array()
         .unwrap()

@@ -17,7 +17,7 @@ pub use crate::services::collaboration::{
         RoomAssignmentsPatch,
     },
     engagement::RaisedHand,
-    messaging::{MessageKind, MessagePage, MessageView, SendMessageRequest},
+    messaging::{EditMessageRequest, MessageKind, MessagePage, MessageView, SendMessageRequest},
     policy::{
         BreakoutRecordingPolicy, ChatSendMode, CollaborationPolicy, CollaborationPolicyPatch,
         ConsentKind, PrivateChatMode, ScreenSharePolicy,

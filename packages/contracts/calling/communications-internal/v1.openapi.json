@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet calling private Communications integration",
-    "version": "1.1.0",
-    "description": "Private backend interfaces for Sections 4\u20137 and the Sections 9\u201323 Calling owner interfaces (CL-1 \u2026 CL-5). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.3.0",
+    "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 Calling owner interfaces (CL-1 … CL-5). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.3.0: POST /internal/v1/communications/calls/participants (the Hub adds a user's contacts to a running call)."
   },
   "tags": [
     {
@@ -915,6 +915,124 @@
           }
         }
       }
+    },
+    "/internal/v1/communications/calls/participants": {
+      "post": {
+        "operationId": "inviteCommunicationsCallParticipants",
+        "summary": "Invite people into a running call for the delegated user",
+        "description": "The Hub's add-contacts path: the very domain path of POST /v1/calls/{callId}/participants (per-target personal policy, blocks, group limit, ringing) for the delegated NATIVE_CF_USER. actingPrincipalId must be the delegated user and invitingParticipantId their own participant of callId (otherwise 404). idempotencyKey is namespaced by the acting user; a replay answers from the command record (replayed true). Requires calling.communications.launch and the launch authority.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.launch",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invited (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Initiator endpoint not an ACTIVE endpoint of the initiator, unknown principal, or delegated scope not governed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Personal policy or block refusal (TARGET_UNAVAILABLE), idempotency conflict, participant limit or call-state conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Communications policy, launch authority, media provider or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1298,6 +1416,11 @@
               "VOICE",
               "VIDEO"
             ]
+          },
+          "initiatorDisplayName": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The caller's Hub display name, shown to the callee on the incoming call. Best effort: Calling keeps it only if it is a valid display name (truncated to 100 characters); never part of the idempotency fingerprint. 1.2.0."
           }
         },
         "required": [
@@ -1491,6 +1614,82 @@
         "required": [
           "principalId"
         ]
+      },
+      "InviteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "actingPrincipalId",
+          "callId",
+          "invitingParticipantId",
+          "targetPrincipalIds",
+          "expectedVersion"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "actingPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitingParticipantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetPrincipalIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "InviteResult": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "call",
+          "replayed"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "call": {
+            "type": "object"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "invitingParticipantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }

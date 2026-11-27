@@ -671,6 +671,8 @@ impl RealtimeService {
                 platform_admin: user.role == UserRole::Admin,
                 // The ticket was issued to an authenticated, revocation-checked request.
                 revocation_checked: true,
+                account_session_id: None,
+                delegation: None,
             }),
             verified_organizations,
             request_id: None,

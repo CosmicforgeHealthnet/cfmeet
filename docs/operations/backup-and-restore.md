@@ -18,11 +18,12 @@ The short version:
 | meeting-service (account authority) | `seaql_migrations` + tables `users`, `meetings` | `account_communications_migrations`, `account_communications_facade_migrations`, `account_security_migrations`, `meetings_calendar_migrations`, `profile_notifications_migrations`, `account_hardening_migrations` | inside the legacy `cosmicforge-db` container; name and version REQUIRES_VALIDATION |
 | communications (Hub) | `communications_seaql_migrations` + table `communication_profiles` | `communications_unified_seaql_migrations` | `cfmeet_comm_production_hub` on `cfmeet-core-db` |
 | platform-access | `platform_access_seaql_migrations` | — | `cfmeet_platform_access` on `cfmeet-core-db` |
-| calling | `calling_seaql_migrations` | `calling_communications_migrations` | `cfmeet_calling` on `cfmeet-core-db` |
+| calling | `calling_seaql_migrations` | `calling_communications_migrations`, `calling_notification_publications_seaql_migrations` | `cfmeet_calling` on `cfmeet-core-db` |
 | messaging | `messaging_seaql_migrations` | `messaging_communications_migrations` | `cfmeet_messaging` on `cfmeet-core-db` |
 | developer-platform | `developer_platform_seaql_migrations` | — | `cfmeet_developer_platform`; production deployment REQUIRES_VALIDATION |
 | numbering, privacy-relay, telephony, sms-gateway | `<service>_seaql_migrations` | — | `cfmeet_<service>`; production deployment REQUIRES_VALIDATION |
 | organizations | `organizations_seaql_migrations` | — | active since Blueprint Sections 3–5; must be backed up and restore-drilled before the Organizations cutover |
+| admin-bridge | `admin_bridge_seaql_migrations` | — | `cfmeet_admin_bridge` on `cfmeet-core-db` (ADR 0068); HQ enrolment, signed access policies and the hash-chained audit; deployed dark |
 
 `cfmeet-core-db` is `postgres:16-alpine` on the internal network `cfmeet-core-private`. It publishes no host port, so the tooling reaches it through a throwaway client container (`--pg-wrapper`, below).
 

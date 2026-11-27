@@ -80,6 +80,48 @@ async fn relay(
     ))
 }
 
+/// Multi-device policy: a personal E2EE (MLS) device can be enrolled only from a sign-in
+/// that belongs to a trusted account device (bootstrap, approval by a trusted device or
+/// email step-up), unless the deployment switched the gate off. A sign-in code alone
+/// never yields an E2EE identity that would receive the account's future messages.
+async fn require_trusted_device_for_e2ee(state: &AppState, actor: &ActorContext) -> ApiResult<()> {
+    if !state.auth_policy.devices.e2ee_requires_trusted_device {
+        return Ok(());
+    }
+    let session = actor.registered().and_then(|r| r.account_session_id);
+    let trusted = match session {
+        Some(s) => {
+            crate::services::account_devices::session_is_trusted_device(&state.db, s).await?
+        }
+        None => false,
+    };
+    if !trusted {
+        return Err(ApiError::domain(
+            ErrorCode::DeviceNotTrusted,
+            "Link this device to your account (POST /api/v2/me/devices/current, then a device link) before enrolling end-to-end encryption",
+        ));
+    }
+    Ok(())
+}
+
+/// [`relay`] for personal E2EE device enrollment: the same integration and account checks
+/// first, then the trusted-device gate.
+async fn relay_enrollment(
+    state: &AppState,
+    actor: &ActorContext,
+    op: BridgeOperation,
+    body: Option<Value>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let um = integration(state)?;
+    let user = verified_user(state, actor)?;
+    require_trusted_device_for_e2ee(state, actor).await?;
+    let (status, value) = um.bridge(user, op, body).await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
+}
+
 /// Start a device registration (the challenge the device signs with its own key).
 ///
 /// First step of registering a Messaging device for the signed-in user; complete it with
@@ -90,7 +132,7 @@ async fn relay(
 #[utoipa::path(
     post, path = "/api/v2/messaging/devices/registration-challenges", tag = "Messaging (v2)", operation_id = "v2_messaging_registration_challenge",
     request_body = Object,
-    responses((status = 201, description = "Challenge (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 201, description = "Challenge (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "DEVICE_NOT_TRUSTED (link this device to the account first)", body = ErrorEnvelope), (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn registration_challenge(
@@ -98,7 +140,7 @@ pub async fn registration_challenge(
     actor: ActorContext,
     V2Json(body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(
+    relay_enrollment(
         &state,
         &actor,
         BridgeOperation::RegistrationChallenge,
@@ -117,7 +159,7 @@ pub async fn registration_challenge(
 #[utoipa::path(
     post, path = "/api/v2/messaging/devices", tag = "Messaging (v2)", operation_id = "v2_messaging_register_device",
     request_body = Object,
-    responses((status = 201, description = "Device (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 201, description = "Device (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "DEVICE_NOT_TRUSTED (link this device to the account first)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn register_device(
@@ -125,7 +167,7 @@ pub async fn register_device(
     actor: ActorContext,
     V2Json(body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
+    relay_enrollment(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
 }
 
 /// Publish one-time KeyPackages of the caller's device.
@@ -200,15 +242,44 @@ pub async fn revoke_device(
 pub async fn client_token(
     State(state): State<AppState>,
     actor: ActorContext,
-    V2Json(body): V2Json<Value>,
+    V2Json(mut body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(
-        &state,
-        &actor,
-        BridgeOperation::IssueClientToken,
-        Some(body),
-    )
-    .await
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    // Gap audit A11: the token is bound to the caller's own sign-in, so signing out of
+    // this browser ends it while the account's other sign-ins keep theirs. The binding
+    // is the relay's; whatever a client sends under that name is discarded.
+    let session = actor.registered().and_then(|r| r.account_session_id);
+    if let Some(map) = body.as_object_mut() {
+        map.remove("accountSessionRef");
+    }
+    let bound = match (session, body.as_object_mut()) {
+        (Some(session), Some(map)) => {
+            map.insert(
+                "accountSessionRef".into(),
+                Value::String(um.account_session_ref(session)),
+            );
+            true
+        }
+        _ => false,
+    };
+    let (mut status, mut value) = um
+        .bridge(user, BridgeOperation::IssueClientToken, Some(body.clone()))
+        .await?;
+    if bound && status == 400 {
+        // A Messaging image that predates the binding refuses the unknown field: issue
+        // the token unbound (it still ends with its device, revoke-all, or expiry).
+        if let Some(map) = body.as_object_mut() {
+            map.remove("accountSessionRef");
+        }
+        (status, value) = um
+            .bridge(user, BridgeOperation::IssueClientToken, Some(body))
+            .await?;
+    }
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -340,13 +411,19 @@ pub const RELAY_MAX_BODY_BYTES: usize = 1024 * 1024;
 /// encrypted message.
 #[utoipa::path(
     get, path = "/api/v2/messaging/me", tag = "Messaging (v2)", operation_id = "v2_messaging_me",
-    responses((status = 200, description = "principalId, tenantId, applicationId, environmentId", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 200, description = "principalId, tenantId, applicationId, environmentId, displayName (the caller's own account display name)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
-    Ok(Json(um.me(user).await?))
+    let mut me = um.me(user).await?;
+    // The caller's own name, so a calling client can name itself on the calls it starts
+    // (initiatorDisplayName), as the callee's incoming-call screen shows it.
+    if let Some(registered) = actor.registered() {
+        me["displayName"] = Value::String(registered.display_name.clone());
+    }
+    Ok(Json(me))
 }
 
 /// The caller's colleague scope (Blueprint Section 4: read from Organizations once it is
@@ -354,6 +431,15 @@ pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult
 async fn colleague_scope(
     state: &AppState,
     actor: &ActorContext,
+) -> crate::services::unified_messaging::relay::ColleagueScope {
+    colleague_scope_for(state, actor, false).await
+}
+
+/// Gap audit G6: `search` applies each organization's `memberDirectory.searchable`.
+async fn colleague_scope_for(
+    state: &AppState,
+    actor: &ActorContext,
+    search: bool,
 ) -> crate::services::unified_messaging::relay::ColleagueScope {
     use crate::services::unified_messaging::relay::ColleagueScope;
     match (
@@ -365,6 +451,14 @@ async fn colleague_scope(
             .filter(|a| a.is_authoritative()),
         actor.registered(),
     ) {
+        (Some(authority), Some(user)) if search => ColleagueScope::Users(
+            crate::services::organizations_authority::searchable_colleagues(
+                authority,
+                user,
+                &actor.verified_organizations,
+            )
+            .await,
+        ),
         (Some(authority), Some(user)) => ColleagueScope::Users(
             crate::services::organizations_authority::authoritative_colleagues(
                 authority,
@@ -404,8 +498,12 @@ pub async fn directory(
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
     Ok(Json(
-        um.directory(user, &colleague_scope(&state, &actor).await, q.q.as_deref())
-            .await?,
+        um.directory(
+            user,
+            &colleague_scope_for(&state, &actor, true).await,
+            q.q.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -447,33 +545,144 @@ pub struct NamesRequest {
     pub principal_ids: Vec<Uuid>,
 }
 
-/// Display names of the principals the caller can see (self and colleagues).
+/// Display names of the principals the caller can see (self, colleagues and connected contacts).
 ///
-/// Returns display names for up to 256 `principalIds`. Only the caller's own principal and those of
-/// active members of the caller's verified organizations are named; any other id is left out of the
-/// answer without an error. Requires a bearer user token whose revocation status could be checked
-/// and the Messaging integration enabled.
+/// Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of
+/// active members of the caller's verified organizations, and the caller's connected personal
+/// contacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`
+/// when set). A pending, revoked or blocked contact and any other id are left out of the answer
+/// without an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer
+/// user token whose revocation status could be checked and the Messaging integration enabled.
 #[utoipa::path(
     post, path = "/api/v2/messaging/principals/names", tag = "Messaging (v2)", operation_id = "v2_messaging_principal_names",
     request_body = Object,
-    responses((status = 200, description = "principals: principalId, displayName", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope)),
+    responses((status = 200, description = "principals: principalId, displayName, alias (connected contacts only, when the caller set one)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn principal_names(
     State(state): State<AppState>,
     actor: ActorContext,
+    headers: HeaderMap,
     V2Json(body): V2Json<NamesRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
-    Ok(Json(
-        um.name_principals(
+    let mut answer = um
+        .name_principals(
             user,
             &colleague_scope(&state, &actor).await,
             &body.principal_ids,
         )
-        .await?,
-    ))
+        .await?;
+    let named: std::collections::HashSet<Uuid> = answer["principals"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            p["principalId"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
+        .collect();
+    let mut rest: Vec<Uuid> = body
+        .principal_ids
+        .iter()
+        .copied()
+        .filter(|p| !named.contains(p))
+        .collect();
+    rest.sort();
+    rest.dedup();
+    if let (false, Some(registered)) = (rest.is_empty(), actor.registered()) {
+        // Personal contacts are display-only: a Hub outage leaves them unnamed, never fails.
+        match crate::services::communications::contact_names(&state, registered, &headers, &rest)
+            .await
+        {
+            Ok(contacts) => {
+                if let Some(list) = answer["principals"].as_array_mut() {
+                    list.extend(contacts.into_iter().map(|c| {
+                        let mut v = serde_json::json!({ "principalId": c.principal_id, "displayName": c.display_name });
+                        if let Some(alias) = c.alias {
+                            v["alias"] = Value::String(alias);
+                        }
+                        v
+                    }));
+                }
+            }
+            Err(error) => tracing::warn!(error = %error, "contact names unavailable"),
+        }
+    }
+    Ok(Json(answer))
+}
+
+/// Messaging's relayed answer, never cached (it may carry a one-time download grant).
+fn no_store(status: u16, value: Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let mut r = (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    )
+        .into_response();
+    r.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    r
+}
+
+/// Data exports waiting for me (Messaging)
+///
+/// ADR 0068 (owner-delivered exports): the Messaging exports CF Meet support requested for
+/// the signed-in account, newest first (at most 20), as references (ids, state, size, SHA-256,
+/// times; never the export or a link). Relayed to Messaging's delegated surface with the
+/// caller's own principal signed in; Messaging answers only the recipient's own exports.
+#[utoipa::path(
+    get, path = "/api/v2/messaging/export-deliveries", tag = "Messaging (v2)", operation_id = "v2_messaging_export_deliveries",
+    responses(
+        (status = 200, description = "`{items: [ExportDelivery]}` (Messaging's answer)", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "FEATURE_DISABLED (Unified Messaging is not enabled)", body = ErrorEnvelope),
+        (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_deliveries(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<axum::response::Response> {
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    let (status, value) = um.export_deliveries(user).await?;
+    Ok(no_store(status, value))
+}
+
+/// Claim a Messaging data export once
+///
+/// ADR 0068 (owner-delivered exports): the signed-in recipient's single claim of a READY
+/// export: one short-lived forced-download grant (`{exportId, deliveryRef, method, url,
+/// expiresAt, size, sha256}`) to use straight away; the export is DELIVERED at once. 409
+/// EXPORT_NOT_READY, EXPORT_ALREADY_DELIVERED (nothing is re-sent) or EXPORT_EXPIRED; anyone
+/// but the recipient gets 404. Relayed with the caller's own principal signed in.
+#[utoipa::path(
+    post, path = "/api/v2/messaging/exports/{exportId}/claim", tag = "Messaging (v2)", operation_id = "v2_messaging_claim_export",
+    params(("exportId" = Uuid, Path, description = "The export's id")),
+    responses(
+        (status = 200, description = "The one download grant (Messaging's ExportClaimGrant)", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "Not the caller's export, or FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "EXPORT_NOT_READY / EXPORT_ALREADY_DELIVERED / EXPORT_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn claim_export(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(export_id): V2Path<Uuid>,
+) -> ApiResult<axum::response::Response> {
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    let (status, value) = um.claim_export(user, export_id).await?;
+    Ok(no_store(status, value))
 }
 
 pub(crate) fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {

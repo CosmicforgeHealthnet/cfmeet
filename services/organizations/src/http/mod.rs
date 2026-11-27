@@ -1,4 +1,6 @@
-//! HTTP surface (contract `cfmeet.organizations.internal-api`, served at `/openapi.json`).
+//! HTTP surface (contract `cfmeet.organizations.internal-api`, served at `/openapi.json`),
+//! plus X5 `resolveInvitationInvitee` of the separate Notification Service owner contract
+//! `cfmeet.organizations.notification-owner-api` (not part of the served document).
 //!
 //! * `GET /health` — liveness; `GET /ready` — database reachable and migrations applied.
 //! * `/internal/v1/**` — service-authenticated (every request, unknown paths included):
@@ -8,12 +10,16 @@
 //! relay, which forwards the verified acting user. Extractor rejections are normalized to
 //! the error envelope.
 
+pub mod admin_bridge;
+pub mod apps;
 pub mod authorization;
 pub mod bindings;
+pub mod exports;
 pub mod invitations;
 pub mod members;
 pub mod middleware;
 pub mod migration;
+pub mod operator;
 pub mod organizations;
 pub mod outbox;
 pub mod policies;
@@ -98,6 +104,20 @@ pub fn app(state: AppState) -> Router {
             "/organization-invitations/decline",
             post(invitations::decline),
         )
+        // X5 (contract `organizations/notification-owner/v1`, Notification Service only).
+        .route("/organization-invitations/mine", get(invitations::mine))
+        .route(
+            "/organization-invitations/:invitation_id/accept",
+            post(invitations::accept_by_id),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/decline",
+            post(invitations::decline_by_id),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/invitee/resolve",
+            post(invitations::resolve_invitee),
+        )
         .route("/organizations/:id/suspend", post(organizations::suspend))
         .route(
             "/organizations/:id/reactivate",
@@ -107,6 +127,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/organizations/:id/audit-events",
             get(authorization::audit_events),
+        )
+        .route("/organizations/:id/export", get(authorization::export))
+        .route(
+            "/organizations/:id/exports/:export_id/download",
+            post(exports::download),
         )
         .route(
             "/organizations/:id/provisioning",
@@ -123,6 +148,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/organizations/:id/policies/effective",
             get(policies::effective),
+        )
+        .route(
+            "/organizations/:id/app-install-check",
+            post(apps::install_check),
         )
         .route(
             "/organizations/:id/teams",
@@ -161,8 +190,40 @@ pub fn app(state: AppState) -> Router {
             patch(organizations::admin_update),
         )
         .route(
+            "/admin/organizations/:id/audit-events",
+            get(authorization::admin_audit_events),
+        )
+        .route(
+            "/admin/organizations/:id/export",
+            get(authorization::admin_export),
+        )
+        .route(
+            "/admin/organizations/:id/exports",
+            post(exports::admin_request_export),
+        )
+        .route(
+            "/admin/organizations/:id/owners",
+            post(members::admin_appoint_owner),
+        )
+        .route(
             "/admin/organizations/:id/provisioning/retry",
             post(organizations::provisioning_retry),
+        )
+        .route(
+            "/admin/organizations/:id/members/:membership_id/change",
+            post(members::admin_change_member),
+        )
+        .route(
+            "/admin/organizations/:id/teams/:team_id/change",
+            post(teams::admin_change_team),
+        )
+        .route(
+            "/admin/organizations/:id/policies/change",
+            post(policies::admin_change),
+        )
+        .route(
+            "/admin/organizations/:id/scopes/primary/service-bindings/:service/change",
+            post(bindings::admin_change_binding),
         )
         .route(
             "/admin/organizations/:id/scopes/primary/service-bindings/:service",
@@ -170,6 +231,30 @@ pub fn app(state: AppState) -> Router {
                 .put(bindings::put_binding)
                 .delete(bindings::delete_binding),
         )
+        .route(
+            "/admin/organizations/:id/scopes/primary/service-bindings/:service/rotate",
+            post(bindings::rotate_binding),
+        )
+        .route("/operator/organizations/:id", get(operator::organization))
+        .route(
+            "/operator/organizations/:id/members",
+            get(operator::members),
+        )
+        .route("/operator/organizations/:id/teams", get(operator::teams))
+        .route(
+            "/operator/organizations/:id/policies",
+            get(operator::policies),
+        )
+        .route(
+            "/operator/organizations/:id/exports",
+            get(exports::operator_list),
+        )
+        .route(
+            "/operator/organizations/:id/exports/:export_id",
+            get(exports::operator_detail),
+        )
+        .route("/operator/audit-events", get(operator::audit_events))
+        .route("/operator/operations/:key", get(operator::operation))
         .route("/admin/event-delivery", get(outbox::status))
         .route("/admin/event-delivery/replay", post(outbox::replay))
         .route(
@@ -235,7 +320,9 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             "outbox": backlog.map(|b| json!({
                 "pending": b.pending,
                 "oldestPendingAt": b.oldest.map(store::rfc3339),
-                "delivery": "disabled",
+                // Consumer rows only: the never-dispatched reconciliation record is excluded.
+                "delivery": if state.event_destinations.is_empty() { "disabled" } else { "enabled" },
+                "destinations": state.event_destinations,
             })),
             "provisioning": { "enabled": state.provisioning_enabled },
         })),
@@ -418,6 +505,10 @@ mod tests {
             ("POST", "/internal/v1/organizations/memberships/resolve"),
             ("POST", "/internal/v1/organizations/authorization/evaluate"),
             ("POST", "/internal/v1/migration/import"),
+            (
+                "POST",
+                "/internal/v1/organization-invitations/00000000-0000-4000-8000-000000000001/invitee/resolve",
+            ),
             (
                 "PUT",
                 "/internal/v1/admin/organizations/00000000-0000-4000-8000-000000000001/scopes/primary/service-bindings/calling",

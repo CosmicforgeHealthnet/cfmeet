@@ -172,6 +172,17 @@ class PolicyMutationTests(unittest.TestCase):
     def test_prometheus_series_allowlist(self) -> None:
         self.assertEqual(findings(rule(expr='up{job="demo"} == 0')), set())
 
+    def test_blackbox_probe_result_is_allowed(self) -> None:
+        self.assertEqual(findings(rule(expr='probe_success{job="health-probes"} == 0')), set())
+
+    def test_sql_collector_metric_needs_a_collector_file(self) -> None:
+        expr = "max(demo_heartbeat_age_seconds) > 300"
+        self.assertEqual(findings(rule(expr=expr)), {"UNKNOWN_METRIC"})
+        repo = SyntheticRepo(rule_file(rule(expr=expr)))
+        repo.write("infra/monitoring/sql-exporter/demo.collector.yml",
+                   "collector_name: demo\nmetrics:\n  - metric_name: demo_heartbeat_age_seconds\n    type: gauge\n")
+        self.assertEqual(repo.findings(), set())
+
     def test_recording_rule_output_is_a_known_metric(self) -> None:
         record = "      - record: demo:requests:rate5m\n        expr: sum(rate(demo_requests_total[5m]))\n"
         self.assertEqual(findings(record, rule(expr="demo:requests:rate5m > 1")), set())

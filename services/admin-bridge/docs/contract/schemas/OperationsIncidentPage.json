@@ -1,0 +1,25 @@
+{
+  "description": "Incidents across the owners in the window, newest first. A page holds up to limit items per owner; next_cursor carries each owner's own position. freshness PARTIAL: an owner did not answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "$ref": "#/components/schemas/OperationsIncident"
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z]\\.[A-Za-z0-9._:@+=-]{1,160}(~[a-z]\\.[A-Za-z0-9._:@+=-]{1,160}){0,2}$"
+    }
+  }
+}

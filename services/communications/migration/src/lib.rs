@@ -135,17 +135,509 @@ impl MigrationTrait for TimelineRealtime {
         ))
     }
 }
-/// Apply the foundation history, then the unified, device-session and timeline-realtime
-/// ones.
+/// Notification Service roadmap N7: the Hub's outbox of publications to the Notification
+/// Service (`communication_notification_publications`). A FIFTH separate history for the
+/// same rollback-safety reason as the others: the previous image checks exactly the
+/// foundation, unified, device-session and timeline-realtime histories. Never merge them.
+pub struct NotificationPublicationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationPublicationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(NotificationPublications)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_notification_publications_seaql_migrations").into_iden()
+    }
+}
+struct NotificationPublications;
+impl MigrationName for NotificationPublications {
+    fn name(&self) -> &str {
+        "m20261117_000001_notification_publications"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for NotificationPublications {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/005_notification_publications.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Notification Service roadmap N10 (Phase 4.2): the explicit preference-authority switch
+/// (`communication_preference_authority`, default `HUB`). A SIXTH separate history for the
+/// same rollback-safety reason as the others: the previous image checks exactly the
+/// foundation, unified, device-session, timeline-realtime and notification-publications histories.
+pub struct PreferenceAuthorityMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for PreferenceAuthorityMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(PreferenceAuthority)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_preference_authority_seaql_migrations").into_iden()
+    }
+}
+struct PreferenceAuthority;
+impl MigrationName for PreferenceAuthority {
+    fn name(&self) -> &str {
+        "m20261117_000001_preference_authority"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PreferenceAuthority {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/006_preference_authority.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Backend gap closure: S9 (separate group-invitation privacy setting) and S4 (operator
+/// review of profile reports). A SEVENTH separate history for the same rollback-safety
+/// reason as the others. Never merge them.
+pub struct GroupInvitationPolicyMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for GroupInvitationPolicyMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(GroupInvitationPolicy),
+            Box::new(ProfileReportReviews),
+            Box::new(Reactivation),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_group_invitation_policy_seaql_migrations").into_iden()
+    }
+}
+struct GroupInvitationPolicy;
+impl MigrationName for GroupInvitationPolicy {
+    fn name(&self) -> &str {
+        "m20261118_000001_group_invitation_policy"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for GroupInvitationPolicy {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/006_group_invitation_policy.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+struct ProfileReportReviews;
+impl MigrationName for ProfileReportReviews {
+    fn name(&self) -> &str {
+        "m20261118_000002_profile_report_reviews"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ProfileReportReviews {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/007_profile_report_reviews.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+struct Reactivation;
+impl MigrationName for Reactivation {
+    fn name(&self) -> &str {
+        "m20261118_000003_reactivation"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for Reactivation {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/008_reactivation.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the gap-closure history (S9, S4, A16) is fully applied.
+pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_group_invitation_policy_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_group_invitation_policy_seaql_migrations"
+                .to_owned(),
+        ))
+        .await?;
+    let applied: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(applied.len() == 3
+        && applied.contains(&GroupInvitationPolicy.name().to_owned())
+        && applied.contains(&ProfileReportReviews.name().to_owned())
+        && applied.contains(&Reactivation.name().to_owned()))
+}
+/// Short CF Meet IDs (CF- plus 6 characters) and direct contact (contact_approval). An
+/// EIGHTH separate history: the previous image checks the seventh one has exactly its three
+/// migrations, so appending there would stop it after a rollback. Never merge them.
+pub struct ShortIdsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ShortIdsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(ShortIds)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_short_ids_seaql_migrations").into_iden()
+    }
+}
+struct ShortIds;
+impl MigrationName for ShortIds {
+    fn name(&self) -> &str {
+        "m20261119_000001_short_ids_direct_contact"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ShortIds {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/009_short_ids_direct_contact.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the short-ID history is fully applied.
+pub async fn short_ids_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_short_ids_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_short_ids_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    let applied: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(applied.len() == 1 && applied.contains(&ShortIds.name().to_owned()))
+}
+/// Contacts audit (K5 unblock restore, KF1 email discovery, KF2 About line, K8 per-person
+/// change feed positions). A NINTH separate history: the previous image checks the short-ID
+/// history has exactly its one migration, so appending there would stop it after a
+/// rollback. Never merge them.
+pub struct ContactsAuditMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ContactsAuditMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(ContactsAudit)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_contacts_audit_seaql_migrations").into_iden()
+    }
+}
+struct ContactsAudit;
+impl MigrationName for ContactsAudit {
+    fn name(&self) -> &str {
+        "m20261119_000002_contacts_audit"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ContactsAudit {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/010_contacts_audit.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the contacts-audit history is fully applied.
+pub async fn contacts_audit_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_contacts_audit_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_contacts_audit_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == ContactsAudit.name())
+}
+/// ADR 0068 phase A4: the admin bridge's operations ledger
+/// (`communication_admin_operations`). A TENTH separate history: the previous image checks
+/// the contacts-audit history has exactly its one migration, so appending there would stop
+/// it after a rollback. Never merge them.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(AdminOperations)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_admin_operations_seaql_migrations").into_iden()
+    }
+}
+struct AdminOperations;
+impl MigrationName for AdminOperations {
+    fn name(&self) -> &str {
+        "m20261120_000001_admin_operations"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AdminOperations {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/011_admin_operations.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the admin-operations history is fully applied.
+pub async fn admin_operations_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_admin_operations_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_admin_operations_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == AdminOperations.name())
+}
+/// ADR 0068 phase A7: the outbox of owner events to the admin bridge
+/// (`communication_admin_bridge_events`). An ELEVENTH separate history: the previous image
+/// checks the admin-operations history has exactly its one migration, so appending there
+/// would stop it after a rollback. Never merge them.
+pub struct AdminBridgeEventsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminBridgeEventsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(AdminBridgeEvents)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_admin_bridge_events_seaql_migrations").into_iden()
+    }
+}
+struct AdminBridgeEvents;
+impl MigrationName for AdminBridgeEvents {
+    fn name(&self) -> &str {
+        "m20261121_000001_admin_bridge_events"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AdminBridgeEvents {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/012_admin_bridge_events.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the admin-bridge-events history is fully applied.
+pub async fn admin_bridge_events_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_admin_bridge_events_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_admin_bridge_events_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == AdminBridgeEvents.name())
+}
+/// Apply the foundation history, then the unified, device-session, timeline-realtime,
+/// notification-publications, preference-authority and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(db, None).await?;
     UnifiedMigrator::up(db, None).await?;
     DeviceSessionMigrator::up(db, None).await?;
-    TimelineRealtimeMigrator::up(db, None).await
+    TimelineRealtimeMigrator::up(db, None).await?;
+    NotificationPublicationsMigrator::up(db, None).await?;
+    PreferenceAuthorityMigrator::up(db, None).await?;
+    GroupInvitationPolicyMigrator::up(db, None).await?;
+    ShortIdsMigrator::up(db, None).await?;
+    ContactsAuditMigrator::up(db, None).await?;
+    AdminOperationsMigrator::up(db, None).await?;
+    AdminBridgeEventsMigrator::up(db, None).await
 }
-/// Everything this image needs: the Sections 9-23 histories, the Section 14 one and the
-/// MSG-009 timeline-realtime one.
+/// Everything this image needs: every earlier history and the N10 preference-authority
+/// one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    if !notification_publications_ready(db).await?
+        || !group_invitation_ready(db).await?
+        || !short_ids_ready(db).await?
+        || !contacts_audit_ready(db).await?
+        || !admin_operations_ready(db).await?
+        || !admin_bridge_events_ready(db).await?
+    {
+        return Ok(false);
+    }
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_preference_authority_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_preference_authority_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == PreferenceAuthority.name())
+}
+/// Readiness the previous (N7) image checks: every history up to the notification-publications
+/// one exactly.
+pub async fn notification_publications_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    if !timeline_ready(db).await? {
+        return Ok(false);
+    }
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_notification_publications_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_notification_publications_seaql_migrations"
+                .to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1
+        && rows[0].try_get::<String>("", "version")? == NotificationPublications.name())
+}
+/// Readiness the MSG-009 image checks: foundation, unified, device-session and
+/// timeline-realtime histories exactly.
+pub async fn timeline_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     if !device_session_ready(db).await? {
         return Ok(false);
     }

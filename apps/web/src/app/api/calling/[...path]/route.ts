@@ -1,5 +1,6 @@
-import { callingDevMode, callingFailure, callingFetch, callingIdentity, CallingHttpError, ownCall, ownEndpoints, type CallingIdentity } from "@/lib/calling/server";
+import { callerDisplayName, callingDevMode, callingFailure, callingFetch, callingIdentity, CallingHttpError, ownCall, ownEndpoints, type CallingIdentity } from "@/lib/calling/server";
 import { mayControl, ownParticipant, activeParticipant, type ControlOperation } from "@/lib/calling/call-permissions";
+import { contactVaultFetch, contactVaultScope, isContactVaultRoute } from "@/lib/calling/contact-vault";
 import type { Call } from "@/types/calling";
 
 /**
@@ -10,13 +11,19 @@ import type { Call } from "@/types/calling";
  * the request: it is injected from the verified login (principalId / initiatorPrincipalId /
  * transferringParticipantId) and ownership is checked before anything reaches Calling.
  *
- *  - Call control follows the party rules of ADR 0009 (CAL-002, `call-permissions.ts`).
+ *  - Call control follows the party rules of ADR 0009 (CAL-002, `call-permissions.ts`); upgrade
+ *    to video (C5), screen sharing (C6, always for the user's own participant) and inviting
+ *    people (C7, as the user's own participant) are active-party commands.
  *  - Recording consent / controls and abuse reports are participant-bound (CAL-005).
  *  - Voicemail and forwarding are self-service, bound to the signed-in principal (CAL-006);
  *    the backend's `VoicemailRequester::Principal` (principalId) gives the owner view only.
  *  - The remaining enterprise administration of the SHARED scope stays behind the
  *    CALLING_ADMIN_PRINCIPAL_IDS allowlist until it is retired (CAL-007); organization
  *    administration goes through Meeting's `/api/v2/organizations/{id}/calling/{path}`.
+ *  - Protected contacts (`v1/privacy-relay/contacts…`) are NOT Calling operations: they are
+ *    Privacy Relay's Contact Vault. Behind the same privacy-administrator allowlist, the adapter
+ *    mints a one-scope grant at Calling (`contact-access-grants`) and calls the Contact Vault
+ *    with `X-CF-Contact-Authorization` (`contact-vault.ts`); nothing of it goes to Calling.
  */
 
 export const runtime = "nodejs";
@@ -65,9 +72,7 @@ const privacyRelayRules: Array<[RegExp, string[]]> = [
   [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/evidence$`), ["GET"]],
   [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/(suspend|resume|revoke)$`), ["POST"]],
   [/^v1\/privacy-relay\/contact-access-grants$/, ["POST"]],
-  [/^v1\/privacy-relay\/contacts$/, ["POST"]],
-  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}$`), ["GET", "PATCH"]],
-  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}/disable$`), ["POST"]],
+  // Contact Vault paths (v1/privacy-relay/contacts…) are served by Privacy Relay: see contact-vault.ts.
 ];
 
 /** Abuse categories of `services/calling/src/calls/app/abuse_reports.rs` (AbuseCategory). */
@@ -78,6 +83,8 @@ const CONSENT_DECISIONS = new Set(["GRANTED", "DECLINED"]);
 const SELF_FORWARDING_DESTINATIONS = new Set(["PRINCIPAL", "EXTENSION", "VOICEMAIL"]);
 /** Upper bounds of the self-service mailbox discovery (pages × 100 mailboxes, ownership probes). */
 const MAILBOX_PAGES = 5;
+/** People one "add people" request may invite (Calling's group limit is 16 including the initiator). */
+const MAX_INVITED = 15;
 const MAILBOX_PROBES = 50;
 
 type Body = Record<string, unknown>;
@@ -227,6 +234,7 @@ async function handle(request: Request, context: Context) {
       if (text) body = parseBody(text);
     }
     const route = path.join("/");
+    if (isContactVaultRoute(route)) return await forwardToContactVault(identity, route, method, url, body);
     const decision = await authorize({ identity, route, path, method, url, body });
     if (decision instanceof Response) return decision;
     if (!decision) throw new CallingHttpError(404, "NOT_FOUND", "Calling operation not found.");
@@ -247,6 +255,23 @@ async function handle(request: Request, context: Context) {
     }
     return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch (error) { return callingFailure(error); }
+}
+
+/** Contact Vault operations: privacy administrators only, through a Calling-minted grant. */
+async function forwardToContactVault(identity: CallingIdentity, route: string, method: string, url: URL, body: Body | undefined) {
+  const scope = contactVaultScope(route, method);
+  if (!scope || url.search) throw new CallingHttpError(404, "NOT_FOUND", "Calling operation not found.");
+  requireResourceAdministrator(identity.principalId, route);
+  const upstream = await contactVaultFetch(route, scope, { method, body: body ? JSON.stringify(body) : undefined });
+  if (upstream.status === 401) {
+    throw new CallingHttpError(503, "CONTACT_VAULT_UNAVAILABLE", "Protected contacts are temporarily unavailable.");
+  }
+  const responseHeaders = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
+  for (const name of ["Retry-After", "X-Request-Id"]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
 type Authorization = { identity: CallingIdentity; route: string; path: string[]; method: string; url: URL; body: Body | undefined };
@@ -295,6 +320,11 @@ async function authorize({ identity, route, path, method, url, body }: Authoriza
     if (method === "GET") url.searchParams.set("principalId", principalId);
     if (body) {
       body.initiatorPrincipalId = principalId;
+      // The callee's incoming-call screen names the caller from the verified account only;
+      // a client-supplied name is never trusted.
+      const name = callerDisplayName(identity.displayName);
+      if (name) body.initiatorDisplayName = name;
+      else delete body.initiatorDisplayName;
       // Contact/relay administration needs a separate end-user authorization
       // boundary. The native UI exposes app calls (1:1 and group) and extensions only.
       if (body.callbackRequested || body.targetContactReference || body.initiatorContactReference || body.presentedNumberResourceId || body.privacyRelaySessionId) {
@@ -394,6 +424,45 @@ async function authorizeCallRoute(
     if (op === "transfer") body.transferringParticipantId = mine.participantId;
     return true;
   }
+  // ---- C5 / C6 / C7: active parties only; the acting participant comes from the login ----
+  if (path.length === 4 && op === "upgrade" && body) {
+    if (method !== "POST" || !mayControl(call, principalId, "upgrade")) return false;
+    return { body: { kind: body.kind, expectedVersion: body.expectedVersion } };
+  }
+  if (op === "screen-share" && (path.length === 4 || (path.length === 5 && path[4] === "stop"))) {
+    if (method !== "POST" || !active || !mayControl(call, principalId, "screenShare")) return false;
+    return { body: { participantId: active.participantId } };
+  }
+  if (path.length === 4 && op === "participants" && body) {
+    if (method !== "POST" || !active || !mayControl(call, principalId, "invite")) return false;
+    const targets = body.targetPrincipalIds;
+    if (!Array.isArray(targets) || targets.length < 1 || targets.length > MAX_INVITED || !targets.every((t) => typeof t === "string" && uuid.test(t))) {
+      throw new CallingHttpError(400, "VALIDATION_ERROR", `Choose between 1 and ${MAX_INVITED} people to add.`);
+    }
+    return { body: { invitingParticipantId: active.participantId, targetPrincipalIds: targets, expectedVersion: body.expectedVersion } };
+  }
+  // ---- C4 group host: hand over the role, mute or remove someone (the server checks the host) ----
+  if (path.length === 4 && op === "host" && body) {
+    if (method !== "POST" || !active || typeof body.hostParticipantId !== "string" || !uuid.test(body.hostParticipantId)) return false;
+    return { body: { actingParticipantId: active.participantId, hostParticipantId: body.hostParticipantId } };
+  }
+  if (path.length === 6 && op === "participants" && uuid.test(path[4]) && ["remove", "mute"].includes(path[5])) {
+    if (method !== "POST" || !active) return false;
+    return { body: path[5] === "mute" ? { actingParticipantId: active.participantId, muted: body?.muted === true } : { actingParticipantId: active.participantId } };
+  }
+  // ---- C6: come back into an ongoing call you left (your own participant, your own endpoint) ----
+  if (path.length === 6 && op === "participants" && path[4] === mine.participantId && path[5] === "rejoin" && body) {
+    if (method !== "POST") return false;
+    await requireOwnEndpoint(body.endpointId);
+    return { body: { endpointId: body.endpointId } };
+  }
+  // ---- C13: hide a call from your own history ----
+  if (path.length === 4 && op === "history" && method === "DELETE") {
+    url.search = `?principalId=${encodeURIComponent(principalId)}`;
+    return true;
+  }
+  // ---- C8: call quality (per-participant aggregates) ----
+  if (path.length === 4 && op === "quality") return method === "GET";
   if (path.length === 4 && ["accept", "decline"].includes(op) && body) {
     if (method !== "POST") return false;
     await requireOwnEndpoint(body.endpointId);

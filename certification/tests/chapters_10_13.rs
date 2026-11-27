@@ -253,7 +253,8 @@ async fn external_onboarding_to_production_journey() {
         .await;
     status(&usage, 200, "usage summary");
     assert_eq!(usage.body["sandbox"], true);
-    assert_eq!(usage.body["usageTypes"].as_array().map(Vec::len), Some(8));
+    // The cf-usage-facts catalogue: the eight Part VI types plus MESSAGE_SENT (ADR 0062).
+    assert_eq!(usage.body["usageTypes"].as_array().map(Vec::len), Some(9));
     let limits = gw
         .get(&format!("/v1/environments/{env}/limits"), cred)
         .await;

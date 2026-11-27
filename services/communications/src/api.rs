@@ -26,6 +26,10 @@ pub fn app(state: State) -> Router {
             post(resolve_organization_invitee),
         )
         .route(
+            "/internal/v1/communications/contacts/names",
+            post(contact_names),
+        )
+        .route(
             "/internal/v1/communications/policy/check",
             post(policy_check),
         )
@@ -37,9 +41,33 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/notification-preferences/resolve",
             post(crate::preferences::resolve),
         )
+        // N10 copy + catch-up (contract `communications/notification-owner/v1`, Notification
+        // Service only).
+        .route(
+            "/internal/v1/communications/notification-preferences/export",
+            post(crate::preference_authority::export),
+        )
+        .route(
+            "/internal/v1/communications/notification-preferences/changes",
+            post(crate::preference_authority::changes),
+        )
+        // X4 (contract `communications/notification-owner/v1`, Notification Service only).
+        .route(
+            "/internal/v1/communications/restrictions/check",
+            post(crate::restrictions::check),
+        )
         .route(
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),
+        )
+        // S2: account deletion and the account's data download (Meeting Service only).
+        .route(
+            "/internal/v1/communications/account-erasure",
+            post(crate::privacy::erase),
+        )
+        .route(
+            "/internal/v1/communications/account-export",
+            post(crate::privacy::export),
         )
         .route(
             "/internal/v1/communications/block-events",
@@ -73,6 +101,59 @@ pub fn app(state: State) -> Router {
         .route(
             "/internal/v1/communications/admin/suspend",
             post(crate::internal::suspend),
+        )
+        .route(
+            "/internal/v1/communications/admin/reports/list",
+            post(crate::internal::list_reports),
+        )
+        .route(
+            "/internal/v1/communications/admin/reports/review",
+            post(crate::internal::review_report),
+        )
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id",
+            get(crate::operator::profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/reports",
+            get(crate::operator::reports),
+        )
+        .route(
+            "/internal/v1/communications/operator/holds",
+            get(crate::operator::holds),
+        )
+        .route(
+            "/internal/v1/communications/operator/audit",
+            get(crate::operator::audit),
+        )
+        .route(
+            "/internal/v1/communications/operator/metrics",
+            get(crate::operator::metrics),
+        )
+        // ADR 0068 A4: the admin bridge's operator commands and their settlement record.
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/suspend",
+            post(crate::operator_commands::suspend_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/restore",
+            post(crate::operator_commands::restore_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/reports/:report_id/review",
+            post(crate::operator_commands::review_report),
+        )
+        .route(
+            "/internal/v1/communications/operator/backfill",
+            post(crate::operator_commands::run_backfill),
+        )
+        .route(
+            "/internal/v1/communications/operator/replay",
+            post(crate::operator_commands::replay_event),
+        )
+        .route(
+            "/internal/v1/operator/operations/:idempotency_key",
+            get(crate::operator_commands::operation_record),
         )
         .route(
             "/internal/v1/communications/verification/callback",
@@ -147,6 +228,70 @@ async fn resolve_organization_invitee(
     }
     Ok(Json(r))
 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ContactNames {
+    account: VerifiedAccount,
+    principal_ids: Vec<Uuid>,
+}
+/// At most this many principals per lookup (the Meeting Service names lookup bound).
+pub const MAX_CONTACT_NAMES: usize = 256;
+/// Display names of the caller's CONNECTED contacts among `principalIds` (Meeting Service only).
+///
+/// The CF Meet client names the other party of a personal call or conversation from the
+/// principal ids those owners return. Only contacts the caller is connected with are named,
+/// with the name the Hub contact list shows (`displayName`, plus the caller's private `alias`
+/// when set); a pending, revoked or blocked (either direction) relationship, the caller itself
+/// and any unknown id are left out without an error, so the answer never reveals more than the
+/// caller's own contact list. Principal ids are never added to Hub responses.
+async fn contact_names(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ContactNames>,
+) -> Result<Json<Value>> {
+    if ctx.authenticated_service() != &cf_service_auth::ServiceId::meeting_service() {
+        return Err(Error::Forbidden);
+    }
+    if input.principal_ids.len() > MAX_CONTACT_NAMES {
+        return Err(Error::Validation);
+    }
+    s.metrics.requests.fetch_add(1, Ordering::Relaxed);
+    let scope = auth::delegated(&ctx)?;
+    let actor = s.ensure_profile(&scope, &input.account).await?;
+    if input.principal_ids.is_empty() {
+        return Ok(Json(json!({"schemaVersion":1,"principals":[]})));
+    }
+    let principals: Vec<Value> = store::rows(
+        &s.store.db,
+        "SELECT jsonb_build_object('principalId',o.principal_id,'displayName',o.display_name,'alias',a.alias) doc \
+           FROM communication_contact_aliases a \
+           JOIN communication_connections c ON c.id=a.connection_id AND c.state='CONNECTED' \
+           JOIN communication_profiles o ON o.id=CASE WHEN c.left_profile_id=$1 THEN c.right_profile_id ELSE c.left_profile_id END \
+          WHERE a.owner_profile_id=$1 AND (c.left_profile_id=$1 OR c.right_profile_id=$1) \
+            AND o.tenant_id=$3 AND o.application_id=$4 AND o.environment_id=$5 AND o.principal_id IN (SELECT jsonb_array_elements_text($2::jsonb)::uuid) \
+            AND NOT EXISTS (SELECT 1 FROM communication_block_bridge b WHERE b.active \
+                AND ((b.blocker_profile_id=$1 AND b.blocked_profile_id=o.id) OR (b.blocker_profile_id=o.id AND b.blocked_profile_id=$1))) \
+          ORDER BY o.principal_id",
+        vec![
+            actor.id.into(),
+            json!(input.principal_ids).into(),
+            actor.tenant_id.into(),
+            actor.application_id.into(),
+            actor.environment_id.into(),
+        ],
+    )
+    .await?;
+    let principals: Vec<Value> = principals
+        .into_iter()
+        .map(|mut v| {
+            if v["alias"].is_null() {
+                v.as_object_mut().map(|o| o.remove("alias"));
+            }
+            v
+        })
+        .collect();
+    Ok(Json(json!({"schemaVersion":1,"principals":principals})))
+}
 /// A private translation for authoritative owners; consumer discovery never exposes it.
 async fn resolve_principal(
     HttpState(s): HttpState<State>,
@@ -192,6 +337,7 @@ async fn resolve_principal(
                 credential_issued_at: None,
                 credential_principal_id: None,
                 conversation_id: None,
+                mentioned: None,
             },
         )
         .await?;
@@ -231,7 +377,7 @@ async fn ready(HttpState(s): HttpState<State>) -> impl IntoResponse {
             StatusCode::SERVICE_UNAVAILABLE
         },
         Json(
-            json!({"status":if ready {"ready"} else {"not_ready"},"service":"communications","databaseMigrationsCurrent":ready}),
+            json!({"status":if ready {"ready"} else {"not_ready"},"service":"communications","databaseMigrationsCurrent":ready,"sendPolicyProtocol":1,"sendPolicySynchronous":s.config.synchronous_policy_events,"sendPolicyGeneration":s.config.send_policy_generation}),
         ),
     )
 }
@@ -269,6 +415,7 @@ async fn dispatch(
     let result = dispatch_inner(&s, &scope, &profile, request).await;
     match result {
         Ok(value) => {
+            s.flush_scope_policy(&scope).await?;
             let mut r = Json(value).into_response();
             r.headers_mut()
                 .insert("cache-control", HeaderValue::from_static("no-store"));
@@ -368,6 +515,7 @@ async fn dispatch_inner(
     let method = r.method.as_str();
     match (method, parts.as_slice()) {
         ("GET", ["me"]) => s.me(p).await,
+        ("PATCH", ["me"]) => s.patch_me(p, body(&r), key(&r)?).await,
         ("GET", ["activation"]) => Ok(
             json!({"schemaVersion":1,"state":p.activation_state,"version":p.version,"phoneVerificationRequired":false}),
         ),
@@ -413,6 +561,8 @@ async fn dispatch_inner(
                 .await?;
             s.visible_profile(scope, p, &target, false).await
         }
+        ("POST", ["discovery", "email", "resolve"]) => s.resolve_email(scope, p, body(&r)).await,
+        ("POST", ["discovery", "phone", "resolve"]) => s.resolve_phone(scope, p, body(&r)).await,
         ("GET", ["profiles", public_id]) => {
             s.limit_attempt(p, "discovery.resolve", 120).await?;
             let target = s
@@ -455,6 +605,9 @@ async fn dispatch_inner(
         ("GET", ["events"]) => s.changes(p, &r.query, true).await,
         ("GET", ["calls", "history"]) => s.call_history(scope, p, &r.query).await,
         ("GET", ["calls", call, "context"]) => s.call_context(scope, p, id(call)?).await,
+        ("POST", ["calls", call, "participants"]) => {
+            s.add_contacts_to_call(scope, p, id(call)?, body(&r)).await
+        }
         ("POST", ["contacts", contact, "calls"]) => {
             s.call_contact(scope, p, id(contact)?, body(&r)).await
         }
@@ -631,6 +784,8 @@ async fn report(s: &State, p: &Profile, cf_id: &str, body: Value, key: Uuid) -> 
     }
     let id = Uuid::new_v4();
     execute(&txn,"INSERT INTO communication_profile_reports(id,reporter_profile_id,target_profile_id,reason) VALUES($1,$2,$3,$4)",vec![id.into(),p.id.into(),target.id.into(),request.reason.clone().into()]).await?;
+    // ADR 0068 A7: the new report, OPEN at version 1, to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(s, &txn, id, None, 1).await?;
     s.store
         .audit(
             &txn,

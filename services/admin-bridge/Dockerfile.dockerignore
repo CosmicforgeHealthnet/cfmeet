@@ -1,0 +1,15 @@
+# Build-context filter for services/admin-bridge/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!packages/migration-guard
+!services/admin-bridge
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/admin-bridge/Dockerfile
+services/admin-bridge/Dockerfile.dockerignore

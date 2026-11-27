@@ -402,6 +402,60 @@ async fn chat_controls_require_membership_and_clear_for_me_is_monotonic() {
     h.close().await;
 }
 
+/// Owner report (2026-11-19): a contact added directly by CF Meet ID (AUTOMATIC approval,
+/// no request) could not be called ("Calling…" forever) while her call to the adder rang.
+/// The Hub side is symmetric: after a direct add each of them has the other as a contact,
+/// the full personal policy allows the call both ways, and each launch asks Calling to
+/// ring exactly the other person. (Calling's side: tests/communications_owner_routes.rs
+/// `hub_launch_rings_the_callee_both_ways_between_directly_added_contacts`.)
+#[tokio::test]
+async fn a_directly_added_contact_can_be_called_both_ways() {
+    let h = Harness::new().await;
+    let adder = {
+        let account = h.account();
+        let profile = h.direct_profile(&account).await;
+        User { account, profile }
+    };
+    let added = {
+        let account = h.account();
+        let profile = h.direct_profile(&account).await;
+        User { account, profile }
+    };
+    let r = h
+        .state
+        .send_request(
+            &h.scope,
+            &adder.profile,
+            json!({"cfMeetId": h.public_id(&added.profile).await}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["relationship"], "CONNECTED", "{r}");
+    for (from, to) in [(&adder, &added), (&added, &adder)] {
+        let contact = contact_id(&h, &from.profile, &to.profile).await;
+        let request = Uuid::new_v4().to_string();
+        let launched = h
+            .state
+            .call_contact(
+                &h.delegated(&from.account),
+                &from.profile,
+                contact,
+                json!({"kind":"VOICE","clientRequestId":request,"endpointId":endpoint(&h, from)}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(launched["contactId"], json!(contact));
+        let world = h.world.read().unwrap();
+        let (call, initiator, targets, kind) = world.launches.get(&request).unwrap();
+        assert_eq!(launched["callId"], json!(call));
+        assert_eq!(*initiator, from.profile.principal_id);
+        assert_eq!(targets, &vec![to.profile.principal_id]);
+        assert_eq!(kind, "VOICE");
+    }
+    h.close().await;
+}
+
 #[tokio::test]
 async fn calls_launch_through_policy_once_and_project_safe_timeline_cards() {
     let h = Harness::new().await;
@@ -1191,6 +1245,38 @@ async fn private_owner_and_operator_routes_are_scoped_deduplicated_and_audited()
             .unwrap()
             .allowed
     );
+    // A mention does not break through a MUTED chat.
+    in_chat.mentioned = Some(true);
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &in_chat)
+            .await
+            .unwrap()
+            .allowed
+    );
+    // Gap audit S10: "mentions only" suppresses ordinary messages but lets a mention through.
+    let mentions_chat = conversation(&h, "DIRECT", &[&a, &b], 1);
+    // Messaging signals mentions for MANAGED messages only (K11).
+    h.world.write().unwrap().managed.insert(mentions_chat);
+    h.state.put_conversation_preferences(&h.delegated(&b.account), &b.profile, mentions_chat, json!({"expectedVersion":0,"notifications":"MENTIONS","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4()).await.unwrap();
+    let mut mention = check(Action::MessageNotification, &a.profile, &b.profile);
+    mention.conversation_id = Some(mentions_chat);
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &mention)
+            .await
+            .unwrap()
+            .allowed
+    );
+    mention.mentioned = Some(true);
+    assert!(
+        h.state
+            .check_policy(&h.scope, &mention)
+            .await
+            .unwrap()
+            .allowed
+    );
+    in_chat.mentioned = None;
     in_chat.conversation_id = Some(other_chat);
     assert!(
         h.state
@@ -1329,7 +1415,8 @@ async fn privacy_block_and_identity_changes_invalidate_through_the_feed() {
         .unwrap();
     assert_eq!(
         domains(a.profile.id, heads.0).await,
-        json!(["PRIVACY", "BLOCK", "BLOCK", "PROFILE"])
+        // K5: the unblock restores the contact, so a's contact list refreshes too.
+        json!(["PRIVACY", "BLOCK", "BLOCK", "CONTACT", "PROFILE"])
     );
     assert_eq!(
         domains(b.profile.id, heads.1).await,
@@ -1554,7 +1641,10 @@ async fn every_published_communications_operation_is_routed() {
             );
         }
     }
-    assert_eq!(operations, 73, "published Communications operations");
+    assert_eq!(
+        operations, 77,
+        "published Communications operations, including phone lookup"
+    );
     let body = serde_json::to_value(route("GET", "phone/verification".into())).unwrap();
     let (status, headers) = h
         .http_full(
@@ -2427,5 +2517,151 @@ async fn call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nud
     let undelivered: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.timeline.changed' AND state<>'DELIVERED'",
         vec![]).await.unwrap().unwrap();
     assert_eq!(undelivered["n"], 0);
+    h.close().await;
+}
+
+/// Connected personal contacts are added to a running call by contact id; the Hub resolves
+/// them to principals server-side and never returns a principal id. Strangers and
+/// blocked contacts are refused before Calling is asked.
+#[tokio::test]
+async fn contacts_are_added_to_a_running_call_without_exposing_principals() {
+    let h = Harness::new().await;
+    let (a, b, c) = (user(&h).await, user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    h.connected(&a.profile, &c.profile).await;
+    let ab = contact_id(&h, &a.profile, &b.profile).await;
+    let ac = contact_id(&h, &a.profile, &c.profile).await;
+    let sa = h.delegated(&a.account);
+    let call = Uuid::new_v4();
+    let body = |ids: Vec<Uuid>| {
+        json!({"targetContactIds":ids,"invitingParticipantId":Uuid::new_v4(),
+            "expectedVersion":1,"clientRequestId":Uuid::new_v4()})
+    };
+    let added = h
+        .state
+        .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab, ac]))
+        .await
+        .unwrap();
+    assert_eq!(added["callId"], json!(call));
+    assert_eq!(added["addedContactIds"], json!([ab, ac]));
+    assert!(
+        !added
+            .to_string()
+            .contains(&b.profile.principal_id.to_string()),
+        "no principal id leaves the Hub: {added}"
+    );
+    {
+        let world = h.world.read().unwrap();
+        assert_eq!(world.invites.len(), 1);
+        assert_eq!(world.invites[0].0, call);
+        assert_eq!(
+            world.invites[0].2,
+            vec![b.profile.principal_id, c.profile.principal_id]
+        );
+    }
+    // Validation: empty, duplicated, unknown contacts.
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![]))
+            .await,
+        Err(Error::Validation)
+    ));
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab, ab]))
+            .await,
+        Err(Error::Validation)
+    ));
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![Uuid::new_v4()]))
+            .await,
+        Err(Error::NotFound)
+    ));
+    // Blocks deny before Calling is asked.
+    *h.blocked.write().unwrap() = true;
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab]))
+            .await,
+        Err(Error::ActionNotAllowed)
+    ));
+    *h.blocked.write().unwrap() = false;
+    assert_eq!(h.world.read().unwrap().invites.len(), 1);
+    h.close().await;
+}
+
+/// Gap audit S4: operators list profile reports in their scope and review each once;
+/// ACTIONED with holdTarget holds the reported profile. Others are refused.
+#[tokio::test]
+async fn profile_reports_have_an_operator_review_queue() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let report = Uuid::new_v4();
+    execute(
+        &h.state.store.db,
+        "INSERT INTO communication_profile_reports(id,reporter_profile_id,target_profile_id,reason) VALUES($1,$2,$3,'HARASSMENT')",
+        vec![report.into(), a.profile.id.into(), b.profile.id.into()],
+    )
+    .await
+    .unwrap();
+    let list = "/internal/v1/communications/admin/reports/list";
+    let review = "/internal/v1/communications/admin/reports/review";
+    let (status, _) = h
+        .http(&h.account_signer, list, json!({}), h.scope.clone())
+        .await;
+    assert_eq!(status.as_u16(), 403);
+    let (status, v) = h.http(&h.operator, list, json!({}), h.scope.clone()).await;
+    assert_eq!(status.as_u16(), 200, "{v}");
+    assert_eq!(v["data"][0]["reportId"], json!(report));
+    assert_eq!(v["data"][0]["reason"], "HARASSMENT");
+    assert_eq!(
+        v["data"][0]["targetCfMeetId"],
+        json!(h.public_id(&b.profile).await)
+    );
+    assert!(v["data"][0].get("targetProfileId").is_none(), "{v}");
+    // A dismissal cannot hold; an unknown decision is refused.
+    let (status, _) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"DISMISSED","reason":"NO_VIOLATION","holdTarget":true}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 400);
+    let (status, v) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"ACTIONED","reason":"ABUSE","holdTarget":true}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 200, "{v}");
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &check(Action::DirectCall, &a.profile, &b.profile))
+            .await
+            .unwrap()
+            .allowed,
+        "the reported profile is held"
+    );
+    // Reviewed once; the open queue is empty, the ALL view shows the review.
+    let (status, _) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"DISMISSED","reason":"NO_VIOLATION"}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 409);
+    let (_, open) = h.http(&h.operator, list, json!({}), h.scope.clone()).await;
+    assert_eq!(open["data"], json!([]));
+    let (_, all) = h
+        .http(&h.operator, list, json!({"status":"ALL"}), h.scope.clone())
+        .await;
+    assert_eq!(all["data"][0]["review"]["decision"], "ACTIONED");
     h.close().await;
 }

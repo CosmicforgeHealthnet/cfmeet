@@ -425,16 +425,19 @@ impl AppCallService {
             MediaEventKind::ResourceStarted
                 if call.current_state.is_terminal() || call.current_state == CallState::Ending =>
             {
-                // A resource of a finished Call must not exist.
-                self.teardown_media(call.id).await;
+                // A resource of a finished Call must not exist (the provider says it does,
+                // whatever the binding recorded).
+                self.teardown_lingering_media(call.id).await;
                 MediaEventOutcome::Applied
             }
             MediaEventKind::ResourceFinished => {
-                if call.current_state.is_terminal() || call.current_state == CallState::Ending {
+                if call.current_state == CallState::Ending {
+                    // finish_ending runs the cleanup itself (once, not twice).
+                    self.finish_ending(call.id).await?;
+                    MediaEventOutcome::Applied
+                } else if call.current_state.is_terminal() {
+                    // The room is gone: a binding already TERMINATED needs no provider call.
                     self.teardown_media(call.id).await;
-                    if call.current_state == CallState::Ending {
-                        self.finish_ending(call.id).await?;
-                    }
                     MediaEventOutcome::Applied
                 } else {
                     // An active Call lost its resource: reconciliation re-ensures it —
@@ -794,7 +797,11 @@ impl AppCallService {
                 .await
                 .map(|s| s.exists)
                 .unwrap_or(true);
-            if lingering || binding.status != MediaSessionStatus::Terminated {
+            if lingering {
+                self.teardown_lingering_media(call.id).await;
+                return Ok(1);
+            }
+            if binding.status != MediaSessionStatus::Terminated {
                 self.teardown_media(call.id).await;
                 return Ok(1);
             }
@@ -955,22 +962,103 @@ impl AppCallService {
     }
 }
 
-/// The media connection gateway's authority (ADR 0007): every fresh signaling connection
-/// and reconnection is decided here, from the database, before the media server is
-/// contacted. No cache: a revocation committed before the check is always seen. Any error
-/// reading the state is a refusal (fail closed).
+/// Attempts of one admission decision when its authoritative inputs are transiently
+/// unreadable (database or Communications policy). Bounded so a dead dependency refuses
+/// quickly instead of stalling the media connection.
+const ADMISSION_ATTEMPTS: u32 = 3;
+/// Back-off before admission retry `n` (1-based).
+const ADMISSION_BACKOFF_MS: [u64; 2] = [50, 200];
+/// No retry is started once a decision has taken this long (pool exhaustion makes each
+/// attempt slow; the client's own reconnect is then the better retry).
+const ADMISSION_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_millis(2_500);
+
+/// How an admission error is handled: a definite refusal, or a transient read failure of
+/// the named dependency (retried, then refused as UNAVAILABLE — never admitted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdmissionFailure {
+    Denied(ConnectionDenied),
+    Transient(&'static str),
+}
+
+/// Classifies an error of [`AppCallService::connection_decision`]. Only reads failed, so a
+/// retry is always safe; a policy DENIAL is a decision and is never retried or reported as
+/// an outage.
+pub(crate) fn admission_failure(error: &CallError) -> AdmissionFailure {
+    match error {
+        CallError::TargetUnavailable => AdmissionFailure::Denied(ConnectionDenied::PolicyDenied),
+        CallError::NotFound => AdmissionFailure::Denied(ConnectionDenied::UnknownIdentity),
+        CallError::CommunicationsPolicyUnavailable => {
+            AdmissionFailure::Transient("communications_policy")
+        }
+        CallError::Database {
+            connectivity: true, ..
+        } => AdmissionFailure::Transient("database_connectivity"),
+        CallError::Database { .. } => AdmissionFailure::Transient("database"),
+        _ => AdmissionFailure::Transient("internal"),
+    }
+}
+
+/// The media connection gateway's authority (ADR 0007): every fresh signaling connection,
+/// reconnection and token refresh is decided here, from the database, before the media
+/// server is contacted. No cache: a revocation committed before the check is always seen.
+/// A transient read failure is retried a bounded number of times (each attempt re-reads
+/// everything); if the state still cannot be read the connection is refused (fail closed).
 #[async_trait::async_trait]
 impl ConnectionAdmission for AppCallService {
     async fn admitted_permissions(
         &self,
         claims: &ConnectionClaims,
     ) -> Result<MediaPermissions, ConnectionDenied> {
-        let decision = self.connection_decision(claims).await;
-        let decision = match decision {
-            Ok(decision) => decision,
-            Err(error) => {
-                tracing::warn!(%error, "media connection refused: authoritative state unavailable");
-                Err(ConnectionDenied::Unavailable)
+        let started = std::time::Instant::now();
+        let mut attempt = 1;
+        let decision = loop {
+            let error = match self.connection_decision(claims).await {
+                Ok(decision) => break decision,
+                Err(error) => error,
+            };
+            match admission_failure(&error) {
+                AdmissionFailure::Denied(denied) => break Err(denied),
+                AdmissionFailure::Transient(dependency) => {
+                    let backoff = ADMISSION_BACKOFF_MS
+                        .get(attempt as usize - 1)
+                        .copied()
+                        .map(std::time::Duration::from_millis);
+                    match backoff {
+                        Some(backoff)
+                            if attempt < ADMISSION_ATTEMPTS
+                                && started.elapsed() + backoff < ADMISSION_RETRY_BUDGET =>
+                        {
+                            crate::metrics::inc(
+                                "calling_media_admission_retries_total",
+                                &[("reason", dependency)],
+                            );
+                            tracing::info!(
+                                %error,
+                                dependency,
+                                attempt,
+                                resource = %claims.resource_name,
+                                "media admission state unreadable; retrying"
+                            );
+                            tokio::time::sleep(backoff).await;
+                            attempt += 1;
+                        }
+                        _ => {
+                            crate::metrics::inc(
+                                "calling_media_admission_unavailable_total",
+                                &[("reason", dependency)],
+                            );
+                            tracing::warn!(
+                                %error,
+                                dependency,
+                                attempts = attempt,
+                                elapsed_ms = started.elapsed().as_millis() as u64,
+                                resource = %claims.resource_name,
+                                "media connection refused: authoritative state unavailable"
+                            );
+                            break Err(ConnectionDenied::Unavailable);
+                        }
+                    }
+                }
             }
         };
         match &decision {
@@ -989,6 +1077,7 @@ impl ConnectionAdmission for AppCallService {
                 );
                 tracing::info!(
                     reason = denied.as_str(),
+                    attempts = attempt,
                     resource = %claims.resource_name,
                     "media connection refused before admission to the media server"
                 );
@@ -1071,32 +1160,87 @@ impl AppCallService {
             crate::calls::ids::CallParticipantId::from_uuid(session.participant_id),
         )
         .await?;
-        self.require_personal_call(
-            &call,
-            Some((participant.principal_id, session.created_at.timestamp())),
-        )
-        .await?;
         let binding_active = self
             .calls
             .media_binding_in(&txn, call.id)
             .await?
             .is_some_and(|b| b.status == MediaSessionStatus::Active);
         let facts = self.facts(&txn, &call, &session).await?;
+        // The database read is complete: release the connection BEFORE the external
+        // Communications policy check, so a slow policy service never holds a pooled
+        // connection (and an admission burst never exhausts the pool).
         txn.commit().await?;
         if !binding_active {
             return Ok(Err(ConnectionDenied::SessionRevoked));
         }
-        Ok(match admission(Some(facts), claims.generation) {
-            Admission::Admit(permissions) => Ok(permissions),
+        let admitted = match admission(Some(facts), claims.generation) {
+            Admission::Admit(permissions) => permissions,
             Admission::Evict(EvictionReason::StaleGeneration) => {
-                Err(ConnectionDenied::StaleGeneration)
+                return Ok(Err(ConnectionDenied::StaleGeneration))
             }
             Admission::Evict(EvictionReason::UnknownIdentity) => {
-                Err(ConnectionDenied::UnknownIdentity)
+                return Ok(Err(ConnectionDenied::UnknownIdentity))
             }
             Admission::Evict(EvictionReason::SessionRevoked) => {
-                Err(ConnectionDenied::SessionRevoked)
+                return Ok(Err(ConnectionDenied::SessionRevoked))
             }
-        })
+        };
+        // Personal calls are additionally governed by the Communications policy; a denial
+        // or an unreadable policy is never an admission (classified by the caller).
+        self.require_personal_call(
+            &call,
+            Some((participant.principal_id, session.created_at.timestamp())),
+        )
+        .await?;
+        Ok(Ok(admitted))
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    /// C3: a policy DENIAL is a refusal (never retried, never logged as an outage); only
+    /// unreadable state is transient — and every class still ends in a refusal, never an
+    /// admission.
+    #[test]
+    fn admission_failures_are_classified_without_weakening_the_decision() {
+        assert_eq!(
+            admission_failure(&CallError::TargetUnavailable),
+            AdmissionFailure::Denied(ConnectionDenied::PolicyDenied)
+        );
+        assert_eq!(
+            admission_failure(&CallError::NotFound),
+            AdmissionFailure::Denied(ConnectionDenied::UnknownIdentity)
+        );
+        assert_eq!(
+            admission_failure(&CallError::CommunicationsPolicyUnavailable),
+            AdmissionFailure::Transient("communications_policy")
+        );
+        assert_eq!(
+            admission_failure(&CallError::Database {
+                summary: "pool timed out".into(),
+                connectivity: true
+            }),
+            AdmissionFailure::Transient("database_connectivity")
+        );
+        assert_eq!(
+            admission_failure(&CallError::Database {
+                summary: "canceling statement due to lock timeout".into(),
+                connectivity: false
+            }),
+            AdmissionFailure::Transient("database")
+        );
+        assert_eq!(
+            admission_failure(&CallError::MediaUnavailable),
+            AdmissionFailure::Transient("internal")
+        );
+    }
+
+    #[test]
+    fn the_retry_is_bounded() {
+        assert_eq!(ADMISSION_BACKOFF_MS.len() as u32, ADMISSION_ATTEMPTS - 1);
+        let worst: u64 = ADMISSION_BACKOFF_MS.iter().sum();
+        assert!(std::time::Duration::from_millis(worst) < ADMISSION_RETRY_BUDGET);
     }
 }

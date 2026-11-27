@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.9.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited."
+    "version": "1.18.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version. 1.15.0 (ADR 0068 A6): pricing and plans under /internal/v1/operator/pricing/** and finance reports under /internal/v1/operator/finance/** (pricing.administer, admin bridge only): price books, versions (draft, edit, submit, two-person approve / reject, schedule, activate), rollback, market freezes, CF Meet user plans, plan assignments, overrides, a charge simulation read and the usage / estimated charges / plan spread reports. Nothing charges anyone."
   },
   "tags": [
     {
@@ -49,6 +49,26 @@
     {
       "name": "Operator: webhook migration",
       "description": "Section 53 webhook migration from Calling: status, inventory, import, reconcile, shadow report, cutover check, takeover and rollback."
+    },
+    {
+      "name": "Operator: apps",
+      "description": "ADR 0065: app review (named reviewers, no self-review), publication and suspension."
+    },
+    {
+      "name": "Operator: verification",
+      "description": "ADR 0068 A3: the verification queue in HQ's shared case shape (production-access requests and app reviews)."
+    },
+    {
+      "name": "Operator: admin bridge",
+      "description": "ADR 0068: admin bridge settlement records, partner commands and reads served to the HQ admin bridge."
+    },
+    {
+      "name": "Operator: pricing",
+      "description": "ADR 0068 A6: price books, versions, activations, market freezes, CF Meet user plans, assignments, overrides and the charge simulation; admin bridge only (pricing.administer)."
+    },
+    {
+      "name": "Operator: finance",
+      "description": "ADR 0068 A6: finance reports (usage, estimated charges, plan spread); one currency per figure, minor units, never revenue; admin bridge only (pricing.administer)."
     }
   ],
   "paths": {
@@ -281,7 +301,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -368,20 +388,70 @@
             "serviceToken": []
           }
         ],
-        "description": "Register the organization of an existing FIRST_PARTY Platform Access tenant (classification verified with Platform Access): state INVITED with an OWNER invitation whose token is returned once. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "description": "Register the organization of an existing FIRST_PARTY Platform Access tenant (classification verified with Platform Access): state INVITED with an OWNER invitation whose token is returned once. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event. ADR 0068 A4 (`partners.workspace.register-first-party`, R4, two-person): from cfmeet.admin-bridge, `Idempotency-Key` and HQ's approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`; POLICY_VIOLATION without) are required; no `expectedVersion` (the workspace does not exist yet; an existing one is INVALID_STATE). Owner-delivered secret: the one-time owner invitation is sealed for the Notification Service and sent ONLY to the invited address as a single-use claim link that expires with the invitation (7 days, never resent); the answer is 200 AdminCommandResult (`status` INVITED, `version` \"1\", `resource` FirstPartyRegistrationResource: ids, state, deliveryRef, recipientMasked, expiresAt) — never the token, a link or the address, which is neither echoed, logged nor recorded. A repeated key returns the same workspace and delivery; the same key for another tenant is VERSION_CONFLICT; recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}). 503 CAPABILITY_UNAVAILABLE (nothing done) when owner delivery is not configured (CF_NOTIFICATIONS_BASE_URL and CF_NOTIFICATIONS_SEALING_KEY). The delivery state: GET /internal/v1/operator/owner-deliveries/{deliveryRef}.",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "HQ's second person (hq:<staff>, never the operator). Required from cfmeet.admin-bridge for R3 / R4 commands.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             }
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK (cfmeet.admin-bridge only): AdminCommandResult whose resource is FirstPartyRegistrationResource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
           "201": {
             "description": "OK.",
             "content": {
@@ -447,7 +517,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -478,6 +548,26 @@
               "type": "string",
               "maxLength": 64,
               "pattern": "^[a-z][a-z_.]*$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339, inclusive); at most 31 days before `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (RFC 3339, exclusive).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -587,6 +677,628 @@
         }
       }
     },
+    "/internal/v1/operator/organizations/{organizationId}/projects": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's projects",
+        "operationId": "operatorListProjects",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: the workspace's projects, newest first, keyset-paginated (no description, labels or support address). Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorProjectList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/environments": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's environments",
+        "operationId": "operatorListEnvironments",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: every environment of the workspace's projects, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorEnvironmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/members": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's members",
+        "operationId": "operatorListMembers",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: workspace memberships (opaque CF Meet user ids; no name or address), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorMemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/invitations": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's invitations",
+        "operationId": "operatorListInvitations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: invitations without the invitee's address or token, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/push-providers": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's push credential details",
+        "operationId": "operatorListPushProviders",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ADR 0068 A4: state (ACTIVE | DISABLED), disabledAt and the row version (the expectedVersion of the disable command).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorPushProviderList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhooks": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's webhook subscriptions",
+        "operationId": "operatorListWebhooks",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: live webhook subscriptions with the endpoint host only (never the URL path or query, the signing secret or the description), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorWebhookList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhook-deliveries": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's webhook deliveries",
+        "operationId": "operatorListWebhookDeliveries",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: webhook delivery outcomes in an optional window (no payload, no response body), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339, inclusive); at most 31 days before `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (RFC 3339, exclusive).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorWebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/internal/v1/operator/organizations/{organizationId}/state": {
       "post": {
         "tags": [
@@ -599,16 +1311,16 @@
             "serviceToken": []
           }
         ],
-        "description": "Restrict, suspend, reactivate or close an organization. SUSPENDED / CLOSED withdraw machine access in Platform Access first; reactivation restores it after the state is recorded. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "description": "Restrict, suspend, reactivate or close an organization. SUSPENDED / CLOSED withdraw machine access in Platform Access first; reactivation restores it after the state is recorded. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event. ADR 0068 A4 (`partners.workspace.state.change`, R3): from cfmeet.admin-bridge, `expectedVersion` (the workspace version) and HQ's approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`; POLICY_VIOLATION without) are required and the change happens only at that version (VERSION_CONFLICT otherwise, nothing done). ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -618,15 +1330,62 @@
             "schema": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "HQ's second person (hq:<staff>, never the operator). Required from cfmeet.admin-bridge for R3 / R4 commands.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -686,7 +1445,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -764,7 +1523,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -842,7 +1601,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -912,7 +1671,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -971,7 +1730,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Durable accounting of accepted public API requests and normalized API_OPERATION counts (API Gateway quota flush). The batch is applied exactly once: a replay of an already applied batchId is acknowledged as ALREADY_RECORDED without counting again. Counts only; no request content or caller identity. Permission `developer-usage.record`. A batch carries at least one entry or operation.",
+        "description": "Durable accounting of accepted public API requests and normalized API_OPERATION counts (the API Gateway's quota flush for forwarded requests and, since 1.10.0 (P6), Calling's flush for requests on its direct routes — disjoint sets, never both). The batch is applied exactly once: a replay of an already applied batchId is acknowledged as ALREADY_RECORDED without counting again. Counts only; no request content or caller identity. Permission `developer-usage.record`. A batch carries at least one entry or operation.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1756,7 +2515,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -1826,7 +2585,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -1904,7 +2663,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -1996,7 +2755,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2066,7 +2825,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -2143,7 +2902,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2207,7 +2966,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2292,7 +3051,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2354,7 +3113,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2420,7 +3179,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2971,7 +3730,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55: review | approve (subset of the requested capabilities, regulated ones only after review) | reject (safe reason code) | suspend | reinstate. Approve / reject need `x-cf-operator-user-id`: a member of the requesting organization can never decide its request (SELF_APPROVAL_FORBIDDEN). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 55: review | approve (subset of the requested capabilities, regulated ones only after review) | reject (safe reason code) | suspend | reinstate. Approve / reject need `x-cf-operator-user-id`: a member of the requesting organization can never decide its request (SELF_APPROVAL_FORBIDDEN). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT.",
         "parameters": [
           {
             "name": "requestId",
@@ -3009,17 +3768,34 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ProductionAccessRequest"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ProductionAccessRequest"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseDetail"
+                    }
+                  ]
                 }
               }
             }
@@ -3037,6 +3813,12 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -3107,7 +3889,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55: rebuild daily rollups from the immutable facts. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 55: rebuild daily rollups from the immutable facts. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.usage.reprocess`, R2): from cfmeet.admin-bridge the rollups are unversioned (no `expectedVersion`); status REPROCESSED, version null; resource {environmentId, from, to, removed, rebuilt}. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "x-cf-operator",
@@ -3115,17 +3897,39 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "not": {
+                        "required": [
+                          "resource"
+                        ]
+                      }
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -3143,6 +3947,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -3474,7 +4281,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 57: support tier / reference. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 57: support tier / reference. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.support-tier.change`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set) and the change happens only at that version. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "organizationId",
@@ -3490,17 +4297,34 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status: the resulting support tier).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -3518,6 +4342,104 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorSupportProfileRequest"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Set an organization's support profile (POST)",
+        "operationId": "operatorPostSupportProfile",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4: the same command as PUT, for the admin bridge (which sends every command as POST). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.support-tier.change`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set) and the change happens only at that version. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "x-cf-operator",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status: the resulting support tier).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -3545,7 +4467,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 57: the last known platform incident affecting the organization (reference only). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 57: the last known platform incident affecting the organization (reference only). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.incident.record`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set); status RECORDED. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "organizationId",
@@ -3561,17 +4483,34 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status RECORDED).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -3589,6 +4528,12 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -3892,6 +4837,3172 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List apps (optionally by review status)",
+        "operationId": "operatorListApps",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: apps by review status (at most 200). Permission `developer-platform.administer`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AppStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AppList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Read an app with the manifest under review and its review history",
+        "operationId": "operatorGetApp",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: the app, the submitted manifest, the developer workspace name and the audited review history. Permission `developer-platform.administer`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorApp"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/app-search": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Search apps",
+        "operationId": "operatorSearchApps",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: apps whose current manifest name contains `q` (case-insensitive, wildcards literal) or whose id equals `q`, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Name substring or exact app id.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorAppSummaryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/versions": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List an app's versions",
+        "operationId": "operatorListAppVersions",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: the app's manifest versions (name and distribution only), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "description": "App id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorAppVersionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/installations": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List an app's installations",
+        "operationId": "operatorListAppInstallations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068: the app's installation grants (opaque targets, scope counts), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "description": "App id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorAppInstallationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Review, approve, reject, publish or suspend an app",
+        "operationId": "operatorDecideApp",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT. ADR 0068 A4: `suspend` (`apps.app.suspend`, R3; every install is withdrawn) and `lift-suspension` (`apps.app.lift-suspension`, R3, admin bridge only: INTERNAL_PERMISSION_DENIED for the operator console; SUSPENDED → the status the app had when it was suspended) answer cfmeet.admin-bridge with AdminCommandResult (status: the app's resulting status) and need HQ's approver.",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "review",
+                "approve",
+                "reject",
+                "publish",
+                "suspend",
+                "lift-suspension"
+              ]
+            }
+          },
+          {
+            "name": "x-cf-operator-user-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "x-cf-operator",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "HQ's second person (hq:<staff>, never the operator). Required from cfmeet.admin-bridge for R3 / R4 commands.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AppDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail) for review / approve / reject / publish; AdminCommandResult for suspend / lift-suspension.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseDetail"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "List the verification queue",
+        "operationId": "operatorListVerificationCases",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: production-access requests (PARTNER_GO_LIVE) and app reviews (APP_REVIEW) in HQ's shared case shape (snake_case), most recently changed first, keyset-paginated. CANCELLED requests and DRAFT apps are not listed. Evidence is hashes only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`next_cursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases/{caseId}": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "Read one verification case",
+        "operationId": "operatorGetVerificationCase",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: one case (CANCELLED included) with its decision details (requested / approved capabilities, or the app version under review and the published version). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "description": "`cfmeet:<PARTNER_GO_LIVE|APP_REVIEW>:<uuid>` (lowercase uuid).",
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases/{caseId}/history": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "A verification case's transitions",
+        "operationId": "operatorListVerificationCaseHistory",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: oldest first, keyset-paginated (cursor = the last sequence). Staff actions name the staff member; a partner's own actions carry no account id. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "description": "`cfmeet:<PARTNER_GO_LIVE|APP_REVIEW>:<uuid>` (lowercase uuid).",
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`next_cursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "The record of an applied admin bridge command",
+        "operationId": "operatorGetAdminOperation",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: the admin bridge settles an unknown command outcome from this record, written in the same transaction as the change and keyed by the command's Idempotency-Key. 404: never applied. Only the admin bridge's commands are recorded (the operator console gets 404). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminOperationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/push-providers/{pushProviderId}/disable": {
+      "post": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Disable a partner push key",
+        "operationId": "operatorDisablePushKey",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.push-key.disable`, R3): admin bridge only (INTERNAL_PERMISSION_DENIED for any other caller). Deletes the credential from the Notification Service vault and keeps its metadata DISABLED (the partner sees status FAILED, lastError DISABLED_BY_OPERATOR; uploading again re-enables push). `expectedVersion` (the row version) and HQ's approver are required; the row is locked at that version while the vault is asked (VERSION_CONFLICT otherwise, nothing done). Never returns key material, key identifiers or the fingerprint. 404 when push credentials are off, 503 without the Notification Service. Status DISABLED. Permission `developer-platform.administer`. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>, ADR 0068).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "pushProviderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "`pushProviderId` of the operator push-provider read."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (hq:<staff>, never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PushKeyDisableRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhook-deliveries/{deliveryId}/retry": {
+      "post": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Retry a dead-lettered webhook delivery",
+        "operationId": "operatorRetryWebhookDelivery",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.webhook-delivery.retry`, R2): admin bridge only (INTERNAL_PERMISSION_DENIED for any other caller). A NEW delivery of a FAILED delivery's event to its still ACTIVE subscription (INVALID_STATE otherwise), like a customer replay; the new delivery's id is the Idempotency-Key. Unversioned: no `expectedVersion`; the body is empty or `{}`. Status RETRIED, version null; resource {deliveryId, retryOf, subscriptionId, environmentId, state (PENDING | SHADOW), createdAt}. 404 when webhooks are off or the delivery is not the workspace's. Permission `developer-platform.administer`. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>, ADR 0068).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/usage": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "A workspace's usage",
+        "operationId": "operatorGetOrganizationUsage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.usage.read`): the workspace's metered usage per environment and usage type over [since, until) (UTC days touched by the window, at most 31; default the last 30 days) from the daily rollups. Offset-paginated over a stable order (environment, usage type). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (inclusive, RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorUsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/incidents": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Recorded platform incidents",
+        "operationId": "operatorListIncidents",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.incidents.list`): every platform incident recorded against a workspace (POST …/organizations/{organizationId}/incidents), newest first, keyset-paginated; optionally one workspace (404 when unknown) and a window on the record time. Reference and times only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "description": "Only this workspace.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (inclusive, RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorIncidentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List price books",
+        "operationId": "pricingListPriceBooks",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.price-books.list`: every lineage, newest first, keyset-paginated; optional productLine. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "productLine",
+            "in": "query",
+            "required": false,
+            "description": "Only this product line.",
+            "schema": {
+              "enum": [
+                "PARTNER_PLATFORM",
+                "CONSUMER"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceBookList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/versions": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List a price book's versions",
+        "operationId": "pricingListVersions",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.versions.list`: newest first (no rates). Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceVersionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Draft a price version",
+        "operationId": "pricingDraftVersion",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.version.draft` (R3): a new DRAFT version at the price book's version; its id is the Idempotency-Key. Status DRAFT; version: the new version's row version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceVersionDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/activations": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "A price book's activation history",
+        "operationId": "pricingListActivations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.activations.list`: the append-only history (SCHEDULED, ACTIVATED, ROLLED_BACK), newest first. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceActivationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/rollback": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Roll a price book back",
+        "operationId": "pricingRollbackPriceBook",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.price-book.rollback` (R4): an older SUPERSEDED version that was activated before becomes effective again now (a ROLLED_BACK activation; that version is APPROVED again, the one it replaces SUPERSEDED). Status ROLLED_BACK; version: the price book's version. Refused in a frozen market. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceBookRollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/versions/{versionId}": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Read a price version",
+        "operationId": "pricingGetVersion",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.versions.read`: the version with its rates, digests, the HQ staff who drafted, submitted and approved it, and whether it is effective. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceVersionDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/versions/{versionId}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Edit, submit, approve, reject, schedule or activate a price version",
+        "operationId": "pricingVersionCommand",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.version.edit` (R3, DRAFT only; status DRAFT), `.submit` (R3; DRAFT → SUBMITTED, the content must be complete, digest kept), `.approve` (R4; SUBMITTED → APPROVED by a staff member other than the submitter, SELF_APPROVAL_FORBIDDEN otherwise; content unchanged since submission; valid 12 hours), `.reject` (R4; SUBMITTED → REJECTED with a reason code), `.schedule` (R4; an APPROVED, unexpired version takes effect at effectiveFrom; status SCHEDULED) and `.activate` (R4; effective now, the previously active version SUPERSEDED; status ACTIVE). An expired approval is APPROVAL_EXPIRED; a frozen market refuses submit, approve, schedule and activate (POLICY_VIOLATION). version: the version's row version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "edit",
+                "submit",
+                "approve",
+                "reject",
+                "schedule",
+                "activate"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PriceVersionCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/freezes": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List market freezes",
+        "operationId": "pricingListFreezes",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.freezes.list`: every market ever frozen, most recently changed first; optional state. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only this state.",
+            "schema": {
+              "enum": [
+                "FROZEN",
+                "UNFROZEN"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/MarketFreezeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/markets/{marketCode}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Freeze or unfreeze a market",
+        "operationId": "pricingMarketFreeze",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.market.freeze` / `pricing.market.unfreeze` (R4): status FROZEN / UNFROZEN; version: the freeze's version (expectedVersion 0 for a market never frozen; unfreezing it is INVALID_STATE). Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "marketCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "freeze",
+                "unfreeze"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/MarketFreezeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/plans": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List CF Meet user plans",
+        "operationId": "pricingListPlans",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plans.list`: the plans of every CONSUMER lineage's effective version (or one lineage), FREE always included. One page (nextCursor null). Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "query",
+            "required": false,
+            "description": "Only this CONSUMER lineage (404 when unknown).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PricingPlanList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/plan-assignments": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List CF Meet user plan assignments",
+        "operationId": "pricingListPlanAssignments",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plan-assignments.list`: the append-only assignment history, newest first; filters holderId, holderKind, planCode. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "query",
+            "required": false,
+            "description": "One user or business organization (opaque id).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "holderKind",
+            "in": "query",
+            "required": false,
+            "description": "Holder kind.",
+            "schema": {
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            }
+          },
+          {
+            "name": "planCode",
+            "in": "query",
+            "required": false,
+            "description": "Plan code.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z_]{1,23}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ConsumerPlanAssignmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Assign a CF Meet user plan",
+        "operationId": "pricingAssignPlan",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plan.assign` (R3): status the plan code; version: the holder's version. A plan absent from the lineage's effective version is INVALID_STATE. Assignment only: limits are enforced by the Meeting Service and Messaging, and nothing is charged. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ConsumerPlanAssignRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/overrides": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List plan overrides",
+        "operationId": "pricingListOverrides",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.overrides.list`: holders' limit overrides, most recently changed first; filters holderId, state. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "query",
+            "required": false,
+            "description": "One holder.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only this state.",
+            "schema": {
+              "enum": [
+                "ACTIVE",
+                "REVOKED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PlanOverrideList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Set or revoke a plan override",
+        "operationId": "pricingChangeOverride",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.override.change` (R4): status ACTIVE (limits set) or REVOKED (limits null); version: the override's version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PlanOverrideChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/simulations": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Simulate charges",
+        "operationId": "pricingSimulateCharges",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.charges.simulate`: a READ that uses POST (its input is a usage vector): no Idempotency-Key, no record, no side effect, nothing charged. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ChargeSimulationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ChargeSimulation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/usage": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Usage report",
+        "operationId": "financeUsageReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.usage.report`: metered usage per partner workspace and usage type over the window's UTC days (default the last 30, at most 31), with the workspace's commercial plan code. Offset-paginated. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/FinanceUsageReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/estimated-charges": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Estimated charges report",
+        "operationId": "financeEstimatedChargesReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.estimated-charges.report`: what each partner workspace's metered usage over the window would cost under a PARTNER_PLATFORM lineage's effective version (the window counts as one month for minimums; monthly active users are not metered and not estimated). An estimate in one currency, never revenue, nothing charged. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "query",
+            "required": false,
+            "description": "Required: a PARTNER_PLATFORM lineage.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EstimatedChargesReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/plan-spread": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Plan spread report",
+        "operationId": "financePlanSpreadReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.plan-spread.report`: holders per CF Meet user plan as of `until` (default now; never-assigned holders are on FREE and not counted) and the assignments made since `since`. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PlanSpreadReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/owner-deliveries/{deliveryRef}": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "The state of an owner-delivered secret",
+        "operationId": "operatorGetOwnerDelivery",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4: the delivery of a secret an admin bridge command produced (today the first-party workspace owner invitation), as a reference: channel, masked address, delivery and claim state, expiry. Never the token, a link or the address. The admin bridge only (404 for every other caller and for an unknown or purged reference; settled deliveries are kept 30 days). Permission `developer-platform.administer` AND the bridge's `X-CF-Operator`.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "deliveryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OwnerDelivery"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/datasets/{datasetId}/days/{day}": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "One UTC day of a dataset",
+        "operationId": "operatorGetDatasetDay",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A7: the daily counts the admin bridge pulls (it sends `X-CF-Operator: hq:dataset-sync`), for `cfmeet.partners_daily` and `cfmeet.apps_daily`: counts only, a snapshot at the end of that UTC day (now for today) reconstructed from the transition and activity history; a metric that cannot be computed is null, never a guessed 0. A future or malformed day is VALIDATION_ERROR; an unknown dataset NOT_FOUND. The admin bridge only (404 for every other caller). Permission `developer-platform.administer` AND the bridge's `X-CF-Operator`.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cfmeet.partners_daily",
+                "cfmeet.apps_daily"
+              ]
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "description": "The UTC day (yyyy-mm-dd).",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/DatasetDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/plan-limits/{holderKind}/{holderId}": {
+      "get": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "A CF Meet plan holder's effective limits",
+        "operationId": "getEffectivePlanLimits",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A6 (plan enforcement where the usage happens): the effective CF Meet plan limits of a user (`USER`) or business organization (`ORGANIZATION`) — plan assignment and overrides — for the Meeting Service and Messaging. Permission `developer-entitlement.read` (grantable to the API Gateway, the Meeting Service and Messaging). Ids, codes and limits only; `Cache-Control: private, max-age=<cacheSeconds>`. A holder never assigned is on FREE; a limit the plan does not set is null. Callers keep today's behaviour when this read is unconfigured or unreachable.",
+        "parameters": [
+          {
+            "name": "holderKind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EffectivePlanLimits"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

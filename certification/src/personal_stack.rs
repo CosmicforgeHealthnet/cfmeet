@@ -19,6 +19,14 @@ const OWNERS: &[&str] = &[
     services::MESSAGING,
     services::COMMUNICATIONS,
 ];
+
+/// Fixed-code test accounts of the personal stack (`AUTH_TEST_ACCOUNTS`): the multi-device
+/// E2EE acceptance binary signs every device in separately and cannot read a mailbox.
+pub const E2EE_TEST_ACCOUNTS: [(&str, &str); 2] = [
+    ("e2ee-a@acceptance.invalid", "135791"),
+    ("e2ee-b@acceptance.invalid", "246802"),
+];
+
 pub struct PersonalStack {
     pub urls: BTreeMap<String, String>,
     pub owner_urls: BTreeMap<String, String>,
@@ -219,6 +227,12 @@ impl PersonalStack {
                 db::migrate(&self.bin.join("account-hardening-migration"), &owner)?;
                 db::migrate(&self.bin.join("organization-integration-migration"), &owner)?;
                 db::migrate(&self.bin.join("lifecycle-delivery-migration"), &owner)?;
+                db::migrate(&self.bin.join("notification-fence-migration"), &owner)?;
+                db::migrate(&self.bin.join("gap-closure-migration"), &owner)?;
+                db::migrate(&self.bin.join("meeting-audit-migration"), &owner)?;
+                db::migrate(&self.bin.join("account-privacy-migration"), &owner)?;
+                db::migrate(&self.bin.join("account-phone-migration"), &owner)?;
+                db::migrate(&self.bin.join("admin-operations-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {
@@ -229,6 +243,12 @@ impl PersonalStack {
                     self.legacy_accounts.push(id);
                 }
                 conn.close().await?;
+            }
+            if name == "messaging" {
+                db::migrate(
+                    &self.bin.join("messaging-send-policy-projection-migration"),
+                    &owner,
+                )?;
             }
             if let Some(feature) = feature {
                 db::migrate(&self.bin.join(feature), &owner)?;
@@ -294,6 +314,14 @@ impl PersonalStack {
                     .into(),
             ),
             ("APP_ENV".into(), "test".into()),
+            (
+                "AUTH_TEST_ACCOUNTS".into(),
+                E2EE_TEST_ACCOUNTS
+                    .iter()
+                    .map(|(email, code)| format!("{email}:{code}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
             ("APP_URL".into(), "http://127.0.0.1:3000".into()),
             ("FRONTEND_URLS".into(), "http://127.0.0.1:3000".into()),
             ("JWT_SECRET".into(), random()),

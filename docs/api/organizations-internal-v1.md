@@ -186,3 +186,59 @@ Per-organization Enterprise Calling runs in the organization's own triple. Provi
 **ServiceBinding** `{"organizationId","capability":"primary","service":"calling","serviceAccountId","credentialId","version","boundBy":"uuid|null","createdAt","updatedAt"}` — `boundBy` is the relayed acting operator (`X-CF-Acting-User`, only from `organization.act-for-user` callers), else `null`. Changes write `scope.service_binding_set` / `scope.service_binding_cleared` audit events (actor `OPERATOR`; ids only). No outbox event: consumers read the binding through `scopes/resolve` on every request.
 
 `POST /internal/v1/organizations/scopes/resolve` adds `serviceBindings: {"calling": {serviceAccountId, credentialId, version} | null}` to its 200 answer; every refusal is unchanged (a suspended or archived organization, or a scope that is not READY, never exposes a binding). Table `organization_scope_service_bindings` (migration `m20261108_000003_scope_service_bindings`, additive; PK organization + capability + service; `service` CHECK `calling`).
+
+### 8.6 Automatic service bindings (ADR 0058 Amendment A2, contract 1.5.0)
+
+With `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning), no operator step is needed. After the scope is verified, the provisioning worker asks Platform Access (`platform-identity.bind-organization-services`, `PUT /internal/v1/organization-scopes/{org}/primary/service-bindings/{calling|messaging}`) to create the service account and credential inside the organization's own triple:
+
+- `calling` gets `calls.read`, `enterprise.config.read` and `enterprise.config.write`; `messaging` gets `messages.read`.
+- The credential secret is never returned.
+- Organizations reads each binding back and verifies the same triple, `verified`/`active`, the exact scopes and matching ids. Only then does it record the ids (`source: AUTOMATIC`, `verifiedAt`, `credentialExpiresAt`).
+- The organization becomes READY only after both bindings are recorded. Workflow steps: `SCOPE_VERIFIED` → `BINDING_CALLING_VERIFIED` → `BINDING_MESSAGING_VERIFIED` → `VERIFIED`.
+
+**Failures** set the workflow to FAILED with one of `SERVICE_BINDING_CONFLICT`, `SERVICE_BINDING_VERIFICATION_FAILED`, `PLATFORM_ACCESS_UNAVAILABLE` (after backoff) or `PLATFORM_ACCESS_REFUSED`. They are recoverable with the existing operator retry, and retries are idempotent on both sides.
+
+**Reconciliation** backfills bindings for already-READY organizations and renews credentials that expire within 30 days. Drift removes the local binding and fails the workflow (`SERVICE_BINDING_DRIFT`).
+
+**Archiving, or an operator DELETE of an AUTOMATIC binding,** marks the local row revoked in the same transaction, so resolve stops returning it at once. A durable sync then revokes it at Platform Access, retrying until it is applied. Automation never recreates a revoked binding.
+
+**Operator bindings** (`PUT`, `source: OPERATOR`) are never overwritten.
+
+**Operator rotation:** `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/rotate` (`organization.administer`, audited `scope.service_binding_rotated`).
+
+Audit actions (ids only): `scope.service_binding_provisioned`, `scope.service_binding_rotated`, `scope.service_binding_revoked`, `scope.service_binding_revocation_applied`. Migration `m20261113_000005_automatic_service_bindings` is additive.
+
+## 9. Admin bridge commands (ADR 0068 phase A4, contract 1.10.0)
+
+The HQ admin bridge (`cfmeet.admin-bridge`, verified `X-CF-Operator: hq:<staff>`) runs operator commands with `organization.administer`. For the bridge only (every other caller keeps the route's existing behaviour and answer):
+
+* `Idempotency-Key` (a UUID) is required (400 `VALIDATION_ERROR`); `expectedVersion` is required where the subject is versioned and the change happens only at that version, checked under the row lock (409 `VERSION_CONFLICT`, nothing done).
+* R3 commands require `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest` (403 `APPROVAL_REQUIRED`).
+* The applied command is written to the append-only `organization_admin_operations` in the same transaction (operator, approver, approval reference, subject, resulting state and version). A repeated key for the same command and subject answers the current state without applying again; for anything else 409 `IDEMPOTENCY_CONFLICT`. `GET /internal/v1/operator/operations/{idempotencyKey}` (bridge only; 404 otherwise and for an unknown key) answers `{idempotency_key, outcome: APPLIED, source_status, source_version}`.
+* The answer is `{"status": "<STATE>", "version": "<n>" | null, "resource": {…}}` (ids, states, timestamps; never a name, email or Platform Access id).
+
+| Command (risk) | Route | `expectedVersion` | `status` / `version` |
+|---|---|---|---|
+| create (R2) | `POST /internal/v1/admin/organizations` | none (new) | `ACTIVE`, `1` |
+| suspend / reactivate / archive (R3) | `POST /internal/v1/organizations/{id}/suspend` · `/reactivate` · `/archive` | organization version | lifecycle status, organization version |
+| ownership recovery (R3) | `POST /internal/v1/admin/organizations/{id}/owners` | the user's current membership version, 0 for none | `ACTIVE`, membership version |
+| provisioning retry (R2) | `POST /internal/v1/admin/organizations/{id}/provisioning/retry` `{}` | none | provisioning state, `null` |
+| event replay (R2) | `POST /internal/v1/admin/event-delivery/replay` | none | `REPLAYED`, `null` |
+| member change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change` | membership version | membership status, membership version |
+| team change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/teams/{teamId}/change` | team version | team status, team version |
+| policy change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/policies/change` | policy revision (0 = defaults) | `UPDATED` / `UNCHANGED`, revision |
+| binding change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/change` `{action: SET \| CLEAR}` | binding version (0 = none) | `BOUND` + version, or `REMOVED` / `REVOKED` + `null` |
+| owner-delivered export (R4, bridge only) | `POST /internal/v1/admin/organizations/{id}/exports` `{}` | none (new export) | `READY`, `1` (see §10) |
+
+The operator export (`GET /internal/v1/admin/organizations/{id}/export`) is not a bridge command: it returns the whole organization document (invitation addresses included) and is refused to the bridge. The bridge requests an owner-delivered export instead (§10).
+
+## 10. Owner-delivered exports (ADR 0068 phase A4, contract 1.11.0)
+
+HQ staff never see exported personal data, and HQ never stores or relays it (owner decision agreed with HQ, 2026-11-21). The bridge's `organizations.organization.export` (R4: `Idempotency-Key`, `X-CF-Approver` / `X-CF-Approval-Ref` / `X-CF-Intent-Digest`, recorded in `organization_admin_operations` with subject `ORGANIZATION_EXPORT`) therefore never returns the document:
+
+* Organizations builds the same document as `GET /internal/v1/organizations/{id}/export` (it carries invitation addresses) in the command's transaction, keeps only an encrypted copy (XChaCha20-Poly1305, keys from the file `ORGANIZATIONS_EXPORT_KEYS_FILE`, additional data bound to the export and organization) with its size and SHA-256, for 7 days (`organization_exports`).
+* Each ACTIVE OWNER (at most 20) gets one single-use download link by email (`DOWNLOAD_LINK_EMAIL`). Organizations holds no address: the link travels as a Notification Service event `organizations.organization.export_ready` addressed to `cfmeet-user:<owner>`, its token HPKE-sealed to the service key (`CF_NOTIFICATIONS_SEALING_KEY`); Organizations stores only the token's SHA-256 (`organization_export_deliveries`) and drops the sealed notice once acknowledged.
+* The link works once, until expiry, only for its owner after sign-in: `POST /internal/v1/organizations/{id}/exports/{exportId}/download` `{token}` (`organization.read`, verified acting user, still an ACTIVE OWNER) answers the stored document (`X-CF-Export-Sha256`) and makes the export `DELIVERED`. 404 `EXPORT_LINK_INVALID` (unknown, someone else's, used), 410 `EXPORT_LINK_EXPIRED`. Expiry means HQ issues the command again; nothing is resent.
+* The answer and the reads (`GET /internal/v1/operator/organizations/{id}/exports`, `.../exports/{exportId}`; `organization.operator-read` + `X-CF-Operator`) carry the reference only: `exportId`, `state` (`READY`, `DELIVERED`, `EXPIRED`, `FAILED`; `REQUESTED` reserved), `delivery: OWNER_DELIVERED`, `deliveryChannel`, `deliveryRef` (the first link), `deliveries[]` (`deliveryRef`, `state` `PENDING`/`SENT`/`CLAIMED`/`FAILED`/`EXPIRED`, `sentAt`, `claimedAt`), `recipientMasked: null` (no address to mask), `recipientCount`, `sizeBytes`, `sha256`, `createdAt`, `expiresAt`, `deliveredAt`, `purgedAt` (+ `version` in reads).
+* The worker expires links and exports, purges the encrypted copy at expiry, on `FAILED` (no owner could be notified) or once every link is settled, and deletes rows after 90 days. `GET /internal/v1/admin/organizations/{id}/export` is refused to the admin bridge (403 `ACTOR_NOT_ALLOWED`).
+* Off by default (`ORGANIZATIONS_EXPORT_DELIVERY_ENABLED`): 409 `EXPORT_DELIVERY_UNAVAILABLE`, nothing built or stored. Turning it on requires `CF_NOTIFICATIONS_BASE_URL`, the sealing key, the key file and the notice type in the Notification Service catalogue (the service refuses to start otherwise). 409 `EXPORT_NO_RECIPIENT` when no ACTIVE OWNER exists. Migration `m20261121_000008_organization_exports` is additive.

@@ -124,6 +124,11 @@ fn is_calling_table(name: &str) -> bool {
         // Part H §80: retention holds and the retention audit (ADR 0030).
         || name == "calling_retention_holds"
         || name == "calling_retention_audit"
+        // Roadmap N7: Calling's outbox of publications to the Notification Service.
+        || name == "calling_notification_publications"
+        // ADR 0068 A4 / A7: the admin bridge's command record and owner event outbox.
+        || name == "calling_admin_operations"
+        || name == "calling_admin_bridge_events"
 }
 
 /// Code with the contents of string literals removed (identifiers, types and syntax

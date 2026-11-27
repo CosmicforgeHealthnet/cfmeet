@@ -1,7 +1,8 @@
 //! HTTP surface (contract `cfmeet.messaging.http-api`, served at `/openapi.json`).
 //!
 //! * `GET /health` — liveness only; `GET /ready` — database reachable and every
-//!   migration applied (503 otherwise), plus non-secret operational facts.
+//!   migration applied (503 otherwise), plus non-secret operational facts (among them
+//!   `routingProtocol` once the routing fence history is applied).
 //! * `/v1/messaging/**` and `/v1/conversations/**` — the customer API: Platform Access authentication, scopes, a
 //!   verified acting principal ([`middleware`]).
 //! * `/internal/v1/**` — service-authenticated; no internal operation exists yet, so
@@ -55,6 +56,7 @@ pub fn customer_routes() -> Router<AppState> {
 /// Routes nested under `/v1/conversations`.
 pub fn conversation_tree() -> Router<AppState> {
     crate::conversations::http::conversation_routes()
+        .merge(crate::conversations::inbox_settings::routes())
         .merge(crate::membership::http::routes())
         .merge(crate::messages::http::routes())
         .merge(crate::mls::http::conversation_routes())
@@ -71,6 +73,8 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/openapi.json", get(openapi))
         .merge(crate::realtime::http::device_routes())
+        // ADR 0062 partner device routes (user token; they authenticate themselves).
+        .merge(crate::partner::http::routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
@@ -94,8 +98,13 @@ pub fn app(state: AppState) -> Router {
         .with_state(state.clone());
     // `/internal/v1/delegated/v1/...` mirrors the customer surface for first-party
     // backends acting through a peer service (`messaging-application.delegate`).
+    // Owner-delivered exports (ADR 0068) are claimed here only: the recipient signed in to
+    // CF Meet, relayed by a first-party backend, never a customer credential on `/v1`.
     let delegated = Router::new()
-        .nest("/v1/messaging", customer_routes())
+        .nest(
+            "/v1/messaging",
+            customer_routes().merge(crate::compliance::http::recipient_routes()),
+        )
         .nest("/v1/conversations", conversation_tree())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
@@ -104,14 +113,33 @@ pub fn app(state: AppState) -> Router {
             state.clone(),
             middleware::require_delegated_application,
         ));
+    // `/internal/v1/organization-moderation/v1/messaging/...`: the SAME moderation
+    // handlers for an organization moderator relayed by the Meeting Service
+    // (`messaging-organization.govern`, gap audit G6).
+    let organization_moderation = Router::new()
+        .nest("/v1/messaging", crate::moderation::http::customer_routes())
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_organization_moderation,
+        ));
     let internal = Router::new()
         .nest(
             "/internal/v1",
             Router::new()
                 .nest("/delegated", delegated)
+                .nest("/organization-moderation", organization_moderation)
                 .merge(crate::communications::routes())
+                .merge(crate::notifications::routes())
                 .merge(crate::integrations::http::internal_routes())
                 .merge(crate::sms_bridge::http::internal_routes())
+                // ADR 0068: the admin bridge's operator reads (`messaging-firstparty.administer`).
+                .merge(crate::operator_reads::routes())
+                // ADR 0068: the admin bridge's operator commands and settlement read.
+                .merge(crate::operator_commands::routes())
+                // ADR 0068 A7: the admin bridge's daily dataset pull.
+                .merge(crate::operator_datasets::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
@@ -172,29 +200,39 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     } else {
         (None, None)
     };
+    // Routing fence protocol (Document 4 §9.6): reported only once its history is
+    // applied, so the activation operation can refuse while any replica lacks it.
+    let routing_protocol = crate::notification_fence::fence_protocol(&state.db).await;
+    let mut body = json!({
+        "status": if ok { "ready" } else { "not_ready" },
+        "service": "messaging",
+        "sendPolicyProtocol": if messaging_migration::send_policy_projection_ready(&state.db).await.unwrap_or(false) { Some(1) } else { None },
+        "sendPolicyLocalEnabled":state.local_send_policy,
+        "sendPolicyGeneration":state.local_send_generation,
+        "database": database,
+        "migrations": migrations,
+        "e2eeDevices": if state.devices.enabled { "enabled" } else { "disabled" },
+        "authorizationCache": if state.authority.is_caching() { "active" } else { "inactive" },
+        "outboxPending": outbox,
+        "outboxDeadLetter": dead,
+        "realtime": {
+            "draining": state.realtime.hub.is_draining(),
+            "connections": state.realtime.hub.connections(),
+            "broker": state.realtime.broker.backend(),
+            "presence": state.realtime.presence.backend(),
+            "clientTokens": if state.realtime.keys.is_some() { "enabled" } else { "disabled" },
+        },
+    });
+    if let Some(protocol) = routing_protocol {
+        body["routingProtocol"] = json!(protocol);
+    }
     (
         if ok {
             StatusCode::OK
         } else {
             StatusCode::SERVICE_UNAVAILABLE
         },
-        Json(json!({
-            "status": if ok { "ready" } else { "not_ready" },
-            "service": "messaging",
-            "database": database,
-            "migrations": migrations,
-            "e2eeDevices": if state.devices.enabled { "enabled" } else { "disabled" },
-            "authorizationCache": if state.authority.is_caching() { "active" } else { "inactive" },
-            "outboxPending": outbox,
-            "outboxDeadLetter": dead,
-            "realtime": {
-                "draining": state.realtime.hub.is_draining(),
-                "connections": state.realtime.hub.connections(),
-                "broker": state.realtime.broker.backend(),
-                "presence": state.realtime.presence.backend(),
-                "clientTokens": if state.realtime.keys.is_some() { "enabled" } else { "disabled" },
-            },
-        })),
+        Json(body),
     )
 }
 

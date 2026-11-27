@@ -1,0 +1,21 @@
+{
+  // Type-checks against the TypeScript SDK sources (../typescript/src) so no build of the
+  // SDK is needed. React Native provides fetch, WebSocket and crypto.getRandomValues /
+  // randomUUID (Hermes; or react-native-get-random-values); the SDK's types name them
+  // through the DOM lib.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "@cfmeet/platform-sdk": ["../typescript/src/index.ts"] }
+  },
+  "include": ["src"]
+}

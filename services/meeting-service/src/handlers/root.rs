@@ -1,4 +1,6 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+
+use crate::state::AppState;
 use serde_json::json;
 
 use chrono::Utc;
@@ -74,6 +76,20 @@ pub async fn get_app_info() -> impl IntoResponse {
         "timestamp": Utc::now().to_rfc3339()
     });
 
+    // D1: documentation links only where the documentation is served.
+    let mut info = info;
+    if !crate::swagger::docs_enabled() {
+        for (section, keys) in [
+            ("endpoints", &["api_docs", "swagger_ui"][..]),
+            ("links", &["swagger"][..]),
+        ] {
+            if let Some(map) = info[section].as_object_mut() {
+                for key in keys {
+                    map.remove(*key);
+                }
+            }
+        }
+    }
     (StatusCode::OK, Json(info))
 }
 
@@ -89,13 +105,27 @@ pub async fn get_app_info() -> impl IntoResponse {
         (status = 200, description = "Service is healthy", body = serde_json::Value)
     )
 )]
-pub async fn health_check() -> impl IntoResponse {
-    let health = json!({
+pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
+    let mut health = json!({
         "status": "healthy",
         "timestamp": Utc::now().to_rfc3339(),
         "service": "CosmicForge RTC",
         "version": env!("CARGO_PKG_VERSION")
     });
+    health["recordingStorageProtocol"] = json!(1);
+    health["recordingStorageConfigured"] =
+        json!(state.meeting.core.artifacts.storage.is_configured());
+    health["recordingEnabled"] = json!(state.meeting.core.flags.recording_v2_enabled);
+    // Notification Service routing fence (Document 4 §9.6): `routingProtocol` is reported
+    // only once the fence migration history is applied; activation tooling refuses to
+    // leave LEGACY_ONLY unless every replica reports it. Absent on any read error.
+    if let Some(protocol) = crate::services::notification_fence::fence_protocol(&state.db).await {
+        health["routingProtocol"] = json!(protocol);
+        // N12 (§10.4 readiness invariant 4): the Account fallback key is loaded and passed
+        // its self-test, so a CRITICAL message decided NEW can always fail over.
+        health["criticalFallbackKey"] =
+            json!(crate::services::critical_notifications::fallback_ready());
+    }
 
     (StatusCode::OK, Json(health))
 }

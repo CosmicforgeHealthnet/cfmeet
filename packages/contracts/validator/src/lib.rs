@@ -7,7 +7,11 @@
 //!   semantic; paths are unique, exist, stay inside the package and (for contract-first
 //!   documents) carry the major version (`v<major>.…`);
 //! * owners are `platform` or a deployable service that exists under `services/` — a
-//!   contract cannot be registered for a service that has not been created;
+//!   contract cannot be registered for a service that has not been created. The single,
+//!   explicit exception is a **planned owner** listed in the manifest's `planned_owners`
+//!   with the owner approval that froze its interfaces before the service is built (for
+//!   example the Notification Service, roadmap N1 before N2): its contracts must be
+//!   `experimental`, and the entry must be removed as soon as `services/<owner>` exists;
 //! * every JSON file in the package is the manifest, a registered contract, or a fixture
 //!   (`examples/`, `counter-examples/`) of a registered JSON Schema contract — there are no
 //!   unregistered "shadow" copies;
@@ -88,6 +92,14 @@ struct Contract {
     path: String,
     owner: String,
     authority: String,
+    lifecycle: String,
+}
+
+/// A service whose contracts the owner froze before the service exists (manifest
+/// `planned_owners`).
+#[derive(Debug, Clone)]
+struct PlannedOwner {
+    owner: String,
 }
 
 /// Validates the contract package at `contracts_root`. `repo_root` is the repository
@@ -140,9 +152,12 @@ pub fn validate(contracts_root: &Path, repo_root: &Path) -> Report {
 
     // 3. Manifest semantics.
     let contracts = manifest_contracts(&manifest);
+    let planned = manifest_planned_owners(&manifest);
     report.contracts = contracts.len();
+    check_planned_owners(&planned, &contracts, repo_root, &mut report);
     check_manifest_semantics(
         &contracts,
+        &planned,
         contracts_root,
         repo_root,
         &documents,
@@ -246,6 +261,7 @@ fn manifest_contracts(manifest: &Value) -> Vec<Contract> {
                         path: s("path"),
                         owner: s("owner"),
                         authority: s("authority"),
+                        lifecycle: s("lifecycle"),
                     }
                 })
                 .collect()
@@ -253,8 +269,55 @@ fn manifest_contracts(manifest: &Value) -> Vec<Contract> {
         .unwrap_or_default()
 }
 
+fn manifest_planned_owners(manifest: &Value) -> Vec<PlannedOwner> {
+    manifest["planned_owners"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|p| PlannedOwner {
+                    owner: p["owner"].as_str().unwrap_or_default().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Planned owners are temporary and narrow: each must be unique, must not exist yet as a
+/// service, must not be `platform`, and must own at least one contract.
+fn check_planned_owners(
+    planned: &[PlannedOwner],
+    contracts: &[Contract],
+    repo_root: &Path,
+    report: &mut Report,
+) {
+    let mut seen = BTreeSet::new();
+    for p in planned {
+        let loc = format!("manifest.json[planned_owners.{}]", p.owner);
+        if !seen.insert(p.owner.clone()) {
+            report.error(loc.clone(), "planned owner listed more than once");
+        }
+        if p.owner == "platform" {
+            report.error(loc.clone(), "`platform` cannot be a planned owner");
+        }
+        if repo_root.join("services").join(&p.owner).is_dir() {
+            report.error(
+                loc.clone(),
+                format!(
+                    "services/{} now exists: remove `{}` from planned_owners",
+                    p.owner, p.owner
+                ),
+            );
+        }
+        if !contracts.iter().any(|c| c.owner == p.owner) {
+            report.error(loc, "planned owner owns no contract");
+        }
+    }
+}
+
 fn check_manifest_semantics(
     contracts: &[Contract],
+    planned: &[PlannedOwner],
     contracts_root: &Path,
     repo_root: &Path,
     documents: &BTreeMap<String, Value>,
@@ -330,7 +393,20 @@ fn check_manifest_semantics(
         if segments.len() != 3 || segments[1] != c.owner {
             report.error(loc.clone(), format!("id must be cfmeet.{}.<name>", c.owner));
         }
-        if c.owner != "platform" && !repo_root.join("services").join(&c.owner).is_dir() {
+        let planned_owner = planned.iter().any(|p| p.owner == c.owner);
+        if planned_owner && c.lifecycle != "experimental" {
+            report.error(
+                loc.clone(),
+                format!(
+                    "owner `{}` is a planned owner: its contracts must be experimental until services/{} exists",
+                    c.owner, c.owner
+                ),
+            );
+        }
+        if c.owner != "platform"
+            && !planned_owner
+            && !repo_root.join("services").join(&c.owner).is_dir()
+        {
             report.error(
                 loc.clone(),
                 format!(

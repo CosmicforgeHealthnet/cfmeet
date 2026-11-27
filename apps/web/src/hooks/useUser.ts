@@ -46,15 +46,3 @@ export function useUpdateProfile() {
   });
 }
 
-/** ACC-026: `currentPassword` for password accounts (null: rely on a recent sign-in). */
-export function useDeactivateAccount() {
-  return useMutation({
-    mutationFn: (currentPassword: string | null) => accountService.deactivate(currentPassword),
-    onError: (error: AxiosError<ApiErrorResponse>) => {
-      console.error(
-        "Deactivation error:",
-        error.response?.data?.error?.message,
-      );
-    },
-  });
-}

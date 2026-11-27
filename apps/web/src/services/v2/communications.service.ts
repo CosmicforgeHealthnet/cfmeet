@@ -82,9 +82,26 @@ export async function communicationsRequest<T>(method: Method, path: string, bod
 
 const call = communicationsRequest;
 
+export type NotificationPreferences = { version: number; directMessages: boolean; groupMessages: boolean; incomingCalls: boolean; missedCalls: boolean; contactRequests: boolean; groupInvitations: boolean; meetingInvitations: boolean };
+export type ContactList = { listId: string; name: string; position: number | null; memberCount: number; version: number; updatedAt: string };
+export type SavedMessage = { savedId: string; conversationId: string; messageId: string; messageSequence: number; savedAt: string; available: boolean; unavailableReason: string | null };
+/** Hub 1.4.0: fileName / mediaType / kind only for MANAGED files (null for end-to-end encrypted ones); `download` / `thumbnail` are relay paths of the access-checked grant operations, never URLs. */
+type GrantRef = { method: "POST"; path: string };
+export type ChatMediaItem = {
+  attachmentId: string; messageId: string; state: string; sizeBytes: number | null; mediaClass: string; createdAt: string;
+  securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null; kind?: string | null; fileName?: string | null; mediaType?: string | null;
+  metadataLocation?: "SERVER" | "ENCRYPTED_DESCRIPTOR" | null; download?: GrantRef | null; thumbnail?: (GrantRef & { mediaType: "image/png" }) | null;
+};
+/** Hub 1.4.0: title / avatarRef for MANAGED groups both people currently belong to (null for end-to-end encrypted groups). */
+export type CommonGroup = { conversationId: string; securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null; title?: string | null; avatarRef?: string | null; memberCount?: number | null };
+/** Hub 1.9.0: `mentionsAvailable` is false where "Only @mentions" can't work (end-to-end encrypted chats); absent from an older Hub. */
+export type ChatPreferences = { conversationId: string; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; effectiveNotifications: string; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER"; version: number; mentionsAvailable?: boolean };
+
 export const communicationsService = {
   // ---- identity, capabilities, start
   me: () => call<CommunicationsProfile>("GET", "/me"),
+  /** 1.9.0: the About line contacts see (null or "" clears it). */
+  updateMe: (expectedVersion: number, about: string | null) => call<CommunicationsProfile>("PATCH", "/me", { expectedVersion, about }),
   capabilities: () => call<CommunicationsCapabilities>("GET", "/me/capabilities"),
   bootstrap: () => call<Bootstrap>("GET", "/bootstrap"),
   publicId: () => call<PublicId>("GET", "/me/public-id"),
@@ -98,6 +115,9 @@ export const communicationsService = {
 
   // ---- discovery and invites
   resolvePublicId: (cfMeetId: string) => call<PublicProfile>("POST", "/discovery/public-id/resolve", { cfMeetId }),
+  /** 1.9.0: find someone by their verified email (only people who allow it). */
+  resolvePhone: (phoneNumber: string) => call<PublicProfile>("POST", "/discovery/phone/resolve", { phoneNumber }),
+  resolveEmail: (email: string) => call<PublicProfile>("POST", "/discovery/email/resolve", { email }),
   resolveInvite: (token: string, idempotencyKey?: string) => call<PublicProfile>("POST", "/discovery/invites/resolve", { token, purpose: "CONNECT" }, idempotencyKey),
   createInvite: (expiresInSeconds: number, maxUses: number) => call<Invite>("POST", "/invites", { purpose: "CONNECT", expiresInSeconds, maxUses }),
   invites: (cursor?: string | null) => call<Page<InviteMetadata>>("GET", `/invites${q({ limit: 50, cursor })}`),
@@ -110,6 +130,40 @@ export const communicationsService = {
   acceptRequest: (requestId: string, expectedVersion: number) => call<ContactRequest>("POST", `/contact-requests/${seg(requestId)}/accept`, { expectedVersion }),
   declineRequest: (requestId: string, expectedVersion: number) => call<ContactRequest>("POST", `/contact-requests/${seg(requestId)}/decline`, { expectedVersion }),
   cancelRequest: (requestId: string, expectedVersion: number) => call<ContactRequest>("DELETE", `/contact-requests/${seg(requestId)}`, { expectedVersion }),
+
+  // ---- where a call came from (a chat or a contact), for its details page
+  callContext: (callId: string) => call<{ origin: "CONTACT" | "CONVERSATION" | "CALLING" | string; conversationId: string | null; actions?: { openConversation?: boolean } }>("GET", `/calls/${seg(callId)}/context`),
+
+  // ---- account-wide chat settings
+  notificationPreferences: () => call<NotificationPreferences>("GET", "/me/notification-preferences"),
+  setNotificationPreferences: (p: NotificationPreferences) => {
+    const { version, ...rest } = p;
+    return call<NotificationPreferences>("PUT", "/me/notification-preferences", { expectedVersion: version, ...rest });
+  },
+  storageSummary: () => call<{ messaging: { attachmentCount: number | null; attachmentBytes: number | null; backupBytes: number | null; environmentQuotaBytes: number | null }; savedMessages: { count: number; limit: number } }>("GET", "/me/storage-summary"),
+  recoveryState: () => call<{ devices?: { active: number; revoked: number }; messaging?: { securityReady?: boolean } }>("GET", "/me/recovery-state"),
+
+  // ---- contact lists ("Family", "Work"…; private to you)
+  contactLists: () => call<{ data: ContactList[]; limit: number }>("GET", "/contact-lists"),
+  contactList: (listId: string, cursor?: string) => call<ContactList & { members: Contact[]; nextCursor: string | null }>("GET", `/contact-lists/${seg(listId)}${q({ limit: 200, cursor })}`),
+  createContactList: (name: string) => call<ContactList>("POST", "/contact-lists", { name }),
+  renameContactList: (listId: string, name: string, expectedVersion: number) => call<ContactList>("PATCH", `/contact-lists/${seg(listId)}`, { name, expectedVersion }),
+  deleteContactList: (listId: string, expectedVersion: number) => call<unknown>("DELETE", `/contact-lists/${seg(listId)}`, { expectedVersion }),
+  setContactListMember: (listId: string, contactId: string, member: boolean) => call<unknown>(member ? "PUT" : "DELETE", `/contact-lists/${seg(listId)}/members/${seg(contactId)}`),
+
+  // ---- saved (starred) messages
+  savedMessages: (cursor?: string | null) => call<{ data: SavedMessage[]; nextCursor: string | null }>("GET", `/saved-messages${q({ limit: 100, cursor })}`),
+  saveMessage: (conversationId: string, messageId: string) => call<SavedMessage>("POST", "/saved-messages", { conversationId, messageId }),
+  unsaveMessage: (savedId: string) => call<unknown>("DELETE", `/saved-messages/${seg(savedId)}`),
+
+  // ---- chat info (WhatsApp "Media, links and docs", per-chat notifications, groups in common)
+  conversationMedia: (conversationId: string, cursor?: string | null) =>
+    call<{ data: ChatMediaItem[]; nextCursor: string | null }>("GET", `/conversations/${seg(conversationId)}/media${q({ limit: 60, cursor })}`),
+  conversationPreferences: (conversationId: string) => call<ChatPreferences>("GET", `/conversations/${seg(conversationId)}/preferences`),
+  setConversationPreferences: (conversationId: string, body: { expectedVersion: number; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER" }) =>
+    call<ChatPreferences>("PUT", `/conversations/${seg(conversationId)}/preferences`, body),
+  sharedGroups: (conversationId: string) => call<{ groups: CommonGroup[]; available?: boolean }>("GET", `/conversations/${seg(conversationId)}/shared-groups`),
+  commonGroups: (contactId: string) => call<{ groups: CommonGroup[] }>("GET", `/contacts/${seg(contactId)}/common-groups`),
 
   // ---- contacts (connections)
   contacts: (cursor?: string | null) => call<Page<Contact>>("GET", `/contacts${q({ limit: 100, cursor })}`),

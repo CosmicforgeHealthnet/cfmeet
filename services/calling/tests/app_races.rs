@@ -464,7 +464,7 @@ async fn load_many_calls_across_applications_fanout_credentials_and_reconciliati
     .await;
     assert!(created
         .iter()
-        .all(|r| r.status == StatusCode::CREATED && r.json["call"]["state"] == "RINGING"));
+        .all(|r| r.status == StatusCode::CREATED && r.json["call"]["state"] == "DIALING"));
     let rooms: BTreeSet<String> = created.iter().map(|r| AppWorld::room(call_id(r))).collect();
     assert_eq!(rooms.len(), 45);
     // Scope isolation under load: each application's calls ring only its own endpoints.

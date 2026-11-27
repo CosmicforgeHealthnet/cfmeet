@@ -17,6 +17,9 @@
 //! inside the credential's principal restriction and when Platform Access resolves it
 //! ACTIVE and messaging-capable in the credential's own environment — always fresh.
 //!
+//! ADR 0064: an OAuth credential (CF Meet Apps; `MESSAGING_APPS_ENABLED`) always acts as
+//! its single restricted principal, on a closed MANAGED-only allowlist (`admit_oauth`).
+//!
 //! Spans carry the matched ROUTE PATTERN, never the path; credentials, tokens, keys and
 //! content are never logged.
 
@@ -26,7 +29,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use cf_service_auth::{headers, InternalPermission, InternalServiceContext};
+use cf_service_auth::{headers, InternalPermission, InternalServiceContext, OperatorAttribution};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -124,6 +127,9 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/conversations/*/messages/*"),
     ("PATCH", "/v1/conversations/*/messages/*"),
     ("DELETE", "/v1/conversations/*/messages/*"),
+    // Gap audit S11 / S12: a member forwards a message and joins with an invite link.
+    ("POST", "/v1/conversations/*/messages/*/forward"),
+    ("POST", "/v1/messaging/invite-links/join"),
     ("GET", "/v1/conversations/*/messages/*/revisions"),
     ("GET", "/v1/conversations/*/messages/*/reactions"),
     ("GET", "/v1/conversations/*/messages/*/thread"),
@@ -131,6 +137,8 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
     ("GET", "/v1/conversations/*/messages/*/sms-transport"),
     ("PUT", "/v1/conversations/*/read-cursor"),
+    // F1: the member's own archive / pin of a chat.
+    ("PUT", "/v1/conversations/*/inbox-settings"),
     ("GET", "/v1/conversations/*/events"),
     ("GET", "/v1/conversations/*/unread"),
     ("GET", "/v1/conversations/*/pins"),
@@ -171,6 +179,55 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/messaging/backups/*/finalize"),
     ("POST", "/v1/messaging/backups/*/download-grants"),
 ];
+
+/// ADR 0062 / build contract §5: the CLOSED allowlist of a partner session device (a
+/// MANAGED-only session device exchanged from a CF Meet user token): conversations and
+/// members (read), messages (list, get, send, edit, delete), reactions, the read cursor,
+/// unread, events, attachments (create, finalize, get, download grants), search within a
+/// conversation and reports. Never MLS, KeyPackages, Welcomes, backups, history
+/// transfer, key transparency or device registration. Every route is also a
+/// [`CLIENT_TOKEN_ROUTES`] member route; a PRIVATE_E2EE conversation is `NOT_FOUND`.
+pub const PARTNER_SESSION_DEVICE_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/conversations"),
+    ("GET", "/v1/conversations/*"),
+    ("GET", "/v1/conversations/*/members"),
+    ("GET", "/v1/conversations/*/messages"),
+    ("POST", "/v1/conversations/*/messages"),
+    ("GET", "/v1/conversations/*/messages/*"),
+    ("PATCH", "/v1/conversations/*/messages/*"),
+    ("DELETE", "/v1/conversations/*/messages/*"),
+    ("GET", "/v1/conversations/*/messages/*/reactions"),
+    ("PUT", "/v1/conversations/*/messages/*/reactions/*"),
+    ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
+    ("PUT", "/v1/conversations/*/read-cursor"),
+    ("GET", "/v1/conversations/*/unread"),
+    ("GET", "/v1/conversations/*/events"),
+    ("POST", "/v1/conversations/*/attachments"),
+    ("GET", "/v1/conversations/*/attachments/*"),
+    ("POST", "/v1/conversations/*/attachments/*/finalize"),
+    ("POST", "/v1/conversations/*/attachments/*/download-grants"),
+    ("GET", "/v1/conversations/*/search"),
+    ("POST", "/v1/conversations/*/reports"),
+];
+
+/// Whether a partner session device may call `method path`.
+pub fn partner_session_device_route(method: &Method, path: &str) -> bool {
+    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    PARTNER_SESSION_DEVICE_ROUTES.iter().any(|(m, pattern)| {
+        let want: Vec<&str> = pattern.split('/').collect();
+        *m == method.as_str()
+            && want.len() == segments.len()
+            && want
+                .iter()
+                .zip(&segments)
+                .all(|(w, got)| (*w == "*" && !got.is_empty()) || w == got)
+    })
+}
+
+/// Request extension set ONLY by the client-token path for a partner session device
+/// (ADR 0062): handlers restrict what it sees to MANAGED conversations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartnerSessionDevice;
 
 /// Whether a client token may call `method path`; `Some(Some(device))` when the route
 /// names a device that must be the session's own.
@@ -343,6 +400,22 @@ async fn authenticated_customer(
 ) -> Response {
     match authentication {
         Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
+            // ADR 0064: a CF Meet App's OAuth credential acts only as its restricted
+            // principal, on the closed MANAGED-only allowlist (refused with the flag off).
+            if ctx.oauth.is_some() {
+                if let Err(e) = admit_oauth(state, &ctx, &mut request).await {
+                    return e.into_response();
+                }
+            }
+            // ADR 0062 / build contract §5: with partner session devices on, an EXTERNAL
+            // environment gets the CFMEET_PLATFORM_PARTNER baseline (once; never
+            // replacing another baseline; its own application policy still wins).
+            if !ctx.first_party && state.partner.settings.session_devices_enabled {
+                state
+                    .partner
+                    .ensure_baseline(&state.db, &ctx.scope, state.now())
+                    .await;
+            }
             let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
             request.extensions_mut().insert(CustomerCaller(*ctx));
             let response = next.run(request).await;
@@ -405,10 +478,52 @@ async fn client_token_request(
             return e.into_response();
         }
     };
+    // ADR 0062: a partner session device reaches its closed MANAGED-only allowlist.
+    let partner = if session.is_session_device() && state.partner.settings.session_devices_enabled {
+        match crate::realtime::session_devices::active_device(
+            &state.db,
+            session.device_id,
+            session.principal_id,
+            session.environment_id,
+            state.now(),
+        )
+        .await
+        {
+            Ok(d) => d.is_some_and(|d| d.is_partner()),
+            Err(e) => return e.into_response(),
+        }
+    } else {
+        false
+    };
+    if partner {
+        if !partner_session_device_route(request.method(), request.uri().path()) {
+            crate::metrics::inc(
+                "messaging_client_token_rest_total",
+                &[("outcome", "partner_route_refused")],
+            );
+            return ApiError::reason(
+                ErrorCode::ClientTokensNotEnabled,
+                "PARTNER_ROUTE_NOT_ALLOWED",
+            )
+            .into_response();
+        }
+        if let Err(e) =
+            require_managed_target(state, session.environment_id, request.uri().path()).await
+        {
+            if e.error_code() == ErrorCode::NotFound {
+                crate::metrics::inc(
+                    "messaging_client_token_rest_total",
+                    &[("outcome", "partner_e2ee_refused")],
+                );
+            }
+            return e.into_response();
+        }
+        request.extensions_mut().insert(PartnerSessionDevice);
+    }
     // Section 13: a session device is accepted only by the realtime gateway; it never
     // reaches a device-direct REST operation (KeyPackages, Welcomes, MLS commits,
     // ciphertext, push registration, ...).
-    if session.is_session_device() {
+    if session.is_session_device() && !partner {
         crate::metrics::inc(
             "messaging_client_token_rest_total",
             &[("outcome", "session_device_refused")],
@@ -453,6 +568,103 @@ async fn client_token_request(
         state.wake_outbox();
     }
     response
+}
+
+/// ADR 0064 (integrate contract §7): an OAuth credential (`credentialKind`
+/// `OAUTH_ACCESS` / `OAUTH_BOT`). With `MESSAGING_APPS_ENABLED` it reaches only
+/// [`crate::apps::oauth_route`], acts only as the ONE principal its restriction names
+/// (`CF-Acting-Principal` is set to it; a different one is refused) and sees MANAGED
+/// conversations only (a PRIVATE_E2EE target is `NOT_FOUND`). With the flag off it is
+/// refused: it never acts like an ordinary credential.
+async fn admit_oauth(
+    state: &AppState,
+    ctx: &TrustedContext,
+    request: &mut Request,
+) -> Result<(), ApiError> {
+    let refused = |outcome: &'static str, e: ApiError| {
+        crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", outcome)]);
+        tracing::info!(outcome, "OAuth credential refused");
+        Err(e)
+    };
+    if !state.apps.enabled {
+        return refused(
+            "not_enabled",
+            ApiError::reason(ErrorCode::InsufficientScope, "OAUTH_NOT_ENABLED"),
+        );
+    }
+    if !crate::apps::oauth_route(request.method(), request.uri().path()) {
+        return refused(
+            "route_not_allowed",
+            ApiError::reason(ErrorCode::InsufficientScope, "OAUTH_ROUTE_NOT_ALLOWED"),
+        );
+    }
+    let Some(principal) = ctx.oauth_principal() else {
+        return refused(
+            "restriction_invalid",
+            ApiError::reason(ErrorCode::PrincipalNotAuthorized, "CREDENTIAL_RESTRICTION"),
+        );
+    };
+    match acting_header(request.headers()) {
+        Ok(None) => {
+            let value = HeaderValue::from_str(&principal.hyphenated().to_string())
+                .expect("uuid is a valid header value");
+            request.headers_mut().insert(ACTING_PRINCIPAL, value);
+        }
+        Ok(Some(p)) if p == principal => {}
+        Ok(Some(_)) => {
+            return refused(
+                "acting_mismatch",
+                ApiError::reason(
+                    ErrorCode::PrincipalNotAuthorized,
+                    "ACTING_PRINCIPAL_MISMATCH",
+                ),
+            )
+        }
+        Err(e) => return Err(e),
+    }
+    if let Err(e) =
+        require_managed_target(state, ctx.scope.environment_id, request.uri().path()).await
+    {
+        if e.error_code() == ErrorCode::NotFound {
+            crate::metrics::inc(
+                "messaging_oauth_requests_total",
+                &[("outcome", "e2ee_refused")],
+            );
+        }
+        return Err(e);
+    }
+    crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", "accepted")]);
+    Ok(())
+}
+
+/// A partner session device and an OAuth credential are MANAGED-only: a conversation
+/// route whose conversation is PRIVATE_E2EE answers `NOT_FOUND` (indistinguishable from
+/// a foreign conversation).
+async fn require_managed_target(
+    state: &AppState,
+    environment_id: Uuid,
+    path: &str,
+) -> Result<(), ApiError> {
+    let Some(id) = path
+        .strip_prefix("/v1/conversations/")
+        .and_then(|rest| rest.split('/').next())
+    else {
+        return Ok(());
+    };
+    let Ok(id) = Uuid::parse_str(id) else {
+        return Ok(()); // the handler refuses a malformed id
+    };
+    let e2ee = crate::db::scalar_i64(
+        &state.db,
+        "SELECT count(*) FROM messaging_conversations WHERE id = $1 AND environment_id = $2 \
+           AND security_profile <> 'MANAGED'",
+        vec![id.into(), environment_id.into()],
+    )
+    .await?;
+    if e2ee > 0 {
+        return Err(ApiError::code(ErrorCode::NotFound));
+    }
+    Ok(())
 }
 
 /// The principal an authenticated application backend acts for, verified now.
@@ -536,11 +748,17 @@ pub async fn require_acting(
 
 /// The authenticated internal caller of the current request.
 #[derive(Debug, Clone)]
-pub struct InternalCaller(InternalServiceContext);
+pub struct InternalCaller(InternalServiceContext, Option<OperatorAttribution>);
 
 impl InternalCaller {
     pub fn context(&self) -> &InternalServiceContext {
         &self.0
+    }
+
+    /// The HQ staff member the admin bridge acts for (ADR 0068); `None` for every other
+    /// caller (attribution from any other caller is refused before any handler runs).
+    pub fn operator(&self) -> Option<&OperatorAttribution> {
+        self.1.as_ref()
     }
 
     /// Fails with INTERNAL_PERMISSION_DENIED unless Messaging's trust bundle grants
@@ -591,6 +809,25 @@ pub async fn require_internal_service(
         .await;
     match verified {
         Ok(ctx) => {
+            // ADR 0068: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
+            // -Intent-Digest) is accepted only from the admin bridge, well formed, never a
+            // self-approval; from any other caller, on any internal route, it is refused.
+            let operator = match OperatorAttribution::from_headers(
+                ctx.authenticated_service(),
+                request.headers(),
+            ) {
+                Ok(operator) => operator,
+                Err(error) => {
+                    tracing::warn!(caller = %ctx.authenticated_service(), reason = %error,
+                        route = route_pattern(&request), "operator attribution refused");
+                    let context = RequestContext::generate();
+                    let response = scoped(context.clone(), async {
+                        ApiError::code(ErrorCode::InternalPermissionDenied).into_response()
+                    })
+                    .await;
+                    return with_request_id(response, &context);
+                }
+            };
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),
                 correlation_id: ctx.correlation_id().clone(),
@@ -599,7 +836,9 @@ pub async fn require_internal_service(
             let span = tracing::info_span!("internal_request", request_id = %context.request_id,
                 correlation_id = %context.correlation_id, caller = %ctx.authenticated_service(),
                 method = %request.method(), route = route_pattern(&request));
-            request.extensions_mut().insert(InternalCaller(ctx));
+            request
+                .extensions_mut()
+                .insert(InternalCaller(ctx, operator));
             let mut response = scoped(context.clone(), next.run(request).instrument(span)).await;
             if let Ok(value) = HeaderValue::from_str(context.request_id.as_str()) {
                 response.headers_mut().insert(headers::REQUEST_ID, value);
@@ -687,6 +926,16 @@ pub async fn delegated_context(
     }
 }
 
+/// Request extension set ONLY by [`require_delegated_application`]: the request is a
+/// first-party backend acting through a peer service granted
+/// `messaging-application.delegate` (the delegated mirror). Never present on `/v1`
+/// requests — customer credentials, gateway-forwarded credentials and client tokens —
+/// so caller-controlled options reserved for mirrored / migrated writes (e.g. a message's
+/// `notify: false`, S-4) can tell the two apart. Handlers read it with
+/// `Option<Extension<DelegatedApplication>>`; a request cannot set an extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DelegatedApplication;
+
 /// `/internal/v1/delegated/**`: a peer granted `messaging-application.delegate` acts as
 /// the backend of its own (first-party) application environment on the standard
 /// customer operations. The handlers see an ordinary [`CustomerCaller`] holding only
@@ -738,6 +987,80 @@ pub async fn require_delegated_application(
     }
     let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
     request.extensions_mut().insert(CustomerCaller(ctx));
+    request.extensions_mut().insert(DelegatedApplication);
+    let response = next.run(request).await;
+    if mutation && response.status().is_success() {
+        state.wake_outbox();
+    }
+    response
+}
+
+/// Request extension set ONLY by [`require_organization_moderation`]: the organization
+/// moderator (their principal in the organization's own Messaging scope) a moderation
+/// request was relayed for. Recorded on moderation actions and audit entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrganizationModerator(pub Uuid);
+
+/// The single scope an organization moderation request holds.
+pub const ORGANIZATION_MODERATION_SCOPES: &[&str] = &["moderation.manage"];
+
+/// `/internal/v1/organization-moderation/**` (gap audit G6): the Meeting Service, granted
+/// `messaging-organization.govern`, relays a request of an organization moderator — a
+/// member whose organization grants `messaging.organization.moderate`, decided by the
+/// Organizations Service on every request before anything reaches Messaging — into the
+/// organization's OWN first-party scope. The handlers are the ordinary moderation
+/// handlers (one moderation path) and see a [`CustomerCaller`] holding only
+/// `moderation.manage`. The moderator must travel SIGNED as the initiating principal and
+/// be ACTIVE in that scope; it is never an acting member (no CF-Acting-Principal), and is
+/// recorded as [`OrganizationModerator`]. The organization's scope bounds what is visible:
+/// the reports and conversations of that organization only.
+pub async fn require_organization_moderation(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(caller) = request.extensions().get::<InternalCaller>().cloned() else {
+        return ApiError::code(ErrorCode::InternalAuthenticationFailed).into_response();
+    };
+    if let Err(e) = caller.require_permission(InternalPermission::MessagingOrganizationGovern) {
+        return e.into_response();
+    }
+    let mut ctx = match delegated_context(&state, &caller).await {
+        Ok(ctx) => ctx,
+        Err(e) => return e.into_response(),
+    };
+    if !ctx.first_party {
+        return ApiError::code(ErrorCode::DelegatedContextInvalid).into_response();
+    }
+    let Some(signed) = caller
+        .context()
+        .delegated_platform_context()
+        .and_then(|d| d.initiating_principal())
+    else {
+        return ApiError::reason(ErrorCode::PrincipalNotAuthorized, "MODERATOR_REQUIRED")
+            .into_response();
+    };
+    match acting_header(request.headers()) {
+        Ok(None) => {}
+        Ok(Some(_)) => {
+            return ApiError::reason(ErrorCode::PrincipalNotAuthorized, "ADMINISTRATION_ONLY")
+                .into_response()
+        }
+        Err(e) => return e.into_response(),
+    }
+    let moderator = match verify_principal(&state, &ctx, signed.principal_id).await {
+        Ok(a) => a.principal_id,
+        Err(e) => return e.into_response(),
+    };
+    ctx.scopes = ORGANIZATION_MODERATION_SCOPES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+    request.extensions_mut().insert(CustomerCaller(ctx));
+    request
+        .extensions_mut()
+        .insert(OrganizationModerator(moderator));
     let response = next.run(request).await;
     if mutation && response.status().is_success() {
         state.wake_outbox();

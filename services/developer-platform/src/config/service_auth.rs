@@ -12,11 +12,15 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (`platform-identity.read`) |
 //! | `CF_MEETING_SERVICE_BASE_URL` | for the console | Meeting Service session bridge (`user-session.verify`); unset: Developer Console sessions are refused |
 //! | `CF_CALLING_BASE_URL` | for the webhook migration | Calling's controlled webhook export (`webhook-migration.export`) |
+//! | `CF_ADMIN_BRIDGE_BASE_URL` | no | ADR 0068 A7: the admin bridge's private events listener (`POST /internal/v1/hq-bridge/events`, `hq-bridge-events.publish`, audience `cfmeet.admin-bridge`). Set: the API and the worker record owner events (verification cases, partner workspaces, app reviews, price versions, incidents) in `devplat_bridge_events` with each state change and the worker posts them; unset (default): nothing is stored or sent |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service's I1 (`notifications-event.publish`, audience `cfmeet.notifications`; roadmap N7 / N11): publications to `devplat_notification_publications` are enqueued and relayed only when set (API and worker); unset: nothing is enqueued or sent (see [`super`] for the per-event routes) |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer the Developer Platform's
 //! own trust bundle grants the route's permission (the API Gateway:
 //! `developer-request.forward`). Outbound, the Developer Platform calls Platform Access
-//! only (`platform-identity.read`: trusted context re-validation, scope registry); it
+//! (`platform-identity.read`: trusted context re-validation, scope registry), and, when
+//! configured, the Meeting Service session bridge, Calling's webhook export and the
+//! Notification Service's I1 (`notifications-event.publish`, ids-only envelopes); it
 //! never verifies a customer credential itself. There is no network-location trust,
 //! no inline key and no default key.
 
@@ -109,6 +113,12 @@ const TARGETS: &[(&str, &str)] = &[
     ("CF_MEETING_SERVICE_BASE_URL", services::MEETING_SERVICE),
     // Calling: the controlled webhook migration export (`webhook-migration.export`).
     ("CF_CALLING_BASE_URL", services::CALLING),
+    // Notification Service N7 / N11: I1 (`notifications-event.publish`) for the publication
+    // relay; unset: nothing is enqueued or sent.
+    ("CF_NOTIFICATIONS_BASE_URL", services::NOTIFICATIONS),
+    // ADR 0068 A7: the admin bridge's private events listener (`hq-bridge-events.publish`,
+    // audience `cfmeet.admin-bridge`); unset: owner events are neither stored nor sent.
+    ("CF_ADMIN_BRIDGE_BASE_URL", services::ADMIN_BRIDGE),
 ];
 
 #[derive(Debug, Clone)]

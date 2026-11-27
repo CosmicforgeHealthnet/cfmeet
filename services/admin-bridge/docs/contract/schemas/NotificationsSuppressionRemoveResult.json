@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suppression_id",
+        "suppressed"
+      ],
+      "properties": {
+        "suppression_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "suppressed": {
+          "type": "boolean"
+        }
+      },
+      "description": "The resource after notifications.suppression.remove; status: REMOVED."
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import re
 import copy
 import json
 from pathlib import Path
@@ -194,6 +195,41 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         self.assertEqual(release.public_ingress_config(candidate),candidate)
         with self.assertRaises(AssertionError):release.public_ingress_config(candidate.replace('return 404','return 200'))
 
+    def test_public_ingress_denies_meeting_operator_routes_but_not_provider_callbacks(self):
+        # Notification Service N0-6 (S-3).
+        original='server {\n include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n location / { proxy_pass http://127.0.0.1:18081; }\n}'
+        candidate=release.public_ingress_config(original)
+        for rule in release.PUBLIC_DENIALS:self.assertIn(rule,candidate)
+        for denied in ('/internal/operations/','/internal/metrics','/internal/rtc/metrics'):
+            self.assertIn(denied,candidate)
+        for open_path in ('/internal/rtc/livekit/webhook','/internal/transcription/events','location ^~ /internal/ '):
+            self.assertNotIn(open_path,candidate)
+        self.assertEqual(release.public_ingress_config(candidate),candidate)
+        # Probes cover every new denial (N0-6 operator routes, N6 Meeting owner routes X1 / X2,
+        # N12 Account lease routes X6 / X7).
+        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),8)
+        for probe in ('/internal/v1/accounts/notification-route-decisions/leases',
+                      '/internal/v1/accounts/notification-route-decisions/completions'):
+            self.assertIn(probe,release.NOTIFICATION_OWNER_DENIAL_PROBES)
+            self.assertIn('location ^~ /internal/v1/accounts/notification-route-decisions/ ',candidate)
+        for probe in release.NOTIFICATION_OWNER_DENIAL_PROBES:self.assertIn(probe,release.PUBLIC_DENIAL_PROBES)
+        # The X2 denial is scoped to the notification-recipients route only.
+        x2=re.compile(r'^/internal/v1/conferences/[^/]+/notification-recipients/')
+        self.assertTrue(x2.match(release.NOTIFICATION_OWNER_DENIAL_PROBES[1]))
+        self.assertFalse(x2.match('/internal/v1/conferences/00000000-0000-0000-0000-000000000000/participants'))
+
+    def test_public_ingress_upgrades_an_installed_communications_denial_in_place(self):
+        # Production already has the marker with only the Communications rule.
+        installed=('server {\n include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'+release.PUBLIC_INGRESS_MARKER+'\n'
+                   +release.PUBLIC_DENIALS[0]+'\n location / { proxy_pass http://127.0.0.1:18081; }\n}')
+        upgraded=release.public_ingress_config(installed)
+        for rule in release.PUBLIC_DENIALS:self.assertEqual(upgraded.count(rule),1,rule)
+        self.assertIn('location / { proxy_pass http://127.0.0.1:18081; }',upgraded)
+        self.assertEqual(release.public_ingress_config(upgraded),upgraded)
+        # A hand-edited denial (same location, other body) is refused, never duplicated.
+        edited=installed.replace(release.PUBLIC_DENIALS[0],release.PUBLIC_DENIALS[0]+'\n    location ^~ /internal/operations/ { return 200; }')
+        with self.assertRaises(AssertionError):release.public_ingress_config(edited)
+
     def test_public_ingress_refuses_unknown_or_duplicate_site_includes(self):
         for value in ('server {}','include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'*2):
             with self.assertRaises(AssertionError):release.public_ingress_config(value)
@@ -272,6 +308,13 @@ class VerifyAcceptsTheCoordinatedRelease(unittest.TestCase):
                 with patch.object(coordinated,'last_release',return_value={'sha':'b'*40}), \
                         patch.object(coordinated,'registry',return_value=manifest):
                     self.assertEqual(release.accepted_images('b'*40),{s:'sha256:'+s for s in release.PORTS})
+                # A service the release kept (build inputs unchanged) must run the kept image.
+                kept={'sha':'d'*40,'kept':{'platform-access':{'imageId':'sha256:kept','revision':'e'*40}}}
+                with patch.object(coordinated,'last_release',return_value=kept), \
+                        patch.object(coordinated,'registry',return_value=manifest):
+                    want={s:'sha256:'+s for s in release.PORTS}
+                    want['platform-access']='sha256:kept'
+                    self.assertEqual(release.accepted_images('d'*40),want)
                 with patch.object(coordinated,'last_release',return_value=None):
                     with self.assertRaisesRegex(AssertionError,'not the recorded release'):
                         release.accepted_images('c'*40)

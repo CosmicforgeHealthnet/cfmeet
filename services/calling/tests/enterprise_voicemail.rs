@@ -394,6 +394,51 @@ async fn mailbox_administration() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     conforms("VoicemailMailboxList", &r.json);
     assert_eq!(r.json["mailboxes"].as_array().unwrap().len(), 2);
+    // C16: the list filters by owner (type, id, or both); a bad filter is 400.
+    let owned = |r: &TestResponse| -> Vec<String> {
+        r.json["mailboxes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["mailboxId"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let member_id = member.principal.id();
+    for (query, expected) in [
+        (format!("ownerId={member_id}"), vec![personal.to_string()]),
+        (
+            "ownerType=PRINCIPAL".to_string(),
+            vec![personal.to_string()],
+        ),
+        ("ownerType=EXTENSION".to_string(), vec![by_ext.to_string()]),
+        (
+            format!("ownerType=PRINCIPAL&ownerId={member_id}"),
+            vec![personal.to_string()],
+        ),
+        (format!("ownerType=QUEUE&ownerId={member_id}"), vec![]),
+        (format!("ownerId={}", Uuid::new_v4()), vec![]),
+    ] {
+        let r = e
+            .admin(
+                Method::GET,
+                &format!("/v1/enterprise/voicemail/mailboxes?{query}"),
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{query}: {}", r.text);
+        conforms("VoicemailMailboxList", &r.json);
+        assert_eq!(owned(&r), expected, "{query}");
+    }
+    for query in ["ownerType=PHONE", "ownerId=not-a-uuid"] {
+        let r = e
+            .admin(
+                Method::GET,
+                &format!("/v1/enterprise/voicemail/mailboxes?{query}"),
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{query}: {}", r.text);
+    }
     // Versioned update; stale versions conflict.
     let path = format!("/v1/enterprise/voicemail/mailboxes/{personal}");
     let r = vm

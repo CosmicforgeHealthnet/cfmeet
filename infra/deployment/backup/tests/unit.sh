@@ -56,11 +56,13 @@ for s in $provisioned meeting-service; do
 done
 cfb_load_service meeting-service
 [ "${CFB_REQUIRED[*]}" = "seaql_migrations" ] && pass "meeting-service requires seaql_migrations" || fail "meeting-service required history"
-[ "${CFB_OPTIONAL[*]}" = "account_communications_migrations account_communications_facade_migrations account_security_migrations meetings_calendar_migrations profile_notifications_migrations account_hardening_migrations organization_integration_migrations" ] &&
+[ "${CFB_OPTIONAL[*]}" = "account_communications_migrations account_communications_facade_migrations account_security_migrations meetings_calendar_migrations profile_notifications_migrations account_hardening_migrations organization_integration_migrations notification_fence_migrations meeting_platform_build_migrations meeting_audit_closure_migrations meeting_account_privacy_migrations meeting_account_phone_migrations lifecycle_delivery_migrations meeting_gap_closure_migrations meeting_admin_operations_migrations" ] &&
   pass "meeting-service records both additive histories" || fail "meeting-service optional histories"
 [ "${CFB_IDENTITY[*]}" = "users meetings" ] && pass "meeting-service identity tables" || fail "meeting-service identity tables"
 cfb_load_service organizations && [ "$CFB_STATUS" = active ] && [ "${CFB_REQUIRED[*]}" = "organizations_seaql_migrations" ] &&
   pass "organizations is active and requires its own history" || fail "organizations catalog entry"
+cfb_load_service admin-bridge && [ "$CFB_STATUS" = active ] && [ "${CFB_REQUIRED[*]}" = "admin_bridge_seaql_migrations" ] &&
+  pass "admin-bridge is active and requires its own history" || fail "admin-bridge catalog entry"
 expect_exit 2 "backup.sh refuses an unknown service" env CFMEET_PG_WRAPPER=false bash "$tool_dir/backup.sh" --service nope --out "$work/x.dump"
 
 echo "== database URL handling"

@@ -26,15 +26,26 @@ import { messagingClientAccessToken, messagingSessionDeviceToken } from "@/servi
 
 import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
 import { b64u } from "./api";
-import { MessagingApiError } from "./errors";
+import { MessagingApiError, friendlyErrorCode, messagingErrorMessage } from "./errors";
+import { accountDevice } from "@/lib/auth/account-device";
+import type { LinkView } from "@/lib/auth/account-device-core";
+import { accountSession } from "@/lib/auth/session";
 import type { Colleague, MessagingIdentity } from "@/types/messaging";
 import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
 import { ManagedConversationState, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
 import { MessageOutbox, browserOutboxStorage, flushOutbox, type OutboxItem } from "./outbox";
 import { reactionSegment } from "./routes";
+import { messagingRealtimeOrigin } from "./urls";
+import { browserDeviceLabel } from "@/lib/auth/device-label";
+import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
+import { inboxFlags, type InboxFlags } from "./chat-list";
+import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
+import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
+import { statusPostId } from "./private-shares";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
-export type Phase = "loading" | "needs-device" | "registering" | "ready" | "locked" | "revoked" | "unavailable" | "error";
+/** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
+export type Phase = "loading" | "needs-device" | "registering" | "needs-signin" | "ready" | "locked" | "revoked" | "unavailable" | "error";
 export type Connection = "connected" | "connecting" | "disconnected" | "auth-required" | "offline";
 /** How live updates arrive: an E2EE device token, a MANAGED-only session device, or polling. */
 export type RealtimeMode = "device" | "session" | "none";
@@ -43,6 +54,9 @@ export type PinView = { messageId: string; sequence: number; pinnedByPrincipalId
 export type MemberRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "READ_ONLY" | "BOT_SERVICE" | string;
 export type AttachmentMeta = { name: string; mediaType: string; size: number | null; state: string; kind: string };
 export type SearchHit = { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; text: string | null };
+
+/** S12: a group invite link (the token is only returned when it's created). */
+export type InviteLink = { inviteLinkId: string; expiresAt: string | null; maxUses: number | null; useCount: number; revokedAt: string | null; status: string; role: string };
 
 export type ConversationView = {
   id: string;
@@ -55,12 +69,15 @@ export type ConversationView = {
   groupReady: boolean;
   createdAt: string;
   members: string[];
+  expiresAt: string | null;
   title: string;
   transparency: "VERIFIED" | "UNPINNED" | "NOT_APPLICABLE";
   version: number;
   ownerPrincipalId: string | null;
   /** The MANAGED conversation title set by a member (null: derived from the members). */
   serverTitle: string | null;
+  /** A PRIVATE_E2EE group's name, read from its encrypted group on this device (never held by the server). */
+  groupTitle: string | null;
   avatarRef: string | null;
   unreadCount: number;
   mentionCount: number;
@@ -68,7 +85,11 @@ export type ConversationView = {
   lastMessage: { sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string } | null;
   memberRoles: Record<string, MemberRole>;
   myRole: MemberRole | null;
-};
+  /** Only owners and admins can send (S13). */
+  announcementOnly: boolean;
+  /** Disappearing messages: seconds a new message is kept (null: off). */
+  retentionSeconds: number | null;
+} & InboxFlags;
 
 export type MessageView = {
   key: string;
@@ -77,7 +98,8 @@ export type MessageView = {
   mine: boolean;
   createdAt: string | null;
   profile: SecurityProfile;
-  state: "queued" | "sending" | "sent" | "delivered" | "failed" | "unreadable" | "removed" | "before-join" | "system";
+  /** `pending-setup`: held (sealed) on this device until another member has a messaging device; never shown as sent. */
+  state: "queued" | "pending-setup" | "sending" | "sent" | "delivered" | "failed" | "unreadable" | "removed" | "before-join" | "system";
   text: string | null;
   file: { name: string; mediaType: string; size: number | null; attachmentId: string | null; state?: string } | null;
   note: string | null;
@@ -90,9 +112,15 @@ export type MessageView = {
   replyTo?: { messageId: string; senderPrincipalId: string | null; text: string | null; removed: boolean } | null;
   reactions?: ReactionView[];
   pinned?: boolean;
+  /** WhatsApp ticks for your own messages: sent (one), delivered (two), read (two, coloured). */
+  receipt?: "sent" | "delivered" | "read";
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
+  /** Forwarded from another chat (WhatsApp's "Forwarded" label). */
+  forwarded?: boolean;
+  /** F4-F7: a private chat's poll, location, contact card or link preview (encrypted content). */
+  rich?: RichContent | null;
 };
 
 export type IncomingTransfer = {
@@ -102,8 +130,21 @@ export type IncomingTransfer = {
   expiresAt: string;
 };
 
+/** A link request from a new device, shown on a trusted device (code typed by the user). */
+export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
+
 export type EngineSnapshot = {
+  /** Chats this account was taken out of by someone else (not left on this device), newest last. */
+  removedFrom?: { conversationId: string; title: string }[];
+  /** Per conversation: who is online and when others were last seen. */
+  presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
+  /** When this browser's messaging device was registered (messages sent earlier never reach it). */
+  deviceRegisteredAt: string | null;
+  /** New devices of the account waiting for this (trusted) browser's approval. */
+  incomingLinks: IncomingLink[];
+  /** Encrypted conversations in which no other member has a messaging device yet. */
+  awaitingSetup: Record<string, boolean>;
   detail: string | null;
   connection: Connection;
   identity: MessagingIdentity | null;
@@ -128,9 +169,13 @@ type ServerConversation = {
   securityProfile: SecurityProfile;
   lifecycleState: string;
   createdAt: string;
+  expiresAt?: string | null;
   encryption: { mlsGroupId: string | null; serverCanReadContent: boolean };
   members?: { principalId: string; role?: string; state?: string }[];
   version?: number;
+  announcementOnly?: boolean;
+  /** Disappearing messages: seconds a message is kept (null: off). */
+  retentionSeconds?: number | null;
   ownerPrincipalId?: string;
   title?: string | null;
   avatarRef?: string | null;
@@ -139,6 +184,10 @@ type ServerConversation = {
     lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null } | null;
     unreadCount: number;
     mentionCount: number;
+    /** F1: this member's own archive / pin of the chat. */
+    archived?: boolean;
+    pinned?: boolean;
+    pinnedAt?: string | null;
   };
 };
 
@@ -156,27 +205,107 @@ type ServerMessage = {
   attachmentIds: string[];
   e2ee?: { epoch: number; ciphertext: string | null } | null;
   managed?: { text: string | null } | null;
+  replyToMessageId?: string | null;
+  targetMessageId?: string | null;
 };
 
-type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null };
+/** What the server knows about a private message (never its content): deletion, reply and edit links. */
+type E2eeMeta = { lifecycle: string; replyTo: string | null; target: string | null };
+
+type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null; keyPackagesAvailable?: number; registeredAt?: string | null };
+
+/** The Delivery Service's view of a group (`GET …/mls/state`). */
+type MlsState = {
+  mlsEpoch: number;
+  pendingRemovals: { deviceId: string; principalId: string; reason: string }[];
+  /** The current epoch's GroupInfo (a member's device joins from it by itself); absent on older servers. */
+  groupInfo?: string | null;
+  groupInfoEpoch?: number | null;
+};
+
+/** A local group change (worker output) to submit to the Delivery Service. */
+type GroupChange = { commit: Uint8Array; epoch: number; welcome?: Uint8Array | null; groupInfo?: Uint8Array | null };
+
+/** An external commit the worker stopped at: its joining device must be verified first. */
+type PendingJoiner = { deviceId: string; sequence: number; senderPrincipalId: string };
 
 const PAGE = 100;
+/** Gone from the chat entirely (WhatsApp): expired, purged, or deleted for you only. */
+const vanishes = (lifecycle: string | undefined) => lifecycle === "EXPIRED" || lifecycle === "PURGED" || lifecycle === "HIDDEN_FOR_YOU";
 /** Newest MANAGED messages loaded when a conversation is first synchronized. */
 const INITIAL_PAGE = 50;
 /** Newest MANAGED messages re-read per poll when no realtime events arrive (edits / tombstones). */
 const WINDOW = 100;
 const SESSION_DEVICE_KEY = "cfmeet.messaging.session-device.";
 const TYPING_THROTTLE_MS = 3000;
-const KEY_PACKAGE_STOCK = 10;
+/** A device not yet in a chat's group retries joining it by itself at most this often. */
+const JOIN_RETRY_MS = 10_000;
+const JOIN_BLOCKED_RETRY_MS = 5 * 60_000;
+/** A member device re-publishes a missing GroupInfo at most this often per chat. */
+const GROUP_INFO_RETRY_MS = 60_000;
+/** Before sending, the sender adds members' new devices; checked at most this often per chat. */
+const SEND_DEVICE_CHECK_MS = 10_000;
+/** A device that had no KeyPackage to claim is not claimed again before this. */
+const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
+
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
+
+/** The API error code of an Account authority call (axios), if any. */
+function accountErrorCode(e: unknown): string | null {
+  const code = (e as { response?: { data?: { error?: { code?: unknown } } } })?.response?.data?.error?.code;
+  return typeof code === "string" ? code : null;
+}
 /** How often a member device checks an encrypted group for members' new devices. */
 const DEVICE_CHECK_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_DEVICE_CHECK_MS) || 30_000);
-const MESSAGING_URL = process.env.NEXT_PUBLIC_MESSAGING_URL ?? "";
+// Realtime origin: the configured Messaging URL, else the API origin (where production
+// routes /v1/realtime). An empty value would silently leave live updates off.
+const MESSAGING_URL = messagingRealtimeOrigin(process.env.NEXT_PUBLIC_MESSAGING_URL, process.env.NEXT_PUBLIC_API_URL);
 const KT_LOG_KEY = process.env.NEXT_PUBLIC_MESSAGING_KT_LOG_KEY ?? "";
 const KT_LOG_ID = process.env.NEXT_PUBLIC_MESSAGING_KT_LOG_ID ?? "";
 const ATTACHMENT_FORMAT = "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1";
 
 const uuid = () => crypto.randomUUID();
+
+/** Photos the chat shows inline; any other type (SVG included) is only ever downloaded. */
+export function isInlineImage(mediaType: string | null | undefined): boolean {
+  return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp" || mediaType === "image/gif";
+}
+
+/** Videos the chat plays inline (WhatsApp); other video types stay a download. */
+export function isPlayableVideo(mediaType: string | null | undefined): boolean {
+  return mediaType === "video/mp4" || mediaType === "video/webm";
+}
+
+/** Voice notes and audio files the chat plays inline. */
+export function isPlayableAudio(mediaType: string | null | undefined): boolean {
+  return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
+}
+
+/**
+ * Photos and voice notes already shown, by attachment, for the whole visit. Kept outside the
+ * engine so leaving the chat and coming back doesn't download and decrypt them again.
+ */
+const mediaUrls = new Map<string, string>();
+
+/** Remembers a file this device just sent, so its own photo shows without downloading it back. */
+function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
+  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType) || isPlayableVideo(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
+}
+
+/** Length of an audio or video file, read by the browser (null: it can't tell). */
+function mediaDurationMs(file: Blob): Promise<number | null> {
+  if (typeof document === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const el = document.createElement(file.type.startsWith("video/") ? "video" : "audio");
+    const url = URL.createObjectURL(file);
+    const done = (v: number | null) => { URL.revokeObjectURL(url); el.removeAttribute("src"); resolve(v); };
+    el.preload = "metadata";
+    el.onloadedmetadata = () => done(Number.isFinite(el.duration) && el.duration > 0 ? Math.max(1, Math.round(el.duration * 1000)) : null);
+    el.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    el.src = url;
+  });
+}
 
 function attachmentKind(mediaType: string): string {
   if (mediaType.startsWith("image/")) return "IMAGE";
@@ -203,10 +332,22 @@ export function currentMessagingEngine(): MessagingEngine | null {
   return MessagingEngine.active;
 }
 
+/** Why a send failed, in plain words (files switched off on the server get their own reason). */
+function sendFailureText(e: unknown): string {
+  if (e instanceof MessagingApiError && e.code === "FEATURE_DISABLED" && (e.reason === "ATTACHMENTS_DISABLED" || e.reason === "ATTACHMENT_STORAGE_NOT_CONFIGURED")) {
+    return "sending photos and files isn't switched on for CF Meet yet";
+  }
+  return messagingErrorMessage(e).replace(/\.$/, "");
+}
+
 export class MessagingEngine {
   static active: MessagingEngine | null = null;
   private snapshot: EngineSnapshot = {
+    presence: {},
     phase: "loading",
+    deviceRegisteredAt: null,
+    incomingLinks: [],
+    awaitingSetup: {},
     detail: null,
     connection: "disconnected",
     identity: null,
@@ -225,11 +366,16 @@ export class MessagingEngine {
   private readonly listeners = new Set<() => void>();
   private crypto: CryptoClient | null = null;
   private transport: MessagingRealtimeTransport | null = null;
+  /** Per conversation, each member's delivered / read sequence (from receipt events and snapshots). */
+  private receipts = new Map<string, Map<string, { read: number; delivered: number }>>();
+  private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private presenceWatched: string | null = null;
   private server = new Map<string, ServerConversation>();
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
   private loadedManaged = new Set<string>();
   private reactions = new Map<string, Map<string, ReactionView[]>>();
+  private e2eeMeta = new Map<string, Map<string, E2eeMeta>>();
   private attachmentMeta = new Map<string, AttachmentMeta>();
   private attachmentLoading = new Set<string>();
   private outbox: MessageOutbox | null = null;
@@ -243,14 +389,43 @@ export class MessagingEngine {
   private syncing = new Map<string, Promise<void>>();
   private resync = new Set<string>();
   private timers: ReturnType<typeof setInterval>[] = [];
+  private privateStarting = false;
   private reconnectDelay = 1000;
   private stopped = false;
+  /** Bumped by every start(); an older start() that resumes after a stop() must not keep going. */
+  private generation = 0;
   private pendingSends = new Map<string, MessageView[]>();
   private deviceChecks = new Map<string, number>();
-  private lastWaitingTopUp = 0;
+  /** Per chat: when a sender last checked for new devices right before sending. */
+  private sendDeviceChecks = new Map<string, number>();
+  private lastStockCheck = 0;
   private missingSince = new Map<string, number>();
+  /** Group changes of this device (worker snapshot / rollback) run one at a time. */
+  private mlsChain: Promise<unknown> = Promise.resolve();
+  /** Per chat: when this device last tried to join its group by itself. */
+  private joinAttempts = new Map<string, number>();
+  /** Chats whose join waits on a member device to commit removals first (retried slowly). */
+  private joinBlocked = new Set<string>();
+  /** Per chat: when this device last published a missing GroupInfo. */
+  private groupInfoChecks = new Map<string, number>();
+  /** Per chat this device is not (yet) in: the latest messages, shown as placeholders. */
+  private waiting = new Map<string, ServerMessage[]>();
+  /** Private messages written while this browser was still being set up (sent once ready). */
+  private beforeReady: { conversationId: string; key: string; text: string; options: { replyToMessageId?: string | null; mentionedPrincipalIds?: string[] } }[] = [];
+  /** Devices whose claim returned no KeyPackage (none published): not claimed again for a while. */
+  private unclaimable = new Map<string, number>();
+  /** Members' device lists (cached briefly: adding new devices before every send). */
+  private deviceLists = new Map<string, { at: number; devices: ServerDevice[] }>();
+  /** Automatic enrollment: in progress, and when a failed attempt may be retried. */
+  private enrolling: Promise<void> | null = null;
+  private nextEnrollAt = 0;
+  private enrollBackoff = 15_000;
+  /** This account's own messaging devices (cached briefly; used to tell "only me" groups). */
+  private ownDeviceCache: { at: number; ids: Set<string> } | null = null;
   /** Sends of one conversation leave in the order the user wrote them. */
   private sendQueues = new Map<string, Promise<void>>();
+  /** PRIVATE_E2EE group names read from (or sent into) each encrypted group on this device. */
+  private groupTitles = new Map<string, string>();
 
   private enqueue(conversationId: string, job: () => Promise<void>): Promise<void> {
     const previous = this.sendQueues.get(conversationId) ?? Promise.resolve();
@@ -268,6 +443,16 @@ export class MessagingEngine {
   getSnapshot = (): EngineSnapshot => this.snapshot;
   private set(patch: Partial<EngineSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
+    // Setup stopped for a reason the user must act on: messages written meanwhile are "Not sent".
+    if (this.beforeReady.length && this.snapshot.phase !== "ready" && !MessagingEngine.settingUp(this.snapshot)) {
+      const note = `Not sent (${this.snapshot.detail ?? "private messaging isn't available in this browser"})`;
+      const messages = { ...this.snapshot.messages };
+      for (const q of this.beforeReady.splice(0)) {
+        this.settlePending(q.conversationId, q.key, note);
+        messages[q.conversationId] = (messages[q.conversationId] ?? []).map((m) => (m.key === q.key ? { ...m, state: "failed" as const, note } : m));
+      }
+      this.snapshot = { ...this.snapshot, messages };
+    }
     for (const l of this.listeners) l();
   }
 
@@ -296,6 +481,8 @@ export class MessagingEngine {
 
   async start(cryptoFactory?: () => CryptoClient): Promise<void> {
     this.stopped = false;
+    const generation = ++this.generation;
+    const stale = () => this.stopped || generation !== this.generation;
     MessagingEngine.active = this;
     if (typeof window !== "undefined") {
       window.addEventListener("offline", this.onOffline);
@@ -303,16 +490,45 @@ export class MessagingEngine {
     }
     try {
       const identity = await identityApi.me();
+      // Stopped (or restarted) while waiting: don't create a worker nobody will ever close.
+      if (stale()) return;
       this.set({ identity });
       this.outbox = new MessageOutbox(browserOutboxStorage(identity.principalId));
       this.outbox.subscribe(() => {
         for (const id of this.loadedManaged) this.renderManaged(id);
       });
-      this.crypto = cryptoFactory ? cryptoFactory() : new CryptoClient();
-      const opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", {
+      // New chats are server-stored (MANAGED): signing in is all a user needs, on every
+      // device at once. The encryption device (worker, keys, one-tab lock, unlock and
+      // device approval) starts only for an account that still has a PRIVATE_E2EE chat.
+      await this.refreshConversations();
+      if (stale()) return;
+      if (!this.hasPrivateChats()) {
+        this.set({ phase: "ready", deviceId: null, detail: null });
+        this.connect();
+        void this.flush();
+        this.timers.push(setInterval(() => void this.poll(), POLL_MS));
+        return;
+      }
+      const crypto = cryptoFactory ? cryptoFactory() : new CryptoClient();
+      this.crypto = crypto;
+      const openArgs = {
         account: identity.principalId,
         scope: { tenantId: identity.tenantId, applicationId: identity.applicationId, environmentId: identity.environmentId },
-      });
+      };
+      let opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+      // The previous page instance in THIS tab (navigating back, or React's dev double-mount)
+      // releases the lock only when its worker has fully shut down: wait briefly before
+      // concluding that another tab really holds it.
+      for (let attempt = 0; opened.status === "LOCKED" && attempt < 6 && !stale(); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+      }
+      if (stale()) {
+        // This start was overtaken by stop() / a newer start(): always release its own worker (and lock).
+        if (this.crypto === crypto) this.crypto = null;
+        crypto.terminate();
+        return;
+      }
       if (opened.status === "LOCKED") {
         this.set({ phase: "locked", detail: "Messaging is open in another tab of this browser." });
         return;
@@ -326,10 +542,12 @@ export class MessagingEngine {
           await this.refreshConversations();
           this.connect();
           this.timers.push(setInterval(() => void this.poll(), POLL_MS));
+          // A fresh device is set up on its own (earlier history stays with other devices).
+          void this.autoEnroll();
           return;
         }
         this.set({ phase: "ready", deviceId: opened.deviceId });
-        await this.topUpKeyPackages();
+        await this.ensureKeyPackageStock(true).catch(() => {});
         this.connect();
       } else {
         this.set({ phase: "needs-device" });
@@ -340,6 +558,9 @@ export class MessagingEngine {
       await this.checkWelcomes();
       void this.flush();
       this.timers.push(setInterval(() => void this.poll(), POLL_MS));
+      // No manual step: this browser's encryption device is set up on its own (account
+      // device trusted by the sign-in, MLS enrollment, KeyPackages, realtime).
+      if (this.snapshot.phase === "needs-device") void this.autoEnroll();
     } catch (e) {
       this.fail(e);
     }
@@ -359,6 +580,7 @@ export class MessagingEngine {
     for (const t of this.typingTimers.values()) clearTimeout(t);
     this.typingTimers.clear();
     this.detachTransport();
+    this.outbox?.detach();
     this.crypto?.terminate();
     this.crypto = null;
   }
@@ -382,17 +604,34 @@ export class MessagingEngine {
     }
   }
 
+  private hasPrivateChats(): boolean {
+    return [...this.server.values()].some((c) => c.securityProfile === "PRIVATE_E2EE");
+  }
+
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
       await this.refreshConversations();
+      // A PRIVATE_E2EE chat appeared (an older client started one): start the encryption
+      // device now, once, through the normal start path.
+      if (!this.crypto && this.snapshot.phase === "ready" && this.hasPrivateChats() && !this.privateStarting) {
+        this.privateStarting = true;
+        for (const t of this.timers) clearInterval(t);
+        this.timers = [];
+        this.detachTransport();
+        void this.start().finally(() => { this.privateStarting = false; });
+        return;
+      }
       await this.checkWelcomes();
       await this.checkIncomingTransfers();
+      await this.checkIncomingLinks();
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
       for (const id of this.server.keys()) this.scheduleSync(id);
       void this.flush();
-      await this.topUpWhileWaiting();
+      if (this.snapshot.phase === "needs-device" && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
+      for (const id of Object.keys(this.snapshot.awaitingSetup)) void this.flushDrafts(id);
+      await this.ensureKeyPackageStock().catch(() => {});
       if (this.snapshot.phase === "ready" && this.snapshot.deviceId && !(await this.deviceIsActive(this.snapshot.deviceId))) {
         await this.onDeviceRevoked();
       }
@@ -406,6 +645,8 @@ export class MessagingEngine {
   private async ownDevices(): Promise<ServerDevice[]> {
     const me = this.snapshot.identity!.principalId;
     const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${me}/devices`);
+    const self = r.devices.find((d) => d.deviceId === this.snapshot.deviceId);
+    if (self?.registeredAt && self.registeredAt !== this.snapshot.deviceRegisteredAt) this.set({ deviceRegisteredAt: self.registeredAt });
     return r.devices;
   }
 
@@ -413,11 +654,26 @@ export class MessagingEngine {
     return (await this.ownDevices()).some((d) => d.deviceId === deviceId && d.status === "ACTIVE");
   }
 
+  /**
+   * Sets up this browser's encryption device without any user action; retried with backoff
+   * on transient failures. Never runs twice at once.
+   */
+  autoEnroll(): Promise<void> {
+    if (this.enrolling || this.stopped) return this.enrolling ?? Promise.resolve();
+    const label = typeof navigator !== "undefined" ? browserDeviceLabel(navigator.userAgent) : "CF Meet web browser";
+    this.enrolling = this.registerDevice(label).finally(() => {
+      this.enrolling = null;
+    });
+    return this.enrolling;
+  }
+
   /** Creates this browser's device: keys generated in the worker, proof of possession. */
   async registerDevice(label = "CF Meet web browser"): Promise<void> {
     if (!this.crypto || !this.snapshot.identity) return;
     this.set({ phase: "registering", detail: null });
     try {
+      // Multi-device policy: only a trusted device of the account may hold an E2EE device.
+      if (!(await this.ensureTrustedAccountDevice(label))) return;
       const challenge = await identityApi.registrationChallenge();
       await this.crypto.call("generate", { deviceId: challenge.deviceId });
       const kp = await this.crypto.call<Uint8Array>("registrationKeyPackage", {
@@ -426,8 +682,14 @@ export class MessagingEngine {
       });
       const device = await identityApi.registerDevice(challenge.challengeId, b64u.enc(kp), label.slice(0, 64));
       await this.crypto.call("adopt");
-      this.set({ phase: "ready", deviceId: device.deviceId });
-      await this.topUpKeyPackages(KEY_PACKAGE_STOCK);
+      // Publish this device's KeyPackages BEFORE it reports ready: from then on others may
+      // start chats with it while it is offline, adding it from these (WhatsApp). A failed
+      // publication is retried by the stock check.
+      this.set({ deviceId: device.deviceId, deviceRegisteredAt: device.registeredAt ?? null });
+      await this.topUpKeyPackages(KEY_PACKAGE_TARGET).catch(() => {});
+      this.set({ phase: "ready", deviceId: device.deviceId, detail: null });
+      this.flushBeforeReady();
+      this.enrollBackoff = 15_000;
       this.connect();
       await this.refreshConversations();
       await this.checkWelcomes();
@@ -437,32 +699,203 @@ export class MessagingEngine {
         return;
       }
       await this.reopenCrypto().catch(() => {});
+      if (this.stopped) return;
+      // Transient (network, server busy): retry on its own with backoff; nothing for the user to do.
+      const status = e instanceof MessagingApiError ? e.status : 0;
+      if (status === 0 || status === 408 || status === 429 || status >= 500 || e instanceof TypeError) {
+        this.nextEnrollAt = Date.now() + this.enrollBackoff;
+        this.enrollBackoff = Math.min(this.enrollBackoff * 2, 5 * 60_000);
+        // Silent: setup keeps going on its own; nothing is shown to the user.
+        this.set({ phase: "needs-device", detail: null });
+        return;
+      }
       this.fail(e);
     }
   }
 
   /**
-   * A device not yet in an encrypted group it belongs to depends on member devices
-   * claiming its KeyPackages; one claimed by an attempt that did not complete is spent.
-   * While waiting, publish one more per device-check period (the server caps the stock
-   * per device).
+   * Keeps this device's published KeyPackages stocked (WhatsApp: keys published in
+   * advance), so a sender can add this device to a chat on its own while it is offline.
+   * Every claim spends one; below KEY_PACKAGE_STOCK the device publishes up to
+   * KEY_PACKAGE_TARGET. Servers that do not report the stock are left alone.
    */
-  private async topUpWhileWaiting(): Promise<void> {
-    const c = this.crypto;
-    if (!c || this.snapshot.phase !== "ready" || Date.now() - this.lastWaitingTopUp < DEVICE_CHECK_MS) return;
-    for (const conv of this.server.values()) {
-      if (conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) continue;
-      if (await c.call<boolean>("hasGroup", { groupId: b64u.dec(conv.encryption.mlsGroupId) })) continue;
-      this.lastWaitingTopUp = Date.now();
-      await this.topUpKeyPackages(1).catch(() => {});
-      return;
-    }
+  private async ensureKeyPackageStock(force = false): Promise<void> {
+    const deviceId = this.snapshot.deviceId;
+    if (!this.crypto || this.snapshot.phase !== "ready" || !deviceId) return;
+    if (!force && Date.now() - this.lastStockCheck < DEVICE_CHECK_MS) return;
+    this.lastStockCheck = Date.now();
+    const own = (await this.ownDevices()).find((d) => d.deviceId === deviceId);
+    await this.topUpKeyPackages(keyPackagesToPublish(own?.keyPackagesAvailable));
   }
 
   private async topUpKeyPackages(count = 0): Promise<void> {
-    if (!this.crypto || !this.snapshot.deviceId || count < 1) return;
-    const kps = await this.crypto.call<Uint8Array[]>("keyPackages", { count });
+    const c = this.crypto;
+    if (!c || !this.snapshot.deviceId || count < 1) return;
+    const kps = await this.withMlsLock(() => c.call<Uint8Array[]>("keyPackages", { count }));
     await identityApi.publishKeyPackages(this.snapshot.deviceId, kps.map((k) => b64u.enc(k)));
+  }
+
+  /** Group changes of this device's worker (snapshot / confirm / rollback) never interleave. */
+  private withMlsLock<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.mlsChain.then(job, job);
+    this.mlsChain = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Submits a group change this device already made locally, with the GroupInfo of the
+   * epoch it creates (so a member's new device can join by itself), and keeps it only if
+   * the Delivery Service accepts it. A server that does not take GroupInfos yet (an
+   * older image) gets the same commit without it.
+   */
+  private async submitChange(conv: ServerConversation, out: GroupChange, extra: { welcomed?: string[]; removed?: string[] } = {}): Promise<void> {
+    const c = this.crypto!;
+    const body = {
+      clientMessageId: uuid(),
+      deviceId: this.snapshot.deviceId,
+      epoch: out.epoch,
+      commit: b64u.enc(out.commit),
+      ...(out.welcome && extra.welcomed?.length ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: extra.welcomed } : {}),
+      ...(extra.removed ? { removedDeviceIds: extra.removed } : {}),
+    };
+    const path = `v1/conversations/${conv.conversationId}/mls/commits`;
+    try {
+      if (out.groupInfo) {
+        try {
+          await relay("POST", path, { ...body, groupInfo: b64u.enc(out.groupInfo) });
+        } catch (e) {
+          if (!(e instanceof MessagingApiError) || e.status !== 400) throw e;
+          await relay("POST", path, body);
+        }
+      } else {
+        await relay("POST", path, body);
+      }
+      await c.call("confirm");
+    } catch (e) {
+      await c.call("rollback").catch(() => {});
+      throw e;
+    }
+  }
+
+  private mlsState(conv: ServerConversation): Promise<MlsState> {
+    return relay<MlsState>("GET", `v1/conversations/${conv.conversationId}/mls/state`);
+  }
+
+  /** A member's device list, cached for `maxAgeMs`. */
+  /**
+   * The security code of a private one-to-one chat (WhatsApp): 60 digits from both people's
+   * active device keys. Both phones show the same code; if it matches when you compare it in
+   * person, nobody swapped a key. It changes when either person adds or removes a device.
+   */
+  async securityCode(conversationId: string): Promise<{ code: string; logChecked: boolean } | null> {
+    const conv = this.server.get(conversationId);
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!conv || !me || conv.securityProfile !== "PRIVATE_E2EE" || !view || view.members.length !== 2) return null;
+    const people = [...view.members].sort();
+    const parts = await Promise.all(people.map(async (p) => {
+      const keys = (await this.principalDevices(p, 0)).filter((d) => d.status === "ACTIVE").map((d) => d.signaturePublicKey).sort();
+      return `${p}:${keys.join(",")}`;
+    }));
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-512", new TextEncoder().encode(`cfmeet-security-code-v1|${parts.join("|")}`)));
+    const view32 = new DataView(digest.buffer);
+    const blocks = Array.from({ length: 12 }, (_, i) => String(view32.getUint32(i * 4) % 100000).padStart(5, "0"));
+    return { code: blocks.join(" "), logChecked: this.snapshot.ktPinned };
+  }
+
+  private async principalDevices(principalId: string, maxAgeMs: number): Promise<ServerDevice[]> {
+    const hit = this.deviceLists.get(principalId);
+    if (hit && Date.now() - hit.at < maxAgeMs) return hit.devices;
+    const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${principalId}/devices`);
+    this.deviceLists.set(principalId, { at: Date.now(), devices: r.devices });
+    return r.devices;
+  }
+
+  /**
+   * Joins a chat's encryption group BY ITSELF (MLS external commit from the GroupInfo the
+   * members published): this device never waits for anyone else to come online. A Welcome
+   * that already adds it is used first. Returns whether this device is in the group.
+   */
+  private async joinBySelf(conv: ServerConversation, force = false): Promise<boolean> {
+    const c = this.crypto;
+    const id = conv.conversationId;
+    if (!c || this.snapshot.phase !== "ready" || !this.snapshot.deviceId || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return false;
+    const gid = b64u.dec(conv.encryption.mlsGroupId);
+    if (await c.call<boolean>("hasGroup", { groupId: gid })) return true;
+    if (!force && Date.now() - (this.joinAttempts.get(id) ?? 0) < (this.joinBlocked.has(id) ? JOIN_BLOCKED_RETRY_MS : JOIN_RETRY_MS)) return false;
+    this.joinAttempts.set(id, Date.now());
+    await this.checkWelcomes().catch(() => {});
+    const joined = await this.withMlsLock(async () => {
+      if (await c.call<boolean>("hasGroup", { groupId: gid })) return true;
+      const state = await this.mlsState(conv);
+      if (!state.groupInfo) return false;
+      const out = await c.call<GroupChange>("externalJoin", { groupId: gid, groupInfo: b64u.dec(state.groupInfo) });
+      try {
+        await this.submitChange(conv, out);
+      } catch (e) {
+        // Another commit won this epoch: retried soon. Signed-out devices still in the group
+        // must be removed by a member's device first: that can take a long time (nobody may be
+        // online), so it is retried slowly instead of every few seconds.
+        if (e instanceof MessagingApiError && e.code === "MLS_REKEY_REQUIRED") this.joinBlocked.add(id);
+        return false;
+      }
+      this.joinBlocked.delete(id);
+      return true;
+    });
+    if (joined) {
+      this.joinAttempts.delete(id);
+      this.waiting.delete(id);
+      await this.renderConversations();
+    }
+    return joined;
+  }
+
+  /**
+   * The current epoch has no GroupInfo (a chat created before devices could join by
+   * themselves, or a commit of an older client): a member device publishes one with a
+   * key-update commit, so the members' new devices can join without anyone online.
+   */
+  private async ensureGroupInfo(conv: ServerConversation, state: MlsState | null): Promise<void> {
+    const c = this.crypto;
+    const id = conv.conversationId;
+    if (!c || !state || !("groupInfoEpoch" in state) || state.groupInfoEpoch === state.mlsEpoch || state.pendingRemovals.length) return;
+    if (Date.now() - (this.groupInfoChecks.get(id) ?? 0) < GROUP_INFO_RETRY_MS) return;
+    this.groupInfoChecks.set(id, Date.now());
+    const gid = b64u.dec(conv.encryption.mlsGroupId!);
+    await this.withMlsLock(async () => {
+      if (Number(await c.call<number>("epoch", { groupId: gid })) !== state.mlsEpoch) return;
+      const out = await c.call<GroupChange>("updateKeys", { groupId: gid });
+      // Another member's device may publish first (its commit wins the epoch): fine.
+      await this.submitChange(conv, out, { removed: [] }).catch(() => {});
+    });
+  }
+
+  /**
+   * Whether the device that joined by an external commit may be merged: a registered,
+   * ACTIVE device of a principal who is an ACTIVE member, whose key is the one in the
+   * directory and (with a pinned log) in the key-transparency log. `null`: refused.
+   * Throws when it cannot be decided now (network): the commit is retried later.
+   */
+  private async verifyJoiner(conv: ServerConversation, joiner: PendingJoiner): Promise<string | null> {
+    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
+    if (!members.members.some((m) => m.principalId === joiner.senderPrincipalId && (!m.state || m.state === "ACTIVE"))) return null;
+    let devices: ServerDevice[];
+    try {
+      devices = await this.principalDevices(joiner.senderPrincipalId, 0);
+    } catch (e) {
+      if (e instanceof MessagingApiError && (e.status === 404 || e.status === 403)) return null;
+      throw e;
+    }
+    const d = devices.find((x) => x.deviceId === joiner.deviceId && x.status === "ACTIVE");
+    if (!d) return null;
+    const key = b64u.dec(d.signaturePublicKey);
+    try {
+      await this.verifyTransparency(joiner.deviceId, key);
+    } catch (e) {
+      if (e instanceof CryptoWorkerError) return null;
+      throw e;
+    }
+    return joinerEntry(joiner.deviceId, key);
   }
 
   /** Removes this browser's device (server first) and erases its local keys and history. */
@@ -501,7 +934,7 @@ export class MessagingEngine {
     // would create a fresh wrapping key after the sign-out's wipe).
     if (this.stopped) return;
     await this.reopenCrypto();
-    this.set({ phase: "revoked", detail, deviceId: null, messages: {}, connection: "disconnected" });
+    this.set({ phase: "revoked", detail, deviceId: null, deviceRegisteredAt: null, messages: {}, connection: "disconnected" });
     this.managed.clear();
     this.loadedManaged.clear();
     await this.refreshConversations();
@@ -509,14 +942,22 @@ export class MessagingEngine {
     this.connect();
   }
 
-  /** Logout: the local device and its history are erased and the device revoked. */
-  async signOut(): Promise<void> {
-    // Background work stops first: the revocation below must not be "detected" by a poll
-    // that would wipe and reopen the device store in parallel.
+  /**
+   * Sign-out step one, synchronous: background work stops and the outbox closes, so a poll
+   * can't "detect" the revocation and reopen the device store, and a send that finishes
+   * after the browser's storage is cleared can't write its queue back.
+   */
+  halt(): void {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.detachTransport();
+    this.outbox?.close();
+  }
+
+  /** Logout: the local device and its history are erased and the device revoked. */
+  async signOut(): Promise<void> {
+    this.halt();
     try {
       if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
@@ -547,7 +988,13 @@ export class MessagingEngine {
     const transport = new MessagingRealtimeTransport({
       baseUrl: MESSAGING_URL,
       getAccessToken: deviceId
-        ? async () => messagingClientAccessToken(await identityApi.clientToken(deviceId), deviceId)
+        ? async () => {
+            // Renewed on the open socket before it expires (like session-device tokens),
+            // so a healthy connection never drops at token expiry.
+            const token = messagingClientAccessToken(await identityApi.clientToken(deviceId), deviceId);
+            this.scheduleAuthRefresh(token.expiresAt);
+            return token;
+          }
         : () => this.sessionAccessToken(),
       onEvent: (event) => this.onRealtimeEvent(event),
       onSyncRequired: (conversationId) => {
@@ -557,6 +1004,17 @@ export class MessagingEngine {
         // MSG-018: the server resumed from this device's stored ack cursor.
         const st = this.managed.get(conversationId);
         if (st && st.eventCursor === null) st.eventCursor = after;
+        transport.queryReceipts(conversationId);
+      },
+      onPresence: (conversationId, members) => {
+        const me = this.snapshot.identity?.principalId;
+        const map: Record<string, { online: boolean; lastSeenAt: string | null }> = {};
+        for (const m of members) if (m.principalId !== me) map[m.principalId] = { online: m.state === "AVAILABLE", lastSeenAt: m.lastSeenAt ?? null };
+        this.set({ presence: { ...this.snapshot.presence, [conversationId]: map } });
+      },
+      onReceipts: (conversationId, members) => {
+        for (const m of members) this.noteReceipt(conversationId, m.principalId, m.readSequence, m.deliveredSequence);
+        this.refreshTicks(conversationId);
       },
       onTyping: (conversationId, principalId, state, ttlMs) => this.onTyping(conversationId, principalId, state, ttlMs),
       onReadCursor: (conversationId) => {
@@ -573,6 +1031,8 @@ export class MessagingEngine {
           this.reconnectDelay = 1000;
           // Missed while offline: catch up every conversation from the Delivery Service.
           for (const id of this.server.keys()) this.scheduleSync(id);
+          // The open chat's "online" / "last seen" is asked again now, not at the next poll.
+          if (this.presenceWatched) transport.queryPresence(this.presenceWatched);
           this.outbox?.wake();
           void this.flush();
         } else if (!this.stopped) {
@@ -673,9 +1133,87 @@ export class MessagingEngine {
   }
 
   /** A realtime event: MANAGED ones are applied directly (current representation), E2EE ones trigger a sync. */
+  /** Keeps "online" / "last seen" fresh for the open chat (null: stop). */
+  watchPresence(conversationId: string | null): void {
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = null;
+    this.presenceWatched = conversationId;
+    if (!conversationId) return;
+    const ask = () => this.transport?.queryPresence(conversationId);
+    ask();
+    this.presenceTimer = setInterval(ask, 20_000);
+  }
+
+  /** WhatsApp's Message info: each other member's state for one of your messages. */
+  messageInfo(conversationId: string, sequence: number): { principalId: string; state: "read" | "delivered" | "sent" }[] {
+    const me = this.snapshot.identity?.principalId;
+    const byMember = this.receipts.get(conversationId);
+    return (this.server.get(conversationId)?.members ?? [])
+      .map((m) => m.principalId)
+      .filter((p) => p !== me)
+      .map((p) => {
+        const r = byMember?.get(p);
+        return { principalId: p, state: (r && r.read >= sequence ? "read" : r && r.delivered >= sequence ? "delivered" : "sent") as "read" | "delivered" | "sent" };
+      });
+  }
+
+  /** Applies read / delivery receipts among `events`; whether any was found. */
+  private noteReceiptEvents(conversationId: string, events: readonly ConversationEvent[]): boolean {
+    let any = false;
+    for (const e of events) {
+      if (e.type !== "read.cursor.updated" && e.type !== "delivery.cursor.updated") continue;
+      const d = (e.data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId !== "string") continue;
+      this.noteReceipt(conversationId, d.principalId,
+        typeof d.readSequence === "number" ? d.readSequence : undefined,
+        typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+      any = true;
+    }
+    return any;
+  }
+
+  private noteReceipt(conversationId: string, principalId: string, read?: number, delivered?: number): void {
+    let byMember = this.receipts.get(conversationId);
+    if (!byMember) this.receipts.set(conversationId, (byMember = new Map()));
+    const cur = byMember.get(principalId) ?? { read: 0, delivered: 0 };
+    const r = Math.max(cur.read, read ?? 0);
+    // Reading a message implies it was delivered.
+    byMember.set(principalId, { read: r, delivered: Math.max(cur.delivered, delivered ?? 0, r) });
+  }
+
+  /** Ticks for your messages: read when every other member read it, delivered when it reached all of them. */
+  private withTicks(conversationId: string, views: MessageView[]): MessageView[] {
+    const me = this.snapshot.identity?.principalId;
+    const others = (this.server.get(conversationId)?.members ?? []).map((m) => m.principalId).filter((p) => p !== me);
+    const byMember = this.receipts.get(conversationId);
+    return views.map((v) => {
+      if (!v.mine || v.sequence == null || (v.state !== "sent" && v.state !== "delivered")) return v;
+      const seq = v.sequence;
+      const all = (key: "read" | "delivered") => others.length > 0 && others.every((p) => (byMember?.get(p)?.[key] ?? 0) >= seq);
+      const receipt = all("read") ? "read" : all("delivered") ? "delivered" : "sent";
+      return v.receipt === receipt ? v : { ...v, receipt };
+    });
+  }
+
+  private refreshTicks(conversationId: string): void {
+    const views = this.snapshot.messages[conversationId];
+    if (!views) return;
+    const next = this.withTicks(conversationId, views);
+    if (next.some((v, i) => v !== views[i])) this.set({ messages: { ...this.snapshot.messages, [conversationId]: next } });
+  }
+
   private onRealtimeEvent(event: MessagingRealtimeEvent): void {
     const conv = this.server.get(event.conversationId);
     if (!conv) return;
+    if (event.type === "read.cursor.updated" || event.type === "delivery.cursor.updated") {
+      const d = ((event as { data?: Record<string, unknown> }).data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId === "string") {
+        this.noteReceipt(event.conversationId, d.principalId,
+          typeof d.readSequence === "number" ? d.readSequence : undefined,
+          typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+        this.refreshTicks(event.conversationId);
+      }
+    }
     if (conv.securityProfile !== "MANAGED") {
       this.scheduleSync(event.conversationId);
       return;
@@ -734,6 +1272,10 @@ export class MessagingEngine {
     }
     const fresh = out.filter((c) => !this.server.has(c.conversationId));
     const gone = [...this.server.keys()].filter((id) => !out.some((c) => c.conversationId === id));
+    const removed = gone
+      .filter((id) => !this.leaving.has(id))
+      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat" }));
+    if (removed.length) this.set({ removedFrom: [...(this.snapshot.removedFrom ?? []), ...removed].slice(-10) });
     for (const id of gone) {
       // No longer a member (removed / left): it disappears from this client.
       this.server.delete(id);
@@ -772,12 +1314,14 @@ export class MessagingEngine {
         mlsGroupId: c.encryption.mlsGroupId,
         groupReady,
         createdAt: c.createdAt,
+        expiresAt: c.expiresAt ?? null,
         members,
         title: "",
         transparency: c.securityProfile === "PRIVATE_E2EE" ? (this.snapshot.ktPinned ? "VERIFIED" : "UNPINNED") : "NOT_APPLICABLE",
         version: c.version ?? 0,
         ownerPrincipalId: c.ownerPrincipalId ?? null,
         serverTitle: c.title ?? null,
+        groupTitle: c.securityProfile === "PRIVATE_E2EE" ? (this.groupTitles.get(c.conversationId) ?? null) : null,
         avatarRef: c.avatarRef ?? null,
         unreadCount: c.inbox?.unreadCount ?? previous?.unreadCount ?? 0,
         mentionCount: c.inbox?.mentionCount ?? previous?.mentionCount ?? 0,
@@ -787,31 +1331,107 @@ export class MessagingEngine {
           : (previous?.lastMessage ?? null),
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
+        announcementOnly: !!c.announcementOnly,
+        retentionSeconds: c.retentionSeconds ?? null,
+        ...inboxFlags(c.inbox, previous),
       });
     }
     if (needNames.size) {
       try {
         const r = await identityApi.names([...needNames].slice(0, 256));
         const names = { ...this.snapshot.names };
-        for (const p of r.principals) names[p.principalId] = p.displayName;
+        // Your own saved contact name (alias) first, as the contact list shows it.
+        for (const p of r.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
         this.set({ names });
       } catch {
         // Names are cosmetic; ids are shown instead.
       }
     }
-    for (const v of views) {
-      const others = v.members.filter((m) => m !== me);
-      v.title = v.serverTitle?.trim()
-        ? v.serverTitle.trim()
-        : others.length ? others.map((m) => this.snapshot.names[m] ?? "CF Meet user").join(", ") : v.contextClass === "GROUP" ? "Group conversation" : "Conversation";
-    }
+    for (const v of views) v.title = this.titleOf(v);
     // Inbox order: latest activity first (MSG-007 `orderBy=lastActivity`).
     views.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
     this.set({ conversations: views });
   }
 
+  /** Direct chat: the other person (alias, then name); group: its name, else its other members. */
+  private titleOf(v: ConversationView): string {
+    if (statusPostId(v.groupTitle)) {
+      const owner = v.ownerPrincipalId;
+      return owner === this.snapshot.identity?.principalId ? "Your status" : `Status from ${owner ? this.snapshot.names[owner] ?? "a contact" : "a contact"}`;
+    }
+    return conversationTitle({ contextClass: v.contextClass, serverTitle: v.serverTitle, groupTitle: v.groupTitle, members: v.members, me: this.snapshot.identity?.principalId, names: this.snapshot.names });
+  }
+
+  /** A private group's name changed on this device: the list, header and chat info follow. */
+  private applyGroupTitle(conversationId: string, title: string | null): void {
+    if (title) this.groupTitles.set(conversationId, title);
+    else this.groupTitles.delete(conversationId);
+    const v = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!v || v.securityProfile !== "PRIVATE_E2EE" || v.groupTitle === title) return;
+    const next = { ...v, groupTitle: title };
+    next.title = this.titleOf(next);
+    this.set({ conversations: this.snapshot.conversations.map((c) => (c.id === conversationId ? next : c)) });
+  }
+
+  /**
+   * Names a private group inside its end-to-end encrypted group: an encrypted message only
+   * member devices can read (the server refuses to hold a PRIVATE_E2EE title). While nobody
+   * else can decrypt yet it is held sealed on this device and sent with the held messages.
+   */
+  private async shareGroupTitle(conversationId: string, title: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    const c = this.crypto;
+    if (!conv || conv.securityProfile !== "PRIVATE_E2EE" || conv.contextClass === "DIRECT" || !c || this.snapshot.phase !== "ready") return;
+    const text = encodeGroupTitle(title);
+    this.applyGroupTitle(conversationId, normalizeTitle(title));
+    const gid = conv.encryption.mlsGroupId ? b64u.dec(conv.encryption.mlsGroupId) : null;
+    const inGroup = !!gid && (await c.call<boolean>("hasGroup", { groupId: gid }).catch(() => false));
+    if (!inGroup || (await this.updateAwaitingSetup(conv))) {
+      await c.call("holdDraft", { conversationId, clientMessageId: uuid(), text, createdAt: new Date().toISOString() });
+      this.deviceChecks.delete(conversationId);
+      this.scheduleSync(conversationId);
+      return;
+    }
+    await this.enqueue(conversationId, () => this.sendEncrypted(conv, { t: "text", text }, []));
+  }
+
+  /** A device or member was just added to a private group: it receives the group's name too. */
+  private reshareGroupTitle(conversationId: string): void {
+    const title = this.groupTitles.get(conversationId);
+    if (title) void this.shareGroupTitle(conversationId, title).catch(() => {});
+  }
+
   async directory(q?: string): Promise<Colleague[]> {
     return (await identityApi.directory(q)).people;
+  }
+
+  /**
+   * An older PRIVATE_E2EE chat continues as a server-stored (MANAGED) chat with the same
+   * people (and the same name for a group): readable on every device the user signs in
+   * on. Opens the server-stored chat when it already exists; the encrypted chat stays
+   * readable where it is. Returns the server-stored chat's id.
+   */
+  /** The group name "Continue chat" can carry over (null: the user must name it). */
+  knownGroupName(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.contextClass === "DIRECT") return null;
+    return view.groupTitle ?? view.serverTitle ?? null;
+  }
+
+  async continueAsManaged(conversationId: string, groupName?: string): Promise<string> {
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (view.securityProfile === "MANAGED") return view.id;
+    const others = view.members.filter((m) => m !== me);
+    const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
+      && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
+    // Never the member list shown when a group's name is unknown: that is not its name.
+    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || undefined);
+    if (view.contextClass !== "DIRECT" && !name) throw new MessagingApiError(0, "GROUP_NAME_REQUIRED", "Give the group a name to continue.");
+    const twin = this.snapshot.conversations.find((c) => same(c) && (view.contextClass === "DIRECT" || (c.serverTitle ?? null) === (name ?? null)));
+    if (twin) return twin.id;
+    return this.createConversation([], "MANAGED", { principalIds: others, title: name });
   }
 
   /**
@@ -822,9 +1442,12 @@ export class MessagingEngine {
   async createConversation(
     userIds: string[],
     profile: SecurityProfile,
-    options: { cfMeetIds?: string[]; title?: string } = {},
+    options: { cfMeetIds?: string[]; principalIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
   ): Promise<string> {
-    const people = userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : [];
+    const people = [
+      ...(userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : []),
+      ...(options.principalIds ?? []),
+    ];
     const contacts = options.cfMeetIds ?? [];
     if (profile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready") throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const title = options.title?.trim() || undefined;
@@ -834,13 +1457,17 @@ export class MessagingEngine {
       ? people.length
         ? { contextClass: "DIRECT", counterpartPrincipalId: people[0], securityProfile: profile, ...disclosure }
         : { contextClass: "DIRECT", counterpartCfMeetId: contacts[0], securityProfile: profile, ...disclosure }
-      : { contextClass: "GROUP", securityProfile: profile, ...disclosure, ...(title && profile === "MANAGED" ? { title: title.slice(0, 120) } : {}) };
+      : { contextClass: "GROUP", securityProfile: profile, ...disclosure, ...(title && profile === "MANAGED" ? { title: title.slice(0, 120) } : {}),
+          ...(options.expiresAt ? { expiresAt: options.expiresAt, expiryGraceSeconds: 0 } : {}),
+          ...(options.retentionSeconds ? { retentionSeconds: options.retentionSeconds } : {}) };
     const conv = await relay<ServerConversation>("POST", "v1/conversations", body, `web-${uuid()}`);
     if (conv.securityProfile !== profile) {
       // Never silently accept another profile than the one the user chose.
       throw new MessagingApiError(0, "PROFILE_NOT_GRANTED", conv.securityProfile);
     }
     this.server.set(conv.conversationId, conv);
+    // Lock a status before adding its audience: recipients may read but never post.
+    if (options.announcementOnly) await this.setAnnouncementOnly(conv.conversationId, true);
     let principals = people;
     if (!direct) {
       for (const p of people) await relay("POST", `v1/conversations/${conv.conversationId}/members`, { principalId: p });
@@ -854,7 +1481,15 @@ export class MessagingEngine {
       const me = this.snapshot.identity?.principalId;
       principals = (conv.members ?? []).map((x) => x.principalId).filter((x) => x !== me);
     }
-    if (profile === "PRIVATE_E2EE") await this.establishGroup(conv, principals);
+    if (profile === "PRIVATE_E2EE") {
+      await this.establishGroup(conv, principals);
+      // The name travels inside the encrypted group, after the members' devices were added.
+      if (title && !direct) {
+        const shared = this.shareGroupTitle(conv.conversationId, title.slice(0, 120));
+        if (statusPostId(title)) await shared;
+        else await shared.catch(() => {});
+      }
+    }
     this.subscribeConversation(conv);
     await this.refreshConversations();
     return conv.conversationId;
@@ -865,55 +1500,110 @@ export class MessagingEngine {
     return this.createConversation([], "MANAGED", { cfMeetIds: [cfMeetId] });
   }
 
-  /** Claims, verifies and adds the devices of `principals` with ONE commit. */
-  private async addPrincipalsToGroup(conv: ServerConversation, principals: string[], create: boolean): Promise<void> {
-    const c = this.crypto!;
-    const gid = b64u.dec(conv.encryption.mlsGroupId!);
-    const deviceId = this.snapshot.deviceId!;
-    if (create) await c.call("createGroup", { groupId: gid });
-    try {
-      let packages: Uint8Array[] = [];
-      let welcomed: string[] = [];
-      if (principals.length) {
-        const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
-          "POST",
-          `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
-          { principalIds: principals },
-        );
-        const now = Math.floor(Date.now() / 1000);
-        for (const k of claim.keyPackages) {
-          if (k.deviceId === deviceId) continue;
-          const kp = b64u.dec(k.keyPackage);
-          const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
-          if (info.deviceId !== k.deviceId) throw new CryptoWorkerError("KEY_PACKAGE_DEVICE_MISMATCH");
-          await this.verifyTransparency(k.deviceId, info.signatureKey);
-          packages.push(kp);
-          welcomed.push(k.deviceId);
+  /**
+   * Claims, verifies and adds the devices of `principals` with ONE commit. A new group
+   * publishes its GroupInfo at once (with the add, or a key-update commit when nobody else
+   * has a device yet), so every member's device can join it by itself later.
+   */
+  private addPrincipalsToGroup(conv: ServerConversation, principals: string[], create: boolean): Promise<void> {
+    return this.withMlsLock(async () => {
+      const c = this.crypto!;
+      const gid = b64u.dec(conv.encryption.mlsGroupId!);
+      const deviceId = this.snapshot.deviceId!;
+      if (create) await c.call("createGroup", { groupId: gid });
+      try {
+        const packages: Uint8Array[] = [];
+        const welcomed: string[] = [];
+        if (principals.length) {
+          const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
+            "POST",
+            `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
+            { principalIds: principals },
+          );
+          const now = Math.floor(Date.now() / 1000);
+          for (const k of claim.keyPackages) {
+            if (k.deviceId === deviceId) continue;
+            const kp = b64u.dec(k.keyPackage);
+            const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
+            if (info.deviceId !== k.deviceId) throw new CryptoWorkerError("KEY_PACKAGE_DEVICE_MISMATCH");
+            await this.verifyTransparency(k.deviceId, info.signatureKey);
+            packages.push(kp);
+            welcomed.push(k.deviceId);
+          }
+          // A member without a published KeyPackage (no device yet, or none left) is not
+          // added here: its devices join by themselves from the GroupInfo, and senders add
+          // new devices before they send (addMissingDevices).
         }
-        if (!packages.length) throw new MessagingApiError(409, "NO_DEVICE_TO_ADD", "The other people have no messaging device yet.");
+        let out: GroupChange | null = null;
+        if (packages.length) out = await c.call<GroupChange>("addDevices", { groupId: gid, keyPackages: packages });
+        else if (create) out = await c.call<GroupChange>("updateKeys", { groupId: gid });
+        if (out) await this.submitChange(conv, out, { welcomed, removed: [] });
+        else await c.call("confirm");
+      } catch (e) {
+        await c.call("rollback").catch(() => {});
+        throw e;
       }
-      if (packages.length) {
-        const out = await c.call<{ commit: Uint8Array; welcome: Uint8Array | null; epoch: number }>("addDevices", { groupId: gid, keyPackages: packages });
-        await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-          clientMessageId: uuid(),
-          deviceId,
-          epoch: out.epoch,
-          commit: b64u.enc(out.commit),
-          ...(out.welcome ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: welcomed } : {}),
-          removedDeviceIds: [],
-        });
-        packages = [];
-        welcomed = [];
-      }
-      await c.call("confirm");
-    } catch (e) {
-      await c.call("rollback").catch(() => {});
-      throw e;
-    }
+    });
   }
 
-  private establishGroup(conv: ServerConversation, others: string[]): Promise<void> {
-    return this.addPrincipalsToGroup(conv, others, true);
+  private async establishGroup(conv: ServerConversation, others: string[]): Promise<void> {
+    await this.addPrincipalsToGroup(conv, others, true);
+    await this.updateAwaitingSetup(conv);
+  }
+
+  /** This account's ACTIVE messaging devices (other browsers included), cached for 30 s. */
+  private async ownDeviceIds(): Promise<Set<string>> {
+    if (this.ownDeviceCache && Date.now() - this.ownDeviceCache.at < 30_000) return this.ownDeviceCache.ids;
+    const ids = new Set((await this.ownDevices()).filter((d) => d.status === "ACTIVE").map((d) => d.deviceId));
+    this.ownDeviceCache = { at: Date.now(), ids };
+    return ids;
+  }
+
+  /**
+   * Whether an encrypted conversation can reach anyone else: true when at least one device
+   * of ANOTHER member is in this device's MLS group. Otherwise the conversation is pending
+   * setup and messages are held (sealed) instead of being sent to nobody.
+   */
+  private async othersInGroup(conv: ServerConversation): Promise<boolean> {
+    if (!this.crypto || !conv.encryption.mlsGroupId) return false;
+    const gid = b64u.dec(conv.encryption.mlsGroupId);
+    if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return false;
+    const inTree = await this.crypto.call<string[]>("members", { groupId: gid });
+    const mine = await this.ownDeviceIds();
+    return inTree.some((d) => d !== this.snapshot.deviceId && !mine.has(d));
+  }
+
+  private async updateAwaitingSetup(conv: ServerConversation): Promise<boolean> {
+    if (conv.securityProfile !== "PRIVATE_E2EE" || this.snapshot.phase !== "ready") return false;
+    const reachable = await this.othersInGroup(conv).catch(() => true);
+    const id = conv.conversationId;
+    const waiting = !reachable;
+    if (Boolean(this.snapshot.awaitingSetup[id]) !== waiting) {
+      const next = { ...this.snapshot.awaitingSetup };
+      if (waiting) next[id] = true;
+      else delete next[id];
+      this.set({ awaitingSetup: next });
+    }
+    return waiting;
+  }
+
+  /** Sends the messages held while the conversation was pending setup, oldest first. */
+  private async flushDrafts(conversationId: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    const c = this.crypto;
+    if (!conv || !c || this.snapshot.phase !== "ready") return;
+    if (await this.updateAwaitingSetup(conv)) return;
+    await this.enqueue(conversationId, async () => {
+      const drafts = await c.call<{ clientMessageId: string; text: string; createdAt: string }[]>("drafts", { conversationId }).catch(() => []);
+      for (const d of drafts) {
+        await this.sendEncrypted(conv, { t: "text", text: d.text }, []);
+        await c.call("dropDraft", { conversationId, clientMessageId: d.clientMessageId });
+        this.settlePending(conversationId, `d${d.clientMessageId}`, null);
+      }
+      if (drafts.length) await this.sync(conversationId);
+    }).catch(() => {
+      // retried on the next poll; the drafts stay sealed on this device
+    });
   }
 
   private async verifyTransparency(deviceId: string, signatureKey: Uint8Array): Promise<void> {
@@ -933,6 +1623,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "PRIVATE_E2EE") {
       await this.sync(conversationId);
       await this.addPrincipalsToGroup(conv, [p.principalId], false);
+      this.reshareGroupTitle(conversationId);
     }
     await this.refreshConversations();
   }
@@ -951,6 +1642,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "PRIVATE_E2EE") {
       await this.sync(conversationId);
       await this.addPrincipalsToGroup(conv, [member.principalId], false);
+      this.reshareGroupTitle(conversationId);
     }
     await this.refreshConversations();
   }
@@ -959,9 +1651,16 @@ export class MessagingEngine {
   async leaveConversation(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId;
     if (!me) return;
-    await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
-    await this.refreshConversations();
+    this.leaving.add(conversationId);
+    try {
+      await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
   }
+  /** Chats being left on this device: their disappearing is not "you were removed". */
+  private leaving = new Set<string>();
 
   async setMemberRole(conversationId: string, principalId: string, role: MemberRole): Promise<void> {
     await relay("PATCH", `v1/conversations/${conversationId}/members/${principalId}`, { role });
@@ -969,130 +1668,262 @@ export class MessagingEngine {
   }
 
   /** Renames a MANAGED group (compare-and-swap on the conversation version). */
+  /** S13: only owners and admins can send in this group. */
+  /**
+   * F4-F6: send a poll, a vote, a location or a contact card. Private chats only: it travels
+   * inside the end-to-end encrypted content (the server sees an ordinary encrypted message).
+   */
+  async sendRich(conversationId: string, payload: RichPayload): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (conv.securityProfile !== "PRIVATE_E2EE") throw new MessagingApiError(0, "PRIVATE_CHATS_ONLY", null);
+    await this.enqueue(conversationId, async () => {
+      await this.sendEncrypted(conv, payload, []);
+      // A read outage after publication must not encourage duplicate broadcast sends.
+      await this.sync(conversationId).catch(() => {});
+    });
+  }
+
+  /** F1: archive / pin this chat for me (WhatsApp); the list updates straight away. */
+  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean }): Promise<void> {
+    const r = await relay<InboxFlags>("PUT", `v1/conversations/${conversationId}/inbox-settings`, change);
+    const flags = inboxFlags(r);
+    const c = this.server.get(conversationId);
+    if (c?.inbox) c.inbox = { ...c.inbox, ...flags };
+    this.set({ conversations: this.snapshot.conversations.map((x) => (x.id === conversationId ? { ...x, ...flags } : x)) });
+  }
+
+  /** B4: turn disappearing messages on, change them, or turn them off (null); applies to new messages. */
+  async setDisappearing(conversationId: string, seconds: number | null): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, retentionSeconds: seconds });
+    await this.refreshConversations();
+  }
+
+  async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, announcementOnly: on });
+    await this.refreshConversations();
+  }
+
+  /**
+   * S11: forward a message. MANAGED → MANAGED goes through the server (it copies the message);
+   * anything private is re-sent from this device as a new message (the server can't read it).
+   */
+  /**
+   * WhatsApp's Forward: one message to several chats (or people, whose direct chat is opened
+   * or created), with an optional note after it. Text goes through the server's forward
+   * (marked Forwarded); a photo, file or voice note is downloaded once and sent again to each
+   * chat, since the server doesn't copy attachments. Returns the chats it reached.
+   */
+  /**
+   * Forwards to each target in turn. One failing target doesn't stop the rest: the result says
+   * which went (by index into `targets`) and which didn't, so a retry re-sends only those.
+   */
+  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<{ reached: number[]; failed: { index: number; error: unknown }[] }> {
+    const reached: number[] = [];
+    const failed: { index: number; error: unknown }[] = [];
+    let media: File | null = null;
+    if (message.file?.attachmentId) {
+      const { blob, name } = await this.download(sourceId, message);
+      media = new File([blob], message.file.name || name, { type: message.file.mediaType || blob.type || "application/octet-stream" });
+    }
+    for (const [index, t] of targets.entries()) {
+      try {
+        const id = t.conversationId
+          ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
+        if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
+        else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
+        if (note?.trim()) await this.send(id, note.trim());
+        reached.push(index);
+      } catch (error) {
+        failed.push({ index, error });
+      }
+    }
+    return { reached, failed };
+  }
+
+  async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
+    const source = this.server.get(sourceId);
+    const target = this.server.get(targetId);
+    if (!source || !target) throw new MessagingApiError(0, "NOT_FOUND", "That chat isn't available.");
+    if (source.securityProfile === "MANAGED" && target.securityProfile === "MANAGED" && messageId) {
+      await relay("POST", `v1/conversations/${sourceId}/messages/${messageId}/forward`, { targetConversationId: targetId, clientMessageId: uuid() });
+      this.scheduleSync(targetId);
+      return;
+    }
+    if (!text?.trim()) throw new MessagingApiError(0, "CONTENT_REJECTED", "Only text messages can be forwarded.");
+    await this.send(targetId, text);
+  }
+
+  /** S12: invite links for a group (admins). */
+  inviteLinks(conversationId: string) {
+    return relay<{ inviteLinks: InviteLink[] }>("GET", `v1/conversations/${conversationId}/invite-links`).then((r) => r.inviteLinks ?? []);
+  }
+  createInviteLink(conversationId: string, opts: { expiresInSeconds?: number; maxUses?: number } = {}) {
+    return relay<InviteLink & { token: string }>("POST", `v1/conversations/${conversationId}/invite-links`, opts);
+  }
+  revokeInviteLink(conversationId: string, linkId: string) {
+    return relay("POST", `v1/conversations/${conversationId}/invite-links/${linkId}/revoke`, {});
+  }
+  async joinByInviteLink(token: string): Promise<string | null> {
+    const r = await relay<{ conversationId?: string; conversation?: { conversationId?: string } }>("POST", "v1/messaging/invite-links/join", { token });
+    await this.refreshConversations().catch(() => {});
+    return r.conversationId ?? r.conversation?.conversationId ?? null;
+  }
+
+  /** S3: hand the group to another member (owner only). */
+  async transferOwnership(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/owner`, { principalId });
+    await this.refreshConversations();
+  }
+
+  /** S2: report messages. Private chats disclose the reported text from this device. */
+  async reportMessages(conversationId: string, messages: { messageId: string; text: string | null }[], category: string, note?: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    const disclosure = conv?.securityProfile === "PRIVATE_E2EE" ? messages.filter((m) => m.text).map((m) => ({ messageId: m.messageId, text: m.text! })) : [];
+    await relay("POST", `v1/conversations/${conversationId}/reports`, { category, messageIds: messages.map((m) => m.messageId), ...(note ? { note } : {}), ...(disclosure.length ? { disclosure } : {}) });
+  }
+
   async renameConversation(conversationId: string, title: string | null): Promise<void> {
     const conv = this.server.get(conversationId);
     if (!conv) return;
+    if (conv.securityProfile === "PRIVATE_E2EE") {
+      // A private group's name is never sent to the server in the clear.
+      const name = normalizeTitle(title?.slice(0, 120));
+      if (!name) throw new MessagingApiError(0, "VALIDATION_ERROR", "Enter a group name.");
+      await this.shareGroupTitle(conversationId, name);
+      return;
+    }
     const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
     await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? conv.version ?? 0, title: title?.trim() ? title.trim().slice(0, 120) : null });
     await this.refreshConversations();
   }
 
-  /** Cryptographic removal: a member device commits the removals the server requires. */
-  private async commitPendingRemovals(conv: ServerConversation): Promise<void> {
+  /**
+   * Cryptographic removal: a member device commits the removals the server requires. A
+   * pending device that is not in the tree (revoked before it ever joined) is attested
+   * too — with a key-update commit when no leaf has to go — so it never blocks the chat.
+   */
+  private async commitPendingRemovals(conv: ServerConversation, state: MlsState | null): Promise<void> {
     const c = this.crypto;
-    if (!c || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return;
+    if (!c || !state || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return;
+    const pending = state.pendingRemovals.map((r) => r.deviceId);
+    if (!pending.length) return;
     const gid = b64u.dec(conv.encryption.mlsGroupId);
-    if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) return;
-    const state = await relay<{ pendingRemovals: { deviceId: string }[] }>("GET", `v1/conversations/${conv.conversationId}/mls/state`);
-    const inTree = new Set(await c.call<string[]>("members", { groupId: gid }));
-    const remove = state.pendingRemovals.map((r) => r.deviceId).filter((d) => inTree.has(d) && d !== this.snapshot.deviceId);
-    if (!remove.length) return;
-    try {
-      const out = await c.call<{ commit: Uint8Array; epoch: number }>("removeDevices", { groupId: gid, deviceIds: remove });
-      await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-        clientMessageId: uuid(),
-        deviceId: this.snapshot.deviceId,
-        epoch: out.epoch,
-        commit: b64u.enc(out.commit),
-        removedDeviceIds: remove,
-      });
-      await c.call("confirm");
-    } catch {
-      // Another member's device committed first (epoch moved): ours is discarded.
-      await c.call("rollback").catch(() => {});
-    }
+    await this.withMlsLock(async () => {
+      if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) return;
+      if (Number(await c.call<number>("epoch", { groupId: gid })) !== state.mlsEpoch) return;
+      const plan = removalPlan(pending, new Set(await c.call<string[]>("members", { groupId: gid })), this.snapshot.deviceId);
+      if (!plan) return;
+      const out = plan.remove.length
+        ? await c.call<GroupChange>("removeDevices", { groupId: gid, deviceIds: plan.remove })
+        : await c.call<GroupChange>("updateKeys", { groupId: gid });
+      // Another member's device may commit first (epoch moved): ours is discarded.
+      await this.submitChange(conv, out, { removed: plan.attest }).catch(() => {});
+    });
   }
 
   /**
-   * Multi-device: an ACTIVE device of a member that is not yet in the MLS tree (a new
-   * browser, a phone) is claimed, verified and added by any member device. Concurrent
-   * attempts are resolved by the Delivery Service's epoch order (the loser rolls back).
+   * Multi-device (WhatsApp): an ACTIVE device of a member that is not yet in the MLS tree
+   * (a new browser, a phone) is claimed, verified and added by a member device. Before
+   * every send (`urgent`) the sender does it itself, so what it sends reaches every device
+   * the others registered; otherwise one designated member device does it (others step
+   * in after a grace period). The new device does not depend on either: it joins by
+   * itself (joinBySelf). Concurrent attempts are resolved by the Delivery Service's epoch
+   * order (the loser rolls back).
    */
-  private async addMissingDevices(conv: ServerConversation): Promise<void> {
-    const last = this.deviceChecks.get(conv.conversationId) ?? 0;
-    if (Date.now() - last < DEVICE_CHECK_MS || !this.crypto || !conv.encryption.mlsGroupId) return;
-    this.deviceChecks.set(conv.conversationId, Date.now());
+  private async addMissingDevices(conv: ServerConversation, urgent = false): Promise<void> {
+    const id = conv.conversationId;
+    const checks = urgent ? this.sendDeviceChecks : this.deviceChecks;
+    if (Date.now() - (checks.get(id) ?? 0) < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
+    checks.set(id, Date.now());
     const gid = b64u.dec(conv.encryption.mlsGroupId);
+    if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return;
     const inTree = new Set(await this.crypto.call<string[]>("members", { groupId: gid }));
-    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
-    const missing: string[] = [];
-    const newDevices: ServerDevice[] = [];
-    const activeInTree: string[] = [];
-    for (const m of members.members ?? []) {
-      if (m.state && m.state !== "ACTIVE") continue;
-      const d = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${m.principalId}/devices`).catch(() => ({ devices: [] as ServerDevice[] }));
-      for (const x of d.devices) if (x.status === "ACTIVE" && inTree.has(x.deviceId)) activeInTree.push(x.deviceId);
-      const fresh = d.devices.filter((x) => x.status === "ACTIVE" && !inTree.has(x.deviceId));
-      if (fresh.length) {
-        missing.push(m.principalId);
-        newDevices.push(...fresh);
-      }
-    }
+    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${id}/members?limit=${PAGE}`);
+    const active = (members.members ?? []).filter((m) => !m.state || m.state === "ACTIVE");
+    const lookups = new Map(
+      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, urgent ? SEND_DEVICE_CHECK_MS : 0).catch(() => [] as ServerDevice[])] as const)),
+    );
+    const { principals: missing, deviceIds, activeInTree } = missingDevices(active, (p) => lookups.get(p) ?? [], inTree, this.snapshot.deviceId);
+    const listed = [...lookups.values()].flat();
+    // A device without published KeyPackages (e.g. a browser whose storage was cleared) is
+    // not claimed again for a while; if it is alive it joins by itself.
+    const newDevices = deviceIds
+      .filter((d) => Date.now() - (this.unclaimable.get(d) ?? 0) > UNCLAIMABLE_RETRY_MS)
+      .map((d) => listed.find((x) => x.deviceId === d)!);
     if (!missing.length) {
-      this.missingSince.delete(conv.conversationId);
+      this.missingSince.delete(id);
       return;
     }
-    // One member device adds new devices (a claim consumes a KeyPackage of EVERY device
-    // of the principal, so racing members would exhaust the newcomer's stock): the ACTIVE
-    // device with the smallest id in the tree. Others step in only after a grace period
-    // (the designated device may be offline).
     const designated = activeInTree.sort()[0];
-    if (designated !== this.snapshot.deviceId) {
-      const seen = this.missingSince.get(conv.conversationId) ?? Date.now();
-      this.missingSince.set(conv.conversationId, seen);
-      if (Date.now() - seen < 10 * DEVICE_CHECK_MS) return;
+    if (!urgent && designated !== this.snapshot.deviceId) {
+      const seen = this.missingSince.get(id) ?? Date.now();
+      this.missingSince.set(id, seen);
+      if (Date.now() - seen < 2 * DEVICE_CHECK_MS) return;
     }
-    // A claim consumes one KeyPackage of every device of the principal, so nothing is
-    // claimed until each new device's listed key verifies against the transparency log
-    // (a device the log does not yet include is retried on a later check without
-    // spending the newcomer's KeyPackages).
+    // Only devices whose listed key verifies (against the transparency log, when pinned)
+    // are claimed; one the log does not include yet is retried on a later check.
+    const verified: string[] = [];
     for (const d of newDevices) {
       const ok = await this.verifyTransparency(d.deviceId, b64u.dec(d.signaturePublicKey)).then(
         () => true,
         () => false,
       );
-      if (!ok) return;
+      if (ok) verified.push(d.deviceId);
     }
-    await this.addDevicesOf(conv, missing, inTree).catch(() => {});
+    if (!verified.length) return;
+    let added = false;
+    try {
+      added = await this.addDevicesOf(conv, missing, verified);
+    } catch (e) {
+      // The group moved on (another commit won the epoch): catch up once and add again.
+      // (Only before a send: during a sync the next sync catches up.)
+      if (!urgent || !(e instanceof MessagingApiError && e.status === 409)) return;
+      await this.sync(id);
+      added = await this.addDevicesOf(conv, missing, verified).catch(() => false);
+    }
+    // A private group's name travels inside the group: new devices get it again.
+    if (added) this.reshareGroupTitle(id);
+    if (this.snapshot.awaitingSetup[id]) void this.flushDrafts(id);
   }
 
-  /** Adds the not-yet-present devices of `principals` (claims skip those in the tree). */
-  private async addDevicesOf(conv: ServerConversation, principals: string[], inTree: Set<string>): Promise<void> {
-    const c = this.crypto!;
-    const gid = b64u.dec(conv.encryption.mlsGroupId!);
-    const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
-      "POST",
-      `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
-      { principalIds: principals },
-    );
-    const now = Math.floor(Date.now() / 1000);
-    const packages: Uint8Array[] = [];
-    const welcomed: string[] = [];
-    for (const k of claim.keyPackages) {
-      if (inTree.has(k.deviceId) || k.deviceId === this.snapshot.deviceId) continue;
-      const kp = b64u.dec(k.keyPackage);
-      const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
-      if (info.deviceId !== k.deviceId) continue;
-      await this.verifyTransparency(k.deviceId, info.signatureKey);
-      packages.push(kp);
-      welcomed.push(k.deviceId);
-    }
-    if (!packages.length) return;
-    try {
-      const out = await c.call<{ commit: Uint8Array; welcome: Uint8Array | null; epoch: number }>("addDevices", { groupId: gid, keyPackages: packages });
-      await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-        clientMessageId: uuid(),
-        deviceId: this.snapshot.deviceId,
-        epoch: out.epoch,
-        commit: b64u.enc(out.commit),
-        ...(out.welcome ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: welcomed } : {}),
-        removedDeviceIds: [],
-      });
-      await c.call("confirm");
-    } catch (e) {
-      await c.call("rollback").catch(() => {});
-      throw e;
-    }
+  /**
+   * Adds the given new devices of `principals` with one commit: the claim takes only
+   * their KeyPackages (never one of a device already in the tree).
+   */
+  private addDevicesOf(conv: ServerConversation, principals: string[], deviceIds: string[]): Promise<boolean> {
+    return this.withMlsLock(async () => {
+      const c = this.crypto!;
+      const gid = b64u.dec(conv.encryption.mlsGroupId!);
+      const inTree = new Set(await c.call<string[]>("members", { groupId: gid }));
+      const wanted = deviceIds.filter((d) => !inTree.has(d) && d !== this.snapshot.deviceId);
+      if (!wanted.length) return false;
+      const path = `v1/conversations/${conv.conversationId}/mls/key-package-claims`;
+      type Claim = { keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] };
+      const claim = await relay<Claim>("POST", path, { principalIds: principals, deviceIds: wanted }).catch((e) =>
+        // An older server does not take deviceIds.
+        e instanceof MessagingApiError && e.status === 400 ? relay<Claim>("POST", path, { principalIds: principals }) : Promise.reject(e),
+      );
+      for (const d of wanted) if (!claim.keyPackages.some((k) => k.deviceId === d)) this.unclaimable.set(d, Date.now());
+      const now = Math.floor(Date.now() / 1000);
+      const packages: Uint8Array[] = [];
+      const welcomed: string[] = [];
+      for (const k of claim.keyPackages) {
+        if (inTree.has(k.deviceId) || k.deviceId === this.snapshot.deviceId) continue;
+        const kp = b64u.dec(k.keyPackage);
+        const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
+        if (info.deviceId !== k.deviceId) continue;
+        await this.verifyTransparency(k.deviceId, info.signatureKey);
+        packages.push(kp);
+        welcomed.push(k.deviceId);
+      }
+      if (!packages.length) return false;
+      const out = await c.call<GroupChange>("addDevices", { groupId: gid, keyPackages: packages });
+      await this.submitChange(conv, out, { welcomed, removed: [] });
+      return true;
+    });
   }
 
   private async checkWelcomes(): Promise<void> {
@@ -1114,7 +1945,8 @@ export class MessagingEngine {
       const gid = b64u.dec(conv.encryption.mlsGroupId);
       if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) {
         try {
-          await this.crypto.call("join", { groupId: gid, welcome: b64u.dec(w.welcome) });
+          const c = this.crypto;
+          await this.withMlsLock(() => c.call("join", { groupId: gid, welcome: b64u.dec(w.welcome) }));
           joined++;
         } catch {
           // A Welcome this device cannot use (e.g. superseded): it is still consumed.
@@ -1124,7 +1956,7 @@ export class MessagingEngine {
       this.scheduleSync(conv.conversationId);
     }
     if (joined) {
-      await this.topUpKeyPackages(joined);
+      await this.ensureKeyPackageStock(true).catch(() => {});
       await this.renderConversations();
     }
   }
@@ -1162,18 +1994,29 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED") return this.syncManaged(conv);
     const c = this.crypto;
     if (!c || !this.snapshot.deviceId || !conv.encryption.mlsGroupId) {
+      await this.loadWaiting(conv);
       await this.renderE2ee(conversationId);
       return;
     }
     const gid = b64u.dec(conv.encryption.mlsGroupId);
-    if (await c.call<boolean>("hasGroup", { groupId: gid })) {
-      for (;;) {
+    let inGroup = await c.call<boolean>("hasGroup", { groupId: gid });
+    // Not in this chat's group yet: join it by itself (nobody else has to be online).
+    if (!inGroup && this.snapshot.phase === "ready") inGroup = await this.joinBySelf(conv).catch(() => false);
+    if (inGroup) {
+      // External commits (members' devices that joined by themselves) are merged only
+      // after their device is verified; one that fails verification is refused.
+      const allowedJoiners: string[] = [];
+      const rejectedJoiners: string[] = [];
+      for (let round = 0; round < 200; round++) {
         const after = await c.call<number>("cursor", { conversationId });
         const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
         if (!page.messages.length) break;
-        const processed = await c.call<{ records: StoredRecord[] }>("processMessages", {
+        this.noteMeta(conversationId, page.messages);
+        const processed = await this.withMlsLock(() => c.call<{ records: StoredRecord[]; joiner?: PendingJoiner | null }>("processMessages", {
           conversationId,
           groupId: gid,
+          allowedJoiners,
+          rejectedJoiners,
           messages: page.messages.map((m) => ({
             sequence: m.sequence,
             messageId: m.messageId,
@@ -1187,25 +2030,90 @@ export class MessagingEngine {
             ciphertext: m.e2ee?.ciphertext ?? "",
             attachmentIds: m.attachmentIds,
           })),
-        });
-        // Another device's commit may have used one of this device's KeyPackages (a
-        // claim takes one per device of a principal): keep the stock up.
-        const foreignCommits = processed.records.filter((r) => r.status === "COMMIT" && r.senderDeviceId !== this.snapshot.deviceId).length;
-        if (foreignCommits) await this.topUpKeyPackages(Math.min(foreignCommits, 5)).catch(() => {});
+        }));
+        if (processed.joiner) {
+          const verdict = await this.verifyJoiner(conv, processed.joiner);
+          if (verdict) allowedJoiners.push(verdict);
+          else rejectedJoiners.push(processed.joiner.deviceId);
+          continue;
+        }
+        // Another device's commit may have used one of this device's KeyPackages: keep the stock up.
+        if (processed.records.some((r) => r.status === "COMMIT" && r.senderDeviceId !== this.snapshot.deviceId)) void this.ensureKeyPackageStock(true).catch(() => {});
         if (page.messages.length < PAGE) break;
       }
-      await this.commitPendingRemovals(conv);
+      this.waiting.delete(conversationId);
+      const state = await this.mlsState(conv).catch(() => null);
+      await this.commitPendingRemovals(conv, state);
+      await this.ensureGroupInfo(conv, state);
       await this.addMissingDevices(conv);
+    } else {
+      await this.loadWaiting(conv);
     }
     await this.renderE2ee(conversationId);
+  }
+
+  /**
+   * A chat this device is not in yet: its latest messages are listed (metadata only) and
+   * shown as "Waiting for this message" rather than an empty chat.
+   */
+  private async loadWaiting(conv: ServerConversation): Promise<void> {
+    const id = conv.conversationId;
+    const last = conv.inbox?.lastMessage?.sequence ?? 0;
+    if (!last) return;
+    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${id}/messages?afterSequence=${Math.max(0, last - PAGE)}&limit=${PAGE}`).catch(() => null);
+    if (!page) return;
+    this.noteMeta(id, page.messages);
+    this.waiting.set(id, page.messages.filter((m) => m.kind === "APPLICATION"));
   }
 
   private async renderE2ee(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId ?? null;
     const records = this.crypto && this.snapshot.deviceId ? await this.crypto.call<StoredRecord[]>("history", { conversationId }).catch(() => []) : [];
     const views: MessageView[] = [];
+    const meta = this.metaFor(conversationId);
+    // Older history comes from another device of this account (history transfer), if any.
+    let olderNote = beforeJoinNote(false);
+    // A message sent before this browser's messaging device existed can never reach it:
+    // it is shown as "sent before this browser joined", never as an endless wait.
+    const joinedAt = this.snapshot.deviceRegisteredAt ? Date.parse(this.snapshot.deviceRegisteredAt) : NaN;
+    const waitingHere = this.waiting.get(conversationId) ?? [];
+    const sentBeforeJoin = (createdAt: string | null | undefined) => !!createdAt && Number.isFinite(joinedAt) && Date.parse(createdAt) < joinedAt;
+    if (records.some((r) => r.status === "BEFORE_JOIN" || (r.status === "FAILED" && sentBeforeJoin(r.createdAt))) || waitingHere.some((m) => m.lifecycle === "ACTIVE" && sentBeforeJoin(m.createdAt))) {
+      const own = await this.ownDeviceIds().catch(() => new Set<string>());
+      olderNote = beforeJoinNote([...own].some((d) => d !== this.snapshot.deviceId));
+    }
+    const reactions = this.reactions.get(conversationId);
+    const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
+    // Edits are encrypted messages that point at the original (the link is server metadata).
+    const edits = new Map<string, string>();
     for (const r of records) {
-      if (r.status === "COMMIT") continue;
+      const target = r.messageId ? meta.get(r.messageId)?.target : null;
+      if (r.kind === "EDIT" && target && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text") edits.set(target, r.payload.text);
+    }
+    // A private group's name travels as an encrypted control message: it renames the chat and
+    // shows as a note only when it changes the name (re-shares for new devices stay silent).
+    const titleRecords = records
+      .filter((r) => r.kind !== "EDIT" && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text))
+      .filter((r) => { const l = r.messageId ? meta.get(r.messageId)?.lifecycle : undefined; return !l || l === "ACTIVE" || l === "HIDDEN_FOR_YOU"; })
+      .map((r) => ({ sequence: r.sequence, senderPrincipalId: r.senderPrincipalId ?? null, text: r.payload?.t === "text" ? r.payload.text : null }));
+    const named = groupTitleFromRecords(titleRecords);
+    // F4: votes are encrypted messages of their own, counted on the poll they point at.
+    const votes: VoteRecord[] = [];
+    for (const r of records) {
+      if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "vote") votes.push({ poll: r.payload.poll, choices: r.payload.choices, sender: r.senderPrincipalId ?? null, sequence: r.sequence });
+    }
+    for (const r of records) {
+      if (r.status === "COMMIT" || r.kind === "EDIT" || r.payload?.t === "vote") continue;
+      if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text)) {
+        const t = named.changes.get(r.sequence);
+        if (t) {
+          const mine = r.senderPrincipalId === me;
+          const who = mine ? "You" : (r.senderPrincipalId && this.snapshot.names[r.senderPrincipalId]) || "Someone";
+          views.push({ key: `s${r.sequence}`, sequence: r.sequence, senderPrincipalId: r.senderPrincipalId ?? null, mine, createdAt: r.createdAt ?? null, profile: "PRIVATE_E2EE", state: "system", text: null, file: null, note: `${who} named the group “${t}”`, transferred: Boolean(r.transferred), messageId: r.messageId ?? null });
+        }
+        continue;
+      }
+      const m = r.messageId ? meta.get(r.messageId) : undefined;
       const base: MessageView = {
         key: `s${r.sequence}`,
         sequence: r.sequence,
@@ -1218,10 +2126,29 @@ export class MessagingEngine {
         file: null,
         note: null,
         transferred: Boolean(r.transferred),
+        messageId: r.messageId ?? null,
+        reactions: r.messageId ? reactions?.get(r.messageId) ?? [] : [],
+        pinned: !!r.messageId && pinned.has(r.messageId),
       };
+      if (m && vanishes(m.lifecycle)) continue;
+      if (m && m.lifecycle !== "ACTIVE") {
+        base.state = "removed";
+        base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
+        views.push(base);
+        continue;
+      }
       if (r.status === "DECRYPTED" || r.status === "SENT") {
         base.state = r.status === "SENT" ? "sent" : "delivered";
         if (r.payload?.t === "text") base.text = r.payload.text;
+        const rich = richContent(r.payload, r.messageId ?? null, votes, me ?? null);
+        if (rich) {
+          base.rich = rich;
+          base.text = richSummary(r.payload) ?? base.text;
+        }
+        if (r.messageId && edits.has(r.messageId)) {
+          base.text = edits.get(r.messageId) ?? base.text;
+          base.editCount = 1;
+        }
         else if (r.payload?.t === "file") {
           base.text = r.payload.caption;
           base.file = { name: r.fileName ?? r.payload.name ?? "attachment", mediaType: r.mediaType ?? r.payload.mediaType ?? "application/octet-stream", size: r.size ?? null, attachmentId: r.attachmentId ?? r.payload.attachmentId };
@@ -1231,18 +2158,76 @@ export class MessagingEngine {
         base.note = "Sent from another of your devices";
       } else if (r.status === "BEFORE_JOIN") {
         base.state = "before-join";
-        base.note = "Sent before this device joined; recover history from another device to read it";
+        base.note = olderNote;
       } else if (r.status === "REMOVED") {
         base.state = "removed";
         base.note = "Message removed";
+      } else if (sentBeforeJoin(r.createdAt)) {
+        // Encrypted before this browser joined: it can never be read here.
+        base.state = "before-join";
+        base.note = olderNote;
       } else {
         base.state = "unreadable";
         base.note = `This message could not be decrypted on this device (${r.error ?? "FAILED"})`;
       }
       views.push(base);
     }
+    // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
+    const local = new Set(records.map((r) => r.sequence));
+    for (const m of waitingHere) {
+      if (local.has(m.sequence) || vanishes(m.lifecycle)) continue;
+      const removed = m.lifecycle !== "ACTIVE";
+      const early = !removed && sentBeforeJoin(m.createdAt);
+      views.push({
+        key: `s${m.sequence}`,
+        sequence: m.sequence,
+        senderPrincipalId: m.senderPrincipalId,
+        mine: m.senderPrincipalId === me,
+        createdAt: m.createdAt,
+        profile: "PRIVATE_E2EE",
+        state: removed ? "removed" : early ? "before-join" : "unreadable",
+        text: null,
+        file: null,
+        note: removed ? "Message deleted" : early ? olderNote : WAITING_NOTE,
+        transferred: false,
+        messageId: m.messageId,
+        reactions: [],
+        pinned: false,
+      });
+    }
+    views.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+    // Replies: the quoted message is read from this device's own history.
+    const byId = new Map(views.filter((v) => v.messageId).map((v) => [v.messageId as string, v]));
+    for (const v of views) {
+      const to = v.messageId ? meta.get(v.messageId)?.replyTo : null;
+      if (!to) continue;
+      const q = byId.get(to);
+      v.replyTo = { messageId: to, senderPrincipalId: q?.senderPrincipalId ?? null, text: q && q.state !== "removed" ? q.text ?? (q.file ? q.file.name : null) : null, removed: q?.state === "removed" };
+    }
     const pending = this.pendingSends.get(conversationId) ?? [];
-    this.set({ messages: { ...this.snapshot.messages, [conversationId]: [...views, ...pending] } });
+    // Held drafts survive reloads (sealed in the worker): show them as pending setup.
+    if (this.crypto && this.snapshot.deviceId) {
+      const drafts = await this.crypto.call<{ clientMessageId: string; text: string; createdAt: string }[]>("drafts", { conversationId }).catch(() => []);
+      for (const d of drafts) {
+        const key = `d${d.clientMessageId}`;
+        // A held group name is not a message: it names the chat here and is sent with the held messages.
+        const heldTitle = decodeGroupTitle(d.text);
+        if (heldTitle || isGroupTitleText(d.text)) {
+          if (heldTitle) named.title = heldTitle;
+          continue;
+        }
+        if (pending.some((m) => m.key === key)) continue;
+        pending.push({ key, sequence: null, senderPrincipalId: me, mine: true, createdAt: d.createdAt, profile: "PRIVATE_E2EE", state: "pending-setup", text: d.text, file: null, note: null, transferred: false });
+      }
+      this.pendingSends.set(conversationId, pending);
+      const conv = this.server.get(conversationId);
+      if (conv && this.snapshot.phase === "ready") {
+        const waiting = await this.updateAwaitingSetup(conv);
+        if (!waiting && drafts.length) void this.flushDrafts(conversationId);
+      }
+    }
+    if (named.title && this.server.get(conversationId)?.contextClass !== "DIRECT") this.applyGroupTitle(conversationId, named.title);
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...pending]) } });
   }
 
   private stateFor(conversationId: string): ManagedConversationState {
@@ -1308,6 +2293,8 @@ export class MessagingEngine {
         await this.resnapshotManaged(conv);
       }
       const refresh = st.applyEvents(page.events);
+      // Receipts caught up here count like live ones (delivered ticks were lost otherwise).
+      if (this.noteReceiptEvents(id, page.events)) this.refreshTicks(id);
       this.afterManagedChange(conv, refresh);
       after = Math.max(after, page.nextAfter ?? after, st.eventCursor ?? 0);
       if (!page.hasMore || !page.events.length) break;
@@ -1348,13 +2335,38 @@ export class MessagingEngine {
   }
 
   /** Moves the conversation's list preview forward from what was just synchronized. */
+  private bumpQueued(conversationId: string, text: string, at: string): void {
+    const me = this.snapshot.identity?.principalId;
+    if (!me) return;
+    const conversations = this.snapshot.conversations.map((c) => c.id !== conversationId ? c : {
+      ...c,
+      lastActivityAt: at > c.lastActivityAt ? at : c.lastActivityAt,
+      // The stored message (a higher sequence) replaces this preview when it arrives.
+      lastMessage: { sequence: c.lastMessage?.sequence ?? 0, senderPrincipalId: me, previewText: text, attachmentCount: 0, lifecycle: "ACTIVE", createdAt: at },
+    });
+    conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
+    this.set({ conversations });
+  }
+
+  /** The chat the user is looking at (null: none, or the tab is hidden). */
+  private openConversationId: string | null = null;
+  setOpenConversation(conversationId: string | null): void {
+    this.openConversationId = conversationId;
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
+    const me = this.snapshot.identity?.principalId;
     const conversations = this.snapshot.conversations.map((c) => {
       if (c.id !== conversationId || (c.lastMessage && c.lastMessage.sequence > latest.sequence)) return c;
+      // A new message from someone else in a chat that isn't open counts as unread at once
+      // (WhatsApp), not at the next poll: badges, the tab title and notifications follow it.
+      const fresh = latest.sequence > (c.lastMessage?.sequence ?? 0) && latest.senderPrincipalId !== me && latest.lifecycle === "ACTIVE";
+      const unseen = fresh && this.openConversationId !== conversationId;
       return {
         ...c,
+        unreadCount: unseen ? c.unreadCount + 1 : c.unreadCount,
         lastActivityAt: latest.createdAt > c.lastActivityAt ? latest.createdAt : c.lastActivityAt,
         lastMessage: { sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt },
       };
@@ -1370,7 +2382,9 @@ export class MessagingEngine {
     const reply = r.replyToMessageId ? st.get(r.replyToMessageId) : undefined;
     const removed = r.lifecycle !== "ACTIVE";
     return {
-      key: `m:${r.messageId}`,
+      // Stable from the moment of sending: the queued bubble and the stored message share
+      // the clientMessageId, so the bubble is updated in place, never remounted.
+      key: r.clientMessageId ? `c:${r.clientMessageId}` : `m:${r.messageId}`,
       sequence: r.sequence,
       senderPrincipalId: r.senderPrincipalId,
       mine: r.senderPrincipalId === me,
@@ -1391,6 +2405,7 @@ export class MessagingEngine {
       pinned: pinned.has(r.messageId),
       seenBy: [],
       announcement: r.announcement,
+      forwarded: r.forwarded,
     };
   }
 
@@ -1400,14 +2415,16 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId ?? null;
     const reactions = this.reactions.get(conversationId);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
-    const views = st.ordered().map((r) => this.managedView(r, st, me, reactions, pinned));
+    const views = st.ordered().filter((r) => !vanishes(r.lifecycle)).map((r) => this.managedView(r, st, me, reactions, pinned));
     // Receipts: who has read up to your latest message.
     const lastMine = [...views].reverse().find((v) => v.mine && v.state === "delivered");
     if (lastMine?.sequence != null) lastMine.seenBy = st.seenBy(lastMine.sequence, me);
-    const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
-      .filter((item) => !st.byClientMessageId(item.clientMessageId))
-      .map((item: OutboxItem) => ({
-        key: `q:${item.key}`,
+    const pendingItems = (this.outbox?.all(conversationId) ?? []).filter((item) => !st.byClientMessageId(item.clientMessageId));
+    // Order is kept: messages after a failed one wait for it, and say so.
+    const firstFailed = pendingItems.findIndex((item) => item.state === "failed");
+    const queued: MessageView[] = pendingItems
+      .map((item: OutboxItem, index) => ({
+        key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
         mine: true,
@@ -1416,7 +2433,9 @@ export class MessagingEngine {
         state: item.state === "failed" ? "failed" : item.state === "sending" ? "sending" : "queued",
         text: item.text,
         file: null,
-        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})` : item.error ? "Waiting to send — will retry" : null,
+        note: item.state === "failed" ? `Not sent: ${friendlyErrorCode(item.error)}`
+          : firstFailed >= 0 && index > firstFailed ? "Waiting — the message above wasn't sent"
+          : item.error ? "Waiting to send — will retry" : null,
         transferred: false,
         messageId: null,
         outboxKey: item.key,
@@ -1424,7 +2443,7 @@ export class MessagingEngine {
       }));
     const pending = this.pendingSends.get(conversationId) ?? [];
     this.set({
-      messages: { ...this.snapshot.messages, [conversationId]: [...views, ...queued, ...pending] },
+      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...[...queued, ...pending].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))]) },
       hasOlder: { ...this.snapshot.hasOlder, [conversationId]: st.hasOlder },
     });
   }
@@ -1456,12 +2475,22 @@ export class MessagingEngine {
     );
     st.applyOlderPage(page.messages, page.nextBeforeSequence);
     this.renderManaged(conversationId);
+    // Older messages show their reactions too (opening the chat loads only the newest 30).
+    const ids = page.messages.filter((m) => m.lifecycle === "ACTIVE").map((m) => m.messageId);
+    if (ids.length) void this.loadReactions(conversationId, ids).catch(() => {});
   }
 
   /** Opening a conversation: sync, pins and the newest messages' reactions (MANAGED). */
   async openConversation(conversationId: string): Promise<void> {
     await this.sync(conversationId);
     const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      await this.refreshE2eeMeta(conversationId);
+      const ids = (this.snapshot.messages[conversationId] ?? []).map((v) => v.messageId).filter((x): x is string => !!x).slice(-30);
+      await Promise.all([this.loadPins(conversationId).catch(() => {}), this.loadReactions(conversationId, ids).catch(() => {})]);
+      await this.renderE2ee(conversationId);
+      return;
+    }
     if (conv?.securityProfile !== "MANAGED") return;
     const st = this.stateFor(conversationId);
     await Promise.all([
@@ -1481,13 +2510,38 @@ export class MessagingEngine {
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    await this.rerender(conversationId);
+  }
+
+  private rerender(conversationId: string): Promise<void> {
+    if (this.server.get(conversationId)?.securityProfile === "PRIVATE_E2EE") return this.renderE2ee(conversationId);
     this.renderManaged(conversationId);
+    return Promise.resolve();
+  }
+
+  private metaFor(conversationId: string): Map<string, E2eeMeta> {
+    let m = this.e2eeMeta.get(conversationId);
+    if (!m) this.e2eeMeta.set(conversationId, (m = new Map()));
+    return m;
+  }
+
+  private noteMeta(conversationId: string, messages: ServerMessage[]): void {
+    const m = this.metaFor(conversationId);
+    for (const x of messages) m.set(x.messageId, { lifecycle: x.lifecycle, replyTo: x.replyToMessageId ?? null, target: x.targetMessageId ?? null });
+  }
+
+  /** Re-reads the newest private messages' server state (deletions, replies, edits); never their content. */
+  private async refreshE2eeMeta(conversationId: string): Promise<void> {
+    const newest = Math.max(0, ...(this.snapshot.messages[conversationId] ?? []).map((v) => v.sequence ?? 0));
+    if (!newest) return;
+    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?beforeSequence=${newest + 1}&limit=${PAGE}`).catch(() => null);
+    if (page) this.noteMeta(conversationId, page.messages);
   }
 
   async loadPins(conversationId: string): Promise<void> {
     const r = await relay<{ pins: PinView[] }>("GET", `v1/conversations/${conversationId}/pins`);
     this.set({ pins: { ...this.snapshot.pins, [conversationId]: r.pins } });
-    this.renderManaged(conversationId);
+    await this.rerender(conversationId);
   }
 
   async react(conversationId: string, messageId: string, reaction: string, add: boolean): Promise<void> {
@@ -1500,8 +2554,14 @@ export class MessagingEngine {
     await this.loadPins(conversationId);
   }
 
-  /** MANAGED edit (`PATCH`, compare-and-swap on the edit count). */
+  /** MANAGED edit (`PATCH`, compare-and-swap on the edit count); PRIVATE_E2EE sends an encrypted EDIT. */
   async editMessage(conversationId: string, messageId: string, text: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      await this.sendEncrypted(conv, { t: "text", text }, [], { kind: "EDIT", targetMessageId: messageId });
+      await this.sync(conversationId);
+      return;
+    }
     const st = this.stateFor(conversationId);
     const current = st.get(messageId);
     const msg = await relay<ManagedServerMessage>("PATCH", `v1/conversations/${conversationId}/messages/${messageId}`, {
@@ -1515,10 +2575,66 @@ export class MessagingEngine {
   /** Deletes for everyone (sender) or hides for you; the tombstone replaces the message. */
   async deleteMessage(conversationId: string, messageId: string, scope: "EVERYONE" | "ME"): Promise<void> {
     await relay("DELETE", `v1/conversations/${conversationId}/messages/${messageId}?scope=${scope}`);
+    if (this.server.get(conversationId)?.securityProfile === "PRIVATE_E2EE") {
+      this.metaFor(conversationId).set(messageId, { ...(this.metaFor(conversationId).get(messageId) ?? { replyTo: null, target: null }), lifecycle: scope === "ME" ? "HIDDEN_FOR_YOU" : "DELETED" });
+      await this.renderE2ee(conversationId);
+      return;
+    }
     const st = this.stateFor(conversationId);
     const r = await relay<{ message: ManagedServerMessage }>("GET", `v1/conversations/${conversationId}/messages/${messageId}`).catch(() => null);
     if (r?.message) st.applyMessages([r.message]);
     this.renderManaged(conversationId);
+  }
+
+  /**
+   * Search every chat (WhatsApp's search box): the server searches server-stored chats; the
+   * messages of older encrypted chats loaded on this device are searched here.
+   */
+  async searchAll(q: string): Promise<(SearchHit & { conversationId: string })[]> {
+    const query = q.trim();
+    if (query.length < 2) return [];
+    const needle = query.toLocaleLowerCase();
+    const local = [...this.server.values()]
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE")
+      .flatMap((c) => (this.snapshot.messages[c.conversationId] ?? [])
+        .filter((m) => m.sequence !== null && m.text?.toLocaleLowerCase().includes(needle))
+        .map((m) => ({ conversationId: c.conversationId, messageId: m.key, sequence: m.sequence!, senderPrincipalId: m.senderPrincipalId ?? "", createdAt: m.createdAt ?? "", text: m.text })));
+    const r = await relay<{ results: ManagedServerMessage[] }>("GET", `v1/messaging/search?q=${encodeURIComponent(query.slice(0, 200))}&limit=30`).catch(() => ({ results: [] as ManagedServerMessage[] }));
+    const remote = r.results.map((m) => ({ conversationId: m.conversationId, messageId: m.messageId, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId, createdAt: m.createdAt, text: m.managed?.text ?? null }));
+    return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
+  }
+
+  /** People banned from a group (admins): removed, and can't be added back until unbanned. */
+  bans(conversationId: string): Promise<{ principalId: string; reason: string | null; bannedAt: string }[]> {
+    return relay<{ bans: { principalId: string; reason: string | null; bannedAt: string }[] }>("GET", `v1/conversations/${conversationId}/bans`).then((r) => r.bans ?? []);
+  }
+  async ban(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/bans`, { principalId });
+    await this.refreshConversations();
+  }
+  unban(conversationId: string, principalId: string): Promise<unknown> {
+    return relay("DELETE", `v1/conversations/${conversationId}/bans/${principalId}`);
+  }
+
+  /** Groups someone added you to that wait for your answer (newest first). */
+  async groupInvitations(): Promise<{ conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[]> {
+    const r = await relay<{ invitations: { conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[] }>("GET", "v1/messaging/invitations");
+    const missing = [...new Set(r.invitations.map((i) => i.invitedByPrincipalId).filter((p): p is string => !!p && !this.snapshot.names[p]))];
+    if (missing.length) {
+      try {
+        const n = await identityApi.names(missing.slice(0, 256));
+        const names = { ...this.snapshot.names };
+        for (const p of n.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        this.set({ names });
+      } catch { /* names are cosmetic */ }
+    }
+    return r.invitations;
+  }
+
+  /** Join (or turn down) a group you were invited to; joined chats appear in the list. */
+  async answerGroupInvitation(conversationId: string, accept: boolean): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/invitation/${accept ? "accept" : "decline"}`, {});
+    await this.refreshConversations();
   }
 
   /** MANAGED server search; PRIVATE_E2EE content is searched on this device only. */
@@ -1552,6 +2668,10 @@ export class MessagingEngine {
 
   private onTyping(conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number): void {
     if (principalId === this.snapshot.identity?.principalId) return;
+    // Someone typing is online right now.
+    if (state === "started" && this.snapshot.presence[conversationId]?.[principalId]?.online === false) {
+      this.set({ presence: { ...this.snapshot.presence, [conversationId]: { ...this.snapshot.presence[conversationId], [principalId]: { online: true, lastSeenAt: new Date().toISOString() } } } });
+    }
     const key = `${conversationId}:${principalId}`;
     const existing = this.typingTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -1567,6 +2687,9 @@ export class MessagingEngine {
   }
 
   async markRead(conversationId: string): Promise<void> {
+    // Ask for everyone's latest read / delivered positions (ticks) whenever the chat is looked at,
+    // not only when the live connection starts: a missed update can't leave ticks stuck.
+    try { this.transport?.queryReceipts(conversationId); } catch { /* not connected: the next connect asks */ }
     const list = this.snapshot.messages[conversationId] ?? [];
     const last = [...list].reverse().find((m) => m.sequence !== null)?.sequence;
     // Only a read position that moves is written (no duplicate receipt events, MSG-018).
@@ -1601,7 +2724,8 @@ export class MessagingEngine {
   /** Sends every due MANAGED outbox item (serialized; offline: waits for `online`). */
   private flush(): Promise<number> {
     if (!this.outbox || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve(0);
-    if (this.flushing) return this.flushing;
+    // A run in progress may already be past what was just queued (or just unheld): go again after it.
+    if (this.flushing) { this.flushAgain = true; return this.flushing; }
     const outbox = this.outbox;
     const run = flushOutbox(outbox, async (item) => {
       const msg = await relay<ManagedServerMessage>("POST", `v1/conversations/${item.conversationId}/messages`, {
@@ -1614,8 +2738,9 @@ export class MessagingEngine {
       st.applyMessages([msg]);
       this.renderManaged(item.conversationId);
       this.bumpConversation(item.conversationId, st);
-    }).finally(() => {
+    }, 50, (item) => this.fileSendingBefore(item.conversationId, item.createdAt)).finally(() => {
       if (this.flushing === run) this.flushing = null;
+      if (this.flushAgain) { this.flushAgain = false; void this.flush(); }
     });
     this.flushing = run;
     return run;
@@ -1623,11 +2748,21 @@ export class MessagingEngine {
 
   // ------------------------------------------------------------------- send
 
+  /**
+   * A photo or file sent before this time is still uploading: text after it waits, so it never
+   * overtakes it — for up to two minutes, so a stalled upload can't hold the chat's text back.
+   */
+  private fileSendingBefore(conversationId: string, createdAt: string): boolean {
+    const since = Date.now() - 120_000;
+    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt && Date.parse(m.createdAt ?? "") > since);
+  }
+  private flushAgain = false;
+
   private addPending(conversationId: string, view: MessageView): void {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
     this.pendingSends.set(conversationId, list);
     const shown = (this.snapshot.messages[conversationId] ?? []).filter((m) => m.key !== view.key);
-    this.set({ messages: { ...this.snapshot.messages, [conversationId]: [...shown, view] } });
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...shown, view]) } });
   }
   private settlePending(conversationId: string, key: string, failed: string | null): void {
     const list = (this.pendingSends.get(conversationId) ?? []).flatMap((m) => (m.key !== key ? [m] : failed ? [{ ...m, state: "failed" as const, note: failed }] : []));
@@ -1644,7 +2779,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED" && this.outbox) {
       this.stateFor(conversationId);
       this.loadedManaged.add(conversationId);
-      this.outbox.enqueue({
+      const item = this.outbox.enqueue({
         key: uuid(),
         conversationId,
         clientMessageId: uuid(),
@@ -1652,36 +2787,90 @@ export class MessagingEngine {
         replyToMessageId: options.replyToMessageId ?? null,
         mentionedPrincipalIds: options.mentionedPrincipalIds ?? [],
       });
+      // The chat moves to the top with this message as its preview at once, not after the
+      // server answers.
+      this.bumpQueued(conversationId, item.text, item.createdAt);
       void this.flush();
       return;
     }
     const key = `p${uuid()}`;
     this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
-    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text));
+    // This browser's private messaging is still being set up (silently): the message shows
+    // as sending and goes out as soon as setup finishes.
+    if (conv.securityProfile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready" && MessagingEngine.settingUp(this.snapshot)) {
+      this.beforeReady.push({ conversationId, key, text, options });
+      return;
+    }
+    // Not in the chat's encryption group yet: join it by itself first (nobody else has to be online).
+    let notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
+    if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
+    // The sender adds the others' newly registered devices before it encrypts, so the
+    // message reaches every device they have (from the KeyPackages they published).
+    if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {});
+    // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
+    // hold it sealed on this device and send it automatically once it can (WhatsApp).
+    if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {
+      // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
+      this.settlePending(conversationId, key, null);
+      const clientMessageId = uuid();
+      const createdAt = new Date().toISOString();
+      await this.crypto.call("holdDraft", { conversationId, clientMessageId, text, createdAt });
+      this.addPending(conversationId, { key: `d${clientMessageId}`, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt, profile: conv.securityProfile, state: "pending-setup", text, file: null, note: null, transferred: false });
+      this.deviceChecks.delete(conversationId);
+      this.scheduleSync(conversationId);
+      return;
+    }
+    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null, options.mentionedPrincipalIds ?? []));
   }
 
-  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string): Promise<void> {
+  /**
+   * Whether this browser's private messaging is only being set up (no user action needed):
+   * private messages written meanwhile are sent once it is ready.
+   */
+  static settingUp(s: Pick<EngineSnapshot, "phase" | "detail" | "identity">): boolean {
+    return !!s.identity && (s.phase === "registering" || s.phase === "revoked" || (s.phase === "needs-device" && !s.detail));
+  }
+
+  /** Sends the private messages written while this browser was being set up. */
+  private flushBeforeReady(): void {
+    const queued = this.beforeReady.splice(0);
+    if (!queued.length) return;
+    const messages = { ...this.snapshot.messages };
+    for (const q of queued) {
+      this.settlePending(q.conversationId, q.key, null);
+      messages[q.conversationId] = (messages[q.conversationId] ?? []).filter((m) => m.key !== q.key);
+    }
+    this.set({ messages });
+    for (const q of queued) void this.send(q.conversationId, q.text, q.options).catch(() => {});
+  }
+
+  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string, replyToMessageId: string | null = null, mentionedPrincipalIds: string[] = []): Promise<void> {
     try {
-      if (conv.securityProfile === "PRIVATE_E2EE") await this.sendEncrypted(conv, { t: "text", text }, []);
+      if (conv.securityProfile === "PRIVATE_E2EE") {
+        // F7: the preview is built here from the link itself (nothing is fetched).
+        const preview = linkPreviewFor(text);
+        await this.sendEncrypted(conv, preview ? { t: "text", text, preview } : { t: "text", text }, [], { replyToMessageId, mentionedPrincipalIds });
+      }
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${e instanceof Error ? e.message : "error"})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
     await this.sync(conversationId);
   }
 
-  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[]): Promise<void> {
+  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[], extra: { replyToMessageId?: string | null; kind?: "EDIT"; targetMessageId?: string; mentionedPrincipalIds?: string[] } = {}): Promise<void> {
     const c = this.crypto;
     const deviceId = this.snapshot.deviceId;
     if (!c || !deviceId || !conv.encryption.mlsGroupId) throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) throw new MessagingApiError(0, "NOT_IN_GROUP", null);
     for (let attempt = 0; attempt < 2; attempt++) {
-      // Process everything first: a message must be sent in the current epoch.
-      await this.sync(conv.conversationId);
+      // Realtime keeps the group current, so send straight away. Only when the server says the
+      // group moved on (409: new epoch, or a removal to commit) process everything and retry.
+      if (attempt > 0) await this.sync(conv.conversationId);
       const clientMessageId = uuid();
-      const out = await c.call<{ ciphertext: Uint8Array; epoch: number }>("encrypt", { conversationId: conv.conversationId, groupId: gid, clientMessageId, payload });
+      const out = await this.withMlsLock(() => c.call<{ ciphertext: Uint8Array; epoch: number }>("encrypt", { conversationId: conv.conversationId, groupId: gid, clientMessageId, payload }));
       try {
         await relay("POST", `v1/conversations/${conv.conversationId}/messages`, {
           clientMessageId,
@@ -1689,7 +2878,12 @@ export class MessagingEngine {
           epoch: out.epoch,
           ciphertext: b64u.enc(out.ciphertext),
           ...(attachmentIds.length ? { attachmentIds } : {}),
+          ...(extra.replyToMessageId ? { replyToMessageId: extra.replyToMessageId } : {}),
+          ...(extra.kind ? { kind: extra.kind, targetMessageId: extra.targetMessageId } : {}),
+          // B3: ids only (deduplicated, at most 50); the mention text stays encrypted.
+          ...(extra.mentionedPrincipalIds?.length && !extra.kind ? { mentionedPrincipalIds: [...new Set(extra.mentionedPrincipalIds)].slice(0, 50) } : {}),
         });
+        this.scheduleSync(conv.conversationId);
         return;
       } catch (e) {
         const stale = e instanceof MessagingApiError && e.status === 409;
@@ -1698,16 +2892,43 @@ export class MessagingEngine {
     }
   }
 
-  /** Sends a file: PRIVATE_E2EE encrypts it here (only ciphertext is uploaded). */
-  async sendFile(conversationId: string, file: File): Promise<void> {
+  /**
+   * Sends a file: PRIVATE_E2EE encrypts it here (only ciphertext is uploaded). Voice notes pass
+   * their recorded length; other audio and video files are measured here.
+   */
+  async sendFile(conversationId: string, file: File, durationMs?: number, caption?: string): Promise<void> {
+    caption = caption?.trim() || undefined;
     const conv = this.server.get(conversationId);
     if (!conv) return;
     const key = `p${uuid()}`;
-    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text: null, file: { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, attachmentId: null }, note: null, transferred: false });
-    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file));
+    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text: caption ?? null, file: { name: file.name, mediaType: file.type || "application/octet-stream", size: file.size, attachmentId: null }, note: null, transferred: false });
+    return this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, file, durationMs, caption));
   }
 
-  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File): Promise<void> {
+  /** Sends a failed file again (it stays on this page until sent or discarded). */
+  retryFile(conversationId: string, key: string): void {
+    const failed = this.failedFiles.get(key);
+    const conv = this.server.get(conversationId);
+    if (!failed || !conv) return;
+    this.failedFiles.delete(key);
+    const view = (this.pendingSends.get(conversationId) ?? []).find((m) => m.key === key);
+    if (view) this.addPending(conversationId, { ...view, state: "sending", note: null });
+    void this.enqueue(conversationId, () => this.deliverFile(conv, conversationId, key, failed.file, failed.durationMs, failed.caption));
+  }
+
+  discardFile(conversationId: string, key: string): void {
+    this.failedFiles.delete(key);
+    this.pendingSends.set(conversationId, (this.pendingSends.get(conversationId) ?? []).filter((m) => m.key !== key));
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: (this.snapshot.messages[conversationId] ?? []).filter((m) => m.key !== key) } });
+  }
+
+  /** A failed file that can be sent again. */
+  canRetryFile(key: string): boolean {
+    return this.failedFiles.has(key);
+  }
+  private failedFiles = new Map<string, { file: File; durationMs?: number; caption?: string }>();
+
+  private async deliverFile(conv: ServerConversation, conversationId: string, key: string, file: File, durationMs?: number, caption?: string): Promise<void> {
     try {
       const data = new Uint8Array(await file.arrayBuffer());
       const mediaType = file.type || "application/octet-stream";
@@ -1722,14 +2943,20 @@ export class MessagingEngine {
         });
         await this.upload(intent.upload, enc.ciphertext);
         await relay("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
-        await this.sendEncrypted(conv, { t: "file", handle: enc.handle, attachmentId: intent.attachmentId }, [intent.attachmentId]);
+        await this.sendEncrypted(conv, { t: "file", handle: enc.handle, attachmentId: intent.attachmentId, ...(caption ? { caption } : {}) }, [intent.attachmentId]);
+        rememberSentMedia(intent.attachmentId, file, mediaType);
       } else {
+        const kind = attachmentKind(mediaType);
+        // The server needs the length of voice notes and videos (and refuses them without it).
+        const length = kind === "VOICE_NOTE" || kind === "VIDEO" ? (durationMs ?? (await mediaDurationMs(file))) : null;
+        if ((kind === "VOICE_NOTE" || kind === "VIDEO") && !length) throw new MessagingApiError(0, "DURATION_UNKNOWN", null, "This browser can't read how long this file is.");
         const intent = await relay<{ attachmentId: string; upload: { url: string; headers: { name: string; value: string }[] } }>("POST", `v1/conversations/${conversationId}/attachments`, {
-          kind: attachmentKind(mediaType),
+          kind,
           size: data.length,
           sha256: await sha256Hex(data),
           mediaType,
           fileName: file.name.slice(0, 255),
+          ...(length ? { durationMs: length } : {}),
         });
         await this.uploadWithRetry(intent.upload, data);
         let fin = await relay<{ state: string; stateReason?: string | null }>("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
@@ -1740,16 +2967,20 @@ export class MessagingEngine {
         }
         if (fin.state !== "READY") throw new MessagingApiError(0, `ATTACHMENT_${fin.state}`, fin.stateReason ?? null, fin.state === "QUARANTINED" || fin.state === "REJECTED" ? "The file was rejected by the security scan." : `The file is not ready (${fin.state}).`);
         this.attachmentMeta.set(intent.attachmentId, { name: file.name, mediaType, size: data.length, state: "READY", kind: attachmentKind(mediaType) });
+        rememberSentMedia(intent.attachmentId, file, mediaType);
         const clientMessageId = uuid();
-        const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId, text: file.name.slice(0, 255), attachmentIds: [intent.attachmentId] });
+        const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId, text: caption ?? file.name.slice(0, 255), attachmentIds: [intent.attachmentId] });
         // A lost response is retried with the same clientMessageId (answered as a replay).
         const msg = await send().catch((e) => (e instanceof MessagingApiError && (e.status === 0 || e.status >= 500) ? send() : Promise.reject(e)));
         this.stateFor(conversationId).applyMessages([msg]);
       }
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${e instanceof Error ? e.message : "error"})`);
+      this.failedFiles.set(key, { file, durationMs, caption });
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
+    // Text typed after this file was waiting for it.
+    if (conv.securityProfile === "MANAGED") void this.flush();
     await this.sync(conversationId);
   }
 
@@ -1779,6 +3010,26 @@ export class MessagingEngine {
   }
 
   /** Downloads an attachment; PRIVATE_E2EE is decrypted on this device. */
+  /**
+   * A photo shown in the chat (WhatsApp): only plain raster types are rendered (never SVG,
+   * which can carry script); everything else stays a download. Cached per attachment.
+   */
+  async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
+    const aid = message.file?.attachmentId;
+    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType) || isPlayableVideo(message.file?.mediaType))) return null;
+    const cached = mediaUrls.get(aid);
+    if (cached) return cached;
+    const { blob } = await this.download(conversationId, message);
+    const url = URL.createObjectURL(new Blob([blob], { type: message.file!.mediaType }));
+    mediaUrls.set(aid, url);
+    return url;
+  }
+
+  /** A photo or voice note already loaded on this visit, so it shows at once (no placeholder). */
+  cachedMediaUrl(message: MessageView): string | null {
+    return (message.file?.attachmentId && mediaUrls.get(message.file.attachmentId)) || null;
+  }
+
   async download(conversationId: string, message: MessageView): Promise<{ blob: Blob; name: string }> {
     const conv = this.server.get(conversationId);
     const aid = message.file?.attachmentId;
@@ -1856,6 +3107,75 @@ export class MessagingEngine {
   private async renderOrSync(id: string): Promise<void> {
     const conv = this.server.get(id);
     if (conv?.securityProfile === "PRIVATE_E2EE") await this.renderE2ee(id);
+  }
+
+  // ------------------------------------------------- account device (ADR 0060, ADR 0067)
+
+  /**
+   * Declares this browser's account device for the current sign-in. Signing in is enough
+   * (ADR 0067): the Account authority trusts a browser declared from a fresh sign-in, so
+   * there is no verification step. Anything else is retried quietly.
+   */
+  private async ensureTrustedAccountDevice(label: string): Promise<boolean> {
+    const token = await accountSession.getAccessToken();
+    if (!token) throw new MessagingApiError(401, "AUTHENTICATION_REQUIRED", null);
+    let view;
+    try {
+      view = await accountDevice.declare(token, label);
+    } catch (e) {
+      const code = accountErrorCode(e);
+      if (code === "DEVICE_DECLARATION_REFUSED") {
+        // This sign-in predates the device flow (or this browser's key was reset): only a
+        // fresh sign-in can register the browser. The page hands over to the sign-in flow.
+        this.set({ phase: "needs-signin", detail: "For your security, sign in again to finish setting up private messaging on this browser." });
+        return false;
+      }
+      if (code === "WEB_DEVICE_LIMIT_REACHED") {
+        // Older servers only; the Account authority now makes room on its own.
+        this.set({ phase: "needs-device", detail: "Your account is signed in on too many browsers. Sign out of one you no longer use, then reload this page." });
+        return false;
+      }
+      throw e;
+    }
+    if (!view) {
+      this.set({ phase: "needs-device", detail: "This browser can't keep a secure key for private messages. Use an up-to-date browser." });
+      return false;
+    }
+    if (view.trust === "TRUSTED" && view.state === "ACTIVE") return true;
+    // Not trusted yet (an older server, or a sign-in being replaced): try again shortly,
+    // silently. Never a verification step on the web.
+    this.nextEnrollAt = Date.now() + this.enrollBackoff;
+    this.enrollBackoff = Math.min(this.enrollBackoff * 2, 5 * 60_000);
+    this.set({ phase: "needs-device", detail: null });
+    return false;
+  }
+
+  /** TRUSTED browser: new devices of the account waiting for approval. */
+  async checkIncomingLinks(): Promise<void> {
+    // Approving a new phone only matters for the encryption device.
+    if (this.snapshot.phase !== "ready" || !this.crypto) return;
+    try {
+      const links = await accountDevice.pendingLinks();
+      this.set({
+        incomingLinks: links.map((l: LinkView) => ({ linkId: l.linkId, platform: l.platform ?? "WEB", label: l.label ?? null, expiresAt: l.expiresAt, keyThumbprint: l.keyThumbprint ?? "" })),
+      });
+    } catch {
+      // Untrusted or unclassified sign-ins cannot approve devices: nothing to show.
+      if (this.snapshot.incomingLinks.length) this.set({ incomingLinks: [] });
+    }
+  }
+
+  /** TRUSTED browser: the user typed the code the new device shows. */
+  async approveLink(linkId: string, comparisonCode: string): Promise<void> {
+    const link = this.snapshot.incomingLinks.find((l) => l.linkId === linkId);
+    if (!link) return;
+    await accountDevice.approveLink({ linkId, deviceId: "", status: "PENDING", expiresAt: link.expiresAt, keyThumbprint: link.keyThumbprint }, comparisonCode);
+    this.set({ incomingLinks: this.snapshot.incomingLinks.filter((l) => l.linkId !== linkId) });
+  }
+
+  async rejectLink(linkId: string): Promise<void> {
+    await accountDevice.rejectLink(linkId);
+    this.set({ incomingLinks: this.snapshot.incomingLinks.filter((l) => l.linkId !== linkId) });
   }
 
   /** SOURCE: requests addressed to this device, each with the code the user compares. */

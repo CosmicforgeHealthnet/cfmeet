@@ -205,6 +205,9 @@ struct Fx {
     bridge: String,
     /// The conversation the fixture bridge belongs to.
     sms_conv: String,
+    /// S12: an open invite link of `conv` and its token.
+    invite_link: String,
+    invite_token: String,
     /// A second TELEPHONE_ENDPOINT party (not yet bridged).
     party2: Uuid,
     policy_version: i64,
@@ -370,6 +373,17 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let r = h.send_managed(&a, &conv_v, owner.principal, &canary).await;
     ok(&r, "owner message");
     let msg = s(&r.json, "messageId");
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/conversations/{conv}/invite-links"),
+            json!({}),
+        )
+        .await;
+    ok(&r, "invite link");
+    let invite_link = s(&r.json, "inviteLinkId");
+    let invite_token = s(&r.json, "token");
     let invitee = h.principal(&a);
     let r = h
         .post(
@@ -731,6 +745,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
         "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        invite_link,
+        invite_token,
         invitee,
         backup_create_body,
         backup_ready,
@@ -991,6 +1007,24 @@ fn ops() -> Vec<Op> {
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/bans/{principalId}", scopes: MANAGE, acting: AM, res: ADMIN,
              req: |f| r(format!("/v1/conversations/{}/bans/{}", f.conv, f.banned), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // S12: invite links (OWNER / ADMIN) and joining with a token (any principal of the environment).
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invite-links", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links", f.conv), Some(f.owner.principal), Some(json!({ "maxUses": 5 }))),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/conversations/{conversationId}/invite-links", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links", f.conv), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links/{}/revoke", f.conv, f.invite_link), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/invite-links/join", scopes: SEND, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/invite-links/join".into(), Some(f.newbie), Some(json!({ "token": f.invite_token }))),
+             ok: 201, skip: NO_SKIP, expect: &[(Case::CrossTenantIds, 404, "NOT_FOUND")] },
+        // Gap audit S3: only the owner hands the conversation over.
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/owner", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/owner", f.conv), Some(f.owner.principal),
+                        Some(json!({ "principalId": f.member2 }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // --------------------------------------------------------------- messages
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages", f.conv), Some(f.owner.principal), None),
@@ -1009,11 +1043,20 @@ fn ops() -> Vec<Op> {
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/revisions", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}/revisions", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // S11: forwarding (source checks first; the target is the fixture's second MANAGED group).
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/messages/{messageId}/forward", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/forward", f.conv, f.msg), Some(f.owner.principal),
+                        Some(json!({ "targetConversationId": f.sms_conv, "clientMessageId": Uuid::new_v4() }))),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/messages/{messageId}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::PUT, template: "/v1/conversations/{conversationId}/read-cursor", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/read-cursor", f.conv), Some(f.owner.principal), Some(json!({ "sequence": 1 }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // F1: the member's own archive / pin of a chat.
+        Op { method: M::PUT, template: "/v1/conversations/{conversationId}/inbox-settings", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/inbox-settings", f.conv), Some(f.owner.principal), Some(json!({ "pinned": true }))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/events", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/events", f.conv), Some(f.owner.principal), None),
@@ -1083,6 +1126,9 @@ fn ops() -> Vec<Op> {
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::DELETE, template: "/v1/messaging/devices/{deviceId}/push-registration", scopes: SEND, acting: AM, res: Res::Device,
              req: |f| r(format!("/v1/messaging/devices/{}/push-registration", f.owner.device_id()), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/push/configuration", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/push/configuration".into(), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ------------------------------------------------------------ attachments
         Op { method: M::POST, template: "/v1/conversations/{conversationId}/attachments", scopes: AW, acting: AM, res: CONV,
@@ -1217,6 +1263,9 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("GET", "/v1/realtime", "WebSocket upgrade with a single-use ticket: `realtime_routes_refuse_customer_credentials_and_missing_tokens` below; tests/realtime.rs"),
     ("POST", "/v1/messaging/session-devices", "Section 13 first-party relay only (this matrix's customers are third-party and are refused): tests/realtime.rs `session_devices_*`"),
     ("POST", "/v1/messaging/session-devices/revoke", "Section 13 first-party relay only: tests/realtime.rs `session_devices_*`"),
+    ("POST", "/v1/messaging/user-sessions", "ADR 0062 partner user-token exchange (userToken, never a customer credential): tests/partner_session_devices.rs"),
+    ("PUT", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push registration (userToken): tests/partner_session_devices.rs"),
+    ("DELETE", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push removal (userToken): tests/partner_session_devices.rs"),
 ];
 
 // ---------------------------------------------------------------------- execution
@@ -1694,6 +1743,8 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     let cid = Uuid::new_v4();
     let pid = Uuid::new_v4();
     let mid = Uuid::new_v4();
+    let rid = Uuid::new_v4();
+    let xid = Uuid::new_v4();
     // (method, path, the one peer allowed, a well-formed body)
     let table: Vec<(Method, String, &str, Value)> = vec![
         (
@@ -1738,6 +1789,209 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "sms_gateway",
             json!({ "bridgeRef": Uuid::new_v4(), "smsMessageId": Uuid::new_v4(), "text": "x", "segmentCount": 1, "receivedAt": "2026-01-01T00:00:00Z" }),
         ),
+        // Gap audit G6 / G7: organization governance (messaging-organization.govern).
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/reports".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/organization-moderation/v1/messaging/reports/{rid}"),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({ "kind": "RESTRICT_PRINCIPAL", "principalId": pid, "reason": "MATRIX", "durationSeconds": 600 }),
+        ),
+        (
+            Method::PUT,
+            "/internal/v1/team-channels".into(),
+            "meeting",
+            json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
+        ),
+        // ADR 0068: the recipient's side of owner-delivered exports (delegated mirror only,
+        // messaging-application.delegate).
+        (
+            Method::GET,
+            "/internal/v1/delegated/v1/messaging/export-deliveries".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/delegated/v1/messaging/exports/{xid}/claim"),
+            "meeting",
+            json!({}),
+        ),
+    ];
+    // ADR 0068: the admin bridge's operator reads and commands (messaging-firstparty.administer,
+    // cfmeet.admin-bridge only, plus X-CF-Operator; no delegated scope). Their behaviour is
+    // proven in tests/bridge_operator_reads.rs and tests/bridge_operator_commands.rs; here each
+    // is refused to every other identity, and to the bridge without an operator, changing
+    // nothing.
+    let (hold, incident, event, op_key) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let tenant = fp.context.scope.tenant_id;
+    let env = fp.context.scope.environment_id;
+    let versioned = json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX" });
+    let operator: Vec<(Method, String, Value)> = vec![
+        (
+            Method::GET,
+            "/internal/v1/operator/reports".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/reports/{rid}"),
+            json!({}),
+        ),
+        (Method::GET, "/internal/v1/operator/holds".into(), json!({})),
+        (
+            Method::GET,
+            "/internal/v1/operator/exports".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/exports/{xid}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/datasets/cfmeet.messaging_daily/days/2026-01-01".into(),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/exports".into(),
+            json!({ "tenantId": tenant, "conversationId": cid, "recipientPrincipalId": pid, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/deletion-requests".into(),
+            json!({}),
+        ),
+        (Method::GET, "/internal/v1/operator/audit".into(), json!({})),
+        (
+            Method::GET,
+            "/internal/v1/operator/switches".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/incidents".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/failed-messages".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/key-transparency".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/operations/{op_key}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/conversations/{cid}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}"),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/policy".into(),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/reports/{rid}/remove-message"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "messageId": mid, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/reports/{rid}/dismiss"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}/mute"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX", "durationSeconds": 600 }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/members/{pid}/remove"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/conversations/{cid}/restrict"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/policy".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "expectedVersion": 0, "reasonCode": "MATRIX", "policy": {} }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/holds".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "scopeKind": "ENVIRONMENT", "reasonCategory": "LITIGATION" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/holds/{hold}/release"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/deletion-requests".into(),
+            json!({ "tenantId": tenant, "environmentId": env, "kind": "PRINCIPAL_ERASURE", "principalId": pid, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/switches/MESSAGE_SEND".into(),
+            json!({ "engaged": true, "expectedVersion": 0, "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/incidents/{incident}/resolve"),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/failed-messages/{event}/retry"),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/operator/key-transparency/checkpoint".into(),
+            json!({ "reasonCode": "MATRIX" }),
+        ),
     ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
@@ -1750,11 +2004,24 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     }
     let covered: BTreeSet<(String, String)> = table
         .iter()
-        .map(|(m, p, _, _)| {
+        .map(|(m, p, _, _)| (m, p))
+        .chain(operator.iter().map(|(m, p, _)| (m, p)))
+        .map(|(m, p)| {
             let t = p
                 .replace(&cid.to_string(), "{conversationId}")
                 .replace(&pid.to_string(), "{principalId}")
-                .replace(&mid.to_string(), "{messageId}");
+                .replace(&mid.to_string(), "{messageId}")
+                .replace(&rid.to_string(), "{reportId}")
+                .replace(&xid.to_string(), "{exportId}")
+                .replace(
+                    "/datasets/cfmeet.messaging_daily/days/2026-01-01",
+                    "/datasets/{datasetId}/days/{day}",
+                )
+                .replace(&hold.to_string(), "{holdId}")
+                .replace(&incident.to_string(), "{incidentId}")
+                .replace(&event.to_string(), "{eventId}")
+                .replace(&op_key.to_string(), "{idempotencyKey}")
+                .replace("/switches/MESSAGE_SEND", "/switches/{switchName}");
             (m.to_string(), t)
         })
         .collect();
@@ -1886,6 +2153,123 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "{path}: refused internal calls changed state"
         );
         println!("MATRIX-INTERNAL {method} {path} allowed={allowed} denials=[no-token,customer-credential,untrusted,rogue-key,wrong-peer,no-delegated,forged-delegated]");
+    }
+    // The admin bridge's operator routes: only cfmeet.admin-bridge with X-CF-Operator.
+    let key = Uuid::new_v4().to_string();
+    for (method, path, body) in &operator {
+        let before = fingerprint(&h).await;
+        let body = (*method == Method::POST).then(|| body.clone());
+        let r = h
+            .send(method.clone(), None, None, path, body.clone(), &[])
+            .await;
+        assert_eq!(
+            (r.status.as_u16(), r.code()),
+            (401, "INTERNAL_AUTHENTICATION_FAILED"),
+            "{path}: {}",
+            r.text
+        );
+        let r = h
+            .send(
+                method.clone(),
+                Some(&fp.token),
+                Some(owner),
+                path,
+                body.clone(),
+                &[],
+            )
+            .await;
+        assert_eq!(
+            r.status.as_u16(),
+            401,
+            "{path} customer credential: {}",
+            r.text
+        );
+        for signer in [&h.untrusted, &peers.rogue_meeting] {
+            let r = h
+                .call_internal(signer, method.clone(), path, body.clone(), None, &[])
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                (401, "INTERNAL_AUTHENTICATION_FAILED"),
+                "{path}: {}",
+                r.text
+            );
+        }
+        // Trusted peers without messaging-firstparty.administer (the settlement read
+        // answers 404 to anyone but the bridge, so it is not an oracle).
+        let denied: (u16, &str) = if path.contains("/operator/operations/") {
+            (404, "NOT_FOUND")
+        } else {
+            (403, "INTERNAL_PERMISSION_DENIED")
+        };
+        for (name, signer) in [
+            ("meeting", &peers.meeting),
+            ("privacy_relay", &peers.privacy_relay),
+            ("sms_gateway", &peers.sms_gateway),
+            ("communications", &peers.communications),
+            ("notifications", &peers.notifications),
+            ("gateway", &peers.gateway),
+        ] {
+            let r = h
+                .call_internal(
+                    signer,
+                    method.clone(),
+                    path,
+                    body.clone(),
+                    None,
+                    &[("idempotency-key", key.as_str())],
+                )
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                denied,
+                "{path} as {name}: {}",
+                r.text
+            );
+            // Operator attribution from anyone but the bridge is refused outright.
+            let r = h
+                .call_internal(
+                    signer,
+                    method.clone(),
+                    path,
+                    body.clone(),
+                    None,
+                    &[
+                        ("x-cf-operator", "hq:matrix"),
+                        ("idempotency-key", key.as_str()),
+                    ],
+                )
+                .await;
+            assert_eq!(
+                (r.status.as_u16(), r.code()),
+                (403, "INTERNAL_PERMISSION_DENIED"),
+                "{path} as {name} with X-CF-Operator: {}",
+                r.text
+            );
+        }
+        // The bridge itself without a named operator.
+        let r = h
+            .call_internal(
+                &peers.admin_bridge,
+                method.clone(),
+                path,
+                body.clone(),
+                None,
+                &[("idempotency-key", key.as_str())],
+            )
+            .await;
+        assert_eq!(
+            (r.status.as_u16(), r.code()),
+            (403, "INTERNAL_PERMISSION_DENIED"),
+            "{path} bridge without operator: {}",
+            r.text
+        );
+        assert_eq!(
+            before,
+            fingerprint(&h).await,
+            "{path}: refused operator calls changed state"
+        );
+        println!("MATRIX-INTERNAL {method} {path} allowed=admin_bridge+operator denials=[no-token,customer-credential,untrusted,rogue-key,wrong-peer,foreign-attribution,no-operator]");
     }
     // The delegated customer surface: the acting header must match the signed initiator.
     let other = h.principal(&fp);

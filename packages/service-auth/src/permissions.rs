@@ -236,6 +236,12 @@ pub enum InternalPermission {
     /// meeting membership / lifecycle changes and import legacy meeting chat.
     #[serde(rename = "messaging-meeting.sync")]
     MessagingMeetingSync,
+    /// Messaging (gap audit G6 / G7): organization governance in an organization's own
+    /// FIRST_PARTY Messaging scope — moderation by organization moderators (reports and
+    /// moderation actions, attributed to the moderator's principal) and team channels
+    /// synchronized from an Organizations team snapshot.
+    #[serde(rename = "messaging-organization.govern")]
+    MessagingOrganizationGovern,
     /// Messaging (Part V H §103): apply a versioned Privacy Relay communication-authority
     /// update (context status / revocation) to the conversations bound to that context.
     #[serde(rename = "messaging-context-authority.apply")]
@@ -342,6 +348,14 @@ pub enum InternalPermission {
     /// grants, principals or any EXTERNAL tenant.
     #[serde(rename = "platform-identity.provision-first-party")]
     PlatformIdentityProvisionFirstParty,
+    /// Platform Access (ADR 0058 Amendment A2, automatic organization service bindings):
+    /// create or return, read back, rotate and revoke the Calling / Messaging service
+    /// account and credential of one first-party organization INSIDE that organization's
+    /// own provisioned FIRST_PARTY triple, with a closed, fixed scope set per service.
+    /// The credential secret is never returned. Organizations only; never any other
+    /// tenant, no operator administration, no EXTERNAL tenant.
+    #[serde(rename = "platform-identity.bind-organization-services")]
+    PlatformIdentityBindOrganizationServices,
     /// Calling (Blueprint Section 12 follow-up, CAL-007): receive a first-party
     /// organization request the Meeting Service authenticated for a human member. The
     /// signed delegated context names the organization's Calling credential (id only,
@@ -349,12 +363,198 @@ pub enum InternalPermission {
     /// Meeting Service only; FIRST_PARTY organization tenants only.
     #[serde(rename = "calling-request.act-for-organization")]
     CallingRequestActForOrganization,
+    /// Calling (gap audit G3): act for one first-party organization MEMBER on their own
+    /// calling presence — register, list and revoke the member's own endpoints and mint
+    /// their signaling credentials — in the organization's FIRST_PARTY scope. The signed
+    /// delegated context names the organization's Calling credential (id only, re-verified
+    /// live with Platform Access) and the member's NATIVE_CF_USER principal; never another
+    /// principal, never administration. Meeting Service only.
+    #[serde(rename = "calling-organization-member.act")]
+    CallingOrganizationMemberAct,
+    /// Calling (gap audit G3): apply an organization membership change to the enterprise
+    /// extensions routed to the member's principal in the organization's FIRST_PARTY
+    /// scope — disable them when the member is removed or suspended, restore exactly the
+    /// ones disabled that way when the member is reactivated. Meeting Service only.
+    #[serde(rename = "calling-organization-member.offboard")]
+    CallingOrganizationMemberOffboard,
+    /// Calling (S2, account deletion and data download): erase one account's call history
+    /// (hide every finished Call from its history, minimize its display names) and export
+    /// it, for the principal of the CF Meet FIRST_PARTY scope named in the signed delegated
+    /// context. Meeting Service only (the account authority).
+    #[serde(rename = "calling-account.privacy")]
+    CallingAccountPrivacy,
     /// Meeting Service (final closure, organization event delivery): receive the
     /// Organizations Service's transactional-outbox events (organization lifecycle,
     /// memberships, ownership, policy, scope mappings; ids, roles and statuses only) at
     /// `POST /internal/v1/organization-events`. Organizations only.
     #[serde(rename = "meeting-organization-events.apply")]
     MeetingOrganizationEventsApply,
+    // ---- Unified Notification Service (blueprint Document 4 §3.3 / §3.4, roadmap N1) ----
+    /// Notifications I1: publish `cfmeet.notifications.event` envelopes from a producer's
+    /// outbox (`producer` must equal the issuer; per-producer closed type allowlist).
+    #[serde(rename = "notifications-event.publish")]
+    NotificationsEventPublish,
+    /// Notifications I2: forward an account-authenticated U1–U9 request (Meeting relay,
+    /// server-resolved account). The Communications Hub holds it for its preference
+    /// facade (roadmap N10): the service accepts only U6 / U7 from the Hub.
+    #[serde(rename = "notifications-user.forward")]
+    NotificationsUserForward,
+    /// Notifications I3: the synchronous call-push fast lane (≤ 1 s, post-commit,
+    /// best-effort). Calling only; ringing stays in Calling.
+    #[serde(rename = "notifications-call-push.dispatch")]
+    NotificationsCallPushDispatch,
+    /// Notifications I13 (roadmap N9, D-1b copy path): mirror Messaging's push
+    /// registrations of CF Meet first-party accounts into the service's push endpoints
+    /// (the one-off copy and the registration facade). Carries push handles in transit
+    /// (sealed at rest by the receiver, never echoed). Messaging only.
+    #[serde(rename = "notifications-push-registration.sync")]
+    NotificationsPushRegistrationSync,
+    /// Notifications I4, I5, I7, I8: PII-free delivery search, dead letters, shadow report
+    /// and routing / route audit. Operator tooling only.
+    #[serde(rename = "notifications-observability.read")]
+    NotificationsObservabilityRead,
+    /// Notifications I6, I9, I10: replay dead letters (never expired codes) and manage the
+    /// email suppression list (keyed digests only). Operator tooling only.
+    #[serde(rename = "notifications-operations.replay")]
+    NotificationsOperationsReplay,
+    /// Notifications I11: first phase of the two-phase reroute (cancel never-dispatched
+    /// items for a producer reroute). Operator tooling only.
+    #[serde(rename = "notifications-operations.reroute")]
+    NotificationsOperationsReroute,
+    /// Account (Meeting Service) X1: resolve notification contacts (status, address,
+    /// display name, locale, time zone, device states) for the Notification Service only.
+    #[serde(rename = "account-contacts.read")]
+    AccountContactsRead,
+    /// Meeting Service X2: resolve a conference's notification recipients and the
+    /// "still true" state (port of `RECIPIENTS_SQL`). Notification Service only.
+    #[serde(rename = "meeting-notification-recipients.read")]
+    MeetingNotificationRecipientsRead,
+    /// Messaging X3: authorize message wake-ups (entitled principals, never content).
+    /// Notification Service only.
+    #[serde(rename = "messaging-wakeups.authorize")]
+    MessagingWakeupsAuthorize,
+    /// Communications Hub X4: batch block / privacy / operator-hold check for
+    /// notifications. Notification Service only.
+    #[serde(rename = "communications-restrictions.read")]
+    CommunicationsRestrictionsRead,
+    /// Organizations X5: resolve an invitation's invitee account (never the email;
+    /// owner decision D-5). Notification Service only.
+    #[serde(rename = "organization-invitations.read")]
+    OrganizationInvitationsRead,
+    /// Account (Meeting Service) X6 / X7: claim CRITICAL send leases and report completed
+    /// sends on the producer's route decisions (a fencing token, not a read).
+    /// Notification Service only.
+    #[serde(rename = "account-route-lease.claim")]
+    AccountRouteLeaseClaim,
+    /// Calling: operator review of abuse reports (list the open queue, resolve a report
+    /// as REVIEWED / DISMISSED or reopen it; audited). Operator tooling only.
+    #[serde(rename = "calling-abuse-reports.review")]
+    CallingAbuseReportsReview,
+    /// Communications Hub (roadmap N10, Phase 4.2): export the Hub's notification
+    /// preferences (account switches, conversation and contact notification levels, with
+    /// their row versions) and the matching change-feed entries for the one-off copy and
+    /// catch-up into the Notification Service. Notification Service only.
+    #[serde(rename = "communications-preferences.export")]
+    CommunicationsPreferencesExport,
+    // ---- CF Meet Platform "Build" (ADR 0062 / 0063) ----
+    /// Platform Access: the Developer Console's partner Users API and user-token minting
+    /// (create / read / update / delete EXTERNAL_APPLICATION_PRINCIPAL users of the
+    /// forwarded credential's own environment, revoke their sessions, mint user tokens).
+    /// The forwarded credential is re-verified live; never another environment, never a
+    /// FIRST_PARTY tenant. Developer Console only.
+    #[serde(rename = "platform-end-users.delegate")]
+    PlatformEndUsersDelegate,
+    /// Platform Access: verify a CF Meet user token (`cfut_`) and read the public keys that
+    /// sign them; returns the user's scope, profile and effective grants.
+    #[serde(rename = "platform-user-token.verify")]
+    PlatformUserTokenVerify,
+    /// Platform Access: read the allowed websites (exact origins) of environments.
+    #[serde(rename = "platform-environment-origins.read")]
+    PlatformEnvironmentOriginsRead,
+    /// Platform Access: ensure the fixed meeting system principal of an EXTERNAL
+    /// environment (and temporary meeting participants) for partner meeting chat.
+    /// Meeting Service only.
+    #[serde(rename = "platform-principal.ensure-meeting-platform")]
+    PlatformPrincipalEnsureMeetingPlatform,
+    /// Messaging: receive a partner meeting's chat synchronisation from the Meeting
+    /// Service in the partner environment's own scope. Meeting Service only.
+    #[serde(rename = "messaging-meeting.sync-platform")]
+    MessagingMeetingSyncPlatform,
+    /// Notification Service: store, verify, read status of and delete a partner
+    /// environment's own push provider credentials (APNs / APNs VoIP / FCM), sealed;
+    /// scope-locked to that environment. Developer Console only.
+    #[serde(rename = "notifications-push-provider.manage")]
+    NotificationsPushProviderManage,
+    // ---- CF Meet Apps "Integrate" (ADR 0064 / 0065) ----
+    /// Platform Access: an app's OAuth client profile, client-secret issue / rotation,
+    /// status and grant listing. Developer Console only.
+    #[serde(rename = "platform-oauth.manage")]
+    PlatformOauthManage,
+    /// Platform Access: the OAuth token endpoint backend (authorization-code and refresh
+    /// exchange, revoke, introspect). Developer Console only.
+    #[serde(rename = "platform-oauth.token")]
+    PlatformOauthToken,
+    /// Platform Access: validate an authorization request, create the code and grant for
+    /// the signed-in account, list and revoke an account's or organization's grants.
+    /// Meeting Service (the account authority) only.
+    #[serde(rename = "platform-oauth.authorize")]
+    PlatformOauthAuthorize,
+    /// Organizations: evaluate an organization's app install policy for an account.
+    /// Meeting Service only.
+    #[serde(rename = "organization-apps.evaluate")]
+    OrganizationAppsEvaluate,
+    /// Meeting Service: read an account's profile for the OAuth userinfo endpoint (display
+    /// name, avatar, optionally email). Developer Console only.
+    #[serde(rename = "meeting-oauth-userinfo.read")]
+    MeetingOauthUserinfoRead,
+    // ---- HQ admin bridge (ADR 0068) ----
+    // Operator permissions received by the owning services and grantable ONLY to
+    // `cfmeet.admin-bridge`. Every request carries the acting HQ staff member in
+    // `X-CF-Operator`; R3 / R4 actions also carry a DIFFERENT approver in `X-CF-Approver`
+    // (see `crate::operator`). The owner audits the person, not the service.
+    /// Meeting Service: staff account administration (user search and detail, status,
+    /// role, support email change, sessions, devices, MFA, duplicates, staff export and
+    /// deletion under legal holds). Admin bridge only.
+    #[serde(rename = "account.administer")]
+    AccountAdminister,
+    /// Meeting Service: staff meeting administration (spaces and meetings across
+    /// everyone, live meetings, participants, ending meetings, archive / transfer,
+    /// recordings, webinars, meeting audit and meeting abuse reports). Admin bridge only.
+    #[serde(rename = "meeting.administer")]
+    MeetingAdminister,
+    /// Messaging: staff tools for CF Meet's own (first-party) chats (reports, moderation,
+    /// chat policy, legal holds, MANAGED-only exports, deletion requests, audit,
+    /// off-switches, incidents, failed-message retries, key-transparency status). Never
+    /// PRIVATE_E2EE content. Admin bridge only.
+    #[serde(rename = "messaging-firstparty.administer")]
+    MessagingFirstpartyAdminister,
+    /// Calling: staff call administration (call search and history, blocks, limits,
+    /// spend limits, routing and enterprise features, recordings and voicemail access,
+    /// retention holds, incidents, webhook keys, staff audit). Admin bridge only.
+    #[serde(rename = "calling.administer")]
+    CallingAdminister,
+    /// Communications: staff profile lookup by CF Meet ID, holds list and profile audit.
+    /// Admin bridge only.
+    #[serde(rename = "communications.administer")]
+    CommunicationsAdminister,
+    /// Organizations: cross-organization operator reads (audit across organizations,
+    /// members, teams and policies). Admin bridge only.
+    #[serde(rename = "organization.operator-read")]
+    OrganizationOperatorRead,
+    /// Developer Platform: price books, price versions, activations, market freezes,
+    /// CF Meet user plans (Free / Pro / Business), plan assignments and overrides.
+    /// Admin bridge only.
+    #[serde(rename = "pricing.administer")]
+    PricingAdminister,
+    /// Notification Service: staff routing changes per category and channel through an
+    /// API (instead of SQL) and push / email provider status. Admin bridge only.
+    #[serde(rename = "notifications.administer")]
+    NotificationsAdminister,
+    /// Admin bridge: owner events posted to the bridge's private event listener
+    /// (verification cases, abuse reports, partner workspaces, app reviews, incidents,
+    /// price versions): ids, states and versions only, never personal content.
+    #[serde(rename = "hq-bridge-events.publish")]
+    HqBridgeEventsPublish,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -372,7 +572,7 @@ pub struct PermissionDefinition {
 pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::CommunicationsUserForward, name: "communications-user.forward", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Forward an account-authenticated personal Communications request with server-resolved principal" },
     PermissionDefinition { permission: InternalPermission::CommunicationsPolicyCheck, name: "communications-policy.check", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Check current personal relationships and privacy; no enterprise override supplied by clients" },
-    PermissionDefinition { permission: InternalPermission::CommunicationsAccountApply, name: "communications-account.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Apply a durable account lifecycle or session-revocation event idempotently" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsAccountApply, name: "communications-account.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Apply a durable account lifecycle or session-revocation event idempotently, erase a deleted account's Hub data and read it back for the account's data download" },
     PermissionDefinition { permission: InternalPermission::CommunicationsBlockApply, name: "communications-block.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Apply restrictive domain block references without message or call contents" },
     PermissionDefinition { permission: InternalPermission::CommunicationsBackfill, name: "communications-backfill.run", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: false, description: "Run bounded authenticated profile backfill and event replay" },
     PermissionDefinition { permission: InternalPermission::CommunicationsAccountRead, name: "communications-account.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current account eligibility and bounded backfill references; no credentials" },
@@ -383,7 +583,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::CallingCommunicationsLaunch, name: "calling-communications.launch", receiver: services::CALLING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Start an app call for the delegated initiating principal; Calling re-checks personal policy" },
     PermissionDefinition { permission: InternalPermission::CommunicationsEventsPublish, name: "communications-events.publish", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING, services::MEETING_SERVICE], sensitive: false, description: "Publish deduplicated owner lifecycle references (ids and states, never content)" },
     PermissionDefinition { permission: InternalPermission::CommunicationsObservabilityRead, name: "communications-observability.read", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: false, description: "Read Communications operational metrics and readiness; no personal data" },
-    PermissionDefinition { permission: InternalPermission::CommunicationsProfileSuspend, name: "communications-profile.suspend", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: true, description: "Suspend or restore one personal Communications profile with an audited reason" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsProfileSuspend, name: "communications-profile.suspend", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE], sensitive: true, description: "Suspend or restore one personal Communications profile with an audited reason" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsRead, name: "meeting-communications.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Resolve a meeting the delegated user may share; returns public meeting references only" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsCreate, name: "meeting-communications.create", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Create one instant meeting owned by the delegated user under existing Meetings rules" },
     PermissionDefinition { permission: InternalPermission::CommunicationsPreferencesRead, name: "communications-preferences.read", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Read which of the given accounts turned a notification category off before the Account sends them a notification; no preference values beyond the opt-out, no profile data" },
@@ -625,7 +825,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformIdentityAdminister,
         name: "platform-identity.administer",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::OPERATOR_CONSOLE],
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
         sensitive: true,
         description: "Administer the platform identity hierarchy (tenants, applications, environments, service accounts, credentials, scopes, principals); operator tooling only",
     },
@@ -734,6 +934,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Resolve meeting conversations, apply version-fenced meeting membership / lifecycle and import legacy meeting chat",
     },
     PermissionDefinition {
+        permission: InternalPermission::MessagingOrganizationGovern,
+        name: "messaging-organization.govern",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Organization moderation (reports, moderation actions by an organization moderator) and team channels synchronized from a team snapshot, in an organization's own scope",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MessagingContextAuthorityApply,
         name: "messaging-context-authority.apply",
         receiver: services::MESSAGING,
@@ -825,17 +1033,25 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::DeveloperEntitlementRead,
         name: "developer-entitlement.read",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::API_GATEWAY],
+        // ADR 0068 A6: the Meeting Service and Messaging read a CF Meet user plan holder's
+        // effective plan limits where the usage happens (ids and limits only).
+        grantable_to: &[
+            services::API_GATEWAY,
+            services::MEETING_SERVICE,
+            services::MESSAGING,
+        ],
         sensitive: false,
-        description: "Read the effective platform entitlements (API request quotas) of an application environment",
+        description: "Read the effective platform entitlements (API request quotas) of an application environment, and the effective CF Meet plan limits of a user or organization (plan assignment and overrides)",
     },
     PermissionDefinition {
         permission: InternalPermission::DeveloperUsageRecord,
         name: "developer-usage.record",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::API_GATEWAY],
+        // P6: Calling counts the requests of its DIRECT routes (the gateway's are counted
+        // by the gateway; never both).
+        grantable_to: &[services::API_GATEWAY, services::CALLING],
         sensitive: false,
-        description: "Record durable daily API request accounting of application environments",
+        description: "Record durable daily API request accounting of application environments (the API Gateway for forwarded requests, Calling for its direct routes)",
     },
     PermissionDefinition {
         permission: InternalPermission::DeveloperEventPublish,
@@ -872,7 +1088,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::DeveloperPlatformAdminister,
         name: "developer-platform.administer",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::OPERATOR_CONSOLE],
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
         sensitive: true,
         description: "Administer the developer control plane (organization restriction / suspension, plan versions and assignments, first-party registration); operator tooling only",
     },
@@ -917,7 +1133,11 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::OrganizationAdminister,
         name: "organization.administer",
         receiver: services::ORGANIZATIONS,
-        grantable_to: &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE],
+        grantable_to: &[
+            services::OPERATOR_CONSOLE,
+            services::MEETING_SERVICE,
+            services::ADMIN_BRIDGE,
+        ],
         sensitive: true,
         description: "Operator administration of organizations (listing, operator create, lifecycle enforcement); operator tooling and the Meeting Service platform-admin facade only",
     },
@@ -938,6 +1158,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Create or return, verify and suspend / resume the dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment of one first-party organization (opaque organization id); Organizations only, never credentials, verifiers, scope grants or EXTERNAL tenants",
     },
     PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityBindOrganizationServices,
+        name: "platform-identity.bind-organization-services",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::ORGANIZATIONS],
+        sensitive: true,
+        description: "Create or return, verify, rotate and revoke the Calling / Messaging service account and credential of one first-party organization inside that organization's own provisioned FIRST_PARTY triple, with a closed scope set per service; the credential secret is never returned; Organizations only, never another tenant or operator administration",
+    },
+    PermissionDefinition {
         permission: InternalPermission::CallingRequestActForOrganization,
         name: "calling-request.act-for-organization",
         receiver: services::CALLING,
@@ -946,12 +1174,343 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Receive a first-party organization request Meeting Service authenticated for a human member: the organization's Calling credential (id only) re-verified live with Platform Access, the acting principal signed in; FIRST_PARTY organization tenants only",
     },
     PermissionDefinition {
+        permission: InternalPermission::CallingOrganizationMemberAct,
+        name: "calling-organization-member.act",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Register, list and revoke an organization member's own Calling endpoints and mint their signaling credentials in the organization's FIRST_PARTY scope: the organization's Calling credential (id only) re-verified live with Platform Access, the acting NATIVE_CF_USER principal only; never another principal or administration",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingOrganizationMemberOffboard,
+        name: "calling-organization-member.offboard",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Disable the enterprise extensions routed to a removed or suspended organization member's principal, and restore exactly those on reactivation, in the organization's FIRST_PARTY scope (system-audited)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingAccountPrivacy,
+        name: "calling-account.privacy",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Erase (hide from history, minimize display names) or export the call history of one deleted or exporting account's principal in the CF Meet FIRST_PARTY scope",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MeetingOrganizationEventsApply,
         name: "meeting-organization-events.apply",
         receiver: services::MEETING_SERVICE,
         grantable_to: &[services::ORGANIZATIONS],
         sensitive: false,
         description: "Deliver Organizations outbox events (organization lifecycle, memberships, ownership, policy and scope mappings; ids, roles and statuses, never email or tokens) to the Meeting Service, which applies them idempotently and in aggregate-version order; Organizations only",
+    },
+    // ---- Unified Notification Service (blueprint Document 4 §3.3 / §3.4, roadmap N1) ----
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsEventPublish,
+        name: "notifications-event.publish",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::ORGANIZATIONS,
+            services::COMMUNICATIONS,
+            services::CALLING,
+            services::MESSAGING,
+            services::DEVELOPER_PLATFORM,
+        ],
+        sensitive: false,
+        description: "Publish notification events from the caller's own transactional outbox (producer equals issuer; closed per-producer type allowlist; codes and tokens HPKE-sealed)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsUserForward,
+        name: "notifications-user.forward",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::MEETING_SERVICE, services::COMMUNICATIONS],
+        sensitive: false,
+        description: "Forward an account-authenticated inbox, preference or push-endpoint request with the server-resolved account (the Communications Hub forwards only its preference facade requests, U6 / U7)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsCallPushDispatch,
+        name: "notifications-call-push.dispatch",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Dispatch a post-commit, best-effort call-invitation push to registered push targets (no queue, no retry; ringing stays in Calling)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsPushRegistrationSync,
+        name: "notifications-push-registration.sync",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::MESSAGING],
+        sensitive: false,
+        description: "Mirror Messaging push registrations of CF Meet first-party accounts into the Notification Service push endpoints (copy and registration facade; handles sealed at rest, never echoed)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsObservabilityRead,
+        name: "notifications-observability.read",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
+        sensitive: false,
+        description: "Read PII-free delivery history, dead letters, the shadow report and the routing state with its route audit",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsOperationsReplay,
+        name: "notifications-operations.replay",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Replay failed notification deliveries (never expired or superseded codes) and manage the email suppression list by keyed digest",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsOperationsReroute,
+        name: "notifications-operations.reroute",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Cancel never-dispatched notifications so their producer can reroute them to the retained old path (first phase of the two-phase reroute)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::AccountContactsRead,
+        name: "account-contacts.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Resolve accounts' notification contacts (status, email address, display name, locale, time zone, device states); addresses only for email ledger rows",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingNotificationRecipientsRead,
+        name: "meeting-notification-recipients.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Resolve a conference's notification recipients, presented title and still-true state at send time",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingWakeupsAuthorize,
+        name: "messaging-wakeups.authorize",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Authorize message wake-ups: the principals entitled to a metadata-only push for one committed conversation event; never content",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationsRestrictionsRead,
+        name: "communications-restrictions.read",
+        receiver: services::COMMUNICATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Check blocks, privacy denials and operator holds between an actor and up to 100 notification recipients",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationInvitationsRead,
+        name: "organization-invitations.read",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Resolve an organization invitation's status and invitee account reference; never the invitee email or token",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::AccountRouteLeaseClaim,
+        name: "account-route-lease.claim",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Claim CRITICAL send leases on, and report completed sends for, Account notification route decisions (fencing tokens; no code or address)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingAbuseReportsReview,
+        name: "calling-abuse-reports.review",
+        receiver: services::CALLING,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "List Calling abuse reports across scopes and resolve them (REVIEWED / DISMISSED / reopen), operator-audited; bounded codes and opaque ids only, never free text or contact data; operator tooling only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationsPreferencesExport,
+        name: "communications-preferences.export",
+        receiver: services::COMMUNICATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Export the Hub's notification preferences (account switches, conversation and contact notification levels with their versions) and their change-feed entries for the copy and catch-up into the Notification Service; account references, conversation ids and levels only, never profile data",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEndUsersDelegate,
+        name: "platform-end-users.delegate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Partner Users API and user-token minting for the forwarded credential's own EXTERNAL environment (credential re-verified live): create, read, update, delete EXTERNAL_APPLICATION_PRINCIPAL users, revoke their sessions, mint CF Meet user tokens; never another environment, never FIRST_PARTY",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformUserTokenVerify,
+        name: "platform-user-token.verify",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[
+            services::MESSAGING,
+            services::CALLING,
+            services::MEETING_SERVICE,
+            services::API_GATEWAY,
+        ],
+        sensitive: false,
+        description: "Verify a CF Meet user token and read its signing public keys: the user's scope triple, profile and effective grants (claimed grants intersected with the minting credential's current scopes); never a secret",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEnvironmentOriginsRead,
+        name: "platform-environment-origins.read",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[
+            services::API_GATEWAY,
+            services::MESSAGING,
+            services::CALLING,
+            services::MEETING_SERVICE,
+        ],
+        sensitive: false,
+        description: "Read the allowed websites (exact origins) of environments and their change feed; origins only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalEnsureMeetingPlatform,
+        name: "platform-principal.ensure-meeting-platform",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Ensure the fixed meeting system principal and temporary meeting participants of an ACTIVE EXTERNAL environment for partner meeting chat; no other kind or reference",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingMeetingSyncPlatform,
+        name: "messaging-meeting.sync-platform",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Synchronise a partner meeting's MANAGED chat conversation and membership in the partner environment's own scope, after Platform Access confirms the environment is ACTIVE and EXTERNAL",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsPushProviderManage,
+        name: "notifications-push-provider.manage",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Store (sealed), verify, read the status of and delete a partner environment's own APNs / APNs VoIP / FCM push credentials; scope-locked to that environment; the secret is never returned",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthManage,
+        name: "platform-oauth.manage",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Manage the OAuth client profile of the developer's own application (redirect URIs, requested scopes, distribution, status), issue / rotate its client secret (returned once) and list its grants; never another tenant's application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthToken,
+        name: "platform-oauth.token",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "OAuth token endpoint backend: exchange authorization codes and refresh tokens after client authentication, revoke and introspect app tokens",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthAuthorize,
+        name: "platform-oauth.authorize",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Validate an OAuth authorization request and create the single-use code and grant for the account the Meeting Service authenticated (user or organization install), list and revoke an account's or organization's app grants",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationAppsEvaluate,
+        name: "organization-apps.evaluate",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Evaluate an organization's app install policy for an account (membership, role tier, allow list); a decision only, no organization data",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingOauthUserinfoRead,
+        name: "meeting-oauth-userinfo.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Read the display name, avatar and (only with the profile:email grant) email of an account for the OAuth userinfo endpoint",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::AccountAdminister,
+        name: "account.administer",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff account administration from HQ (user search and detail, status, role, support email change, sessions, devices, MFA, duplicates, staff export / deletion under legal holds); requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingAdminister,
+        name: "meeting.administer",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff meeting administration from HQ (spaces and meetings across everyone, live meetings, participants, end meeting, archive / transfer, recordings, webinars, meeting audit and abuse reports); requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingFirstpartyAdminister,
+        name: "messaging-firstparty.administer",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff tools for CF Meet's own chats (reports, moderation, policy, legal holds, MANAGED-only exports, deletion requests, audit, off-switches, incidents, failed-message retries, key-transparency status); never PRIVATE_E2EE content; requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingAdminister,
+        name: "calling.administer",
+        receiver: services::CALLING,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff call administration (search and history, blocks, limits, spend limits, routing and enterprise features, recordings / voicemail access, retention holds, incidents, webhook keys, staff audit); requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationsAdminister,
+        name: "communications.administer",
+        receiver: services::COMMUNICATIONS,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff profile lookup by CF Meet ID, holds list and profile audit; requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationOperatorRead,
+        name: "organization.operator-read",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Cross-organization operator reads (audit across organizations, members, teams and policies); requires X-CF-Operator; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PricingAdminister,
+        name: "pricing.administer",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Price books, versions, activations and market freezes; CF Meet user plans, plan assignments and overrides; requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsAdminister,
+        name: "notifications.administer",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::ADMIN_BRIDGE],
+        sensitive: true,
+        description: "Staff notification routing changes per category and channel and push / email provider status; requires X-CF-Operator, and X-CF-Approver (a different person) for R3 / R4 actions; admin bridge only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::HqBridgeEventsPublish,
+        name: "hq-bridge-events.publish",
+        receiver: services::ADMIN_BRIDGE,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::MESSAGING,
+            services::CALLING,
+            services::COMMUNICATIONS,
+            services::ORGANIZATIONS,
+            services::DEVELOPER_PLATFORM,
+            services::PLATFORM_ACCESS,
+            services::NOTIFICATIONS,
+        ],
+        sensitive: false,
+        description: "Post owner events to the admin bridge's private event listener (verification cases, abuse reports, partner workspaces, app reviews, incidents, price versions); ids, states and versions only, never personal content",
     },
 ];
 
@@ -1020,6 +1579,7 @@ impl InternalPermission {
         InternalPermission::PlatformPrincipalEnsure,
         InternalPermission::MessagingApplicationDelegate,
         InternalPermission::MessagingMeetingSync,
+        InternalPermission::MessagingOrganizationGovern,
         InternalPermission::MessagingContextAuthorityApply,
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
@@ -1044,8 +1604,47 @@ impl InternalPermission {
         InternalPermission::OrganizationAdminister,
         InternalPermission::OrganizationMigrate,
         InternalPermission::PlatformIdentityProvisionFirstParty,
+        InternalPermission::PlatformIdentityBindOrganizationServices,
         InternalPermission::CallingRequestActForOrganization,
+        InternalPermission::CallingOrganizationMemberAct,
+        InternalPermission::CallingOrganizationMemberOffboard,
+        InternalPermission::CallingAccountPrivacy,
         InternalPermission::MeetingOrganizationEventsApply,
+        InternalPermission::NotificationsEventPublish,
+        InternalPermission::NotificationsUserForward,
+        InternalPermission::NotificationsCallPushDispatch,
+        InternalPermission::NotificationsPushRegistrationSync,
+        InternalPermission::NotificationsObservabilityRead,
+        InternalPermission::NotificationsOperationsReplay,
+        InternalPermission::NotificationsOperationsReroute,
+        InternalPermission::AccountContactsRead,
+        InternalPermission::MeetingNotificationRecipientsRead,
+        InternalPermission::MessagingWakeupsAuthorize,
+        InternalPermission::CommunicationsRestrictionsRead,
+        InternalPermission::OrganizationInvitationsRead,
+        InternalPermission::AccountRouteLeaseClaim,
+        InternalPermission::CallingAbuseReportsReview,
+        InternalPermission::CommunicationsPreferencesExport,
+        InternalPermission::PlatformEndUsersDelegate,
+        InternalPermission::PlatformUserTokenVerify,
+        InternalPermission::PlatformEnvironmentOriginsRead,
+        InternalPermission::PlatformPrincipalEnsureMeetingPlatform,
+        InternalPermission::MessagingMeetingSyncPlatform,
+        InternalPermission::NotificationsPushProviderManage,
+        InternalPermission::PlatformOauthManage,
+        InternalPermission::PlatformOauthToken,
+        InternalPermission::PlatformOauthAuthorize,
+        InternalPermission::OrganizationAppsEvaluate,
+        InternalPermission::MeetingOauthUserinfoRead,
+        InternalPermission::AccountAdminister,
+        InternalPermission::MeetingAdminister,
+        InternalPermission::MessagingFirstpartyAdminister,
+        InternalPermission::CallingAdminister,
+        InternalPermission::CommunicationsAdminister,
+        InternalPermission::OrganizationOperatorRead,
+        InternalPermission::PricingAdminister,
+        InternalPermission::NotificationsAdminister,
+        InternalPermission::HqBridgeEventsPublish,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1235,9 +1834,14 @@ mod tests {
         ] {
             assert_eq!(p.definition().receiver, services::PLATFORM_ACCESS);
         }
-        // Identity administration is operator tooling only, never a service.
+        // Identity administration is operator tooling only (the operator console and,
+        // ADR 0068, the HQ admin bridge acting for a named staff member), never a
+        // product service.
         let d = PlatformIdentityAdminister.definition();
-        assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE]);
+        assert_eq!(
+            d.grantable_to,
+            &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE]
+        );
         assert!(d.sensitive);
         // Principal registration (public parties, tombstones) is Calling's only.
         assert_eq!(
@@ -1330,11 +1934,30 @@ mod tests {
                 ),
                 ("messaging-meeting.sync", &[services::MEETING_SERVICE][..]),
                 (
+                    "messaging-organization.govern",
+                    &[services::MEETING_SERVICE][..]
+                ),
+                (
                     "messaging-context-authority.apply",
                     &[services::PRIVACY_RELAY][..]
                 ),
                 ("messaging-sms-bridge.deliver", &[services::SMS_GATEWAY][..]),
                 ("messaging-request.forward", &[services::API_GATEWAY][..]),
+                // Notification Service X3 (metadata-only wake-up authorization).
+                (
+                    "messaging-wakeups.authorize",
+                    &[services::NOTIFICATIONS][..]
+                ),
+                // ADR 0062: partner meeting chat in the partner environment's scope.
+                (
+                    "messaging-meeting.sync-platform",
+                    &[services::MEETING_SERVICE][..]
+                ),
+                // ADR 0068: HQ staff tools for first-party chats (admin bridge only).
+                (
+                    "messaging-firstparty.administer",
+                    &[services::ADMIN_BRIDGE][..]
+                ),
             ]
         );
         // Native account bootstrap remains owned by Account; Hub backfill reuses its bindings.
@@ -1374,9 +1997,20 @@ mod tests {
         "platform-principal.resolve",
         "platform-identity.read",
         "sms-bridge.submit",
+        // ADR 0068 A6: the effective CF Meet plan limits of a holder.
+        "developer-entitlement.read",
         "developer-event.publish",
         "security-scan.submit",
         "organization.read",
+        // Notification Service I1: message wake-up and member-invited publications.
+        "notifications-event.publish",
+        // Notification Service I13 (N9): the push-registration facade and D-1b copy.
+        "notifications-push-registration.sync",
+        // ADR 0062: partner user tokens and allowed websites.
+        "platform-user-token.verify",
+        "platform-environment-origins.read",
+        // ADR 0068: owner events to the HQ admin bridge (ids and states only).
+        "hq-bridge-events.publish",
     ];
 
     #[test]
@@ -1430,6 +2064,8 @@ mod tests {
                 "meeting-request.forward",
                 "developer-entitlement.read",
                 "developer-usage.record",
+                "platform-user-token.verify",
+                "platform-environment-origins.read",
             ]
         );
         assert!(received(services::API_GATEWAY).is_empty());
@@ -1444,6 +2080,17 @@ mod tests {
                 "user-session.verify",
                 "webhook-migration.export",
                 "webhook-migration.import",
+                // Notification Service I1: developer notices from its own outbox.
+                "notifications-event.publish",
+                // ADR 0062 / 0063: the partner Users API and partner push credentials.
+                "platform-end-users.delegate",
+                "notifications-push-provider.manage",
+                // ADR 0064: CF Meet Apps (OAuth client profile, token endpoint, userinfo).
+                "platform-oauth.manage",
+                "platform-oauth.token",
+                "meeting-oauth-userinfo.read",
+                // ADR 0068: owner events to the HQ admin bridge.
+                "hq-bridge-events.publish",
             ]
         );
         assert_eq!(
@@ -1454,13 +2101,15 @@ mod tests {
                 "developer-usage.record",
                 "developer-event.publish",
                 "developer-platform.administer",
+                // ADR 0068: HQ pricing and plans (admin bridge only).
+                "pricing.administer",
             ]
         );
         assert_eq!(
             InternalPermission::DeveloperPlatformAdminister
                 .definition()
                 .grantable_to,
-            &[services::OPERATOR_CONSOLE]
+            &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE]
         );
         for d in REGISTRY.iter().filter(|d| d.sensitive) {
             for s in [services::API_GATEWAY, services::DEVELOPER_PLATFORM] {
@@ -1516,7 +2165,18 @@ mod tests {
                 "meeting-request.forward",
                 "user-session.verify",
                 // Organization event delivery (Organizations only).
-                "meeting-organization-events.apply"
+                "meeting-organization-events.apply",
+                // Notification Service owner APIs X1, X2 and X6/X7 (granted to
+                // cfmeet.notifications only).
+                "account-contacts.read",
+                "meeting-notification-recipients.read",
+                "account-route-lease.claim",
+                // ADR 0064: OAuth userinfo for the Developer Console.
+                "meeting-oauth-userinfo.read",
+                // ADR 0068: HQ staff account and meeting administration (admin bridge
+                // only).
+                "account.administer",
+                "meeting.administer",
             ]
         );
         // The only sensitive grants the Meeting Service may hold are the Organizations
@@ -1533,15 +2193,26 @@ mod tests {
                 "organization.act-for-user",
                 "organization.administer",
                 "organization.migrate",
-                "calling-request.act-for-organization"
+                "calling-request.act-for-organization",
+                "calling-organization-member.act",
+                "platform-principal.ensure-meeting-platform",
+                "platform-oauth.authorize"
             ]
         );
         for d in REGISTRY
             .iter()
             .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
         {
-            let expected = if d.permission == CallingRequestActForOrganization {
+            let expected = if matches!(
+                d.permission,
+                CallingRequestActForOrganization | CallingOrganizationMemberAct
+            ) {
                 services::CALLING
+            } else if d.permission == PlatformPrincipalEnsureMeetingPlatform
+                || d.permission == PlatformOauthAuthorize
+            {
+                // ADR 0062: partner meeting chat's fixed system principal.
+                services::PLATFORM_ACCESS
             } else {
                 services::ORGANIZATIONS
             };
@@ -1588,12 +2259,34 @@ mod tests {
                 ),
                 (
                     "organization.administer",
-                    &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    &[
+                        services::OPERATOR_CONSOLE,
+                        services::MEETING_SERVICE,
+                        services::ADMIN_BRIDGE
+                    ][..],
                     true
                 ),
                 (
                     "organization.migrate",
                     &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    true
+                ),
+                // Notification Service X5 (D-5): invitee account ref, never the email.
+                (
+                    "organization-invitations.read",
+                    &[services::NOTIFICATIONS][..],
+                    false
+                ),
+                // ADR 0064: app install policy decision for the Meeting Service.
+                (
+                    "organization-apps.evaluate",
+                    &[services::MEETING_SERVICE][..],
+                    false
+                ),
+                // ADR 0068: cross-organization operator reads (admin bridge only).
+                (
+                    "organization.operator-read",
+                    &[services::ADMIN_BRIDGE][..],
                     true
                 ),
             ]
@@ -1616,9 +2309,45 @@ mod tests {
                     true
                 ),
                 (
+                    "platform-identity.bind-organization-services",
+                    services::PLATFORM_ACCESS,
+                    &[services::ORGANIZATIONS][..],
+                    true
+                ),
+                (
                     "meeting-organization-events.apply",
                     services::MEETING_SERVICE,
                     &[services::ORGANIZATIONS][..],
+                    false
+                ),
+                // Notification Service I1: invitation / membership notices (ids only).
+                (
+                    "notifications-event.publish",
+                    services::NOTIFICATIONS,
+                    &[
+                        services::MEETING_SERVICE,
+                        services::ORGANIZATIONS,
+                        services::COMMUNICATIONS,
+                        services::CALLING,
+                        services::MESSAGING,
+                        services::DEVELOPER_PLATFORM
+                    ][..],
+                    false
+                ),
+                // ADR 0068: owner events to the HQ admin bridge (ids and states only).
+                (
+                    "hq-bridge-events.publish",
+                    services::ADMIN_BRIDGE,
+                    &[
+                        services::MEETING_SERVICE,
+                        services::MESSAGING,
+                        services::CALLING,
+                        services::COMMUNICATIONS,
+                        services::ORGANIZATIONS,
+                        services::DEVELOPER_PLATFORM,
+                        services::PLATFORM_ACCESS,
+                        services::NOTIFICATIONS
+                    ][..],
                     false
                 )
             ]
@@ -1667,6 +2396,276 @@ mod tests {
                 .grantable_to,
             &[services::API_GATEWAY]
         );
+        // Gap audit G3: the member's own calling presence and the offboarding of their
+        // extensions, both Meeting Service only.
+        for (p, name, sensitive) in [
+            (
+                InternalPermission::CallingOrganizationMemberAct,
+                "calling-organization-member.act",
+                true,
+            ),
+            (
+                InternalPermission::CallingOrganizationMemberOffboard,
+                "calling-organization-member.offboard",
+                false,
+            ),
+            (
+                InternalPermission::CallingAccountPrivacy,
+                "calling-account.privacy",
+                false,
+            ),
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.name, d.receiver, d.grantable_to, d.sensitive),
+                (
+                    name,
+                    services::CALLING,
+                    &[services::MEETING_SERVICE][..],
+                    sensitive
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn notification_service_flows_are_least_privilege() {
+        use InternalPermission::*;
+        let granted = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.grantable_to.contains(&service))
+                .map(|d| d.name)
+                .collect()
+        };
+        let received = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.receiver == service)
+                .map(|d| d.name)
+                .collect()
+        };
+        // Received by the Notification Service (Document 4 §3.3).
+        assert_eq!(
+            received(services::NOTIFICATIONS),
+            [
+                "notifications-event.publish",
+                "notifications-user.forward",
+                "notifications-call-push.dispatch",
+                "notifications-push-registration.sync",
+                "notifications-observability.read",
+                "notifications-operations.replay",
+                "notifications-operations.reroute",
+                // ADR 0063: partner push provider credentials (Developer Console only).
+                "notifications-push-provider.manage",
+                // ADR 0068: HQ staff routing and provider status (admin bridge only).
+                "notifications.administer",
+            ]
+        );
+        // Granted to the Notification Service: the owner read / fencing APIs X1–X7 only.
+        assert_eq!(
+            granted(services::NOTIFICATIONS),
+            [
+                "account-contacts.read",
+                "meeting-notification-recipients.read",
+                "messaging-wakeups.authorize",
+                "communications-restrictions.read",
+                "organization-invitations.read",
+                "account-route-lease.claim",
+                "communications-preferences.export",
+                // ADR 0068: owner events to the HQ admin bridge.
+                "hq-bridge-events.publish",
+            ]
+        );
+        // Producers that publish events: exactly the six producer services, never the
+        // customer ingress, operator tooling, Telephony or Privacy Relay.
+        assert_eq!(
+            NotificationsEventPublish.definition().grantable_to,
+            &[
+                services::MEETING_SERVICE,
+                services::ORGANIZATIONS,
+                services::COMMUNICATIONS,
+                services::CALLING,
+                services::MESSAGING,
+                services::DEVELOPER_PLATFORM,
+            ]
+        );
+        // The Meeting relay (U1–U9) and the Hub preference facade (U6 / U7 only, enforced
+        // by the receiver; roadmap N10).
+        assert_eq!(
+            NotificationsUserForward.definition().grantable_to,
+            &[services::MEETING_SERVICE, services::COMMUNICATIONS]
+        );
+        assert_eq!(
+            NotificationsCallPushDispatch.definition().grantable_to,
+            &[services::CALLING]
+        );
+        // The push-registration facade (N9, D-1b): Messaging only. Not "sensitive" (no
+        // sensitive permission is grantable to Messaging); handles are sealed at rest.
+        let sync = NotificationsPushRegistrationSync.definition();
+        assert_eq!(sync.grantable_to, &[services::MESSAGING]);
+        assert!(!sync.sensitive);
+        // Operator operations: operator tooling only (the operator console and, ADR 0068,
+        // the HQ admin bridge); replay and reroute are sensitive.
+        for (p, sensitive) in [
+            (NotificationsObservabilityRead, false),
+            (NotificationsOperationsReplay, true),
+            (NotificationsOperationsReroute, true),
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                d.grantable_to,
+                &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE],
+                "{}",
+                d.name
+            );
+            assert_eq!(d.sensitive, sensitive, "{}", d.name);
+        }
+        // P6: API request accounting by the gateway and by Calling (direct routes) only.
+        assert_eq!(
+            DeveloperUsageRecord.definition().grantable_to,
+            &[services::API_GATEWAY, services::CALLING]
+        );
+        // Calling abuse-report review: received by Calling, operator tooling only.
+        let review = CallingAbuseReportsReview.definition();
+        assert_eq!(review.receiver, services::CALLING);
+        assert_eq!(
+            review.grantable_to,
+            &[services::OPERATOR_CONSOLE, services::ADMIN_BRIDGE]
+        );
+        assert!(review.sensitive);
+        // Owner APIs: each received by its authority, grantable to the service ONLY.
+        // Addresses (X1, X2) are sensitive; X5 never returns the email (not sensitive).
+        for (p, receiver, sensitive) in [
+            (AccountContactsRead, services::MEETING_SERVICE, true),
+            (
+                MeetingNotificationRecipientsRead,
+                services::MEETING_SERVICE,
+                true,
+            ),
+            (MessagingWakeupsAuthorize, services::MESSAGING, false),
+            (
+                CommunicationsRestrictionsRead,
+                services::COMMUNICATIONS,
+                false,
+            ),
+            (OrganizationInvitationsRead, services::ORGANIZATIONS, false),
+            (AccountRouteLeaseClaim, services::MEETING_SERVICE, false),
+            // N10 copy + catch-up: preference values and contact pairs are protected.
+            (
+                CommunicationsPreferencesExport,
+                services::COMMUNICATIONS,
+                true,
+            ),
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to, d.sensitive),
+                (receiver, &[services::NOTIFICATIONS][..], sensitive),
+                "{}",
+                d.name
+            );
+        }
+        // No other permission is grantable to the Notification Service, and none of its
+        // permissions reaches the customer ingress.
+        for d in REGISTRY {
+            if d.receiver == services::NOTIFICATIONS {
+                assert!(
+                    !d.grantable_to.contains(&services::API_GATEWAY),
+                    "{}",
+                    d.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn admin_bridge_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // ADR 0068: the HQ admin bridge receives only owner events, ids and states only.
+        let received: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::ADMIN_BRIDGE)
+            .map(|d| (d.permission, d.sensitive))
+            .collect();
+        assert_eq!(received, [(HqBridgeEventsPublish, false)]);
+        // The new operator permissions: one receiver each, the bridge ONLY, sensitive.
+        let exclusive = [
+            (AccountAdminister, services::MEETING_SERVICE),
+            (MeetingAdminister, services::MEETING_SERVICE),
+            (MessagingFirstpartyAdminister, services::MESSAGING),
+            (CallingAdminister, services::CALLING),
+            (CommunicationsAdminister, services::COMMUNICATIONS),
+            (OrganizationOperatorRead, services::ORGANIZATIONS),
+            (PricingAdminister, services::DEVELOPER_PLATFORM),
+            (NotificationsAdminister, services::NOTIFICATIONS),
+        ];
+        for (p, receiver) in exclusive {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to, d.sensitive),
+                (receiver, &[services::ADMIN_BRIDGE][..], true),
+                "{}",
+                d.name
+            );
+            assert!(d.description.contains("X-CF-Operator"), "{}", d.name);
+        }
+        // Existing operator permissions the bridge may additionally hold (the operator
+        // console keeps them for emergencies).
+        let shared = [
+            CallingAbuseReportsReview,
+            CommunicationsProfileSuspend,
+            OrganizationAdminister,
+            DeveloperPlatformAdminister,
+            PlatformIdentityAdminister,
+            NotificationsObservabilityRead,
+            NotificationsOperationsReplay,
+            NotificationsOperationsReroute,
+        ];
+        for p in shared {
+            let g = p.definition().grantable_to;
+            assert!(g.contains(&services::ADMIN_BRIDGE), "{p}");
+            assert!(g.contains(&services::OPERATOR_CONSOLE), "{p}");
+        }
+        // Nothing else is grantable to the bridge: no forwarding, no delegation, no
+        // content, no credential or key material path.
+        let granted: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::ADMIN_BRIDGE))
+            .map(|d| d.permission)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut expected: Vec<_> = exclusive
+            .iter()
+            .map(|(p, _)| *p)
+            .chain(shared)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        expected.sort();
+        assert_eq!(granted, expected);
+        // No product service other than the bridge may hold an exclusive bridge permission,
+        // and the customer ingress never reaches anything the bridge holds.
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::ADMIN_BRIDGE))
+        {
+            assert!(
+                !d.grantable_to.contains(&services::API_GATEWAY),
+                "{}",
+                d.name
+            );
+        }
+        // Owner events come from owners only, never the ingress or operator tooling.
+        let publishers = HqBridgeEventsPublish.definition().grantable_to;
+        for s in [
+            services::API_GATEWAY,
+            services::OPERATOR_CONSOLE,
+            services::ADMIN_BRIDGE,
+        ] {
+            assert!(!publishers.contains(&s), "{s}");
+        }
     }
 
     #[test]

@@ -35,6 +35,20 @@ pub struct DisplayName(String);
 impl DisplayName {
     pub const MAX_CHARS: usize = 100;
 
+    /// A caller name supplied by a trusted first-party creator (Hub launch): truncated to
+    /// [`Self::MAX_CHARS`] and kept only if it is a valid display name. A name that is not
+    /// (for example one that looks like contact data) is dropped, never failing the call.
+    pub fn lenient(value: &str) -> Option<Self> {
+        let truncated: String = value
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(Self::MAX_CHARS)
+            .collect();
+        Self::parse(truncated.trim_end()).ok()
+    }
+
     pub fn parse(value: &str) -> Result<Self, CallError> {
         let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
         let chars = normalized.chars().count();

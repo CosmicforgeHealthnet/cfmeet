@@ -6,18 +6,22 @@ name: Build CF Meet core service images
 # every image's revision label and transfers the exact images to the VPS.
 # An image that already exists for this SHA with the matching revision label is reused.
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/cfmeet-core-images.yml"
+  # All production image builds are scheduled by the selective release plan.
+  # Direct dispatch remains an explicit emergency/manual build option only.
   workflow_dispatch:
   workflow_call:
+    inputs:
+      services:
+        description: JSON array of required images for this coordinated release
+        required: false
+        type: string
+        default: '["platform-access","organizations","notifications","messaging","calling","communications","numbering","privacy-relay","sms-gateway","telephony","meeting-service","developer-platform","admin-bridge","api-gateway","security-scan-gateway"]'
 
 permissions:
   contents: read
 
 concurrency:
-  group: cfmeet-core-images-${{ github.ref }}
+  group: cfmeet-core-images-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [platform-access, organizations, messaging, calling, communications, numbering, privacy-relay, sms-gateway, telephony, meeting-service, developer-platform, api-gateway, security-scan-gateway]
+        service: ${{ fromJSON(inputs.services || '["platform-access","organizations","notifications","messaging","calling","communications","numbering","privacy-relay","sms-gateway","telephony","meeting-service","developer-platform","admin-bridge","api-gateway","security-scan-gateway"]') }}
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v4

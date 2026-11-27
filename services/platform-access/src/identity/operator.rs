@@ -71,6 +71,15 @@ text_enum!(
         ProductionEnvironmentActivated = "PRODUCTION_ENVIRONMENT_ACTIVATED",
         OrganizationScopeProvisioned = "ORGANIZATION_SCOPE_PROVISIONED",
         TenantRenamed = "TENANT_RENAMED",
+        // ADR 0062 (migration 000008): partner users and allowed websites.
+        PrincipalProfileSet = "PRINCIPAL_PROFILE_SET",
+        PrincipalSessionsRevoked = "PRINCIPAL_SESSIONS_REVOKED",
+        EnvironmentOriginsSet = "ENVIRONMENT_ORIGINS_SET",
+        UserTokenTestIssued = "USER_TOKEN_TEST_ISSUED",
+        // ADR 0068 (migration 000011): a staff revocation of a CF Meet Apps grant.
+        AppGrantRevoked = "APP_GRANT_REVOKED",
+        // ADR 0068 (migration 000012): the partner's one reveal of an owner-delivered key.
+        CredentialDeliveryRevealed = "CREDENTIAL_DELIVERY_REVEALED",
     }
 );
 
@@ -84,6 +93,7 @@ text_enum!(
         Credential = "CREDENTIAL",
         Principal = "PRINCIPAL",
         IdentityImport = "IDENTITY_IMPORT",
+        AppGrant = "APP_GRANT",
     }
 );
 
@@ -93,6 +103,9 @@ text_enum!(
 pub struct OperatorContext {
     operator: String,
     correlation_id: String,
+    /// ADR 0068: the admin bridge command this context runs (locked and recorded in the
+    /// mutation's transaction by the audited operations).
+    bridge: Option<Box<super::bridge::BridgeCommand>>,
 }
 
 fn valid_operator(value: &str) -> bool {
@@ -118,7 +131,25 @@ impl OperatorContext {
         Ok(Self {
             operator: operator.to_string(),
             correlation_id: format!("op_{}", Uuid::new_v4().simple()),
+            bridge: None,
         })
+    }
+
+    /// The context of an admin bridge command: the audit actor is the bridge identity and
+    /// the correlation id `hq_<Idempotency-Key>` joins the audit row to the command's
+    /// record (`platform_access_admin_operations`), which names the staff member and the
+    /// approver.
+    pub fn for_bridge(command: super::bridge::BridgeCommand) -> Self {
+        Self {
+            operator: super::bridge::AUDIT_ACTOR.to_string(),
+            correlation_id: format!("hq_{}", command.key.simple()),
+            bridge: Some(Box::new(command)),
+        }
+    }
+
+    /// The admin bridge command of this context, if any.
+    pub fn bridge(&self) -> Option<&super::bridge::BridgeCommand> {
+        self.bridge.as_deref()
     }
 
     pub fn operator(&self) -> &str {
@@ -231,8 +262,14 @@ where
     F: for<'t> FnOnce(&'t DatabaseTransaction) -> BoxFuture<'t, PlatformResult<(T, AuditEntry)>>,
 {
     let txn = db.begin().await?;
+    if let Some(command) = operator.bridge() {
+        super::bridge::lock(&txn, command).await?;
+    }
     let (value, entry) = mutation(&txn).await?;
     record(&txn, operator, &entry, at).await?;
+    if let Some(command) = operator.bridge() {
+        super::bridge::record(&txn, command, entry.target_id, None, at).await?;
+    }
     txn.commit().await?;
     Ok(value)
 }
@@ -334,11 +371,20 @@ pub async fn audit_trail<C: ConnectionTrait>(db: &C, q: &AuditQuery) -> Platform
 }
 
 /// Opens the mutation's transaction, runs it, audits it and commits — all or nothing.
+/// An admin bridge command carried by the context is locked at its expected version
+/// before the mutation and recorded after it, in the same transaction.
 macro_rules! audited {
     ($self:ident, $op:ident, |$txn:ident| $body:expr) => {{
         let $txn = $self.db.begin().await?;
+        if let Some(command) = $op.bridge() {
+            super::bridge::lock(&$txn, command).await?;
+        }
         let (value, entry) = $body;
-        record(&$txn, $op, &entry, $self.clock.now()).await?;
+        let now = $self.clock.now();
+        record(&$txn, $op, &entry, now).await?;
+        if let Some(command) = $op.bridge() {
+            super::bridge::record(&$txn, command, entry.target_id, None, now).await?;
+        }
         $txn.commit().await?;
         Ok(value)
     }};
@@ -867,7 +913,7 @@ fn service_account_entry(action: OperatorAction, sa: &ServiceAccountView) -> Aud
     )
 }
 
-fn credential_entry(action: OperatorAction, c: &CredentialView) -> AuditEntry {
+pub(crate) fn credential_entry(action: OperatorAction, c: &CredentialView) -> AuditEntry {
     AuditEntry::new(action, AuditTargetKind::Credential, c.id.as_uuid())
         .scope(
             Some(c.tenant_id.as_uuid()),
@@ -920,9 +966,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000003 / 000004 / 000005 / 000006 (an unknown code
-        // is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 25);
-        assert_eq!(AuditTargetKind::ALL.len(), 7);
+        // Kept in step with migrations 000003 / 000004 / 000005 / 000006 / 000008 / 000011
+        // / 000012 (an unknown code is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 31);
+        assert_eq!(AuditTargetKind::ALL.len(), 8);
     }
 }

@@ -136,6 +136,89 @@ impl Default for DelegatedAdministration {
     }
 }
 
+/// Who may install an app for the whole organization (ADR 0064 workspace installs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InstallTier {
+    /// ADMIN and above (the default).
+    Admins,
+    /// MEMBER and above (GUESTs excluded).
+    Members,
+}
+
+impl InstallTier {
+    pub fn admits(&self, role: Role) -> bool {
+        match self {
+            InstallTier::Admins => Tier::Admins.admits(role),
+            InstallTier::Members => Tier::Members.admits(role),
+        }
+    }
+}
+
+/// Upper bound of `apps.allowList`.
+pub const MAX_APP_ALLOW_LIST: usize = 200;
+
+/// ADR 0064 `apps` section (`ORGANIZATIONS_APP_INSTALLS_ENABLED`): who may install apps
+/// for the organization and which apps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct Apps {
+    pub install_tier: InstallTier,
+    /// `null`: any app the caller may otherwise install; a list: only these app ids.
+    pub allow_list: Option<Vec<uuid::Uuid>>,
+    /// Whether members may connect apps to their own accounts (a hint the account
+    /// authority shows; personal installs stay the member's own decision).
+    pub user_installs_allowed: bool,
+}
+
+impl Default for Apps {
+    fn default() -> Self {
+        Self {
+            install_tier: InstallTier::Admins,
+            allow_list: None,
+            user_installs_allowed: true,
+        }
+    }
+}
+
+/// Why an organization app install is refused (`app-install-check`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppInstallRefusal {
+    NotAMember,
+    RoleRequired,
+    NotAllowlisted,
+    OrganizationNotReady,
+}
+
+impl AppInstallRefusal {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AppInstallRefusal::NotAMember => "NOT_A_MEMBER",
+            AppInstallRefusal::RoleRequired => "ROLE_REQUIRED",
+            AppInstallRefusal::NotAllowlisted => "NOT_ALLOWLISTED",
+            AppInstallRefusal::OrganizationNotReady => "ORGANIZATION_NOT_READY",
+        }
+    }
+}
+
+impl Apps {
+    /// May a member with `role` install `app` for the organization? (Membership, the
+    /// organization's readiness and the membership status are checked by the caller.)
+    pub fn install_decision(&self, role: Role, app: uuid::Uuid) -> Result<(), AppInstallRefusal> {
+        if !self.install_tier.admits(role) {
+            return Err(AppInstallRefusal::RoleRequired);
+        }
+        if self
+            .allow_list
+            .as_ref()
+            .is_some_and(|list| !list.contains(&app))
+        {
+            return Err(AppInstallRefusal::NotAllowlisted);
+        }
+        Ok(())
+    }
+}
+
 /// The organization policy document (`schemaVersion` 1).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
@@ -146,6 +229,10 @@ pub struct PolicyDocument {
     pub features: Features,
     pub retention: Retention,
     pub delegated_administration: DelegatedAdministration,
+    /// ADR 0064 (`ORGANIZATIONS_APP_INSTALLS_ENABLED`). Absent (`None`, never serialized)
+    /// means the defaults of [`Apps`]; documents without it are exactly as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps: Option<Apps>,
 }
 
 /// Upper bound of `retention.hintDays` (10 years).
@@ -168,7 +255,25 @@ impl PolicyDocument {
                 "retention.hintDays must be between 1 and {MAX_RETENTION_HINT_DAYS}"
             ));
         }
+        if let Some(apps) = &doc.apps {
+            if let Some(list) = &apps.allow_list {
+                if list.len() > MAX_APP_ALLOW_LIST {
+                    return Err(format!(
+                        "apps.allowList is limited to {MAX_APP_ALLOW_LIST} apps"
+                    ));
+                }
+                let unique: std::collections::BTreeSet<_> = list.iter().collect();
+                if unique.len() != list.len() {
+                    return Err("apps.allowList must not repeat an app".into());
+                }
+            }
+        }
         Ok(doc)
+    }
+
+    /// The effective `apps` section (defaults when absent).
+    pub fn apps(&self) -> Apps {
+        self.apps.clone().unwrap_or_default()
     }
 
     pub fn to_json(&self) -> Value {
@@ -356,6 +461,68 @@ mod tests {
         ] {
             assert!(PolicyDocument::parse(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_apps_section_defaults_to_admins_and_is_strict() {
+        let p = PolicyDocument::default();
+        assert!(
+            !p.to_json().as_object().unwrap().contains_key("apps"),
+            "absent unless stored"
+        );
+        let apps = p.apps();
+        assert_eq!(apps.install_tier, InstallTier::Admins);
+        assert_eq!(apps.allow_list, None);
+        assert!(apps.user_installs_allowed);
+        let app = uuid::Uuid::new_v4();
+        assert_eq!(apps.install_decision(Role::Owner, app), Ok(()));
+        assert_eq!(apps.install_decision(Role::Admin, app), Ok(()));
+        for role in [Role::Manager, Role::Member, Role::Guest] {
+            assert_eq!(
+                apps.install_decision(role, app),
+                Err(AppInstallRefusal::RoleRequired)
+            );
+        }
+        let members = PolicyDocument::parse(&json!({
+            "apps": { "installTier": "MEMBERS", "allowList": [app], "userInstallsAllowed": false }
+        }))
+        .unwrap();
+        let a = members.apps();
+        assert_eq!(a.install_decision(Role::Member, app), Ok(()));
+        assert_eq!(
+            a.install_decision(Role::Guest, app),
+            Err(AppInstallRefusal::RoleRequired)
+        );
+        assert_eq!(
+            a.install_decision(Role::Owner, uuid::Uuid::new_v4()),
+            Err(AppInstallRefusal::NotAllowlisted)
+        );
+        assert_eq!(
+            PolicyDocument::parse(&members.to_json()).unwrap(),
+            members,
+            "round-trips"
+        );
+        // A partial section takes the remaining defaults.
+        let partial = PolicyDocument::parse(&json!({ "apps": { "allowList": [] } })).unwrap();
+        assert_eq!(partial.apps().install_tier, InstallTier::Admins);
+        assert_eq!(
+            partial.apps().install_decision(Role::Owner, app),
+            Err(AppInstallRefusal::NotAllowlisted)
+        );
+        for bad in [
+            json!({ "apps": { "installTier": "EVERYONE" } }),
+            json!({ "apps": { "installTier": "MANAGERS" } }),
+            json!({ "apps": { "allowList": ["not-a-uuid"] } }),
+            json!({ "apps": { "allowList": [app, app] } }),
+            json!({ "apps": { "unknown": true } }),
+            json!({ "apps": { "userInstallsAllowed": "yes" } }),
+        ] {
+            assert!(PolicyDocument::parse(&bad).is_err(), "{bad}");
+        }
+        let too_many: Vec<_> = (0..=MAX_APP_ALLOW_LIST)
+            .map(|_| uuid::Uuid::new_v4())
+            .collect();
+        assert!(PolicyDocument::parse(&json!({ "apps": { "allowList": too_many } })).is_err());
     }
 
     #[test]

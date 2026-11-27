@@ -42,6 +42,12 @@ pub struct Account {
 /// Simulated canonical owners for the Sections 9-23 private routes.
 #[derive(Default)]
 pub struct World {
+    pub policy_events: Vec<Value>,
+    pub policy_ack_generation: Option<Uuid>,
+    pub policy_events_down: bool,
+    /// Rendezvous the two fresh account/block owner reads; a sequential policy
+    /// implementation times out instead of passing the overlap regression test.
+    pub policy_read_barrier: Option<Arc<tokio::sync::Barrier>>,
     pub conversations: BTreeMap<Uuid, MockConversation>,
     /// idempotency key -> (call id, initiator, targets, kind)
     pub launches: BTreeMap<String, (Uuid, Uuid, Vec<Uuid>, String)>,
@@ -57,8 +63,133 @@ pub struct World {
     pub push_status: Option<Value>,
     pub revoked_devices: Vec<Uuid>,
     pub revoked_endpoints: Vec<Uuid>,
+    /// Calls joined by contact resolution: (call id, acting principal, targets).
+    pub invites: Vec<(Uuid, Uuid, Vec<Uuid>)>,
     /// Replaces the Account's backfill page (malformed-owner tests).
     pub backfill_page: Option<Value>,
+    /// The Notification Service I2 (U6 / U7 only) behind the N10 preference facade.
+    pub notifications: MockNotifications,
+    /// Conversations Messaging reports as MANAGED (every other one is PRIVATE_E2EE).
+    pub managed: std::collections::BTreeSet<Uuid>,
+    /// Messaging answers 404 to the batched message access route (an older image).
+    pub no_batch_access: bool,
+    /// Messaging answers 503 to the batched message access route.
+    pub batch_access_down: bool,
+    /// Calls made to the batched message access route.
+    pub batch_access_calls: usize,
+    /// Calls made to the single conversation access route.
+    pub access_calls: usize,
+    /// The Account's verified email addresses (lower case) -> account reference.
+    pub verified_emails: BTreeMap<String, String>,
+    pub discoverable_phones: BTreeMap<String, String>,
+}
+/// One account's preference document in the mock Notification Service (U6 / U7 rules:
+/// absent = everything enabled, one document version bumped by every write).
+#[derive(Clone, Default, Debug)]
+pub struct NsDoc {
+    pub version: i64,
+    pub categories: BTreeMap<String, bool>,
+    pub conversations: BTreeMap<String, Value>,
+    pub contacts: BTreeMap<String, String>,
+}
+#[derive(Default)]
+pub struct MockNotifications {
+    pub docs: BTreeMap<String, NsDoc>,
+    /// Answer 503 to every call (outage tests).
+    pub down: bool,
+    /// Every dispatch body received.
+    pub calls: Vec<Value>,
+}
+pub const NS_CATEGORIES: [&str; 11] = [
+    "directMessages",
+    "groupMessages",
+    "incomingCalls",
+    "missedCalls",
+    "contactRequests",
+    "groupInvitations",
+    "meetingInvitations",
+    "meetingReminders",
+    "voicemail",
+    "organizationUpdates",
+    "developerUpdates",
+];
+impl NsDoc {
+    pub fn document(&self) -> Value {
+        let categories: serde_json::Map<String, Value> = NS_CATEGORIES
+            .iter()
+            .map(|k| {
+                (
+                    (*k).to_owned(),
+                    json!(self.categories.get(*k).copied().unwrap_or(true)),
+                )
+            })
+            .collect();
+        let contacts: serde_json::Map<String, Value> = self
+            .contacts
+            .iter()
+            .map(|(k, v)| (k.clone(), json!({ "notifications": v })))
+            .collect();
+        json!({"schemaVersion":1,"version":self.version,"categories":categories,"channels":{},"quietHours":null,
+            "conversations":self.conversations,"contacts":contacts,"securityEvents":true,"timeZone":"UTC"})
+    }
+}
+fn mock_notifications(ns: &mut MockNotifications, body: &Value) -> Response {
+    ns.calls.push(body.clone());
+    if ns.down {
+        return reject(StatusCode::SERVICE_UNAVAILABLE, "UNAVAILABLE");
+    }
+    if body["path"] != "/preferences" {
+        return reject(StatusCode::NOT_FOUND, "NOT_FOUND");
+    }
+    let account = body["account"].as_str().unwrap_or_default().to_owned();
+    let doc = ns.docs.entry(account).or_default();
+    match body["method"].as_str() {
+        Some("GET") => Json(doc.document()).into_response(),
+        Some("PUT") => {
+            if body["idempotencyKey"].as_str().is_none_or(|k| k.len() < 8) {
+                return reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR");
+            }
+            let u = &body["body"];
+            if u["expectedVersion"].as_i64() != Some(doc.version) {
+                return reject(StatusCode::CONFLICT, "VERSION_CONFLICT");
+            }
+            if let Some(c) = u["categories"].as_object() {
+                if c.keys().any(|k| !NS_CATEGORIES.contains(&k.as_str())) {
+                    return reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR");
+                }
+                for (k, v) in c {
+                    doc.categories.insert(k.clone(), v.as_bool().unwrap());
+                }
+            }
+            if let Some(c) = u["conversations"].as_object() {
+                for (k, v) in c {
+                    if v.is_null() {
+                        doc.conversations.remove(k);
+                    } else {
+                        doc.conversations.insert(
+                            k.clone(),
+                            json!({"notifications":v["notifications"],"mutedUntil":v.get("mutedUntil").cloned().unwrap_or(Value::Null)}),
+                        );
+                    }
+                }
+            }
+            if let Some(c) = u["contacts"].as_object() {
+                for (k, v) in c {
+                    match v["notifications"].as_str() {
+                        Some(n) => {
+                            doc.contacts.insert(k.clone(), n.to_owned());
+                        }
+                        None => {
+                            doc.contacts.remove(k);
+                        }
+                    }
+                }
+            }
+            doc.version += 1;
+            Json(doc.document()).into_response()
+        }
+        _ => reject(StatusCode::NOT_FOUND, "NOT_FOUND"),
+    }
 }
 #[derive(Clone)]
 pub struct MockConversation {
@@ -100,6 +231,7 @@ fn entry(world: &World, call: Uuid, viewer: Uuid) -> Option<Value> {
 fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Option<Response> {
     const WORLD: &[&str] = &[
         "conversations/access",
+        "conversations/messages/access",
         "conversations/attachments",
         "storage-summary",
         "devices/verify",
@@ -110,6 +242,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
         "endpoints/revoke",
         "calls",
         "calls/participation",
+        "calls/participants",
         "calls/history",
         "meetings/instant",
         "meetings/resolve",
@@ -124,6 +257,8 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
         body,
         if path.ends_with("/calls") {
             "initiatorPrincipalId"
+        } else if path.ends_with("/calls/participants") {
+            "actingPrincipalId"
         } else {
             "principalId"
         },
@@ -133,8 +268,47 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
     }
     let ok = |v: Value| Some(Json(v).into_response());
     match path {
+        "/internal/v1/communications/conversations/messages/access" => {
+            world.batch_access_calls += 1;
+            if world.no_batch_access {
+                return Some(reject(StatusCode::NOT_FOUND, "NOT_FOUND"));
+            }
+            if world.batch_access_down {
+                return Some(reject(StatusCode::SERVICE_UNAVAILABLE, "UNAVAILABLE"));
+            }
+            let items: Vec<Value> = body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| {
+                    let (c, m) = (uuid_at(i, "conversationId"), uuid_at(i, "messageId"));
+                    match world
+                        .conversations
+                        .get(&c)
+                        .filter(|x| x.members.contains(&principal))
+                    {
+                        None => json!({"conversationId":c,"messageId":m,"member":false}),
+                        Some(x) => match x.messages.get(&m) {
+                            Some((seq, state)) => {
+                                json!({"conversationId":c,"messageId":m,"member":true,"state":state,"sequence":seq})
+                            }
+                            None => {
+                                json!({"conversationId":c,"messageId":m,"member":true,"state":"NOT_FOUND","sequence":null})
+                            }
+                        },
+                    }
+                })
+                .collect();
+            ok(json!({"schemaVersion":1,"items":items}))
+        }
         "/internal/v1/communications/conversations/access" => {
+            world.access_calls += 1;
             let id = uuid_at(body, "conversationId");
+            let security = if world.managed.contains(&id) {
+                "MANAGED"
+            } else {
+                "PRIVATE_E2EE"
+            };
             match world
                 .conversations
                 .get(&id)
@@ -143,7 +317,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 None => ok(json!({"schemaVersion":1,"member":false})),
                 Some(c) => {
                     let mut v = json!({"schemaVersion":1,"member":true,"conversationId":id,"contextClass":c.context,
-                        "securityProfile":"PRIVATE_E2EE","lifecycleState":"ACTIVE","lastSequence":c.last_sequence,
+                        "securityProfile":security,"lifecycleState":"ACTIVE","lastSequence":c.last_sequence,
                         "visibleFromSequence":0,"retentionSeconds":null,"expiresAt":null,"role":"MEMBER",
                         "memberCount":c.members.len(),"memberPrincipalIds":c.members});
                     if let Some(m) = body["messageId"]
@@ -222,9 +396,32 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 }
             }
         }
+        "/internal/v1/communications/calls/participants" => {
+            if world.calling_down {
+                return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+            }
+            let call = uuid_at(body, "callId");
+            let targets: Vec<Uuid> = body["targetPrincipalIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| Uuid::parse_str(v.as_str().unwrap()).unwrap())
+                .collect();
+            world.invites.push((call, principal, targets.clone()));
+            ok(json!({"schemaVersion":1,"call":{"callId":call,"state":"CONNECTED","version":2},
+                "operation":"ADD_PARTICIPANTS","participants":targets.iter().map(|t| json!({"principalId":t})).collect::<Vec<_>>(),
+                "replayed":false}))
+        }
         "/internal/v1/communications/calls" => {
             if world.calling_down {
                 return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+            }
+            // The Hub always names the caller for the callee's incoming-call screen.
+            if body["initiatorDisplayName"]
+                .as_str()
+                .is_none_or(|n| n.trim().is_empty())
+            {
+                return Some(reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
             }
             let endpoint = uuid_at(body, "initiatorEndpointId");
             if !world
@@ -343,12 +540,29 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         .and_then(|d| d.initiating_principal().map(|p| p.principal_id))
         .unwrap_or_default();
     let path = request.uri().path().to_owned();
+    if matches!(
+        path.as_str(),
+        "/internal/v1/accounts/communications/status" | "/internal/v1/communications/blocks/check"
+    ) {
+        let barrier = s.world.read().unwrap().policy_read_barrier.clone();
+        if let Some(barrier) = barrier {
+            if tokio::time::timeout(Duration::from_secs(5), barrier.wait())
+                .await
+                .is_err()
+            {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+    }
     let b = to_bytes(request.into_body(), 16384).await.unwrap();
     let body: Value = if b.is_empty() {
         json!({})
     } else {
         serde_json::from_slice(&b).unwrap()
     };
+    if path == "/internal/v1/notifications/dispatch" {
+        return mock_notifications(&mut s.world.write().unwrap().notifications, &body);
+    }
     if let Some(response) = world_route(&mut s.world.write().unwrap(), &path, &body, caller) {
         return response;
     }
@@ -373,6 +587,21 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             }
             None => json!({"active":false,"version":0}),
         },
+        // KF1: the Account's verified-email lookup.
+        "/internal/v1/accounts/communications/email-lookup" => {
+            let world = s.world.read().unwrap();
+            let matched = if let Some(phone) = body["phoneNumber"].as_str() {
+                world.discoverable_phones.get(phone)
+            } else {
+                world
+                    .verified_emails
+                    .get(body["email"].as_str().unwrap_or_default())
+            };
+            match matched {
+                Some(r) => json!({"schemaVersion":1,"found":true,"accountReference":r}),
+                None => json!({"schemaVersion":1,"found":false}),
+            }
+        }
         // The Account's backfill page: accounts ordered by principal id after `cursor`.
         "/internal/v1/accounts/communications/backfill" => {
             if let Some(page) = s.world.read().unwrap().backfill_page.clone() {
@@ -399,7 +628,14 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             json!({"available":false,"reason":"DEVICE_SECURITY_SETUP_REQUIRED","securityReady":false,"privateField":"MUST_NOT_REACH_CONSUMER"})
         }
         "/internal/v1/communications/common-groups" => json!({"groups":[]}),
-        "/internal/v1/communications/events" => json!({"applied":true}),
+        "/internal/v1/communications/events" => {
+            let mut world = s.world.write().unwrap();
+            world.policy_events.push(body.clone());
+            if world.policy_events_down {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            json!({"applied":true,"sendPolicyProjection":1,"sendPolicyGeneration":world.policy_ack_generation})
+        }
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     Json(value).into_response()
@@ -436,6 +672,13 @@ pub struct Harness {
     pub account_signer: Arc<ServiceTokenSigner>,
     pub calling_signer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
+    /// The Notification Service: `communications-restrictions.read` (X4) and
+    /// `communications-preferences.export` (N10 copy + catch-up).
+    pub notifications: Arc<ServiceTokenSigner>,
+    /// The admin bridge: `communications.administer` (ADR 0068 operator reads).
+    pub bridge: Arc<ServiceTokenSigner>,
+    /// The Hub's own signing key (what a receiver's trust bundle grants).
+    pub hub_key: PublicJwk,
     admin: DatabaseConnection,
     name: String,
     server: tokio::task::JoinHandle<()>,
@@ -446,6 +689,18 @@ impl Harness {
         self.server.abort();
     }
     pub async fn new() -> Self {
+        Self::with_notifications(None).await
+    }
+    /// A harness whose Hub has `CF_NOTIFICATIONS_BASE_URL` set to `notifications_url`.
+    pub async fn with_notifications(notifications_url: Option<&str>) -> Self {
+        Self::with_targets(notifications_url, None).await
+    }
+    /// A harness whose Hub has `CF_ADMIN_BRIDGE_BASE_URL` set to `admin_bridge_url` (ADR
+    /// 0068 A7 owner events).
+    pub async fn with_admin_bridge(admin_bridge_url: &str) -> Self {
+        Self::with_targets(None, Some(admin_bridge_url)).await
+    }
+    async fn with_targets(notifications_url: Option<&str>, admin_bridge_url: Option<&str>) -> Self {
         let url = std::env::var("TEST_DATABASE_URL").expect(
             "PostgreSQL acceptance tests require TEST_DATABASE_URL; there is no implicit skip",
         );
@@ -473,6 +728,15 @@ impl Harness {
         assert!(!communications_migration::ready(&db).await.unwrap());
         communications_migration::up_all(&db).await.unwrap();
         communications_migration::up_all(&db).await.unwrap();
+        // The previous (N7) image checks the first five histories exactly and the MSG-009 one
+        // the first four; the N10 preference-authority history is separate, so both still
+        // start (rollback safety).
+        assert!(
+            communications_migration::notification_publications_ready(&db)
+                .await
+                .unwrap()
+        );
+        assert!(communications_migration::timeline_ready(&db).await.unwrap());
         // The previous (Section 14) image checks foundation + unified + device-session
         // exactly; the MSG-009 history is separate, so it still starts (rollback safety).
         assert!(communications_migration::device_session_ready(&db)
@@ -481,11 +745,17 @@ impl Harness {
         assert!(communications_migration::foundation_ready(&db)
             .await
             .unwrap());
+        // The previous (MSG-009) image checks the four earlier histories exactly; the N7
+        // history is separate, so it still starts (rollback safety).
+        assert!(communications_migration::timeline_ready(&db).await.unwrap());
         assert!(communications_migration::ready(&db).await.unwrap());
         let hub = signer(ServiceId::communications(), key("hub-test"));
+        let hub_key = hub.public_jwk();
         let account_signer = signer(ServiceId::meeting_service(), key("account-test"));
         let calling_signer = signer(ServiceId::calling(), key("calling-test"));
         let operator = signer(ServiceId::operator_console(), key("operator-test"));
+        let notifications = signer(ServiceId::notifications(), key("notifications-test"));
+        let bridge = signer(ServiceId::admin_bridge(), key("admin-bridge-test"));
         let verifiers = vec![
             verifier(
                 ServiceId::platform_access(),
@@ -525,6 +795,15 @@ impl Harness {
                     ],
                 )],
             ),
+            // N10: the Hub preference facade forwards U6 / U7 over I2.
+            verifier(
+                ServiceId::notifications(),
+                vec![(
+                    ServiceId::communications(),
+                    hub.public_jwk(),
+                    vec!["notifications-user.forward"],
+                )],
+            ),
         ];
         let accounts = Arc::new(RwLock::new(BTreeMap::new()));
         let blocked = Arc::new(RwLock::new(false));
@@ -548,6 +827,16 @@ impl Harness {
             ServiceId::messaging(),
         ] {
             targets.insert(id, &format!("http://{address}")).unwrap();
+        }
+        // The Notification Service: the test's fake I1 when given, else the mock (U6 / U7).
+        let notifications_target = notifications_url
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("http://{address}"));
+        targets
+            .insert(ServiceId::notifications(), &notifications_target)
+            .unwrap();
+        if let Some(url) = admin_bridge_url {
+            targets.insert(ServiceId::admin_bridge(), url).unwrap();
         }
         let inbound = verifier(
             ServiceId::communications(),
@@ -579,11 +868,27 @@ impl Harness {
                         "communications-profile.suspend",
                     ],
                 ),
+                (
+                    ServiceId::notifications(),
+                    notifications.public_jwk(),
+                    vec![
+                        "communications-restrictions.read",
+                        "communications-preferences.export",
+                    ],
+                ),
+                // ADR 0068: the admin bridge's operator reads.
+                (
+                    ServiceId::admin_bridge(),
+                    bridge.public_jwk(),
+                    vec!["communications.administer"],
+                ),
             ],
         );
         let state = State {
             store: Store { db },
             config: Arc::new(Config {
+                synchronous_policy_events: false,
+                send_policy_generation: None,
                 bind: "127.0.0.1:0".parse().unwrap(),
                 database_url: "redacted-test-only".to_owned().into(),
                 public_app_url: "https://cfmeet.com".into(),
@@ -594,6 +899,9 @@ impl Harness {
                 ),
                 calling_configured: true,
                 messaging_configured: true,
+                notifications_configured: true,
+                notifications_publications: notifications_url.is_some(),
+                admin_bridge_events: admin_bridge_url.is_some(),
             }),
             metrics: Arc::new(Metrics::default()),
         };
@@ -613,6 +921,9 @@ impl Harness {
             available,
             calling_signer,
             operator,
+            notifications,
+            bridge,
+            hub_key,
             admin,
             name,
             server,
@@ -645,11 +956,32 @@ impl Harness {
             .clone()
             .with_initiating_principal(a.principal_id, DelegatedPrincipalKind::NativeCfUser)
     }
+    /// A profile with MANUAL contact approval, so the request flow these tests cover still
+    /// applies; [`Harness::direct_profile`] keeps the AUTOMATIC default.
     pub async fn profile(&self, a: &VerifiedAccount) -> Profile {
+        let p = self.direct_profile(a).await;
+        self.set_contact_approval(&p, "MANUAL").await;
+        p
+    }
+    /// A profile with the default contact approval (AUTOMATIC: direct contact by CF Meet ID).
+    pub async fn direct_profile(&self, a: &VerifiedAccount) -> Profile {
         self.state
             .ensure_profile(&self.delegated(a), a)
             .await
             .unwrap()
+    }
+    /// Sets contact approval without advancing the privacy version (test setup only).
+    pub async fn set_contact_approval(&self, p: &Profile, value: &str) {
+        let db = &self.state.store.db;
+        for sql in [
+            "ALTER TABLE communication_privacy DISABLE TRIGGER communication_privacy_version".to_owned(),
+            format!("UPDATE communication_privacy SET contact_approval = '{value}' WHERE profile_id = '{}'", p.id),
+            "ALTER TABLE communication_privacy ENABLE TRIGGER communication_privacy_version".to_owned(),
+        ] {
+            db.execute(Statement::from_string(DbBackend::Postgres, sql))
+                .await
+                .unwrap();
+        }
     }
     pub async fn public_id(&self, p: &Profile) -> String {
         self.state
@@ -735,6 +1067,9 @@ impl Harness {
             .await
             .unwrap();
         let id = Uuid::parse_str(request["requestId"].as_str().unwrap()).unwrap();
+        if request["state"] == "ACCEPTED" {
+            return id; // direct contact: already connected
+        }
         self.state
             .decide_request(
                 &self.scope,
@@ -747,6 +1082,23 @@ impl Harness {
             .await
             .unwrap();
         id
+    }
+    /// Sets the N10 preference-authority switch the way the release tooling does
+    /// (version-guarded single-row update).
+    pub async fn set_preference_authority(&self, mode: &str) {
+        let n = self
+            .state
+            .store
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE communication_preference_authority SET mode=$1,version=version+1,changed_by_run='test',changed_at=now() WHERE singleton",
+                vec![mode.into()],
+            ))
+            .await
+            .unwrap()
+            .rows_affected();
+        assert_eq!(n, 1);
     }
     pub async fn close(self) {
         self.server.abort();
@@ -775,5 +1127,6 @@ pub fn check(
         credential_issued_at: None,
         credential_principal_id: None,
         conversation_id: None,
+        mentioned: None,
     }
 }

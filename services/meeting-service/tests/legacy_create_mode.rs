@@ -258,3 +258,191 @@ async fn refuse_mode_blocks_only_new_legacy_creates() {
         0
     );
 }
+
+/// Gap audit M7 / M15 / M16: the whole legacy surface is marked deprecated (once), ending a
+/// legacy meeting ends its media room, and the unauthenticated public lookup never shows a
+/// private meeting's title or end.
+#[tokio::test]
+async fn gap_legacy_surface_is_deprecated_ends_its_room_and_hides_private_details() {
+    let Some(app) = app_with(LegacyMeetingCreateMode::Mirror).await else {
+        return;
+    };
+    let host = app.user("gaplegacy").await;
+    let (s, h, v) = raw(
+        &app,
+        Method::POST,
+        "/api/v1/meetings/instant",
+        &host.token,
+        json!({ "title": "Secret strategy", "is_private": true }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    // A create carries the headers exactly once (the surface-wide layer does not repeat them).
+    assert_eq!(h.get_all("link").iter().count(), 1, "{h:?}");
+    let id: Uuid = v["data"]["id"].as_str().unwrap().parse().unwrap();
+    let code = v["data"]["meeting_identifier"]
+        .as_str()
+        .or_else(|| v["data"]["meetingIdentifier"].as_str())
+        .unwrap()
+        .to_string();
+
+    // M15: reads are deprecated too.
+    let (s, h, _) = raw(
+        &app,
+        Method::GET,
+        "/api/v1/meetings",
+        &host.token,
+        Value::Null,
+    )
+    .await;
+    assert!(s.is_success());
+    assert_deprecated(&h, "list");
+    let (_, h, _) = raw(
+        &app,
+        Method::GET,
+        &format!("/api/v1/meetings/{id}"),
+        &host.token,
+        Value::Null,
+    )
+    .await;
+    assert_deprecated(&h, "get");
+
+    // M16: the public lookup of a private meeting shows neither its title nor its end.
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE meetings SET is_private = true WHERE id = '{id}'"
+        ))
+        .await
+        .unwrap();
+    let (s, info) = app
+        .get(&format!("/api/v1/meetings/public/{code}"), Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{info}");
+    let data = &info["data"];
+    let title = data["title"].as_str().unwrap_or_default();
+    assert_eq!(
+        title,
+        backend::handlers::meetings::PRIVATE_MEETING_TITLE,
+        "{info}"
+    );
+    assert!(!info.to_string().contains("Secret strategy"));
+    assert!(
+        data["end_time"].is_null() && data["endTime"].is_null(),
+        "{info}"
+    );
+
+    // M7: ending the meeting ends its media room.
+    let (s, _, v) = raw(
+        &app,
+        Method::POST,
+        &format!("/api/v1/meetings/{id}/end"),
+        &host.token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let terminated = app.rtc.terminated.lock().unwrap().clone();
+    assert!(
+        terminated.contains(&(code.clone(), "LEGACY_MEETING_ENDED".to_string())),
+        "{terminated:?}"
+    );
+}
+
+/// Gap audit M9: deleting a legacy meeting retires its v2 view, and the auto-start job
+/// mirrors the start into the v2 conference.
+#[tokio::test]
+async fn gap_v2_view_follows_legacy_delete_and_auto_start() {
+    let Some(app) = app_with(LegacyMeetingCreateMode::Mirror).await else {
+        return;
+    };
+    let host = app.user("gapmirror").await;
+    let (s, _, v) = raw(
+        &app,
+        Method::POST,
+        "/api/v1/meetings",
+        &host.token,
+        json!({ "title": "to delete", "start_time": future_local(), "timezone": "Africa/Lagos" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let gone: Uuid = v["data"]["id"].as_str().unwrap().parse().unwrap();
+    let space: Uuid = {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        app.db
+            .conn
+            .query_one(Statement::from_string(
+                DbBackend::Postgres,
+                format!("SELECT id FROM meeting_spaces WHERE legacy_meeting_id = '{gone}'"),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "id")
+            .unwrap()
+    };
+    let (s, _, v) = raw(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/meetings/{gone}"),
+        &host.token,
+        Value::Null,
+    )
+    .await;
+    assert!(s.is_success(), "{v}");
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_spaces WHERE id = '{space}' AND status = 'DELETED'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE meeting_space_id = '{space}' AND status = 'CANCELLED'"
+        ))
+        .await,
+        1
+    );
+
+    // Auto-start: the legacy start reaches the v2 conference.
+    let (s, _, v) = raw(
+        &app,
+        Method::POST,
+        "/api/v1/meetings",
+        &host.token,
+        json!({ "title": "auto start", "start_time": future_local(), "timezone": "Africa/Lagos" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let due: Uuid = v["data"]["id"].as_str().unwrap().parse().unwrap();
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE meetings SET start_time = now() - interval '1 minute' WHERE id = '{due}'"
+        ))
+        .await
+        .unwrap();
+    let before = app
+        .scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE legacy_meeting_id = '{due}' AND status = 'CREATED'"
+        ))
+        .await;
+    assert_eq!(before, 1);
+    let started = backend::workers::MeetingAutoStartWorker::new(app.db.conn.clone())
+        .with_mirror(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(app.state.meeting.core.clone()),
+        ))
+        .process_batch()
+        .await
+        .unwrap();
+    assert!(started >= 1);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE legacy_meeting_id = '{due}' AND status = 'CREATED'"
+        ))
+        .await,
+        0,
+        "the mirrored conference left CREATED"
+    );
+}

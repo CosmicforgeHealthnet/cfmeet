@@ -9,6 +9,11 @@
   "properties": {
     "$schema": { "type": "string" },
     "manifest_version": { "const": 1 },
+    "planned_owners": {
+      "description": "Services whose contracts the owner froze before the service exists (e.g. the Notification Service, blueprint roadmap N1 before N2). Their contracts must be experimental; the validator rejects an entry once services/<owner> exists.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/PlannedOwner" }
+    },
     "contracts": {
       "type": "array",
       "minItems": 1,
@@ -16,6 +21,16 @@
     }
   },
   "$defs": {
+    "PlannedOwner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "approval", "until"],
+      "properties": {
+        "owner": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "approval": { "type": "string", "minLength": 1, "description": "The owner decision and document that authorized freezing the interfaces." },
+        "until": { "type": "string", "minLength": 1, "description": "The roadmap step that creates services/<owner>." }
+      }
+    },
     "Contract": {
       "type": "object",
       "additionalProperties": false,

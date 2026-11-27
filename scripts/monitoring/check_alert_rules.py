@@ -21,7 +21,10 @@ Complements ``promtool check rules`` / ``promtool test rules`` / ``amtool check-
                      appears in ``services/*/src/**/*.rs``, or it is a synthesized
                      ``<prefix>_<field>_total`` counter whose field is listed in the
                      ``counters!`` block the prefix is exported from, or it is in
-                     METRIC_ALLOWLIST (Prometheus' own series)
+                     METRIC_ALLOWLIST (Prometheus' own series) / BLACKBOX_METRICS (the
+                     deployed blackbox exporter's probe result), or it is the
+                     ``metric_name`` of a repository SQL exporter collector
+                     (``infra/monitoring/sql-exporter/*.collector.yml``)
   UNTESTED_CRITICAL  every critical alert is exercised by a promtool unit test
                      (``alertname: <name>`` in ``infra/monitoring/prometheus/tests``)
   ALERTMANAGER       the Alertmanager config contains no URL and no literal key / token /
@@ -56,6 +59,15 @@ APPROVALS = {"documented", "required"}
 
 # Series Prometheus itself produces for every scrape target; not exported by service code.
 METRIC_ALLOWLIST = {"up", "scrape_duration_seconds", "scrape_samples_scraped"}
+
+# Series of the blackbox exporter deployed with the production stack (job health-probes,
+# infra/monitoring/blackbox/blackbox.yml): its own result of probing a service's
+# health / readiness route.
+BLACKBOX_METRICS = {"probe_success", "probe_duration_seconds", "probe_http_status_code"}
+
+# Metrics defined by SQL exporter collectors in this repository (``metric_name:`` of
+# every collector file): read-only queries over a service's own tables.
+SQL_COLLECTORS_GLOB = "infra/monitoring/sql-exporter/*.collector.yml"
 
 # Counters whose exported names are synthesized at runtime as "<prefix>_<field>_total"
 # (services/meeting-service/src/handlers/internal.rs::prometheus_counters). The field
@@ -298,6 +310,11 @@ class MetricIndex:
         self.root = root
         texts = [p.read_text(encoding="utf-8", errors="replace") for p in sorted(root.glob("services/*/src/**/*.rs"))]
         self.corpus = "\n".join(texts)
+        self.collector_metrics: set[str] = set()
+        for path in sorted(root.glob(SQL_COLLECTORS_GLOB)):
+            self.collector_metrics.update(re.findall(
+                r"^\s*-?\s*metric_name:\s*['\"]?([A-Za-z_:][A-Za-z0-9_:]*)",
+                path.read_text(encoding="utf-8"), flags=re.M))
         self.fields: dict[str, set[str]] = {}
         exporter = root / SYNTHESIZED_EXPORTER
         exporter_text = exporter.read_text(encoding="utf-8") if exporter.is_file() else ""
@@ -308,7 +325,7 @@ class MetricIndex:
             self.fields[prefix] = counters_fields(path.read_text(encoding="utf-8"))
 
     def exported(self, name: str) -> bool:
-        if name in METRIC_ALLOWLIST:
+        if name in METRIC_ALLOWLIST or name in BLACKBOX_METRICS or name in self.collector_metrics:
             return True
         candidates = {name}
         for suffix in ("_bucket", "_sum", "_count"):

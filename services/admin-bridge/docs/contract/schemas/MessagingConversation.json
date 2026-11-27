@@ -1,0 +1,76 @@
+{
+  "description": "One conversation: ids, context class, security profile, lifecycle state, version and times. No title, no members, no content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conversation_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "context_class",
+    "security_profile",
+    "lifecycle_state",
+    "version",
+    "created_at",
+    "state_changed_at"
+  ],
+  "properties": {
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "context_class": {
+      "enum": [
+        "DIRECT",
+        "GROUP",
+        "MEETING",
+        "TRANSACTION",
+        "CONSULTATION",
+        "SUPPORT",
+        "ENTERPRISE",
+        "DEVELOPER_DEFINED"
+      ]
+    },
+    "security_profile": {
+      "enum": [
+        "MANAGED",
+        "PRIVATE_E2EE"
+      ]
+    },
+    "lifecycle_state": {
+      "enum": [
+        "ACTIVE",
+        "LOCKED",
+        "CLOSED",
+        "ARCHIVED",
+        "EXPIRED",
+        "DELETED"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The conversation's version (expected_version of messaging.conversation.restrict)."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "state_changed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

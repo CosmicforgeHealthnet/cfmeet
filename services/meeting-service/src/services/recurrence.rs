@@ -740,6 +740,9 @@ impl RecurrenceService {
             build_rule_set(&req.rrule, &space.timezone, req.start_local).map_err(validation)?;
         let now = Utc::now();
         if let Some(old) = active_rule(&txn, space_id, true).await? {
+            // Gap audit M3: occurrences the edit moves or cancels are announced.
+            let upcoming =
+                crate::services::notifications::upcoming_occurrences(&txn, space_id, now).await?;
             // MTG-014: a series edit keeps the rule (and every occurrence key), keeps the
             // exceptions that still match an occurrence and the occurrences that did not
             // move, instead of replacing the series.
@@ -752,6 +755,14 @@ impl RecurrenceService {
                 now,
                 &self.core.config,
                 &AuditActor::from(ctx),
+            )
+            .await?;
+            crate::services::notifications::announce_series_change(
+                &txn,
+                &self.core.config.notifications,
+                space_id,
+                &upcoming,
+                ctx.user_id(),
             )
             .await?;
             txn.commit().await?;
@@ -815,6 +826,9 @@ impl RecurrenceService {
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, space_id).await?;
         self.require_scheduler(&txn, ctx, &space).await?;
+        // Gap audit M3: the occurrence an exception cancels or moves is announced.
+        let upcoming =
+            crate::services::notifications::upcoming_occurrences(&txn, space_id, now).await?;
         let rule = active_rule(&txn, space_id, true)
             .await?
             .ok_or_else(|| validation("This meeting has no active recurrence"))?;
@@ -933,6 +947,14 @@ impl RecurrenceService {
             )
             .await?;
         }
+        crate::services::notifications::announce_series_change(
+            &txn,
+            &self.core.config.notifications,
+            space_id,
+            &upcoming,
+            ctx.user_id(),
+        )
+        .await?;
         txn.commit().await?;
         Ok((exception, applied_to))
     }
@@ -972,8 +994,48 @@ impl RecurrenceService {
             return Ok(());
         };
         let now = Utc::now();
+        // Gap audit M3: the next occurrences are cancelled (kept, so their attendees can be
+        // told) before the rest are retired.
+        let upcoming =
+            crate::services::notifications::upcoming_occurrences(&txn, space_id, now).await?;
+        let upcoming: Vec<_> = upcoming
+            .into_iter()
+            .filter(|c| c.recurrence_rule_id == Some(rule.id))
+            .collect();
+        if !upcoming.is_empty() {
+            conference_sessions::Entity::update_many()
+                .col_expr(
+                    conference_sessions::Column::Status,
+                    Expr::value(ConferenceStatus::Cancelled.as_str()),
+                )
+                .col_expr(
+                    conference_sessions::Column::TerminationReason,
+                    Expr::value(TerminationReason::Cancelled.as_str()),
+                )
+                .col_expr(conference_sessions::Column::CancelledAt, Expr::value(now))
+                .col_expr(
+                    conference_sessions::Column::CancelledBy,
+                    Expr::value("system:recurrence"),
+                )
+                .col_expr(conference_sessions::Column::UpdatedAt, Expr::value(now))
+                .filter(
+                    conference_sessions::Column::Id
+                        .is_in(upcoming.iter().map(|c| c.id).collect::<Vec<_>>()),
+                )
+                .filter(conference_sessions::Column::Status.eq(ConferenceStatus::Created))
+                .exec(&txn)
+                .await?;
+        }
         // Every unstarted future occurrence ends with the series, rescheduled ones too.
         let retired = retire_future_occurrences(&txn, rule.id, now, true, false).await?;
+        crate::services::notifications::announce_series_change(
+            &txn,
+            &self.core.config.notifications,
+            space_id,
+            &upcoming,
+            ctx.user_id(),
+        )
+        .await?;
         let mut am: meeting_recurrence_rules::ActiveModel = rule.clone().into();
         am.status = Set(RecurrenceStatus::Ended);
         am.ended_at = Set(Some(now));

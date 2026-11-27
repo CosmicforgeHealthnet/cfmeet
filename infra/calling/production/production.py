@@ -798,14 +798,15 @@ def verify(run_id):
             result['checks'][name] = 'FAIL'
         else:
             result['checks'][name] = 'FAIL'
+    # D1: the Meeting Service no longer serves its Swagger documents in production (the
+    # developer portal publishes the customer documentation); the public host answers 404.
     try:
-        with urllib.request.urlopen('https://api.cfmeet.com/api-docs/calling.json',timeout=15) as response:
-            paths = json.load(response)['paths']
-        assert paths and any('enterprise' in p for p in paths)
-        assert not any(p.startswith(('/internal/','/v1/internal/')) for p in paths)
-        result['checks']['public_calling_enterprise_swagger'] = 'PASS'
-        result['public_calling_path_count'] = len(paths)
+        urllib.request.urlopen('https://api.cfmeet.com/api-docs/calling.json',timeout=15)
+    except urllib.error.HTTPError as exc:
+        result['checks']['public_calling_enterprise_swagger'] = 'PASS' if exc.code==404 else 'FAIL'
     except Exception:
+        result['checks']['public_calling_enterprise_swagger'] = 'FAIL'
+    else:
         result['checks']['public_calling_enterprise_swagger'] = 'FAIL'
     write_private(out/'verification.json',json.dumps(result,indent=2))
     print(json.dumps(result))
@@ -840,6 +841,9 @@ if __name__ == '__main__':
         elif operation.startswith('resource-'):
             import resource_recovery
             resource_recovery.run(operation, sha, run_id)
+        elif operation.startswith('livekit-webhook'):
+            import livekit_webhook
+            livekit_webhook.run(operation, sha, run_id)
         elif operation == 'media-diagnose':
             import media_diagnostics
             media_diagnostics.run()

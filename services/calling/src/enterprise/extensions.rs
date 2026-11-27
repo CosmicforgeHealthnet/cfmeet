@@ -520,6 +520,152 @@ impl EnterpriseService {
     }
 }
 
+/// The audit `details.reason` of an extension disabled because its member left the
+/// organization (gap audit G3). Restoration restores exactly these.
+pub const MEMBER_OFFBOARDED: &str = "MEMBER_OFFBOARDED";
+/// The audit `details.reason` of such an extension restored on reactivation.
+pub const MEMBER_RESTORED: &str = "MEMBER_RESTORED";
+
+/// What [`EnterpriseService::apply_member_extension_status`] changed.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberExtensionChange {
+    /// ACTIVE extensions routed to the member that were disabled.
+    pub disabled: u64,
+    /// Extensions disabled for the member's offboarding that were made ACTIVE again.
+    pub restored: u64,
+    /// Offboarded extensions left DISABLED because their number is now taken or
+    /// ambiguous (an administrator re-creates or renumbers them).
+    pub not_restored: u64,
+}
+
+impl EnterpriseService {
+    /// Gap audit G3 — applies an organization membership change to the enterprise
+    /// extensions routed to `principal` (destination `PRINCIPAL`) in `scope`. Idempotent:
+    ///
+    /// * `active = false` (member removed or suspended): every ACTIVE such extension is
+    ///   disabled like [`Self::disable_extension`] (future routing stops; the row and all
+    ///   Call evidence remain), audited as SYSTEM `DISABLE` with reason
+    ///   [`MEMBER_OFFBOARDED`]. Already disabled extensions are left alone.
+    /// * `active = true` (member reactivated): exactly the DISABLED extensions whose latest
+    ///   disable was that offboarding are restored to ACTIVE (`ACTIVATE`, reason
+    ///   [`MEMBER_RESTORED`]); an administrator's own disable is never undone. A number
+    ///   now taken or ambiguous is left disabled and counted in `not_restored`.
+    ///
+    /// Restrictive in its disabling half: never blocked by a kill switch or capability.
+    pub async fn apply_member_extension_status(
+        &self,
+        scope: CallScope,
+        principal: Uuid,
+        active: bool,
+        correlation_id: &str,
+    ) -> EnterpriseResult<MemberExtensionChange> {
+        let actor = AdminActor::system(scope, correlation_id);
+        let mut change = MemberExtensionChange::default();
+        let txn = self.begin().await?;
+        lock_namespace(&txn, scope).await?;
+        let mut values = scope_values(scope);
+        values.push(principal.into());
+        let rows = if active {
+            values.push(MEMBER_OFFBOARDED.into());
+            ExtensionRow::find_by_statement(stmt(
+                &format!(
+                    "SELECT {COLUMNS} FROM enterprise_extensions x \
+                     WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
+                       AND destination_type = 'PRINCIPAL' AND destination_id = $4 AND status = 'DISABLED' \
+                       AND (SELECT a.details ->> 'reason' FROM enterprise_admin_audit a \
+                             WHERE a.resource_id = x.id AND a.resource_type = 'EXTENSION' \
+                               AND a.operation = 'DISABLE' ORDER BY a.seq DESC LIMIT 1) = $5 \
+                     ORDER BY created_at, id FOR UPDATE"
+                ),
+                values,
+            ))
+            .all(&txn)
+            .await?
+        } else {
+            ExtensionRow::find_by_statement(stmt(
+                &format!(
+                    "SELECT {COLUMNS} FROM enterprise_extensions \
+                     WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
+                       AND destination_type = 'PRINCIPAL' AND destination_id = $4 AND status = 'ACTIVE' \
+                     ORDER BY created_at, id FOR UPDATE"
+                ),
+                values,
+            ))
+            .all(&txn)
+            .await?
+        };
+        let now = self.now();
+        for row in rows {
+            if active {
+                match check_namespace(&txn, scope, &row.extension_number, Some(row.id)).await {
+                    Ok(()) => {}
+                    Err(EnterpriseError::Conflict(_)) => {
+                        change.not_restored += 1;
+                        continue;
+                    }
+                    Err(other) => return Err(other),
+                }
+                exec(
+                    &txn,
+                    "UPDATE enterprise_extensions SET status = 'ACTIVE', disabled_at = NULL, \
+                     version = version + 1, updated_at = GREATEST(updated_at, $2) WHERE id = $1",
+                    vec![row.id.into(), now.into()],
+                )
+                .await?;
+            } else {
+                exec(
+                    &txn,
+                    "UPDATE enterprise_extensions SET status = 'DISABLED', disabled_at = $2, \
+                     version = version + 1, updated_at = GREATEST(updated_at, $2) WHERE id = $1",
+                    vec![row.id.into(), now.into()],
+                )
+                .await?;
+            }
+            audit::record(
+                &txn,
+                &actor,
+                AuditFact {
+                    resource: AuditResource::Extension,
+                    resource_id: row.id,
+                    operation: if active {
+                        AuditOperation::Activate
+                    } else {
+                        AuditOperation::Disable
+                    },
+                    old_version: Some(row.version),
+                    new_version: Some(row.version + 1),
+                    details: AuditDetails::new().with(
+                        "reason",
+                        if active {
+                            MEMBER_RESTORED
+                        } else {
+                            MEMBER_OFFBOARDED
+                        },
+                    ),
+                },
+                now,
+            )
+            .await?;
+            if active {
+                change.restored += 1;
+            } else {
+                change.disabled += 1;
+            }
+        }
+        txn.commit().await?;
+        for (operation, n) in [("DISABLE", change.disabled), ("ACTIVATE", change.restored)] {
+            for _ in 0..n {
+                crate::metrics::inc(
+                    "calling_enterprise_config_changes_total",
+                    &[("resource", "EXTENSION"), ("operation", operation)],
+                );
+            }
+        }
+        Ok(change)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

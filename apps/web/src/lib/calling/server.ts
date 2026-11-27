@@ -14,7 +14,22 @@ export type CallingIdentity = {
   tenantId: string;
   applicationId: string;
   environmentId: string;
+  /** The signed-in account's display name (from the identity service), when known. */
+  displayName?: string;
 };
+
+/**
+ * The caller name Calling accepts on a new call (initiatorDisplayName): whitespace collapsed,
+ * at most 100 characters, no control or bidi-override characters. Anything else is omitted
+ * (Calling would refuse it), so a call never fails because of the caller's name.
+ */
+export function callerDisplayName(name: unknown): string | undefined {
+  if (typeof name !== "string") return undefined;
+  const normalized = name.split(/\s+/).filter(Boolean).join(" ");
+  const value = Array.from(normalized).slice(0, 100).join("").trim();
+  if (!value || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(value)) return undefined;
+  return value;
+}
 
 /**
  * Calling development mode (fixed identity, mock reads). Only a development build without a
@@ -45,6 +60,7 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
     const devPrincipalId = process.env.CALLING_DEV_PRINCIPAL_ID || "dev-user-001";
     return {
       principalId: devPrincipalId,
+      displayName: "Development user",
       tenantId: "dev-tenant",
       applicationId: "dev-application",
       environmentId: "dev-environment",
@@ -129,7 +145,10 @@ export async function ownEndpoints(identity: CallingIdentity): Promise<EndpointL
 
 export async function ownCall(identity: CallingIdentity, id: string): Promise<Call> {
   const response = await callingFetch(`/v1/calls/${id}`);
-  if (!response.ok) throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");
+  // Only a real "not found" means the call is gone: a brief Calling error or rate limit
+  // must not read as one (the client would end a live call over it).
+  if (response.status === 404) throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");
+  if (!response.ok) throw new CallingHttpError(503, "SERVICE_UNAVAILABLE", "Calling is temporarily unavailable.");
   const call = await response.json() as Call;
   if (!call.participants.some((p) => p.principalId === identity.principalId)) {
     throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");

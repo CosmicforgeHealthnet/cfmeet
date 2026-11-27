@@ -6,7 +6,8 @@
 //! * Webhooks (`/api/v1/webhooks*`, PLT-003 / DATA-007): owner-scoped CRUD that says on
 //!   every answer that nothing is delivered (`Deprecation` / `Sunset` / `Link` headers,
 //!   `delivery: NOT_DELIVERED`, a `notice` pointing to Developer Platform webhooks).
-//! * Email verification and the reset-code probe (`verify-email`, `verify-reset-token`).
+//! * Passwordless sign-in codes: the attempt limit destroys a code, unknown addresses
+//!   share the budget, and requesting a new code never buys more guesses.
 //! * Google sign-in start, callback refusals and the one-time exchange code (no call to
 //!   Google is ever made: every path tested fails before the token exchange).
 //! * Admin user, meeting and log reads/writes require the admin role.
@@ -394,23 +395,23 @@ async fn legacy_webhooks_are_owner_scoped_and_every_answer_says_nothing_is_deliv
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn verify_email_activates_a_pending_account_once_without_revealing_accounts() {
+async fn too_many_wrong_codes_destroy_the_code_without_revealing_accounts() {
     let app = app_with_redis!();
-    let email = unique_email("verify");
-    let id = insert_user(&app, &email, "pending_verification").await;
+    let email = unique_email("guess");
+    let id = insert_user(&app, &email, "active").await;
     app.state
         .otp_service
-        .store_code(&email, "246810", OtpType::Verification)
+        .store_code(&email, "246810", OtpType::SignIn)
         .await
         .unwrap();
 
-    let verify = |email: String, token: &'static str| {
+    let verify = |email: String, code: &'static str| {
         let app = &app;
         async move {
             app.post(
-                "/api/v1/auth/verify-email",
+                "/api/v1/auth/otp/verify",
                 Auth::None,
-                json!({ "email": email, "token": token }),
+                json!({ "email": email, "code": code }),
             )
             .await
         }
@@ -421,81 +422,59 @@ async fn verify_email_activates_a_pending_account_once_without_revealing_account
     assert_eq!(unknown.0, StatusCode::BAD_REQUEST);
     assert_eq!(
         wrong.1["error"]["message"], unknown.1["error"]["message"],
-        "an unknown account answers like a wrong code"
+        "an unknown address answers like a wrong code"
     );
     let malformed = verify(email.clone(), "12").await;
     assert_eq!(malformed.0, StatusCode::BAD_REQUEST);
 
-    let (s, v) = verify(email.clone(), "246810").await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(
-        app.scalar(&format!(
-            "SELECT count(*) FROM users WHERE id = '{id}' AND status::text = 'active' AND email_verified_at IS NOT NULL"
-        ))
-        .await,
-        1
-    );
-    // Single use: the code is gone and an active account cannot be "verified" again.
-    let replay = verify(email.clone(), "246810").await;
-    assert_eq!(replay.0, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        app.scalar(&format!(
-            "SELECT count(*) FROM account_security_events WHERE (user_id = '{id}' OR actor_user_id = '{id}') AND event_type = 'EMAIL_VERIFIED'"
-        ))
-        .await,
-        1
-    );
-}
-
-#[tokio::test]
-async fn verify_reset_token_reports_a_pending_reset_without_consuming_it() {
-    let app = app_with_redis!();
-    let email = unique_email("resetprobe");
-    insert_user(&app, &email, "active").await;
-    let probe = |email: String| {
-        let app = &app;
-        async move {
-            app.post(
-                "/api/v1/auth/verify-reset-token",
-                Auth::None,
-                json!({ "email": email, "token": "123456" }),
-            )
-            .await
-        }
-    };
-
-    let none = probe(email.clone()).await;
-    assert_eq!(none.0, StatusCode::BAD_REQUEST, "{}", none.1);
-    let unknown = probe(unique_email("nobody")).await;
-    assert_eq!(unknown.0, StatusCode::BAD_REQUEST);
-    assert_eq!(none.1["error"]["message"], unknown.1["error"]["message"]);
-
-    app.state
-        .otp_service
-        .store_code(&email, "975310", OtpType::PasswordReset)
-        .await
-        .unwrap();
-    for _ in 0..2 {
-        let (s, v) = probe(email.clone()).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(v["valid"], true);
+    // Four more wrong guesses (five in all), then the sixth check is refused and the
+    // pending code is destroyed: even the right code no longer works.
+    for _ in 0..4 {
+        assert_eq!(
+            verify(email.clone(), "135790").await.0,
+            StatusCode::BAD_REQUEST
+        );
     }
-    // The probe never compares or consumes the code.
-    assert!(app
+    assert_eq!(
+        verify(email.clone(), "246810").await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert!(!app
         .state
         .otp_service
-        .has_code(&email, OtpType::PasswordReset)
+        .has_code(&email, OtpType::SignIn)
         .await
         .unwrap());
+    // Requesting (here: issuing) a new code does not reset the budget.
+    app.state
+        .otp_service
+        .store_code(&email, "975310", OtpType::SignIn)
+        .await
+        .unwrap();
+    assert_eq!(
+        verify(email.clone(), "975310").await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}'"
+        ))
+        .await,
+        0
+    );
 
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/verify-reset-token",
-            Auth::None,
-            json!({ "email": "not-an-email", "token": "123456" }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Unknown addresses share the same limit.
+    let other = unique_email("nobody2");
+    for _ in 0..5 {
+        assert_eq!(
+            verify(other.clone(), "000000").await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        verify(other, "000000").await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
 }
 
 // ---------------------------------------------------------------------------

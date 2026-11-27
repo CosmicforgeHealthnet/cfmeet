@@ -15,6 +15,7 @@ import {
   readCookie,
   refreshOutcome,
   sessionCookies,
+  deviceProofOf,
 } from "@/lib/auth/session-cookies";
 
 export const runtime = "nodejs";
@@ -41,6 +42,8 @@ export async function POST(request: Request) {
     return answer(401, failure("SESSION_ENDED", "Sign in again."), clearedSessionCookies(secure));
   }
   const persistent = readCookie(cookieHeader, HINT_COOKIE) === "persistent";
+  // Multi-device policy: the browser's proof of its device key travels with the refresh.
+  const deviceProof = deviceProofOf(await request.json().catch(() => null));
 
   let upstream: Response;
   try {
@@ -49,7 +52,7 @@ export async function POST(request: Request) {
     upstream = await fetch(accountRefreshUrl(process.env.ACCOUNT_API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      body: JSON.stringify(deviceProof ? { refresh_token: refreshToken, device_proof: deviceProof } : { refresh_token: refreshToken }),
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(10_000),

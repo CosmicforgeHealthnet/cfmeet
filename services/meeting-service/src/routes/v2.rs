@@ -15,7 +15,8 @@ use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
         artifacts, breakouts, calendar, collaboration as collab, compat, conferences, engagement,
-        invitations, members, organizations, participants, quality, realtime, spaces, specialized,
+        invitations, members, notifications, organizations, participants, quality, realtime,
+        spaces, specialized,
     },
     state::AppState,
 };
@@ -74,6 +75,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(members::list_members).post(members::add_member),
         )
         .route(
+            "/meeting-spaces/:id/members/team",
+            post(members::add_team_members),
+        )
+        .route(
             "/meeting-spaces/:id/members/:member_id",
             patch(members::update_member).delete(members::revoke_member),
         )
@@ -98,6 +103,14 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route("/conferences/:id", get(conferences::get_conference))
         // Blueprint Section 10: first-party calendar (agenda, RFC 5545 exports)
         .route("/me/conferences", get(calendar::my_conferences))
+        // Audit MF2: private, revocable calendar feed
+        .route(
+            "/me/calendar-feed",
+            get(calendar::get_calendar_feed)
+                .post(calendar::create_calendar_feed)
+                .delete(calendar::delete_calendar_feed),
+        )
+        .route("/calendar-feeds/:file", get(calendar::read_calendar_feed))
         .route(
             "/conferences/:id/calendar.ics",
             get(calendar::conference_calendar),
@@ -127,6 +140,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/conferences/:id/reschedule",
             post(conferences::reschedule_conference),
+        )
+        .route(
+            "/conferences/:id/extend",
+            post(conferences::extend_conference),
         )
         .route("/conferences/:id/join", post(conferences::join_conference))
         .route(
@@ -223,7 +240,7 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/conferences/:id/messages/:mid",
-            delete(collab::delete_message),
+            delete(collab::delete_message).patch(collab::edit_message),
         )
         .route(
             "/conferences/:id/chat-policy",
@@ -363,6 +380,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(artifacts::generate_report),
         )
         .route(
+            "/conferences/:id/exports/:artifact_type",
+            get(artifacts::export_report),
+        )
+        .route(
             "/conferences/:id/artifacts/:aid",
             get(artifacts::get_artifact).delete(artifacts::delete_artifact),
         )
@@ -416,6 +437,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/meeting-spaces/:id/registrations",
             get(specialized::list_registrations).post(specialized::register),
+        )
+        .route(
+            "/registrations/cancel",
+            post(specialized::cancel_own_registration),
         )
         .route(
             "/meeting-spaces/:id/registrations/:rid",
@@ -483,6 +508,15 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/messaging/principals/names",
             post(crate::handlers::v2::unified_messaging::principal_names),
         )
+        // ADR 0068: owner-delivered Messaging exports, claimed by their recipient.
+        .route(
+            "/messaging/export-deliveries",
+            get(crate::handlers::v2::unified_messaging::export_deliveries),
+        )
+        .route(
+            "/messaging/exports/:export_id/claim",
+            post(crate::handlers::v2::unified_messaging::claim_export),
+        )
         .route(
             "/messaging/relay/*path",
             get(crate::handlers::v2::unified_messaging::relay_get)
@@ -517,6 +551,30 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             patch(organizations::update_organization),
         )
         .route(
+            "/admin/organizations/:id/owners",
+            post(organizations::appoint_organization_owner),
+        )
+        .route(
+            "/admin/organizations/:id/provisioning/retry",
+            post(organizations::admin_retry_organization_provisioning),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service",
+            get(organizations::admin_get_organization_service_binding),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service/rotate",
+            post(organizations::admin_rotate_organization_service_binding),
+        )
+        .route(
+            "/admin/organization-event-delivery",
+            get(organizations::admin_organization_event_delivery),
+        )
+        .route(
+            "/admin/organization-event-delivery/replay",
+            post(organizations::admin_replay_organization_events),
+        )
+        .route(
             "/organizations",
             post(organizations::create_business_organization),
         )
@@ -528,6 +586,23 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/organizations/:id/members",
             get(organizations::list_organization_members),
+        )
+        .route(
+            "/organizations/:id/meeting-spaces",
+            get(organizations::list_organization_meeting_spaces),
+        )
+        .route(
+            "/organizations/:id/export",
+            get(organizations::export_organization),
+        )
+        .route(
+            "/organizations/:id/exports/:export_id/download",
+            post(organizations::download_organization_export),
+        )
+        .route(
+            "/organizations/:id/meeting-profile-policy",
+            get(organizations::get_organization_meeting_profile_policy)
+                .put(organizations::put_organization_meeting_profile_policy),
         )
         .route(
             "/organizations/:id/members/me/leave",
@@ -577,6 +652,21 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
                     crate::services::organization_calling::MAX_BODY_BYTES,
                 )),
         )
+        // Gap audit G3: a member's own calling endpoints and signaling credentials in the
+        // organization's Calling scope.
+        .route(
+            "/organizations/:id/member-calling/endpoints",
+            get(crate::handlers::v2::organization_member_calling::endpoints_list)
+                .post(crate::handlers::v2::organization_member_calling::endpoints_register),
+        )
+        .route(
+            "/organizations/:id/member-calling/endpoints/:endpoint_id",
+            delete(crate::handlers::v2::organization_member_calling::endpoints_revoke),
+        )
+        .route(
+            "/organizations/:id/member-calling/signaling-credentials",
+            post(crate::handlers::v2::organization_member_calling::signaling_credential),
+        )
         // Final closure (J-10): organization-scope Messaging relay and realtime tokens.
         .route(
             "/organizations/:id/messaging/relay/*path",
@@ -590,6 +680,17 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/organizations/:id/messaging/session-tokens",
             post(crate::handlers::v2::organization_messaging::messaging_session_token),
+        )
+        // Gap audit G6 / G7: organization moderation and team channels in the
+        // organization's own Messaging scope.
+        .route(
+            "/organizations/:id/messaging/moderation/*path",
+            get(crate::handlers::v2::organization_messaging::moderation_get)
+                .post(crate::handlers::v2::organization_messaging::moderation_post),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/messaging-channel",
+            put(crate::handlers::v2::organization_messaging::team_channel),
         )
         .route(
             "/organizations/:id/messaging/members/resolve",
@@ -642,6 +743,18 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        .route(
+            "/me/organization-invitations",
+            get(organizations::my_organization_invitations),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/accept",
+            post(organizations::accept_my_organization_invitation),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/decline",
+            post(organizations::decline_my_organization_invitation),
+        )
         // Blueprint Section 8: workspace context (per request; no switch endpoint)
         .route(
             "/me/workspaces",
@@ -653,9 +766,36 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         // Blueprint Section 9: the personal account profile
         .route(
+            "/me/phone",
+            get(crate::handlers::v2::account_phone::get_my_phone)
+                .patch(crate::handlers::v2::account_phone::update_privacy)
+                .delete(crate::handlers::v2::account_phone::remove_phone),
+        )
+        .route(
+            "/me/phone/verification",
+            post(crate::handlers::v2::account_phone::request_binding),
+        )
+        .route(
+            "/me/phone/confirm",
+            post(crate::handlers::v2::account_phone::confirm_binding),
+        )
+        .route(
             "/me/profile",
             get(crate::handlers::v2::account_profile::get_my_profile)
                 .patch(crate::handlers::v2::account_profile::update_my_profile),
+        )
+        // Gap audit A22: avatar upload, and the public image address
+        .route(
+            "/me/avatar",
+            put(crate::handlers::v2::account_profile::upload_my_avatar)
+                .delete(crate::handlers::v2::account_profile::remove_my_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::services::account_avatar::MAX_AVATAR_BYTES,
+                )),
+        )
+        .route(
+            "/avatars/:avatar_id",
+            get(crate::handlers::v2::account_profile::get_avatar),
         )
         // Blueprint Section 2: account sessions and the security audit
         .route(
@@ -667,12 +807,193 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::account_sessions::revoke_all_my_sessions),
         )
         .route(
+            "/me/sessions/revoke-others",
+            post(crate::handlers::v2::account_sessions::revoke_other_sessions),
+        )
+        .route(
             "/me/sessions/:session_id/revoke",
             post(crate::handlers::v2::account_sessions::revoke_my_session),
+        )
+        // Passwordless sign-in: step-up confirmation and secure email change
+        .route(
+            "/me/step-up/request",
+            post(crate::handlers::v2::account_identity::request_step_up),
+        )
+        .route(
+            "/me/step-up/verify",
+            post(crate::handlers::v2::account_identity::verify_step_up),
+        )
+        .route(
+            "/me/data-export",
+            get(crate::handlers::v2::account_identity::export_my_data),
+        )
+        .route(
+            "/me/account/delete",
+            post(crate::handlers::v2::account_identity::delete_my_account),
+        )
+        .route(
+            "/me/mfa",
+            get(crate::handlers::v2::account_identity::get_my_mfa),
+        )
+        .route(
+            "/me/mfa/totp/setup",
+            post(crate::handlers::v2::account_identity::setup_my_totp),
+        )
+        .route(
+            "/me/mfa/totp/confirm",
+            post(crate::handlers::v2::account_identity::confirm_my_totp),
+        )
+        .route(
+            "/me/mfa/disable",
+            post(crate::handlers::v2::account_identity::disable_my_mfa),
+        )
+        .route(
+            "/me/email/change/request",
+            post(crate::handlers::v2::account_identity::request_email_change),
+        )
+        .route(
+            "/me/email/change/verify",
+            post(crate::handlers::v2::account_identity::confirm_email_change),
+        )
+        .route(
+            "/admin/identity-duplicates",
+            get(crate::handlers::v2::account_sessions::admin_identity_duplicates),
+        )
+        .route(
+            "/admin/identity-duplicates/enforce",
+            post(crate::handlers::v2::account_sessions::admin_enforce_identity_uniqueness),
+        )
+        .route(
+            "/admin/users/:user_id/sessions/revoke",
+            post(crate::handlers::v2::account_sessions::admin_revoke_user_sessions),
         )
         .route(
             "/admin/audit-events",
             get(crate::handlers::v2::account_sessions::list_account_audit_events),
+        )
+        // Multi-device policy: linked devices, linking challenges, primary-mobile replacement
+        .route(
+            "/me/device-policy",
+            get(crate::handlers::v2::account_devices::get_device_policy),
+        )
+        .route(
+            "/me/devices",
+            get(crate::handlers::v2::account_devices::list_devices),
+        )
+        .route(
+            "/me/devices/current",
+            post(crate::handlers::v2::account_devices::declare_device),
+        )
+        .route(
+            "/me/devices/:device_id/revoke",
+            post(crate::handlers::v2::account_devices::revoke_device),
+        )
+        .route(
+            "/me/device-links",
+            get(crate::handlers::v2::account_devices::list_pending_links)
+                .post(crate::handlers::v2::account_devices::create_link),
+        )
+        .route(
+            "/me/device-links/:link_id",
+            get(crate::handlers::v2::account_devices::get_link),
+        )
+        .route(
+            "/me/device-links/:link_id/approve",
+            post(crate::handlers::v2::account_devices::approve_link),
+        )
+        .route(
+            "/me/device-links/:link_id/reject",
+            post(crate::handlers::v2::account_devices::reject_link),
+        )
+        .route(
+            "/me/device-links/:link_id/email-code",
+            post(crate::handlers::v2::account_devices::send_email_code),
+        )
+        .route(
+            "/me/device-links/:link_id/complete",
+            post(crate::handlers::v2::account_devices::complete_link),
+        )
+        .route(
+            "/me/device-links/:link_id/cancel",
+            post(crate::handlers::v2::account_devices::cancel_link),
+        )
+        .route(
+            "/me/security-events",
+            get(crate::handlers::v2::account_devices::list_my_security_events),
+        )
+        // ADR 0064 / 0065: CF Meet Apps (each behind its default-off flag).
+        .route(
+            "/oauth/authorize/context",
+            get(crate::handlers::v2::apps::authorize_context),
+        )
+        .route(
+            "/oauth/authorize/approve",
+            post(crate::handlers::v2::apps::authorize_decide),
+        )
+        .route("/me/apps", get(crate::handlers::v2::apps::list_my_apps))
+        .route(
+            "/me/apps/:grant_id",
+            delete(crate::handlers::v2::apps::revoke_my_app),
+        )
+        .route(
+            "/organizations/:id/apps",
+            get(crate::handlers::v2::apps::list_organization_apps),
+        )
+        .route(
+            "/organizations/:id/apps/:grant_id",
+            delete(crate::handlers::v2::apps::revoke_organization_app),
+        )
+        .route(
+            "/conferences/:id/apps",
+            get(crate::handlers::v2::apps::list_conference_apps),
+        )
+        .route(
+            "/conferences/:id/apps/:app_id/context",
+            post(crate::handlers::v2::apps::create_app_context),
+        )
+        .route(
+            "/app-context-keys",
+            get(crate::handlers::v2::apps::app_context_keys),
+        )
+        // Document 4 §3.1: Notification Service user APIs U1–U9 (Account-verified relay)
+        .route("/notifications", get(notifications::list_my_notifications))
+        .route(
+            "/notifications/unread-count",
+            get(notifications::get_my_notification_unread_count),
+        )
+        .route(
+            "/notifications/read",
+            post(notifications::mark_my_notifications_read).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
+        )
+        .route(
+            "/notifications/dismiss",
+            post(notifications::dismiss_my_notifications).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
+        )
+        .route(
+            "/notifications/preferences",
+            get(notifications::get_my_notification_preferences)
+                .put(notifications::update_my_notification_preferences)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    notifications::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/notifications/devices/:account_device_id/push",
+            put(notifications::register_my_push_endpoint)
+                .delete(notifications::remove_my_push_endpoint)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    notifications::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/notifications/:notification_id",
+            patch(notifications::update_my_notification).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

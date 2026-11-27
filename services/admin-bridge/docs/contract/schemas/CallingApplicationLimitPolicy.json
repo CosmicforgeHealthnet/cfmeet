@@ -1,0 +1,53 @@
+{
+  "description": "An application's limit policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application_id",
+    "requests_per_minute",
+    "max_concurrent_communications",
+    "telecom_spend_daily_limit_minor",
+    "telecom_spend_monthly_limit_minor",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "requests_per_minute": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_concurrent_communications": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "telecom_spend_daily_limit_minor": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "telecom_spend_monthly_limit_minor": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The level's limits version (expected_version of calling.limits.change)."
+    }
+  }
+}

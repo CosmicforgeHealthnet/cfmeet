@@ -1,11 +1,14 @@
 "use client";
 
+import { NiceSelect } from "@/components/ui/nice-select";
+
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useCreateInvitation, useOrganizationInvitations, useRevokeInvitation } from "@/hooks/v2/useBusinessOrganizations";
 import { invitableRoles, newIdempotencyKey } from "@/lib/organizations/organization-core";
 import type { BusinessOrganization, OrganizationInvitation } from "@/types/generated/meeting-service";
 import { OrgError, Section, TextField, formatDateTime } from "./shared";
+const niceLabel = (v: string) => v ? v.charAt(0) + v.slice(1).toLowerCase().replaceAll("_", " ") : "All";
 
 const STATUSES = ["", "PENDING", "ACCEPTED", "DECLINED", "REVOKED", "EXPIRED"] as const;
 
@@ -30,18 +33,7 @@ export default function OrganizationInvitations({ org }: { org: BusinessOrganiza
       <Section
         title="Invitations"
         actions={
-          <select
-            aria-label="Invitation status"
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s || "All"}
-              </option>
-            ))}
-          </select>
+          <NiceSelect className="w-44" value={status} onChange={setStatus} options={STATUSES.map((s) => ({ value: s, label: niceLabel(s) }))} />
         }
       >
         {invitations.isLoading && <p role="status" className="text-sm">Loading invitations…</p>}
@@ -106,13 +98,7 @@ function InviteForm({ org }: { org: BusinessOrganization }) {
           <label htmlFor="invite-role" className="font-medium">
             Role
           </label>
-          <select id="invite-role" className="h-10 rounded-md border border-input bg-background px-2" value={role} onChange={(e) => { setRole(e.target.value); setKey(null); }}>
-            {roles.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          <NiceSelect className="min-w-40" value={role} onChange={(v) => { setRole(v); setKey(null); }} options={roles.map((r) => ({ value: r, label: niceLabel(r) }))} />
         </div>
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <input type="checkbox" checked={sendEmail} onChange={(e) => { setSendEmail(e.target.checked); setKey(null); }} />

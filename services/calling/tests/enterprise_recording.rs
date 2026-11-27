@@ -1999,3 +1999,224 @@ async fn the_scopes_recordings_are_listed_filtered_paginated_and_audited() {
     conforms("RecordingAccessList", &audit.json);
     assert_eq!(audit.json["records"][0]["reason"], "LISTED");
 }
+
+/// A participant who joins while a recording runs (here: the target of a transfer) is
+/// given the notice at once; when the policy requires its consent it must grant it within
+/// the grace, or the recording stops (CONSENT_WITHDRAWN).
+#[tokio::test]
+async fn a_participant_who_joins_a_recorded_call_gets_the_notice_and_must_consent() {
+    use calling::signaling::RealtimeSignalBus;
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    let third = rec.desk("third").await;
+    e.extension("4240", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", true, "ALL_PARTICIPANTS", 600)
+        .await;
+    for grants in [true, false] {
+        let call = rec.connected(&caller, "4240", &callee).await;
+        for d in [&caller, &callee] {
+            let r = rec.consent(call, d, "GRANTED").await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+        let r = rec.start(call, Some(caller.principal.id().as_uuid())).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let recording = recording_id(&r);
+        let mut third_signals = e.h().bus.subscribe(third.phone.endpoint);
+
+        // The callee hands its place to the third desk, which answers and connects.
+        let from =
+            e.a.participant_of(call, callee.principal.id().as_uuid())
+                .await;
+        let (_, v) = e.a.state(call).await;
+        let r =
+            e.a.transfer(call, from, &third.principal, v, &Uuid::new_v4().to_string())
+                .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let inv =
+            e.a.invitation_for(call, third.phone.endpoint)
+                .await
+                .unwrap();
+        let (_, v) = e.a.state(call).await;
+        let r = e.a.accept(call, inv, &third.phone, v).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let session = e.a.session_on(call, third.phone.endpoint).await.unwrap();
+        e.a.connect(call, session).await;
+        let joined =
+            e.a.participant_of(call, third.principal.id().as_uuid())
+                .await;
+
+        // The notice reached the newcomer, which still has to consent.
+        let mut notices = Vec::new();
+        while let Some(signal) = third_signals.try_recv() {
+            if signal["type"] == "call.recording_started" {
+                notices.push(signal);
+            }
+        }
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        let data = &notices[0]["data"];
+        assert_eq!(data["recordingId"], recording.to_string());
+        assert_eq!(data["participantId"], joined.to_string());
+        assert_eq!(data["lateJoin"], true);
+        assert_eq!(data["noticeRequired"], true);
+        assert_eq!(data["consentRequired"], true);
+
+        // Within the grace nothing changes.
+        e.h().clock.advance(chrono::Duration::seconds(30));
+        rec.tick().await;
+        assert_eq!(rec.recording_state(recording).await, "RECORDING::");
+        if grants {
+            let r = rec.consent(call, &third, "GRANTED").await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+            e.h().clock.advance(chrono::Duration::seconds(31));
+            rec.tick().await;
+            assert_eq!(rec.recording_state(recording).await, "RECORDING::");
+            // A later withdrawal by the newcomer stops it like any participant's.
+            rec.consent(call, &third, "DECLINED").await;
+            assert_eq!(
+                rec.recording_state(recording).await,
+                "STOPPING:CONSENT_WITHDRAWN:"
+            );
+        } else {
+            e.h().clock.advance(chrono::Duration::seconds(31));
+            rec.tick().await;
+            assert_eq!(
+                rec.recording_state(recording).await,
+                "STOPPING:CONSENT_WITHDRAWN:"
+            );
+        }
+        let (_, v) = e.a.state(call).await;
+        e.a.command(call, "end", v).await;
+    }
+}
+
+/// ADR 0068 A4: `calling.recording.delete` from the admin bridge (R4) takes the
+/// administrator's safe path — DELETING, the worker removes the object — at the
+/// recording's version, never under a retention hold, never without the second person.
+#[tokio::test]
+async fn the_admin_bridge_deletes_a_recording_only_by_the_safe_path() {
+    use common::bridge::{self, Attribution};
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let h = e.h();
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4260", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    let (call, recording) = rec.stopped_recording(&caller, "4260", &callee).await;
+    rec.deliver(recording, call, &wav(2000)).await;
+    assert_eq!(rec.recording_state(recording).await, "READY:CALL_ENDED:");
+    let scope = e.a.w.scope();
+    let t = scope.tenant_id().as_uuid();
+    let version: i64 = strings(
+        h.conn(),
+        &format!("SELECT version::text FROM call_recordings WHERE id = '{recording}'"),
+    )
+    .await
+    .pop()
+    .unwrap()
+    .parse()
+    .unwrap();
+    let path = format!("/internal/v1/operator/recordings/{recording}/delete");
+    let body = |v: i64| json!({ "tenantId": t, "expectedVersion": v });
+
+    // R4: never without the approval.
+    let r = bridge::command(
+        h,
+        &path,
+        body(version),
+        Attribution::Operator,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    // A retention hold on the recording blocks it: nothing changes.
+    let hold = Uuid::new_v4();
+    let r = bridge::command(
+        h,
+        "/internal/v1/operator/retention-holds",
+        json!({ "tenantId": t, "applicationId": scope.application_id().as_uuid(),
+                "environmentId": scope.environment_id().as_uuid(),
+                "dataClass": "RECORDING_ARTIFACT", "resourceId": recording, "reasonCode": "DISPUTE" }),
+        Attribution::Approved,
+        hold,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let held = Uuid::new_v4();
+    let r = bridge::command(h, &path, body(version), Attribution::Approved, held).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CONFLICT");
+    assert_eq!(rec.recording_state(recording).await, "READY:CALL_ENDED:");
+    assert_eq!(
+        bridge::operation(h, held).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let r = bridge::command(
+        h,
+        &format!("/internal/v1/operator/retention-holds/{hold}/release"),
+        json!({ "tenantId": t }),
+        Attribution::Approved,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // A stale version, another tenant: nothing changes.
+    let r = bridge::command(
+        h,
+        &path,
+        body(version + 5),
+        Attribution::Approved,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(r.json["error"]["code"], "VERSION_CONFLICT", "{}", r.text);
+    let r = bridge::command(
+        h,
+        &path,
+        json!({ "tenantId": Uuid::new_v4(), "expectedVersion": version }),
+        Attribution::Approved,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+
+    // Applied: DELETING (the worker removes the object), access-audited, recorded.
+    let key = Uuid::new_v4();
+    let r = bridge::command(h, &path, body(version), Attribution::Approved, key).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    common::contracts::check_openapi_component("OperatorCommandResult", &r.json);
+    assert_eq!(r.json["status"], "DELETING");
+    assert_eq!(r.json["version"], json!((version + 1).to_string()));
+    assert!(r.json["resource"].get("objectKey").is_none());
+    assert!(
+        !r.text.contains("recordings/"),
+        "never an object key: {}",
+        r.text
+    );
+    let record = bridge::operation(h, key).await;
+    assert_eq!(record.json["source_status"], "DELETING");
+    let audited = e
+        .count(&format!(
+            "SELECT count(*) FROM call_recording_access_audit WHERE recording_id = '{recording}' \
+             AND operation = 'DELETE' AND outcome = 'GRANTED' AND actor_kind = 'SYSTEM' \
+             AND reason = 'OPERATOR_REQUEST' AND correlation_id = 'op_{}'",
+            key.simple()
+        ))
+        .await;
+    assert_eq!(audited, 1);
+    // A replay applies nothing.
+    let r = bridge::command(h, &path, body(version), Attribution::Approved, key).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["status"], "DELETING");
+    // The worker finishes the safe path.
+    rec.tick().await;
+    assert!(rec.recording_state(recording).await.starts_with("DELET"));
+}

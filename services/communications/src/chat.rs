@@ -4,6 +4,7 @@
 use crate::{
     error::{Error, Result},
     model::*,
+    preference_authority::{account_view_from_service, Authority},
     relationships::uuid_field,
     store::{execute, one, rows},
     State,
@@ -61,15 +62,50 @@ impl State {
     }
 
     // ---- C01/C02 ----
+    /// C01. Roadmap N10: with the preference switch on SERVICE, `notifications` /
+    /// `mutedUntil` come from the Notification Service (media auto-download and the row
+    /// version stay the Hub's); a service failure is a 503, never a stale answer.
     pub async fn get_conversation_preferences(
         &self,
         scope: &DelegatedPlatformContext,
         p: &Profile,
         conversation: Uuid,
     ) -> Result<Value> {
-        self.conversation(scope, p, conversation, None).await?;
+        self.conversation_preferences_view(scope, p, conversation, true)
+            .await
+    }
+    /// The conversation preference view; `strict = false` (embedded in U05) falls back to
+    /// the Hub mirror when the Notification Service cannot answer.
+    pub async fn conversation_preferences_view(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        conversation: Uuid,
+        strict: bool,
+    ) -> Result<Value> {
+        let c = self.conversation(scope, p, conversation, None).await?;
+        let mentions = mentions_available(&c);
         let row:Option<Value>=one(&self.store.db,"SELECT to_jsonb(c) doc FROM communication_conversation_preferences c WHERE owner_profile_id=$1 AND conversation_id=$2",vec![p.id.into(),conversation.into()]).await?;
-        Ok(preference_view(conversation, row.as_ref()))
+        if self.preference_authority(&self.store.db, false).await? == Authority::Service {
+            match self
+                .service_conversation_row(p, conversation, row.clone())
+                .await
+            {
+                Ok(merged) => {
+                    let mut view = preference_view(conversation, Some(&merged));
+                    view["mentionsAvailable"] = json!(mentions);
+                    return Ok(view);
+                }
+                Err(e) if strict || !fallback_allowed(&e) => return Err(e),
+                Err(_) => tracing::warn!(
+                    service = "communications",
+                    "conversation preferences embedded from the Hub mirror: Notification Service unavailable"
+                ),
+            }
+        }
+        let mut view = preference_view(conversation, row.as_ref());
+        view["mentionsAvailable"] = json!(mentions);
+        Ok(view)
     }
     pub async fn put_conversation_preferences(
         &self,
@@ -101,8 +137,18 @@ impl State {
         {
             return Err(Error::Validation);
         }
-        self.conversation(scope, p, conversation, None).await?;
+        let c = self.conversation(scope, p, conversation, None).await?;
+        let mentions = mentions_available(&c);
+        // K11: "Mentions only" is refused where mentions cannot be read (private, end-to-end
+        // encrypted chats): it would silently behave like a mute.
+        if input.notifications == "MENTIONS" && !mentions {
+            return Err(Error::Validation);
+        }
         let txn = self.store.begin().await?;
+        let authority = self.preference_authority(&txn, true).await?;
+        if authority == Authority::Freeze {
+            return Err(Error::PreferencesFrozen);
+        }
         let op = "conversation.preferences";
         if let Some(v) = self
             .store
@@ -132,6 +178,21 @@ impl State {
             one(&txn,"UPDATE communication_conversation_preferences c SET notifications=$3,muted_until=$4,media_auto_download=$5,version=c.version+1,updated_at=now() WHERE owner_profile_id=$1 AND conversation_id=$2 AND version=$6 RETURNING to_jsonb(c) doc",values).await?
         };
         let row = row.ok_or(Error::Version)?;
+        if authority == Authority::Service {
+            // N10: the Notification Service is the single writer of the notification
+            // level; the Hub row (media auto-download, version, mirror of the level) is
+            // committed only once the service accepted it.
+            let mut entry = json!({"notifications":input.notifications});
+            if let Some(t) = input.muted_until {
+                entry["mutedUntil"] = json!(t);
+            }
+            self.service_update_entry(
+                p,
+                json!({"conversations":{conversation.to_string():entry}}),
+                key,
+            )
+            .await?;
+        }
         self.store
             .change(
                 &txn,
@@ -141,7 +202,8 @@ impl State {
                 row["version"].as_i64(),
             )
             .await?;
-        let result = preference_view(conversation, Some(&row));
+        let mut result = preference_view(conversation, Some(&row));
+        result["mentionsAvailable"] = json!(mentions);
         self.store
             .finish_idempotency(&txn, p, op, key, result.clone())
             .await?;
@@ -279,43 +341,81 @@ impl State {
         let limit = limit.min(50);
         let items:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(s) doc FROM communication_saved_messages s WHERE owner_profile_id=$1 AND ($2='00000000-0000-0000-0000-000000000000'::uuid OR (created_at,id)<(SELECT created_at,id FROM communication_saved_messages WHERE id=$2 AND owner_profile_id=$1)) ORDER BY created_at DESC,id DESC LIMIT $3",vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
         let more = items.len() > limit as usize;
-        let mut data = Vec::new();
-        let mut last = None;
+        let items: Vec<Value> = items.into_iter().take(limit as usize).collect();
+        let last = match items.last() {
+            Some(i) => Some(uuid_field(i, "id")?),
+            None => None,
+        };
         // Visibility is rechecked live: leaving a group, deletion, expiry or clear-for-me
-        // makes an item unavailable without deleting the user's reference.
-        let mut marks: BTreeMap<Uuid, i64> = BTreeMap::new();
-        for item in items.into_iter().take(limit as usize) {
-            let id = uuid_field(&item, "id")?;
-            last = Some(id);
-            let conversation = uuid_field(&item, "conversation_id")?;
-            let message = uuid_field(&item, "message_id")?;
-            let mark = match marks.get(&conversation) {
-                Some(m) => *m,
-                None => {
-                    let m = self.watermark(p, conversation).await?;
-                    marks.insert(conversation, m);
-                    m
+        // makes an item unavailable without deleting the user's reference. The page's
+        // clear-for-me watermarks come in one read.
+        let marks: Vec<Value> = rows(&self.store.db,"SELECT jsonb_build_object('c',conversation_id,'m',cleared_through_sequence) doc FROM communication_conversation_watermarks WHERE owner_profile_id=$1 AND conversation_id IN (SELECT jsonb_array_elements_text($2::jsonb)::uuid)",
+            vec![p.id.into(),json!(items.iter().map(|i| i["conversation_id"].clone()).collect::<Vec<_>>()).into()]).await?;
+        let marks: BTreeMap<Uuid, i64> = marks
+            .iter()
+            .filter_map(|m| Some((Uuid::parse_str(m["c"].as_str()?).ok()?, m["m"].as_i64()?)))
+            .collect();
+        let mut pending = Vec::new();
+        for item in &items {
+            let conversation = uuid_field(item, "conversation_id")?;
+            let cleared = item["message_sequence"].as_i64().unwrap_or(0)
+                <= marks.get(&conversation).copied().unwrap_or(0);
+            if !cleared {
+                pending.push((conversation, uuid_field(item, "message_id")?));
+            }
+        }
+        // K9: every item is checked with Messaging in ONE batched call. A Messaging
+        // problem marks the affected items unavailable instead of failing the whole list.
+        let checked = if pending.is_empty() {
+            Ok(Default::default())
+        } else {
+            match self.messages_access(scope, p, &pending).await {
+                // An older Messaging image without the batched route: one call per item.
+                Err(Error::NotFound) => {
+                    let mut one_by_one = std::collections::HashMap::new();
+                    for (c, m) in &pending {
+                        match self.conversation(scope, p, *c, Some(*m)).await {
+                            Ok(conv) => {
+                                let state = conv
+                                    .message
+                                    .as_ref()
+                                    .and_then(|v| v["state"].as_str())
+                                    .unwrap_or("NOT_FOUND")
+                                    .to_owned();
+                                one_by_one.insert((*c, *m), Some(state));
+                            }
+                            Err(Error::NotFound) => {
+                                one_by_one.insert((*c, *m), None);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Ok(one_by_one)
                 }
-            };
-            let reason = if item["message_sequence"].as_i64().unwrap_or(0) <= mark {
+                other => other,
+            }
+        };
+        let checked = checked.unwrap_or_default();
+        let mut data = Vec::new();
+        for item in &items {
+            let conversation = uuid_field(item, "conversation_id")?;
+            let message = uuid_field(item, "message_id")?;
+            let reason = if !pending.contains(&(conversation, message)) {
                 Some("CLEARED_FOR_ME")
             } else {
-                match self
-                    .conversation(scope, p, conversation, Some(message))
-                    .await
-                {
-                    Ok(c) => match c.message.as_ref().and_then(|m| m["state"].as_str()) {
-                        Some("VISIBLE") => None,
-                        Some("DELETED") => Some("DELETED"),
-                        Some("EXPIRED") => Some("EXPIRED"),
-                        Some("HIDDEN_FOR_ME") => Some("HIDDEN_FOR_ME"),
+                match checked.get(&(conversation, message)) {
+                    None => Some("TEMPORARILY_UNAVAILABLE"),
+                    Some(None) => Some("NOT_A_MEMBER"),
+                    Some(Some(state)) => match state.as_str() {
+                        "VISIBLE" => None,
+                        "DELETED" => Some("DELETED"),
+                        "EXPIRED" => Some("EXPIRED"),
+                        "HIDDEN_FOR_ME" => Some("HIDDEN_FOR_ME"),
                         _ => Some("NOT_FOUND"),
                     },
-                    Err(Error::NotFound) => Some("NOT_A_MEMBER"),
-                    Err(e) => return Err(e),
                 }
             };
-            data.push(saved_view(&item, reason.is_none(), reason));
+            data.push(saved_view(item, reason.is_none(), reason));
         }
         Ok(json!({"schemaVersion":1,"data":data,"nextCursor":if more {last} else {None}}))
     }
@@ -351,9 +451,32 @@ impl State {
     }
 
     // ---- C17/C18 ----
+    /// C17. Roadmap N10: with the preference switch on SERVICE this is a facade over U6
+    /// (same schema; the version is the service's); a service failure is a 503.
     pub async fn get_notification_preferences(&self, p: &Profile) -> Result<Value> {
+        if self.preference_authority(&self.store.db, false).await? == Authority::Service {
+            return account_view_from_service(&self.service_preferences(p).await?);
+        }
+        self.local_notification_preferences(p).await
+    }
+    async fn local_notification_preferences(&self, p: &Profile) -> Result<Value> {
         let row:Option<Value>=one(&self.store.db,"SELECT to_jsonb(n) doc FROM communication_notification_preferences n WHERE profile_id=$1",vec![p.id.into()]).await?;
         Ok(notification_view(row.as_ref()))
+    }
+    /// The preferences embedded in U01 bootstrap and N07 delivery status: as C17, but an
+    /// unavailable Notification Service falls back to the Hub mirror (which holds every
+    /// change made through these endpoints) instead of failing the whole aggregate.
+    pub async fn notification_preferences_embedded(&self, p: &Profile) -> Result<Value> {
+        match self.get_notification_preferences(p).await {
+            Err(e) if fallback_allowed(&e) => {
+                tracing::warn!(
+                    service = "communications",
+                    "notification preferences embedded from the Hub mirror: Notification Service unavailable"
+                );
+                self.local_notification_preferences(p).await
+            }
+            r => r,
+        }
     }
     pub async fn put_notification_preferences(
         &self,
@@ -378,10 +501,47 @@ impl State {
             return Err(Error::Validation);
         }
         let txn = self.store.begin().await?;
+        let authority = self.preference_authority(&txn, true).await?;
+        if authority == Authority::Freeze {
+            return Err(Error::PreferencesFrozen);
+        }
         let op = "notification-preferences.put";
         if let Some(v) = self.store.idempotency(&txn, p, op, key, &body).await? {
             txn.commit().await?;
             return Ok(v);
+        }
+        if authority == Authority::Service {
+            // N10: U7 decides (optimistic version of the service document); the Hub row is
+            // then updated as a mirror in the same transaction, never before.
+            let accepted = self
+                .service_update(
+                    p,
+                    json!({"expectedVersion":i.expected_version,"categories":{
+                        "directMessages":i.direct_messages,"groupMessages":i.group_messages,
+                        "incomingCalls":i.incoming_calls,"missedCalls":i.missed_calls,
+                        "contactRequests":i.contact_requests,"groupInvitations":i.group_invitations,
+                        "meetingInvitations":i.meeting_invitations}}),
+                    key,
+                )
+                .await?
+                .ok_or(Error::Version)?;
+            let result = account_view_from_service(&accepted)?;
+            execute(&txn,"INSERT INTO communication_notification_preferences AS n (profile_id,direct_messages,group_messages,incoming_calls,missed_calls,contact_requests,group_invitations,meeting_invitations) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (profile_id) DO UPDATE SET direct_messages=EXCLUDED.direct_messages,group_messages=EXCLUDED.group_messages,incoming_calls=EXCLUDED.incoming_calls,missed_calls=EXCLUDED.missed_calls,contact_requests=EXCLUDED.contact_requests,group_invitations=EXCLUDED.group_invitations,meeting_invitations=EXCLUDED.meeting_invitations,version=n.version+1,updated_at=now()",
+                vec![p.id.into(),i.direct_messages.into(),i.group_messages.into(),i.incoming_calls.into(),i.missed_calls.into(),i.contact_requests.into(),i.group_invitations.into(),i.meeting_invitations.into()]).await?;
+            self.store
+                .change(
+                    &txn,
+                    p.id,
+                    "NOTIFICATION_PREFERENCE",
+                    Some(p.id),
+                    result["version"].as_i64(),
+                )
+                .await?;
+            self.store
+                .finish_idempotency(&txn, p, op, key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
         }
         let values = vec![
             p.id.into(),
@@ -500,8 +660,7 @@ impl State {
             if a["messageSequence"].as_i64().is_some_and(|s| s <= mark) {
                 continue;
             }
-            data.push(json!({"attachmentId":a["attachmentId"],"messageId":a["messageId"],"state":a["state"],
-                "sizeBytes":a["sizeBytes"],"mediaClass":a["mediaClass"],"createdAt":a["createdAt"]}));
+            data.push(media_item(conversation, a));
         }
         Ok(
             json!({"schemaVersion":1,"conversationId":conversation,"data":data,"nextCursor":v["nextCursor"],
@@ -509,10 +668,74 @@ impl State {
         )
     }
 }
+
+/// U14 / M3: one shared-media item. MANAGED files carry the sanitized name, media type
+/// and kind Messaging holds; PRIVATE_E2EE files carry none of them (they live in the
+/// MLS-encrypted descriptor and are shown only after the device decrypts it). Retrieval
+/// is a reference to the normal access-checked grant operation of THIS conversation and
+/// attachment — `download.path` / `thumbnail.path` relative to the Messaging client API,
+/// reached by CF Meet apps through `/api/v2/messaging/relay/` — never a URL or storage
+/// key; anything else Messaging might send is dropped.
+pub fn media_item(conversation: Uuid, a: &Value) -> Value {
+    let managed = a["securityProfile"] == "MANAGED";
+    let id = a["attachmentId"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok());
+    let grant = |field: &str, operation: &str, thumbnail: bool| -> Value {
+        let Some(id) = id else { return Value::Null };
+        let expected = format!("v1/conversations/{conversation}/attachments/{id}/{operation}");
+        if a[field]["path"].as_str() != Some(expected.as_str()) || a[field]["method"] != "POST" {
+            return Value::Null;
+        }
+        if thumbnail {
+            json!({"method":"POST","path":expected,"mediaType":"image/png"})
+        } else {
+            json!({"method":"POST","path":expected})
+        }
+    };
+    let text = |key: &str, max: usize| {
+        a[key]
+            .as_str()
+            .filter(|t| managed && !t.is_empty() && t.chars().count() <= max)
+            .filter(|t| !t.chars().any(char::is_control))
+            .map(str::to_string)
+    };
+    let kind = a["kind"]
+        .as_str()
+        .filter(|k| managed && ["IMAGE", "DOCUMENT", "FILE", "VOICE_NOTE", "VIDEO"].contains(k));
+    let profile = a["securityProfile"]
+        .as_str()
+        .filter(|p| ["MANAGED", "PRIVATE_E2EE"].contains(p));
+    json!({"attachmentId":a["attachmentId"],"messageId":a["messageId"],"state":a["state"],
+        "sizeBytes":a["sizeBytes"],"mediaClass":a["mediaClass"],"createdAt":a["createdAt"],
+        "securityProfile":profile,"kind":kind,"fileName":text("fileName", 255),"mediaType":text("mediaType", 255),
+        "metadataLocation":match profile {
+            Some("MANAGED") => Some("SERVER"),
+            Some(_) => Some("ENCRYPTED_DESCRIPTOR"),
+            None => None,
+        },
+        "download":grant("download", "download-grants", false),
+        "thumbnail":if managed {grant("thumbnail", "thumbnail-grants", true)} else {Value::Null}})
+}
+/// K11: whether "Mentions only" works in this conversation: Messaging signals mentions
+/// for MANAGED messages only; in end-to-end encrypted (private) chats they cannot be read
+/// until encrypted mentions exist (`crate::policy::MENTIONS_IN_PRIVATE_CHATS`).
+fn mentions_available(c: &crate::owners::Conversation) -> bool {
+    c.security_profile == "MANAGED" || crate::policy::MENTIONS_IN_PRIVATE_CHATS
+}
 fn saved_view(r: &Value, available: bool, reason: Option<&str>) -> Value {
     json!({"schemaVersion":1,"savedId":r["id"],"conversationId":r["conversation_id"],"messageId":r["message_id"],
         "messageSequence":r["message_sequence"],"savedAt":r["created_at"],"available":available,"unavailableReason":reason})
 }
+/// Embedded views may fall back to the Hub mirror on these (never on a validation,
+/// version or database error).
+fn fallback_allowed(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Unavailable | Error::RateLimited | Error::DependencyNotConfigured
+    )
+}
+
 fn notification_view(r: Option<&Value>) -> Value {
     let get = |k: &str| r.map(|r| r[k] == true).unwrap_or(true);
     json!({"schemaVersion":1,"version":r.and_then(|r| r["version"].as_i64()).unwrap_or(0),

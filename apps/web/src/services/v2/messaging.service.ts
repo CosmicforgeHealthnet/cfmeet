@@ -12,7 +12,7 @@ export const messagingService = {
   me: () => call<MessagingIdentity>("GET", "/messaging/me"),
   directory: (q?: string) => call<{ people: Colleague[] }>("GET", `/messaging/directory${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   resolve: (userIds: string[]) => call<{ people: { userId: string; principalId: string }[] }>("POST", "/messaging/directory/resolve", { userIds }),
-  names: (principalIds: string[]) => call<{ principals: { principalId: string; displayName: string }[] }>("POST", "/messaging/principals/names", { principalIds }),
+  names: (principalIds: string[]) => call<{ principals: { principalId: string; displayName: string; alias?: string | null }[] }>("POST", "/messaging/principals/names", { principalIds }),
   registrationChallenge: () => call<RegistrationChallenge>("POST", "/messaging/devices/registration-challenges", {}),
   registerDevice: (challengeId: string, keyPackage: string, displayLabel: string) =>
     call<MessagingDevice>("POST", "/messaging/devices", { challengeId, keyPackage, displayLabel }),

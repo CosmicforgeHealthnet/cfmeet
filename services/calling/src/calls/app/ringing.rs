@@ -82,6 +82,8 @@ pub struct RecoveredInvitation {
     pub expires_at: String,
     pub terminal_reason: Option<&'static str>,
     pub session_id: Option<Uuid>,
+    /// The Call initiator's display name, when the Call was created with one.
+    pub caller_display_name: Option<String>,
 }
 
 /// What a finished ring round led to.
@@ -199,9 +201,19 @@ impl AppCallService {
                 current: call.version,
             });
         }
+        // Answering is proof of receipt: an offer the device never acknowledged moves
+        // PENDING → RINGING first (same transaction), and a DIALING Call rings first.
+        let newly_received = invitation.status == InvitationStatus::Pending;
+        let invitation = self
+            .calls
+            .mark_invitation_ringing_in(&txn, invitation)
+            .await?;
         if invitation.status != InvitationStatus::Ringing {
             return Err(CallError::InvitationNotActionable);
         }
+        let (call, _) = self
+            .ring_on_receipt_in(&txn, &cmd, call, &invitation, newly_received)
+            .await?;
         let transfer = match invitation.purpose {
             InvitationPurpose::Call => {
                 if !matches!(
@@ -437,6 +449,11 @@ impl AppCallService {
             // A PSTN_TO_APP Call: the answered app side is now bridged to the public leg.
             self.after_application_answer(call.id).await;
         }
+        if !answered {
+            // Joining a live Call (an answered transfer, a later group answer): a recording
+            // in progress gives this participant its notice (and asks for its consent).
+            self.recording_notice_on_join(call.id, participant.id).await;
+        }
         Ok(CommandOutcome {
             body,
             replayed: false,
@@ -498,6 +515,15 @@ impl AppCallService {
                 current: call.version,
             });
         }
+        // Declining is proof of receipt too (PENDING → RINGING → DECLINED; the Call rang).
+        let newly_received = invitation.status == InvitationStatus::Pending;
+        let invitation = self
+            .calls
+            .mark_invitation_ringing_in(&txn, invitation)
+            .await?;
+        let (call, _) = self
+            .ring_on_receipt_in(&txn, &cmd, call, &invitation, newly_received)
+            .await?;
         let invitation = self
             .calls
             .finish_invitation_in(
@@ -579,6 +605,9 @@ impl AppCallService {
                 if round.is_empty() || round.iter().any(|i| i.status.is_live()) {
                     return Ok(RingOutcome::Unchanged);
                 }
+                // A direct call whose callee has a forwarding rule or a mailbox gets its
+                // routing context now (BUSY / NO_ANSWER continuation below).
+                self.direct_routing_at_ring_end_in(txn, call).await?;
                 // Enterprise routing first: the next ordered ring-group member or a
                 // fallback takes the SAME Call before any no-answer outcome.
                 match self.enterprise_continue_in(txn, cmd, call).await? {
@@ -785,6 +814,196 @@ impl AppCallService {
         }
     }
 
+    /// Receipt acknowledgement (C1): the endpoint's device confirms, over its own signaling
+    /// credential, that it received ring offer `invitation_id` and is alerting its user.
+    /// The offer moves PENDING → RINGING; the first acknowledged offer of a DIALING
+    /// application Call moves the Call (and its dialing legs) to RINGING, so the caller sees
+    /// "Ringing" only once a device of the callee actually rings. Idempotent: repeating it
+    /// on a RINGING offer changes nothing. A finished, answered, expired or foreign offer is
+    /// refused with the same errors as accept.
+    ///
+    /// The endpoint acknowledges over its own signaling credential; an application backend
+    /// that learns of the delivery (e.g. a push receipt) may acknowledge for an explicit
+    /// endpoint of its scope (API credential, `calls.write`), as for accept / decline.
+    pub async fn acknowledge_invitation(
+        &self,
+        actor: InvitationActor,
+        call_id: Option<CallId>,
+        invitation_id: CallInvitationId,
+    ) -> CallResult<Value> {
+        let cmd = actor.cmd();
+        let scope = cmd.scope();
+        let txn = self.db().begin().await?;
+        let located = self
+            .invitation_for(&txn, &actor, call_id, invitation_id)
+            .await?;
+        let call = self
+            .calls
+            .lock_call(&txn, scope, CallId::from_uuid(located.call_id))
+            .await?;
+        let invitation = self
+            .calls
+            .lock_invitation(&txn, &call, invitation_id)
+            .await?;
+        match invitation.status {
+            InvitationStatus::AnsweredElsewhere => return Err(CallError::AnsweredElsewhere),
+            InvitationStatus::Expired => return Err(CallError::InvitationExpired),
+            InvitationStatus::Accepted
+            | InvitationStatus::Declined
+            | InvitationStatus::Cancelled => return Err(CallError::InvitationNotActionable),
+            InvitationStatus::Pending | InvitationStatus::Ringing => {}
+        }
+        if invitation.expires_at <= self.calls.now() {
+            return Err(CallError::InvitationExpired);
+        }
+        if call.current_state.is_terminal() || call.current_state == CallState::Ending {
+            return Err(CallError::InvitationNotActionable);
+        }
+        let acknowledged = invitation.status == InvitationStatus::Pending;
+        let invitation = self
+            .calls
+            .mark_invitation_ringing_in(&txn, invitation)
+            .await?;
+        let mut pending = PendingSignals::default();
+        let correlation = cmd.correlation_id().as_str().to_string();
+        let (call, rang) = self
+            .ring_on_receipt_in(&txn, &cmd, call, &invitation, acknowledged)
+            .await?;
+        if rang {
+            self.call_signal(
+                &txn,
+                &mut pending,
+                SignalType::Ringing,
+                &call,
+                &correlation,
+                Map::new(),
+            )
+            .await?;
+        }
+        txn.commit().await?;
+        self.publish(pending).await;
+        if acknowledged {
+            crate::metrics::inc("calling_invitations_acknowledged_total", &[]);
+            tracing::info!(call_id = %call.id, invitation_id = %invitation.id, call_state = %call.current_state,
+                "ring offer acknowledged by the endpoint");
+        }
+        Ok(json!({
+            "invitationId": invitation.id,
+            "callId": call.id,
+            "status": invitation.status.as_str(),
+            "ringingAt": invitation.ringing_at.map(time),
+            "expiresAt": time(invitation.expires_at),
+            "callState": call.current_state.as_str(),
+            "callVersion": call.version,
+        }))
+    }
+
+    /// The first receipt of an offer (`newly_received`: it just moved PENDING → RINGING) of a
+    /// DIALING application Call: the Call and its dialing legs move to RINGING, so every
+    /// answered Call keeps its ringing evidence (`ringingAt`). Returns the Call and whether
+    /// it moved.
+    async fn ring_on_receipt_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: calls::Model,
+        invitation: &call_invitations::Model,
+        newly_received: bool,
+    ) -> CallResult<(calls::Model, bool)> {
+        if !newly_received
+            || invitation.purpose != InvitationPurpose::Call
+            || call.current_state != CallState::Dialing
+        {
+            return Ok((call, false));
+        }
+        for leg in crate::models::call_legs::Entity::find()
+            .filter(crate::models::call_legs::Column::CallId.eq(call.id))
+            .filter(crate::models::call_legs::Column::State.eq(LegState::Dialing))
+            .all(txn)
+            .await?
+        {
+            self.calls
+                .move_leg_in(txn, cmd, &call, leg, LegState::Ringing, None)
+                .await?;
+        }
+        let call = self
+            .calls
+            .transition_in(txn, cmd, &call, call.version, CallAction::MarkRinging)
+            .await?
+            .call;
+        Ok((call, true))
+    }
+
+    /// Repair (C2): closes the live offers of one Call that is already ENDING or terminal
+    /// (CANCELLED with CALL_CANCELLED / CALL_TERMINATED evidence, RING_CANCELLED signals).
+    /// The lifecycle closes offers in the same transaction as the state change; this only
+    /// repairs rows written before it did. Returns `None` when another instance holds the
+    /// Call (retried next round).
+    pub(crate) async fn close_finished_call_invitations(
+        &self,
+        call_id: Uuid,
+    ) -> CallResult<Option<usize>> {
+        let txn = self.db().begin().await?;
+        let Some(call) = calls::Entity::find_by_id(call_id)
+            .lock_with_behavior(
+                sea_orm::sea_query::LockType::Update,
+                sea_orm::sea_query::LockBehavior::SkipLocked,
+            )
+            .one(&txn)
+            .await?
+        else {
+            txn.rollback().await?;
+            return Ok(None);
+        };
+        if !(call.current_state.is_terminal() || call.current_state == CallState::Ending) {
+            txn.rollback().await?;
+            return Ok(Some(0));
+        }
+        let reason = if call.current_state == CallState::Cancelled {
+            InvitationTerminalReason::CallCancelled
+        } else {
+            InvitationTerminalReason::CallTerminated
+        };
+        let cmd = super::system_cmd(&call);
+        let correlation = cmd.correlation_id().as_str().to_string();
+        let closed = self
+            .calls
+            .finish_live_invitations_in(
+                &txn,
+                &cmd,
+                &call,
+                None,
+                None,
+                InvitationStatus::Cancelled,
+                reason,
+            )
+            .await?;
+        let mut pending = PendingSignals::default();
+        for invitation in &closed {
+            self.invitation_signal(
+                &txn,
+                &mut pending,
+                SignalType::RingCancelled,
+                &call,
+                invitation,
+                &correlation,
+            )
+            .await?;
+        }
+        txn.commit().await?;
+        self.publish(pending).await;
+        if !closed.is_empty() {
+            tracing::warn!(call_id = %call.id, call_state = %call.current_state, closed = closed.len(),
+                "closed ring offers left open on a finished call");
+            crate::metrics::add(
+                "calling_finished_call_invitations_closed_total",
+                &[],
+                closed.len() as u64,
+            );
+        }
+        Ok(Some(closed.len()))
+    }
+
     /// Cancels the live ring offers of a revoked endpoint and derives each Call's outcome.
     pub async fn cancel_endpoint_invitations(
         &self,
@@ -879,15 +1098,25 @@ impl AppCallService {
             else {
                 continue;
             };
-            let actionable = invitation.status == InvitationStatus::Ringing
-                && invitation.expires_at > now
-                && !call.current_state.is_terminal()
-                && call.current_state != CallState::Ending;
-            // A due offer the worker has not finalized yet is reported as expired.
-            let status = if invitation.status.is_live() && invitation.expires_at <= now {
-                InvitationStatus::Expired
+            let finished_call =
+                call.current_state.is_terminal() || call.current_state == CallState::Ending;
+            // PENDING (not yet acknowledged by this device) and RINGING offers can both be
+            // answered: answering is itself proof of receipt.
+            let actionable =
+                invitation.status.is_live() && invitation.expires_at > now && !finished_call;
+            // A due offer the worker has not finalized yet is reported as expired; a live
+            // offer of a finished Call (closed by the sweep shortly) as cancelled.
+            let (status, terminal_reason) = if invitation.status.is_live() && finished_call {
+                let reason = if call.current_state == CallState::Cancelled {
+                    InvitationTerminalReason::CallCancelled
+                } else {
+                    InvitationTerminalReason::CallTerminated
+                };
+                (InvitationStatus::Cancelled, Some(reason))
+            } else if invitation.status.is_live() && invitation.expires_at <= now {
+                (InvitationStatus::Expired, invitation.terminal_reason)
             } else {
-                invitation.status
+                (invitation.status, invitation.terminal_reason)
             };
             out.push(RecoveredInvitation {
                 invitation_id: invitation.id,
@@ -900,8 +1129,9 @@ impl AppCallService {
                 actionable,
                 issued_at: time(invitation.issued_at),
                 expires_at: time(invitation.expires_at),
-                terminal_reason: invitation.terminal_reason.map(|r| r.as_str()),
+                terminal_reason: terminal_reason.map(|r| r.as_str()),
                 session_id: invitation.session_id,
+                caller_display_name: super::caller_display_name(self.db(), call.id).await?,
             });
         }
         Ok(out)

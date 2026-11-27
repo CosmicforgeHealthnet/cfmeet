@@ -1,0 +1,678 @@
+//! Persistence port of the bridge. `PgStore` (`store/pg.rs`) is production; `MemoryStore`
+//! backs the security-chain tests. Both must give the same answers: the Postgres suite
+//! (`tests/pg_store.rs`) runs the same behavioural checks as the unit tests here.
+//!
+//! The bridge stores no business data: only HQ enrolment (certificate fingerprints, HMAC
+//! key digests, staff-token public keys), single-use claims, revocations, rate-limit
+//! counters, signed access-policy revisions, the hash-chained audit and small summaries.
+
+pub mod memory;
+pub mod pg;
+
+use async_trait::async_trait;
+use chrono::{DateTime, NaiveDate, Utc};
+use serde_json::Value;
+
+pub use memory::MemoryStore;
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("store unavailable")]
+    Unavailable(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("stored data invalid: {0}")]
+    Invalid(&'static str),
+}
+
+pub type StoreResult<T> = Result<T, StoreError>;
+
+/// What an enrolled HQ credential is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrincipalKind {
+    /// `key_id` = lowercase hex SHA-256 fingerprint of the client certificate (DER).
+    ClientCert,
+    /// `key_id` = `X-HQ-Key-ID`; `material` = lowercase hex SHA-256 of the key bytes (the
+    /// key itself lives only in a file, never in the database).
+    HmacKey,
+    /// `key_id` = JWS `kid`; `material` = lowercase hex Ed25519 public key (32 bytes).
+    StaffKey,
+}
+
+impl PrincipalKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PrincipalKind::ClientCert => "CLIENT_CERT",
+            PrincipalKind::HmacKey => "HMAC_KEY",
+            PrincipalKind::StaffKey => "STAFF_KEY",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "CLIENT_CERT" => Some(Self::ClientCert),
+            "HMAC_KEY" => Some(Self::HmacKey),
+            "STAFF_KEY" => Some(Self::StaffKey),
+            _ => None,
+        }
+    }
+}
+
+/// One enrolled HQ credential (`admin_remote_principals`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Principal {
+    pub principal: String,
+    pub kind: PrincipalKind,
+    pub key_id: String,
+    pub material: String,
+    /// Staff keys only: enrolled `iss` / `aud`.
+    pub issuer: Option<String>,
+    pub audience: Option<String>,
+    pub not_before: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl Principal {
+    pub fn live_at(&self, now: DateTime<Utc>) -> bool {
+        self.revoked_at.is_none_or(|r| r > now) && self.not_before <= now && now < self.expires_at
+    }
+}
+
+/// What a single-use claim protects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClaimKind {
+    Nonce,
+    Jti,
+    Approval,
+}
+
+impl ClaimKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ClaimKind::Nonce => "NONCE",
+            ClaimKind::Jti => "JTI",
+            ClaimKind::Approval => "APPROVAL",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Claim {
+    pub kind: ClaimKind,
+    pub value: String,
+    /// The claim is kept (and a repeat refused) until then; cleanup removes it after.
+    pub keep_until: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimOutcome {
+    /// Every claim was new and is now recorded (all in one transaction).
+    Recorded,
+    /// At least one claim already existed; nothing was recorded.
+    Replay(ClaimKind),
+}
+
+/// A verified-in-memory access policy revision as stored (`admin_policy_revisions`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyRow {
+    pub revision: i64,
+    /// Exact signed bytes (UTF-8 JSON).
+    pub document: Vec<u8>,
+    /// Lowercase hex Ed25519 signature over `document`.
+    pub signature: String,
+    pub key_id: String,
+}
+
+/// Audit entry before it is chained.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditDraft {
+    pub correlation_id: uuid::Uuid,
+    pub occurred_at: DateTime<Utc>,
+    /// `hq:<sub>` or `unauthenticated`.
+    pub actor: String,
+    pub session_id: Option<String>,
+    pub capability: Option<String>,
+    pub method: String,
+    /// Path only (no query), at most 4096 bytes.
+    pub path: String,
+    pub purpose: Option<String>,
+    /// `{market, organization, zone, tenant}` or null.
+    pub scope: Value,
+    /// `ALLOWED` or the refusal error code.
+    pub decision: String,
+    pub http_status: u16,
+    pub request_digest: Option<String>,
+    pub approval_id: Option<String>,
+    pub approver: Option<String>,
+    /// Extra non-personal detail (role used, risk, policy revision).
+    pub detail: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditReceipt {
+    pub sequence: i64,
+    /// Lowercase hex SHA-256 chaining this entry to the previous one.
+    pub entry_hash: String,
+}
+
+/// Rate-limit bucket: fixed one-minute windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateKey {
+    /// Lowercase hex SHA-256 of `sub LF permission LF market LF organization LF zone LF tenant`.
+    pub bucket: String,
+    pub window_start: DateTime<Utc>,
+}
+
+/// One day of one dataset (`admin_dataset_days`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DatasetDay {
+    pub dataset_id: String,
+    pub day: NaiveDate,
+    /// metric -> integer | null.
+    pub metrics: serde_json::Map<String, Value>,
+    /// Sources (`<service>:<via>`) that reported for this day.
+    pub sources_reported: Vec<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Subjects of one owner event type per producer and latest state ([`Store::event_states`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventStateCount {
+    pub producer: String,
+    pub state: String,
+    pub subjects: i64,
+}
+
+/// Freshness of one projection (`admin_projections`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectionRow {
+    pub name: String,
+    pub last_event_at: Option<DateTime<Utc>>,
+    pub open_gaps: i64,
+    pub quarantined: i64,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Send-once state of an HQ command (`admin_operations.status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OpStatus {
+    /// Accepted, never sent to the owner.
+    Pending,
+    /// Sent; no answer recorded yet.
+    Sent,
+    Succeeded,
+    Failed,
+    /// Sent and no clear answer came back: settled only from the owner's own record.
+    UnknownOutcome,
+}
+
+impl OpStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            OpStatus::Pending => "PENDING",
+            OpStatus::Sent => "SENT",
+            OpStatus::Succeeded => "SUCCEEDED",
+            OpStatus::Failed => "FAILED",
+            OpStatus::UnknownOutcome => "UNKNOWN_OUTCOME",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "PENDING" => OpStatus::Pending,
+            "SENT" => OpStatus::Sent,
+            "SUCCEEDED" => OpStatus::Succeeded,
+            "FAILED" => OpStatus::Failed,
+            "UNKNOWN_OUTCOME" => OpStatus::UnknownOutcome,
+            _ => return None,
+        })
+    }
+    pub const fn settled(self) -> bool {
+        matches!(self, OpStatus::Succeeded | OpStatus::Failed)
+    }
+    /// The only transitions the ledger (and its database trigger) allows.
+    pub const fn may_become(self, next: OpStatus) -> bool {
+        matches!(
+            (self, next),
+            (OpStatus::Pending, OpStatus::Sent | OpStatus::Failed)
+                | (
+                    OpStatus::Sent,
+                    OpStatus::Succeeded | OpStatus::Failed | OpStatus::UnknownOutcome
+                )
+                | (
+                    OpStatus::UnknownOutcome,
+                    OpStatus::Succeeded | OpStatus::Failed
+                )
+        )
+    }
+}
+
+/// One `admin_operations` row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Operation {
+    pub principal_sub: String,
+    pub idempotency_key: uuid::Uuid,
+    pub operation_id: uuid::Uuid,
+    pub capability: String,
+    pub owner: String,
+    pub purpose: String,
+    pub scope: Value,
+    pub intent_sha256: String,
+    pub target: String,
+    pub expected_version: String,
+    pub approval_id: Option<String>,
+    pub correlation_id: uuid::Uuid,
+    pub status: OpStatus,
+    pub source_status: Option<String>,
+    pub source_version: Option<String>,
+    pub error_code: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub settled_at: Option<DateTime<Utc>>,
+}
+
+/// How an outcome is recorded ([`Store::settle_operation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settlement {
+    pub status: OpStatus,
+    pub source_status: Option<String>,
+    pub source_version: Option<String>,
+    pub error_code: Option<String>,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BeginOutcome {
+    /// Recorded as `PENDING`.
+    Started,
+    /// The key is already used by this staff member (the stored row; the caller compares
+    /// intents).
+    Existing(Box<Operation>),
+    /// Another non-failed operation holds the target's expected version.
+    VersionTaken,
+}
+
+/// The services one privacy request is tracked across (design §6.14).
+pub const PRIVACY_SERVICES: [&str; 7] = [
+    "meeting-service",
+    "messaging",
+    "calling",
+    "communications",
+    "organizations",
+    "developer-platform",
+    "notifications",
+];
+
+/// One service's reported outcome on a privacy request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivacyService {
+    pub service: String,
+    /// PENDING, DONE, NOT_HELD or LEGAL_HOLD.
+    pub outcome: String,
+    pub recorded_by: Option<String>,
+    pub recorded_at: Option<DateTime<Utc>>,
+}
+
+/// One privacy request (`admin_privacy_requests` and its services).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivacyRequest {
+    pub request_id: uuid::Uuid,
+    /// ACCESS, ERASURE, CORRECTION or RESTRICTION.
+    pub kind: String,
+    pub subject_ref: uuid::Uuid,
+    /// OPEN, then COMPLETE once every service has an outcome.
+    pub state: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub version: i64,
+    pub services: Vec<PrivacyService>,
+}
+
+/// A change to the bridge's own data, applied with its operation in ONE transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalChange {
+    /// A new request (id = the HQ operation id), every service PENDING.
+    PrivacyRegister {
+        kind: String,
+        subject_ref: uuid::Uuid,
+    },
+    /// One service's outcome, at the request's expected version.
+    PrivacyRecord {
+        request_id: uuid::Uuid,
+        service: String,
+        outcome: String,
+        expected_version: i64,
+    },
+}
+
+/// What became of a local command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalOutcome {
+    /// Applied and recorded SUCCEEDED.
+    Applied { status: String, version: i64 },
+    /// Refused and recorded FAILED with this bridge error code (nothing changed).
+    Refused(&'static str),
+    /// The key is already used by this staff member.
+    Existing(Box<Operation>),
+    /// Another non-failed operation holds the target's expected version.
+    VersionTaken,
+}
+
+/// The owner event types the bridge appends to the HQ feed (design §11).
+pub const EVENT_TYPES: [&str; 6] = [
+    "verification.case.changed.v1",
+    "abuse.report.changed.v1",
+    "partner.workspace.changed.v1",
+    "app.review.changed.v1",
+    "incident.changed.v1",
+    "pricing.version.changed.v1",
+];
+
+/// One owner event as received (ids, states, versions and times only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerEvent {
+    /// The authenticated producer (owner name, e.g. `developer-platform`).
+    pub producer: String,
+    pub event_id: uuid::Uuid,
+    pub event_type: String,
+    pub subject_kind: String,
+    pub subject_id: String,
+    pub state: String,
+    pub version: i64,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// What became of an owner event ([`Store::ingest_event`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestOutcome {
+    /// Appended to the feed with this sequence.
+    Appended(i64),
+    /// This producer already sent this event id: nothing changed.
+    Duplicate,
+    /// Accepted, but its version is not newer than the subject's last one: not appended.
+    Stale,
+    /// A type the bridge does not accept from this producer: counted, never appended.
+    Quarantined,
+}
+
+impl IngestOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            IngestOutcome::Appended(_) => "APPENDED",
+            IngestOutcome::Duplicate => "DUPLICATE",
+            IngestOutcome::Stale => "STALE",
+            IngestOutcome::Quarantined => "QUARANTINED",
+        }
+    }
+}
+
+/// One entry of the HQ feed (`admin_hq_outbox`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedEvent {
+    pub sequence: i64,
+    pub event: OwnerEvent,
+    pub appended_at: DateTime<Utc>,
+}
+
+/// What became of an acknowledgement ([`Store::acknowledge_events`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckOutcome {
+    /// The consumer's acknowledged sequence now (never lower than before).
+    Acknowledged(i64),
+    /// The sequence is beyond the last appended one: nothing changed.
+    BeyondHead,
+}
+
+/// One feature switch-on request (`admin_activation_requests`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationRequest {
+    /// = the HQ operation id.
+    pub request_id: uuid::Uuid,
+    /// A release workflow operation.
+    pub operation: String,
+    pub release_sha: String,
+    pub confirm: Option<String>,
+    /// `hq:<sub>`.
+    pub requested_by: String,
+    /// `hq:<sub>` of the second person.
+    pub approver: String,
+    pub approval_id: String,
+    /// REQUESTED (dispatch in flight or outcome unknown), DISPATCHED or FAILED.
+    pub state: String,
+    pub created_at: DateTime<Utc>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    /// The workflow run, once linked (set once).
+    pub run_id: Option<i64>,
+}
+
+/// The activation record's side of a settlement ([`Store::settle_activation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationUpdate {
+    /// `DISPATCHED` or `FAILED`; `None` keeps REQUESTED (unknown outcome).
+    pub state: Option<&'static str>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    pub run_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CleanupStats {
+    pub claims: u64,
+    pub rate_buckets: u64,
+}
+
+#[async_trait]
+pub trait Store: Send + Sync + 'static {
+    async fn ping(&self) -> StoreResult<()>;
+
+    /// The enrolled credential of `kind` with `key_id`, if any (live or not: callers
+    /// check [`Principal::live_at`]).
+    async fn principal(&self, kind: PrincipalKind, key_id: &str) -> StoreResult<Option<Principal>>;
+
+    /// True when `sub` (any session) or `session_id` is revoked at `now`.
+    async fn is_revoked(
+        &self,
+        sub: &str,
+        session_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<bool>;
+
+    /// Records every claim in ONE transaction, or none if any already exists.
+    async fn claim_once(&self, claims: &[Claim]) -> StoreResult<ClaimOutcome>;
+
+    /// Counts one request in the bucket's window; true when the count (including this
+    /// one) is within `limit`.
+    async fn rate_allow(&self, key: &RateKey, limit: u32) -> StoreResult<bool>;
+
+    async fn policy_revision(&self, revision: i64) -> StoreResult<Option<PolicyRow>>;
+
+    /// Appends to the hash chain: `entry_hash = sha256(previous_hash LF canonical(entry))`,
+    /// the genesis previous hash being 64 zeros. Serialized: no two entries share a
+    /// previous hash.
+    async fn append_audit(&self, draft: &AuditDraft) -> StoreResult<AuditReceipt>;
+
+    /// Days of `dataset_id` in `[start, end]` (inclusive), ascending, at most `limit`.
+    async fn dataset_days(
+        &self,
+        dataset_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        limit: u32,
+    ) -> StoreResult<Vec<DatasetDay>>;
+
+    async fn projections(&self) -> StoreResult<Vec<ProjectionRow>>;
+
+    /// Merges reported metrics into one dataset day in ONE statement (idempotent, so
+    /// replicas collecting at once are harmless): `metrics` replace the stored values of
+    /// the same names, `sources` join the reported set (sorted, distinct).
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()>;
+
+    /// Subjects of `event_type` on the HQ feed per producer and latest state as of `end`
+    /// (each subject's highest version among the events that occurred before `end`). A
+    /// producer is listed only once it had sent such an event before `end`.
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>>;
+
+    /// Owner events quarantined with `start <= received_at < end`.
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64>;
+
+    /// Records a new `PENDING` operation, or reports why it cannot be.
+    async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome>;
+
+    /// `PENDING` → `SENT`. False when the row is no longer `PENDING` (never send then).
+    async fn mark_sent(&self, sub: &str, key: uuid::Uuid, at: DateTime<Utc>) -> StoreResult<bool>;
+
+    /// Records an outcome if the transition is allowed; false (nothing changed) otherwise.
+    async fn settle_operation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        s: &Settlement,
+    ) -> StoreResult<bool>;
+
+    async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>>;
+
+    /// Audit rows with `start <= occurred_at < end` and `sequence > after`, oldest first.
+    async fn audit_window(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<(AuditDraft, AuditReceipt)>>;
+
+    /// Records `op` and applies `change` in one transaction: SUCCEEDED with the change, or
+    /// FAILED with nothing changed. Never an unknown outcome.
+    async fn local_command(
+        &self,
+        op: &Operation,
+        change: &LocalChange,
+    ) -> StoreResult<LocalOutcome>;
+
+    /// Privacy requests, oldest first, after `(created_at, request_id)`.
+    async fn privacy_requests(
+        &self,
+        after: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<PrivacyRequest>>;
+
+    async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>>;
+
+    /// Records an owner event in ONE transaction, serialized with every other append:
+    /// a duplicate `(producer, event_id)` changes nothing; a type not `accepted` is
+    /// quarantined (counted on the `events.inbox` projection); an accepted event whose
+    /// version is not newer than the last appended one of the same `(producer, subject)` is
+    /// STALE; otherwise it is appended (feed sequences commit in increasing order).
+    async fn ingest_event(
+        &self,
+        event: &OwnerEvent,
+        accepted: bool,
+        received_at: DateTime<Utc>,
+    ) -> StoreResult<IngestOutcome>;
+
+    /// Feed entries with `start <= appended_at < end` and `sequence > after`, in
+    /// increasing sequence.
+    async fn event_feed(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<FeedEvent>>;
+
+    /// Moves `consumer`'s acknowledged sequence forward to `sequence` (never backwards: a
+    /// lower value leaves the stored one).
+    async fn acknowledge_events(
+        &self,
+        consumer: &str,
+        sequence: i64,
+        at: DateTime<Utc>,
+    ) -> StoreResult<AckOutcome>;
+
+    /// Records a new `PENDING` operation and its activation request (REQUESTED) in ONE
+    /// transaction, or reports why it cannot be (as [`Store::begin_operation`]).
+    async fn begin_activation(
+        &self,
+        op: &Operation,
+        request: &ActivationRequest,
+    ) -> StoreResult<BeginOutcome>;
+
+    /// Records an operation outcome and its activation request's state in ONE transaction,
+    /// if the operation transition is allowed; false (nothing changed) otherwise.
+    async fn settle_activation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        s: &Settlement,
+        update: &ActivationUpdate,
+    ) -> StoreResult<bool>;
+
+    /// Links a DISPATCHED request to its workflow run, once; false when it already has a
+    /// run, is not DISPATCHED, or the run belongs to another request.
+    async fn link_activation_run(&self, request_id: uuid::Uuid, run_id: i64) -> StoreResult<bool>;
+
+    /// Activation requests, newest first, before `(created_at, request_id)`.
+    async fn activation_requests(
+        &self,
+        before: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationRequest>>;
+
+    async fn activation_request(&self, id: uuid::Uuid) -> StoreResult<Option<ActivationRequest>>;
+
+    /// The activation requests linked to any of `run_ids`.
+    async fn activations_for_runs(&self, run_ids: &[i64]) -> StoreResult<Vec<ActivationRequest>>;
+
+    /// Unsettled operations created before `before`, oldest first.
+    async fn open_operations(
+        &self,
+        before: DateTime<Utc>,
+        limit: u32,
+    ) -> StoreResult<Vec<Operation>>;
+
+    /// Removes expired claims and rate buckets older than `now - 1 hour`.
+    async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats>;
+}
+
+/// Canonical bytes hashed into the audit chain (stable key order, no whitespace).
+pub fn audit_canonical(draft: &AuditDraft) -> Vec<u8> {
+    let v = serde_json::json!({
+        "correlation_id": draft.correlation_id.to_string(),
+        "occurred_at": draft.occurred_at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        "actor": draft.actor,
+        "session_id": draft.session_id,
+        "capability": draft.capability,
+        "method": draft.method,
+        "path": draft.path,
+        "purpose": draft.purpose,
+        "scope": draft.scope,
+        "decision": draft.decision,
+        "http_status": draft.http_status,
+        "request_digest": draft.request_digest,
+        "approval_id": draft.approval_id,
+        "approver": draft.approver,
+        "detail": draft.detail,
+    });
+    serde_json::to_vec(&v).expect("serializable")
+}
+
+pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+pub fn chain_hash(previous: &str, draft: &AuditDraft) -> String {
+    let mut bytes = previous.as_bytes().to_vec();
+    bytes.push(b'\n');
+    bytes.extend(audit_canonical(draft));
+    crate::wire::sha256_hex(&bytes)
+}

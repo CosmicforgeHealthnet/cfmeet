@@ -258,6 +258,14 @@ impl From<&CallTransfer> for TransferView {
     }
 }
 
+/// The Call's current presenter (C6).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenShareView {
+    pub participant_id: String,
+    pub started_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallView {
@@ -269,6 +277,18 @@ pub struct CallView {
     pub sessions: Vec<SessionView>,
     pub invitations: Vec<InvitationView>,
     pub transfers: Vec<TransferView>,
+    /// C6: who is presenting a screen now (`null` when nobody is).
+    pub screen_share: Option<ScreenShareView>,
+    /// C4: the Call's host participant (the creator unless the role was transferred;
+    /// `null` once nobody is active).
+    pub host_participant_id: Option<String>,
+    /// C4: participants the host muted (no audio publishing until unmuted).
+    pub muted_participant_ids: Vec<String>,
+    /// Whether THIS caller may read the call's recordings and recording authorizations
+    /// (`GET /v1/calls/{id}/recordings`, `/recording-authorizations`): its credential holds
+    /// `enterprise.recording.read`. Clients request recordings only when true (an ordinary
+    /// app credential holds `calls.write` / `calls.read` only and would get 403).
+    pub can_view_recordings: bool,
 }
 
 impl From<&CallDetail> for CallView {
@@ -281,6 +301,13 @@ impl From<&CallDetail> for CallView {
             sessions: d.sessions.iter().map(Into::into).collect(),
             invitations: d.invitations.iter().map(Into::into).collect(),
             transfers: d.transfers.iter().map(Into::into).collect(),
+            screen_share: d.screen_share.map(|(participant, since)| ScreenShareView {
+                participant_id: participant.to_string(),
+                started_at: ts(since),
+            }),
+            host_participant_id: d.host.map(|h| h.to_string()),
+            muted_participant_ids: d.host_muted.iter().map(ToString::to_string).collect(),
+            can_view_recordings: false,
         }
     }
 }

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.3.0",
+    "version": "1.6.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -596,6 +596,124 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConversationAccessRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/conversations/messages/access": {
+      "post": {
+        "operationId": "readMessagingCommunicationsMessagesAccess",
+        "summary": "Read the delegated user's access to several saved messages at once",
+        "description": "Read the delegated user's access to up to 50 messages at once (the Hub's saved-messages list, contacts audit K9): one entry per reference, in request order. member is whether the user is an ACTIVE member of that conversation right now (a non-member and an unknown conversation are the same member:false entry); for members, state is the message state exactly as conversations/access reports it. Metadata only. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesAccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagesAccessRequest"
               }
             }
           }
@@ -1380,6 +1498,71 @@
               "reason",
               "realtime"
             ]
+          },
+          "attachments": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.4.0 (CF Meet chat M1): whether clients may offer sending files, from the same inputs the upload intent enforces: the effective policy (environment switch, limits, kinds; per-context switch in contexts), configured private attachment storage and the ATTACHMENT_UPLOAD kill switch. Advisory for the UI only; every upload is still authorized and validated by Messaging. maxBytes is the plaintext limit per file (PRIVATE_E2EE ciphertext may be slightly larger).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED_BY_POLICY",
+                  "STORAGE_NOT_CONFIGURED",
+                  "TEMPORARILY_DISABLED"
+                ]
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxPerMessage": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "allowedKinds": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "IMAGE",
+                    "DOCUMENT",
+                    "FILE",
+                    "VOICE_NOTE",
+                    "VIDEO"
+                  ]
+                }
+              },
+              "contexts": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "DIRECT": {
+                    "type": "boolean"
+                  },
+                  "GROUP": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "DIRECT",
+                  "GROUP"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "reason",
+              "maxBytes",
+              "maxPerMessage",
+              "allowedKinds",
+              "contexts"
+            ]
           }
         },
         "required": [
@@ -1650,6 +1833,110 @@
                 "uploaderPrincipalId": {
                   "type": "string",
                   "format": "uuid"
+                },
+                "securityProfile": {
+                  "type": "string",
+                  "enum": [
+                    "MANAGED",
+                    "PRIVATE_E2EE"
+                  ]
+                },
+                "kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "IMAGE",
+                    "DOCUMENT",
+                    "FILE",
+                    "VOICE_NOTE",
+                    "VIDEO",
+                    null
+                  ]
+                },
+                "fileName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "mediaType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "metadataLocation": {
+                  "type": "string",
+                  "enum": [
+                    "SERVER",
+                    "ENCRYPTED_DESCRIPTOR"
+                  ]
+                },
+                "download": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "POST"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/download-grants$"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "path"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "thumbnail": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "POST"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/thumbnail-grants$"
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "enum": [
+                            "image/png"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "path",
+                        "mediaType"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1661,7 +1948,8 @@
                 "mediaClass",
                 "createdAt",
                 "uploaderPrincipalId"
-              ]
+              ],
+              "description": "1.4.0 (CF Meet chat M3): MANAGED items carry the sanitized file name, the declared media type and kind the server holds; PRIVATE_E2EE items carry none of them (metadataLocation ENCRYPTED_DESCRIPTOR: they travel only inside the MLS-encrypted attachment descriptor). download / thumbnail never hold a URL: they name the normal access-checked grant operation (path relative to the Messaging client API; CF Meet apps call it through the Meeting relay /api/v2/messaging/relay/v1/...), which re-checks membership, history window and state and returns a short-lived signed read. thumbnail is present only for a READY server-made thumbnail of a MANAGED attachment."
             }
           },
           "nextCursor": {
@@ -1949,6 +2237,17 @@
           },
           "duplicate": {
             "type": "boolean"
+          },
+          "sendPolicyProjection": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "sendPolicyGeneration": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         },
         "required": [
@@ -1976,12 +2275,39 @@
                   "enum": [
                     "GROUP"
                   ]
+                },
+                "securityProfile": {
+                  "type": "string",
+                  "enum": [
+                    "MANAGED",
+                    "PRIVATE_E2EE"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "avatarRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 256
+                },
+                "memberCount": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               },
               "required": [
                 "conversationId",
                 "contextClass"
-              ]
+              ],
+              "description": "1.4.0 (CF Meet chat M2): only groups BOTH principals are current (ACTIVE) members of; a group the actor left or was removed from is never listed. title / avatarRef are the server-held display metadata of MANAGED groups; a PRIVATE_E2EE group's name lives in its encrypted group state, so they are null there (never fabricated)."
             }
           }
         },
@@ -2229,6 +2555,102 @@
           "backupBytes",
           "environmentQuotaBytes",
           "measuredAt"
+        ]
+      },
+      "MessagesAccessRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "conversationId",
+                "messageId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "principalId",
+          "items"
+        ]
+      },
+      "MessagesAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "member": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "VISIBLE",
+                    "DELETED",
+                    "HIDDEN_FOR_ME",
+                    "EXPIRED",
+                    "NOT_FOUND"
+                  ]
+                },
+                "sequence": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "conversationId",
+                "messageId",
+                "member"
+              ],
+              "description": "member:false carries nothing else; member:true carries state and sequence."
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "items"
         ]
       }
     }

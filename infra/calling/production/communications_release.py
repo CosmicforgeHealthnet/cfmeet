@@ -112,6 +112,18 @@ def save(path, value, secret=False):
     os.chmod(path,0o400 if secret else 0o444)
     if secret: os.chown(path,10001,10001)
 
+def stage_test_accounts():
+    """The staging candidate's two fixed-code test accounts (passwordless sign-in): created
+    once with random codes, kept 0600 in the VPS work folder, configured on the candidate
+    Meeting Service only (AUTH_TEST_ACCOUNTS) and used by the staging acceptance client."""
+    path=WORK/'stage-test-accounts.private.json'
+    if not path.exists():
+        values=[{'email':'comm-stage-%s-%s@acceptance.invalid'%(x,secrets.token_hex(4)),
+                 'code':'%06d'%secrets.randbelow(10**6)} for x in 'ab']
+        WORK.mkdir(parents=True,exist_ok=True,mode=0o700)
+        p.write_private(path,json.dumps(values))
+    return json.loads(path.read_text())
+
 def env_file(path, values):
     assert all('\n' not in v and '\r' not in v for v in values.values())
     p.write_private(path,'\n'.join(k+'='+v for k,v in values.items())+'\n')
@@ -148,6 +160,15 @@ def grant(bundle,issuer,key,permissions):
     bundle['trusted_issuers'].append(dict(issuer=issuer,audience=bundle['receiver'],
         runtime_environment=bundle['runtime_environment'],keys=[key],permissions=permissions))
 
+# Grants the Communications Hub's trust bundle gives each owner service. The Hub bundle is
+# rebuilt from this table on every release preparation, so a permission missing here is
+# dropped at the next release. Notification Service N0-1 (S-1): the Meeting Service reads
+# notification opt-outs (communications-preferences.read) before it sends a meeting notice;
+# without the grant every meeting notice fails closed.
+HUB_INCOMING={'meeting-service':['communications-user.forward','communications-account.apply','communications-preferences.read'],
+              'calling':['communications-policy.check','communications-block.apply'],
+              'messaging':['communications-policy.check','communications-block.apply']}
+
 def prepare_trust():
     WORK.mkdir(exist_ok=True,mode=0o700)
     keyfile=WORK/'communications.pem'
@@ -175,10 +196,7 @@ def prepare_trust():
     for service,name in OWNERS.items():
         c=p.inspect(name);e=p.env_of(c)
         key=public_key(mount_source(c,e['CF_SERVICE_AUTH_PRIVATE_KEY_FILE']),e['CF_SERVICE_AUTH_KEY_ID'])
-        incoming={'meeting-service':['communications-user.forward','communications-account.apply'],
-                  'calling':['communications-policy.check','communications-block.apply'],
-                  'messaging':['communications-policy.check','communications-block.apply']}
-        if service in incoming:grant(hub,'cfmeet.'+service,key,incoming[service])
+        if service in HUB_INCOMING:grant(hub,'cfmeet.'+service,key,HUB_INCOMING[service])
         old=e.get('CF_SERVICE_TRUST_BUNDLE_FILE')
         bundle=json.loads(Path(mount_source(c,old)).read_text()) if old else dict(bundle_version=1,receiver='cfmeet.'+service,runtime_environment='production',trusted_issuers=[])
         # Repeated release preparation reads the original bundle or our already
@@ -220,8 +238,8 @@ def database(name):
     p.write_private(config,json.dumps(value));return value
 
 def migrate(service,sha,url,feature_only=False,network=None):
-    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','organization-integration-migration','account-communications-migration','lifecycle-delivery-migration'],
-              'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration'],
+    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','organization-integration-migration','account-communications-migration','lifecycle-delivery-migration','notification-fence-migration','gap-closure-migration','platform-build-migration','meeting-audit-migration','account-privacy-migration','account-phone-migration','admin-operations-migration'],
+              'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration','messaging-notification-fence-migration','messaging-send-policy-projection-migration'],
               'communications':['communications-migration']}[service]
     # Feature-only releases apply every additive history after the base one (meeting-service:
     # account security, meetings calendar, profile/notifications, then Account Communications); other services have exactly one.
@@ -337,7 +355,10 @@ def configured(service,sha,stage,scope,db=None):
             e.update({'CFMEET_COMMUNICATION_'+k+'_ID':scope[k.lower()+'Id'] for k in ('TENANT','APPLICATION','ENVIRONMENT')})
             e.update(CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID=scope['serviceAccountId'],CFMEET_COMMUNICATION_ENVIRONMENT_KIND=scope['kind'],
                      CF_MESSAGING_BASE_URL='https://api.cfmeet.com:'+str(routes['messaging']))
-            if stage:e.update(JWT_SECRET=secrets.token_hex(32),SMTP_HOST='',EMAIL_VERIFICATION_REQUIRED='false')
+            if stage:
+                e.update(JWT_SECRET=secrets.token_hex(32),SMTP_HOST='',EMAIL_VERIFICATION_REQUIRED='false',
+                         AUTH_TEST_ACCOUNTS=','.join(a['email']+':'+a['code'] for a in stage_test_accounts()),
+                         AUTH_TEST_ACCOUNTS_ALLOW_IN_PRODUCTION='true')
         if stage and service=='calling':
             e.update(VOICEMAIL_ENABLED='false',CALL_RECORDING_ENABLED='false',CALLING_MEDIA_GATEWAY_URL='wss://api.cfmeet.com:'+str(routes['calling'])+'/v1/calling/media')
         cfg=clone(p.inspect(OWNERS[service]),name,image(service,sha),e,stage)
@@ -386,15 +407,49 @@ def proxy_routes():
         raise
     assert not p.inspect('cfmeet-core-tls')['HostConfig']['PortBindings']
 
+PUBLIC_INGRESS_MARKER='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
+# Routes the public server block refuses. The first is the original Communications denial.
+# Notification Service N0-6 (S-3): the Meeting Service's token-protected operator routes
+# (/internal/operations/*, incl. the email delivery / acceptance operations, and its metrics)
+# are reached only over the host loopback (email_operations.MEETING_LOOPBACK, Prometheus on
+# the private network); the public host refuses them, marked so a probe can tell an nginx
+# denial from a Meeting answer. Signed provider callbacks (/internal/rtc/livekit/webhook,
+# /internal/transcription/events) are deliberately NOT denied: LiveKit or a transcription
+# provider may post to them through the public host (Q15 outstanding).
+PUBLIC_DENIALS=('    location ^~ /internal/v1/accounts/communications/ { return 404; }',
+                '    location ^~ /internal/operations/ { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location = /internal/metrics { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location = /internal/rtc/metrics { add_header X-CFMeet-Ingress denied always; return 404; }',
+                # Notification Service N6: the Meeting owner APIs X1 / X2 (signed service tokens
+                # only) are reached over the private TLS route; the public host refuses them.
+                '    location ^~ /internal/v1/accounts/notification-contacts/ { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location ~ ^/internal/v1/conferences/[^/]+/notification-recipients/ { add_header X-CFMeet-Ingress denied always; return 404; }',
+                # Notification Service N12: the Account CRITICAL lease owner API X6 / X7.
+                '    location ^~ /internal/v1/accounts/notification-route-decisions/ { add_header X-CFMeet-Ingress denied always; return 404; }')
+# Paths a probe uses to prove each N0-6 denial (expects 404 + X-CFMeet-Ingress: denied).
+NOTIFICATION_OWNER_DENIAL_PROBES=('/internal/v1/accounts/notification-contacts/resolve',
+                                  '/internal/v1/conferences/00000000-0000-0000-0000-000000000000/notification-recipients/resolve',
+                                  '/internal/v1/accounts/notification-route-decisions/leases',
+                                  '/internal/v1/accounts/notification-route-decisions/completions')
+PUBLIC_DENIAL_PROBES=('/internal/operations/email/deliveries/00000000-0000-0000-0000-000000000000',
+                      '/internal/operations/email/acceptance','/internal/metrics','/internal/rtc/metrics') \
+    + NOTIFICATION_OWNER_DENIAL_PROBES
+
 def public_ingress_config(previous):
-    marker='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
-    rule='    location ^~ /internal/v1/accounts/communications/ { return 404; }'
+    marker=PUBLIC_INGRESS_MARKER
+    def location(rule):return rule.split('{',1)[0].strip()
     if marker in previous:
-        assert rule in previous,'Private endpoint denial was changed'
-        return previous
+        assert PUBLIC_DENIALS[0] in previous,'Private endpoint denial was changed'
+        out=previous
+        for rule in PUBLIC_DENIALS[1:]:
+            if rule in out:continue
+            # A location with this path but another body was edited by hand: refuse.
+            assert location(rule)+' ' not in out and location(rule)+'{' not in out,'Public ingress denial was changed: '+location(rule)
+            out=out.replace(marker+'\n',marker+'\n'+rule+'\n',1)
+        return out
     include='include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
     assert previous.count(include)==1,'Unexpected existing public ingress topology'
-    return previous.replace(include,include+'\n'+marker+'\n'+rule+'\n')
+    return previous.replace(include,include+'\n'+marker+'\n'+'\n'.join(PUBLIC_DENIALS)+'\n')
 
 def secure_public_ingress():
     site=Path('/etc/nginx/sites-enabled/api.cfmeet.com').resolve()
@@ -678,7 +733,8 @@ def accepted_images(sha):
     import coordinated_release as coordinated
     assert coordinated.last_release(sha),'Requested source is not the recorded release'
     manifest=coordinated.registry(sha)
-    return {service:manifest[coordinated.image_of(service)]['imageId'] for service in PORTS}
+    # A service the release kept (build inputs unchanged) runs the image it kept, as recorded.
+    return {service:coordinated.expected_image(service,sha,manifest)[0] for service in PORTS}
 
 def verify(sha,run_id):
     images=accepted_images(sha)

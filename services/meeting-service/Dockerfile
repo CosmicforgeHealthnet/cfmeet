@@ -25,10 +25,12 @@ COPY packages/usage-facts/ /app/packages/usage-facts/
 COPY packages/object-storage/ /app/packages/object-storage/
 # Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
 COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
+# Notification Service producer client (envelope builder / HPKE sealing; roadmap N7 / N11).
+COPY packages/notification-client/ /app/packages/notification-client/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration --bin gap-closure-migration --bin platform-build-migration --bin meeting-audit-migration --bin account-privacy-migration --bin account-phone-migration --bin admin-operations-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
@@ -38,8 +40,9 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies and apply pending Debian security updates (like every other
+# service image; checked by .github/workflows/dependency-security.yml)
+RUN apt-get update && apt-get -y --no-install-recommends upgrade && apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
@@ -53,6 +56,13 @@ COPY --from=builder /app/services/meeting-service/target/release/account-hardeni
 COPY --from=builder /app/services/meeting-service/target/release/organization-integration-migration ./organization-integration-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/lifecycle-delivery-migration ./lifecycle-delivery-migration
+COPY --from=builder /app/services/meeting-service/target/release/notification-fence-migration ./notification-fence-migration
+COPY --from=builder /app/services/meeting-service/target/release/gap-closure-migration ./gap-closure-migration
+COPY --from=builder /app/services/meeting-service/target/release/platform-build-migration ./platform-build-migration
+COPY --from=builder /app/services/meeting-service/target/release/meeting-audit-migration ./meeting-audit-migration
+COPY --from=builder /app/services/meeting-service/target/release/account-privacy-migration ./account-privacy-migration
+COPY --from=builder /app/services/meeting-service/target/release/account-phone-migration ./account-phone-migration
+COPY --from=builder /app/services/meeting-service/target/release/admin-operations-migration ./admin-operations-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
 

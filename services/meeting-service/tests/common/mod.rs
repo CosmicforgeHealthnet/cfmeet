@@ -168,6 +168,32 @@ async fn template(admin: &str) -> String {
             migration::LifecycleDeliveryMigrator::up(&tmpl, None)
                 .await
                 .expect("lifecycle delivery migrations apply");
+            // Notification Service N7: routing fence v1 (guard triggers inert in LEGACY_ONLY,
+            // so every suite runs with them installed).
+            migration::NotificationFenceMigrator::up(&tmpl, None)
+                .await
+                .expect("notification fence migrations apply");
+            migration::GapClosureMigrator::up(&tmpl, None)
+                .await
+                .expect("gap-closure migrations apply");
+            // ADR 0062: partner user participants and partner meeting chat links.
+            migration::PlatformBuildMigrator::up(&tmpl, None)
+                .await
+                .expect("platform-build migrations apply");
+            // Server audit MF2: calendar feed tokens (their own additive history).
+            migration::MeetingAuditMigrator::up(&tmpl, None)
+                .await
+                .expect("meeting-audit migrations apply");
+            // S2: durable erasure jobs of deleted accounts.
+            migration::AccountPrivacyMigrator::up(&tmpl, None)
+                .await
+                .expect("account-privacy migrations apply");
+            migration::AccountPhoneMigrator::up(&tmpl, None)
+                .await
+                .expect("account-phone migrations apply");
+            migration::AdminOperationsMigrator::up(&tmpl, None)
+                .await
+                .expect("admin-operations migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -274,6 +300,8 @@ pub struct FakeRtc {
     pub other_calls: AtomicUsize,
     /// SEC-009: `(room, media identity, reason)` of every provider removal.
     pub removed: std::sync::Mutex<Vec<(String, String, String)>>,
+    /// Gap audit M7: `(room, reason)` of every provider room termination.
+    pub terminated: std::sync::Mutex<Vec<(String, String)>>,
     pub fail_issue: std::sync::atomic::AtomicBool,
     pub last_permissions: std::sync::Mutex<Option<MediaPermissions>>,
 }
@@ -291,8 +319,12 @@ impl RtcProvider for FakeRtc {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(None)
     }
-    async fn terminate_room(&self, _r: &RtcRoomRef, _reason: &str) -> RtcResult<()> {
+    async fn terminate_room(&self, r: &RtcRoomRef, reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
+        self.terminated
+            .lock()
+            .unwrap()
+            .push((r.room_name.clone(), reason.to_string()));
         Ok(())
     }
     async fn issue_join_credentials(
@@ -460,6 +492,10 @@ pub struct TestOptions {
     /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`).
     pub organization_calling:
         Option<backend::services::organization_calling::SharedOrganizationCalling>,
+    /// ADR 0064 / 0065: CF Meet Apps (`None` = every Apps flag off).
+    pub apps: Option<backend::services::apps::Apps>,
+    /// ADR 0068 A6: CF Meet user plan enforcement (`None` = off).
+    pub plan_limits: Option<Arc<backend::services::plan_limits::PlanEnforcement>>,
 }
 
 impl Default for TestOptions {
@@ -485,6 +521,8 @@ impl Default for TestOptions {
             platform: None,
             organizations_authority: None,
             organization_calling: None,
+            apps: None,
+            plan_limits: None,
         }
     }
 }
@@ -812,6 +850,7 @@ impl TestApp {
                 Arc::new(backend::services::appointment_authorization::UnconfiguredAppointmentAuthorization)
             }),
             unified_messaging: opts.unified_messaging.clone(),
+            plan_limits: opts.plan_limits.clone(),
         };
         let mut state = AppState::with_meeting_deps(
             db.conn.clone(),
@@ -823,6 +862,9 @@ impl TestApp {
         );
         if let Some(platform) = opts.platform.clone() {
             state = state.with_platform(platform);
+        }
+        if let Some(apps) = opts.apps.clone() {
+            state = state.with_apps(apps);
         }
         let router = routes::create_routes(state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));
@@ -954,6 +996,54 @@ impl TestApp {
             token,
             email: email.to_string(),
         }
+    }
+
+    /// Multi-device policy: give `user` a real sign-in bound to a TRUSTED (bootstrap) web
+    /// device, as a production client gets by declaring its first device. Replaces the
+    /// user's token with that session's access token. Personal E2EE enrollment requires it.
+    pub async fn trust_device(&self, user: &mut User) {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let session = Uuid::new_v4();
+        let refresh = Uuid::new_v4();
+        let device = Uuid::new_v4();
+        let mut key = [0u8; 32];
+        key[..16].copy_from_slice(device.as_bytes());
+        key[16..].copy_from_slice(session.as_bytes());
+        let thumb = backend::services::account_devices::thumbprint(&key);
+        let inst =
+            backend::services::account_devices::installation_digest(user.id, &device.to_string());
+        let row = self
+            .db
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "WITH d AS (INSERT INTO account_devices (id, user_id, installation_digest, device_class, platform, \
+                    public_key, key_thumbprint, trust, trusted_via, trusted_at, state) \
+                    VALUES ($1, $2, $3, 'WEB', 'WEB', $4, $5, 'TRUSTED', 'BOOTSTRAP', now(), 'ACTIVE') RETURNING id) \
+                 INSERT INTO account_sessions (id, user_id, auth_method, authenticated_at, absolute_expires_at, \
+                    current_refresh_id, device_id) \
+                 SELECT $6, $2, 'PASSWORD', now(), now() + interval '30 days', $7, d.id FROM d \
+                 RETURNING floor(extract(epoch FROM authenticated_at))::bigint AS auth_time",
+                [
+                    device.into(),
+                    user.id.into(),
+                    inst.into(),
+                    key.to_vec().into(),
+                    thumb.into(),
+                    session.into(),
+                    refresh.into(),
+                ],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let auth_time: i64 = row.try_get("", "auth_time").unwrap();
+        let (access, _) = self
+            .state
+            .jwt_service
+            .session_tokens(user.id, "user", auth_time, session, refresh)
+            .unwrap();
+        user.token = access;
     }
 
     pub async fn admin(&self, name: &str) -> User {
@@ -1130,7 +1220,76 @@ impl TestApp {
             .unwrap();
         row.try_get_by_index::<i64>(0).unwrap()
     }
+
+    /// Passwordless sign-in: put a known sign-in code in the store, exactly as
+    /// `POST /api/v1/auth/otp/request` does before mailing it (Redis required).
+    pub async fn seed_sign_in_code(&self, email: &str, code: &str) {
+        self.state
+            .otp_service
+            .store_code(
+                &email.trim().to_lowercase(),
+                code,
+                backend::services::otp::OtpType::SignIn,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Passwordless sign-in through the public API with a seeded code; returns the
+    /// `POST /api/v1/auth/otp/verify` body (tokens, user, `is_new_account`).
+    pub async fn otp_sign_in(&self, email: &str) -> Value {
+        self.seed_sign_in_code(email, TEST_SIGN_IN_CODE).await;
+        let (s, v) = self
+            .post(
+                "/api/v1/auth/otp/verify",
+                Auth::None,
+                serde_json::json!({ "email": email, "code": TEST_SIGN_IN_CODE }),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "otp sign-in: {v}");
+        v
+    }
+
+    /// `(access, refresh)` of a fresh passwordless sign-in.
+    pub async fn otp_tokens(&self, email: &str) -> (String, String) {
+        let v = self.otp_sign_in(email).await;
+        (
+            v["access_token"].as_str().unwrap().to_string(),
+            v["refresh_token"].as_str().unwrap().to_string(),
+        )
+    }
+
+    /// Put a known step-up code in the store for `user_id` and `purpose`
+    /// (`DEACTIVATE_ACCOUNT` / `CHANGE_EMAIL`), as `POST /api/v2/me/step-up/request` does.
+    pub async fn seed_step_up_code(&self, user_id: Uuid, purpose: &str, code: &str) {
+        self.state
+            .otp_service
+            .store_code(
+                &format!("user:{user_id}:{purpose}"),
+                code,
+                backend::services::otp::OtpType::StepUp,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A step-up token for `purpose`, bound to the session of `access`.
+    pub async fn step_up_token(&self, access: &str, user_id: Uuid, purpose: &str) -> String {
+        self.seed_step_up_code(user_id, purpose, "135790").await;
+        let (s, v) = self
+            .post(
+                "/api/v2/me/step-up/verify",
+                Auth::Bearer(access),
+                serde_json::json!({ "purpose": purpose, "code": "135790" }),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "step-up: {v}");
+        v["stepUpToken"].as_str().unwrap().to_string()
+    }
 }
+
+/// The code [`TestApp::otp_sign_in`] seeds (leading zero on purpose).
+pub const TEST_SIGN_IN_CODE: &str = "024680";
 
 pub fn uuid(v: &Value) -> Uuid {
     Uuid::parse_str(

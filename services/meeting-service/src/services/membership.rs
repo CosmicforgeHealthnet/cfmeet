@@ -76,6 +76,62 @@ impl MembershipService {
             .await?)
     }
 
+    /// Gap audit G7: adds every active member of a team of the space's organization, with
+    /// the same grant rules as adding one member. Organizations decides (for the acting
+    /// user) whether the team may be read; members who already belong, the owner, the
+    /// caller and inactive accounts are skipped.
+    pub async fn add_team(
+        &self,
+        ctx: &ActorContext,
+        space_id: Uuid,
+        req: crate::dto::v2::AddTeamMembersRequest,
+    ) -> ApiResult<(Vec<meeting_members::Model>, usize)> {
+        let actor = ctx.require_registered()?;
+        let space = crate::services::meeting_core::find_space(&self.core.db, space_id).await?;
+        let organization = space
+            .organization_id
+            .ok_or_else(|| validation("Only an organization's meeting spaces can add its teams"))?;
+        let authority = crate::services::organization_policy::authoritative(&self.core)
+            .ok_or_else(|| {
+                ApiError::domain(
+                    ErrorCode::FeatureDisabled,
+                    "Teams need the Organizations Service",
+                )
+            })?;
+        let users = authority
+            .team_member_users(
+                organization,
+                req.team_id,
+                &crate::services::organizations_authority::ActingUser::of(actor),
+            )
+            .await
+            .map_err(|e| match e {
+                crate::services::organizations_authority::AuthorityError::Refused(r) => {
+                    crate::services::organizations_authority::relayed_error(&r)
+                }
+                _ => crate::services::organizations_authority::unavailable(),
+            })?;
+        let mut added = vec![];
+        let mut skipped = 0;
+        for user in users {
+            if user == actor.user_id {
+                skipped += 1;
+                continue;
+            }
+            let one = AddMemberRequest {
+                user_id: Some(user),
+                email: None,
+                role: req.role,
+            };
+            match self.add(ctx, space_id, one).await {
+                Ok(m) => added.push(m),
+                Err(e) if e.code() == Some(ErrorCode::ValidationError) => skipped += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok((added, skipped))
+    }
+
     pub async fn add(
         &self,
         ctx: &ActorContext,

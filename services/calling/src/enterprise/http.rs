@@ -27,15 +27,15 @@ use super::{
     hours::{HoursException, HoursSettings, WeeklyWindow},
     ivr::IvrGraph,
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
-    queues::{QueueChange, QueueMember, QueueSettings},
+    queues::{HoldMusicRef, QueueChange, QueueMember, QueueSettings},
     recording::{
         CallRecordingView, ConsentDecision, ConsentParticipants, RecordingFilter, RecordingMode,
         RecordingPolicyChange, RecordingPolicySettings, RecordingRequester, RecordingState,
     },
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     voicemail::{
-        MailboxChange, MailboxOwnerType, MailboxSettings, MessageFilter, MessageState, ReadState,
-        VoicemailRequester,
+        MailboxChange, MailboxOwnerFilter, MailboxOwnerType, MailboxSettings, MessageFilter,
+        MessageState, ReadState, VoicemailRequester,
     },
     AdminActor, PageRequest,
 };
@@ -939,6 +939,13 @@ struct CreateQueueBody {
     capacity: i32,
     #[serde(default)]
     overflow: Option<Destination>,
+    /// C15: seconds an agent is not offered another call after their previous call
+    /// answered from this queue ended (default 0).
+    #[serde(default)]
+    wrap_up_seconds: i32,
+    /// C15: built-in hold music for the waiting caller (absent / `null` = none).
+    #[serde(default)]
+    hold_music: Option<HoldMusicRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -956,6 +963,11 @@ struct UpdateQueueBody {
     /// Present (even `null`) = replace the overflow (`null` removes it).
     #[serde(default, with = "double_option")]
     overflow: Option<Option<Destination>>,
+    #[serde(default)]
+    wrap_up_seconds: Option<i32>,
+    /// Present (even `null`) = replace the hold music (`null` removes it).
+    #[serde(default, with = "double_option")]
+    hold_music: Option<Option<HoldMusicRef>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -982,6 +994,8 @@ async fn create_queue(
                 offer_timeout_seconds: body.offer_timeout_seconds,
                 capacity: body.capacity,
                 overflow: body.overflow,
+                wrap_up_seconds: body.wrap_up_seconds,
+                hold_music: body.hold_music,
             },
         )
         .await?;
@@ -1036,6 +1050,8 @@ async fn update_queue(
                 offer_timeout_seconds: body.offer_timeout_seconds,
                 capacity: body.capacity,
                 overflow: body.overflow,
+                wrap_up_seconds: body.wrap_up_seconds,
+                hold_music: body.hold_music,
             },
         )
         .await?;
@@ -1722,10 +1738,23 @@ async fn list_mailboxes(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
-    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let q = QueryParams::parse(
+        query,
+        &["limit", "cursor", "status", "ownerType", "ownerId"],
+    )?;
+    let owner = MailboxOwnerFilter {
+        owner_type: q
+            .get("ownerType")
+            .map(|v| {
+                MailboxOwnerType::parse(v)
+                    .ok_or(CallingError::Validation("The ownerType filter is invalid."))
+            })
+            .transpose()?,
+        owner_id: q.uuid("ownerId")?,
+    };
     let page = state
         .enterprise
-        .list_mailboxes(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .list_mailboxes(CallScope::of_platform(&ctx), q.status()?, owner, &q.page()?)
         .await?;
     Ok(ok(page))
 }

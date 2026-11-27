@@ -1,6 +1,7 @@
-# EXAMPLE ONLY: NOT DEPLOYED. Shows how the rule files are loaded and how the CF Meet
-# metrics endpoints would be scraped (SEC-016). Hostnames use the reserved .invalid TLD on
-# purpose; replace them with the private network names of a real deployment.
+# EXAMPLE ONLY. Shows how the rule files are loaded and how the CF Meet metrics endpoints
+# are scraped (SEC-016). Hostnames use the reserved .invalid TLD on purpose. The production
+# configuration is rendered from the running containers by
+# infra/calling/production/monitoring_stack.py (docs/operations/monitoring-alerts.md).
 #
 # Validated in CI with `promtool check config` (.github/workflows/service-boundaries.yml),
 # which also loads every rule file matched below. CI mounts an EMPTY placeholder file at

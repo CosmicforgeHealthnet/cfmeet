@@ -84,21 +84,42 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
+| `APP_CONTEXT_KEYS_DIRECT` | 1 | meetings | Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential. |
+| `CALENDAR_FEED_DIRECT_INGRESS` | 4 | meetings | Private calendar subscription feed of a CF Meet account (audit MF2): managed by the signed-in account in the CF Meet apps and read by calendar clients with the feed token in a `.ics` path; the gateway route grammar has no file-extension segments and it is not a partner API, so it stays on the Meeting Service ingress. |
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
-| `FIRST_PARTY_APP_ACCOUNT` | 6 | meetings | The CF Meet app's own account profile. |
-| `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
-| `FIRST_PARTY_ORGANIZATIONS` | 39 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
+| `FIRST_PARTY_APP_ACCOUNT` | 41 | meetings | The CF Meet app's own account profile. |
+| `FIRST_PARTY_APP_BACKEND` | 18 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
+| `FIRST_PARTY_APP_CONSENT` | 6 | meetings | The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route. |
+| `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
+| `FIRST_PARTY_COMMUNICATIONS_HUB` | 77 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
+| `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
+| `FIRST_PARTY_ORGANIZATIONS` | 50 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
-| `LEGACY_DIRECT_INGRESS` | 46 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
+| `LEGACY_DIRECT_INGRESS` | 43 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
-| `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 2 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
+| `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **123** | | |
+| **Total** | **271** | | |
+
+#### `APP_CONTEXT_KEYS_DIRECT` (1)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/app-context-keys` | `v2_app_context_keys` | `cfmeet.meeting-service.http-api` |
+
+#### `CALENDAR_FEED_DIRECT_INGRESS` (4)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/calendar-feeds/{file}` | `v2_read_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/calendar-feed` | `v2_delete_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/calendar-feed` | `v2_get_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/calendar-feed` | `v2_create_calendar_feed` | `cfmeet.meeting-service.http-api` |
 
 #### `CALENDAR_FILE_DIRECT_INGRESS` (2)
 
@@ -117,18 +138,53 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/disable` | `disableContact` | `cfmeet.privacy-relay.http-api` |
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/verification` | `assertContactVerification` | `cfmeet.privacy-relay.http-api` |
 
-#### `FIRST_PARTY_APP_ACCOUNT` (6)
+#### `FIRST_PARTY_APP_ACCOUNT` (41)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
 | POST | `/api/v1/auth/oauth/google/exchange` | `oauth_google_exchange` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/oauth/google/native` | `oauth_google_native` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/phone/request` | `request_phone_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/phone/verify` | `verify_phone_otp` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/avatars/{avatarId}` | `v2_get_avatar` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/account/delete` | `v2_delete_my_account` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/avatar` | `v2_remove_my_avatar` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/me/avatar` | `v2_upload_my_avatar` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/data-export` | `v2_export_my_data` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/device-links` | `v2_list_pending_device_links` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links` | `v2_create_device_link` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/device-links/{linkId}` | `v2_get_device_link` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links/{linkId}/approve` | `v2_approve_device_link` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links/{linkId}/cancel` | `v2_cancel_device_link` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links/{linkId}/complete` | `v2_complete_device_link` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links/{linkId}/email-code` | `v2_send_device_link_email_code` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/device-links/{linkId}/reject` | `v2_reject_device_link` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/device-policy` | `v2_get_my_device_policy` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/devices` | `v2_list_my_devices` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/devices/current` | `v2_declare_my_device` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/devices/{deviceId}/revoke` | `v2_revoke_my_device` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/email/change/request` | `v2_request_email_change` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/email/change/verify` | `v2_confirm_email_change` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/mfa` | `v2_get_my_mfa` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/mfa/disable` | `v2_disable_my_mfa` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/mfa/totp/confirm` | `v2_confirm_my_totp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/mfa/totp/setup` | `v2_setup_my_totp` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/phone` | `v2_remove_phone` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/phone` | `v2_get_my_phone` | `cfmeet.meeting-service.http-api` |
+| PATCH | `/api/v2/me/phone` | `v2_update_phone_privacy` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/phone/confirm` | `v2_confirm_phone_binding` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/phone/verification` | `v2_request_phone_binding` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/profile` | `v2_get_my_profile` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/me/profile` | `v2_update_my_profile` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/security-events` | `v2_list_my_security_events` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/sessions` | `v2_list_my_sessions` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/sessions/revoke-all` | `v2_revoke_all_my_sessions` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/sessions/revoke-others` | `v2_revoke_other_account_sessions` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/sessions/{sessionId}/revoke` | `v2_revoke_my_session` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/step-up/request` | `v2_request_step_up` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/step-up/verify` | `v2_verify_step_up` | `cfmeet.meeting-service.http-api` |
 
-#### `FIRST_PARTY_APP_BACKEND` (16)
+#### `FIRST_PARTY_APP_BACKEND` (18)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -140,6 +196,8 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | POST | `/api/v2/messaging/devices/{deviceId}/revoke` | `v2_messaging_revoke_device` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/messaging/directory` | `v2_messaging_directory` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/messaging/directory/resolve` | `v2_messaging_directory_resolve` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/messaging/export-deliveries` | `v2_messaging_export_deliveries` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/messaging/exports/{exportId}/claim` | `v2_messaging_claim_export` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/messaging/me` | `v2_messaging_me` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/messaging/principals/names` | `v2_messaging_principal_names` | `cfmeet.meeting-service.http-api` |
 | DELETE | `/api/v2/messaging/relay/{path}` | `v2_messaging_relay_delete` | `cfmeet.meeting-service.http-api` |
@@ -149,12 +207,129 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | PUT | `/api/v2/messaging/relay/{path}` | `v2_messaging_relay_put` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/messaging/session-tokens` | `v2_messaging_session_token` | `cfmeet.meeting-service.http-api` |
 
-#### `FIRST_PARTY_ORGANIZATIONS` (39)
+#### `FIRST_PARTY_APP_CONSENT` (6)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
+| GET | `/api/v2/me/apps` | `v2_list_my_apps` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/apps/{grantId}` | `v2_revoke_my_app` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/oauth/authorize/approve` | `v2_oauth_authorize_decide` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/oauth/authorize/context` | `v2_oauth_authorize_context` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/apps` | `v2_list_organization_apps` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/organizations/{id}/apps/{grantId}` | `v2_revoke_organization_app` | `cfmeet.meeting-service.http-api` |
+
+#### `FIRST_PARTY_APP_NOTIFICATIONS` (9)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/notifications` | `v2_notifications_list` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/notifications/devices/{accountDeviceId}/push` | `v2_notifications_push_remove` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/notifications/devices/{accountDeviceId}/push` | `v2_notifications_push_register` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/notifications/dismiss` | `v2_notifications_dismiss` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/notifications/preferences` | `v2_notifications_preferences_get` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/notifications/preferences` | `v2_notifications_preferences_update` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/notifications/read` | `v2_notifications_mark_read` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/notifications/unread-count` | `v2_notifications_unread_count` | `cfmeet.meeting-service.http-api` |
+| PATCH | `/api/v2/notifications/{notificationId}` | `v2_notifications_update` | `cfmeet.meeting-service.http-api` |
+
+#### `FIRST_PARTY_COMMUNICATIONS_HUB` (77)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/communications/activation` | `getCommunicationsActivation` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/activity` | `listCommunicationsActivity` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/blocks` | `listCommunicationsBlocks` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/bootstrap` | `getCommunicationsBootstrap` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/calls/history` | `listCommunicationsCallHistory` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/calls/{callId}/context` | `getCommunicationsCallContext` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/calls/{callId}/participants` | `addContactsToCall` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contact-lists` | `listContactLists` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/contact-lists` | `createContactList` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/contact-lists/{listId}` | `deleteContactList` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contact-lists/{listId}` | `getContactList` | `cfmeet.communications.http-api` |
+| PATCH | `/api/v2/communications/contact-lists/{listId}` | `updateContactList` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/contact-lists/{listId}/members/{contactId}` | `removeContactListMember` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/contact-lists/{listId}/members/{contactId}` | `addContactListMember` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/contact-requests` | `createCommunicationsContactRequest` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contact-requests/incoming` | `listIncomingCommunicationsContactRequests` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contact-requests/outgoing` | `listOutgoingCommunicationsContactRequests` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/contact-requests/{requestId}` | `cancelCommunicationsContactRequest` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/contact-requests/{requestId}/accept` | `acceptCommunicationsContactRequest` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/contact-requests/{requestId}/decline` | `declineCommunicationsContactRequest` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contacts` | `listCommunicationsContacts` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contacts/favorites` | `listFavoriteContacts` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/contacts/{contactId}` | `removeCommunicationsContact` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contacts/{contactId}` | `getCommunicationsContact` | `cfmeet.communications.http-api` |
+| PATCH | `/api/v2/communications/contacts/{contactId}` | `updateCommunicationsContact` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/contacts/{contactId}/calls` | `startContactCall` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/contacts/{contactId}/common-groups` | `listCommunicationsCommonGroups` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/contacts/{contactId}/favorite` | `removeFavoriteContact` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/contacts/{contactId}/favorite` | `addFavoriteContact` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/conversations/{conversationId}/calls` | `startConversationCall` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/conversations/{conversationId}/clear-for-me` | `clearConversationForMe` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/context` | `getConversationContext` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/media` | `listConversationMedia` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/meetings` | `listConversationMeetings` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/conversations/{conversationId}/meetings/instant` | `createConversationInstantMeeting` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/conversations/{conversationId}/meetings/share` | `shareConversationMeeting` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/preferences` | `getConversationPreferences` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/conversations/{conversationId}/preferences` | `updateConversationPreferences` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/shared-groups` | `listConversationSharedGroups` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/conversations/{conversationId}/timeline` | `getConversationTimeline` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/devices` | `listCommunicationsDevices` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/devices/link` | `linkCommunicationsDevice` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/devices/{deviceId}/push` | `removeCommunicationsDevicePush` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/devices/{deviceId}/push` | `registerCommunicationsDevicePush` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/devices/{deviceId}/revoke` | `revokeCommunicationsDevice` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/devices/{deviceId}/sync-state` | `getCommunicationsDeviceSyncState` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/devices/{deviceId}/sync-state` | `acknowledgeCommunicationsDeviceSync` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/email/resolve` | `resolveCommunicationsEmail` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/invites/resolve` | `resolveCommunicationsInvitation` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/phone/resolve` | `resolveProfileByPhone` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/public-id/resolve` | `resolveCommunicationsPublicId` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/events` | `listCommunicationsEvents` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/inbox` | `getCommunicationsInboxOverlay` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/invites` | `listCommunicationsInvitations` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/invites` | `createCommunicationsInvitation` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/invites/{inviteId}` | `revokeCommunicationsInvitation` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me` | `getCommunicationsProfile` | `cfmeet.communications.http-api` |
+| PATCH | `/api/v2/communications/me` | `updateCommunicationsProfile` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/capabilities` | `getCommunicationsCapabilities` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/notification-delivery-status` | `getNotificationDeliveryStatus` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/notification-preferences` | `getNotificationPreferences` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/me/notification-preferences` | `updateNotificationPreferences` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/privacy` | `getCommunicationsPrivacy` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/me/privacy` | `updateCommunicationsPrivacy` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/public-id` | `getCommunicationsPublicId` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/me/public-id/rotate` | `rotateCommunicationsPublicId` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/qr` | `getCommunicationsQrInvitation` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/recovery-state` | `getCommunicationsRecoveryState` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/me/storage-summary` | `getStorageSummary` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/profiles/{cfMeetId}` | `getCommunicationsPublicProfile` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/profiles/{cfMeetId}/block` | `unblockCommunicationsProfile` | `cfmeet.communications.http-api` |
+| PUT | `/api/v2/communications/profiles/{cfMeetId}/block` | `blockCommunicationsProfile` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/profiles/{cfMeetId}/reports` | `reportCommunicationsProfile` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/saved-messages` | `listSavedMessages` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/saved-messages` | `saveMessage` | `cfmeet.communications.http-api` |
+| DELETE | `/api/v2/communications/saved-messages/{savedId}` | `deleteSavedMessage` | `cfmeet.communications.http-api` |
+| GET | `/api/v2/communications/sync` | `syncCommunicationsChanges` | `cfmeet.communications.http-api` |
+
+#### `FIRST_PARTY_IN_MEETING_APPS` (2)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/conferences/{id}/apps` | `v2_list_conference_apps` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/conferences/{id}/apps/{appId}/context` | `v2_create_app_context` | `cfmeet.meeting-service.http-api` |
+
+#### `FIRST_PARTY_ORGANIZATIONS` (50)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/me/organization-invitations` | `v2_my_organization_invitations` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organization-invitations/accept` | `v2_accept_organization_invitation` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organization-invitations/decline` | `v2_decline_organization_invitation` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organization-invitations/{invitationId}/accept` | `v2_accept_my_organization_invitation` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organization-invitations/{invitationId}/decline` | `v2_decline_my_organization_invitation` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations` | `v2_create_business_organization` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/organizations/{id}` | `v2_get_business_organization` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/organizations/{id}` | `v2_update_business_organization` | `cfmeet.meeting-service.http-api` |
@@ -165,12 +340,19 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | PATCH | `/api/v2/organizations/{id}/calling/{path}` | `v2_organization_calling_patch` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/calling/{path}` | `v2_organization_calling_post` | `cfmeet.meeting-service.http-api` |
 | PUT | `/api/v2/organizations/{id}/calling/{path}` | `v2_organization_calling_put` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/exports/{exportId}/download` | `v2_download_organization_export` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/organizations/{id}/invitations` | `v2_list_organization_invitations` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/invitations` | `v2_create_organization_invitation` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | `v2_revoke_organization_invitation` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/member-calling/endpoints` | `v2_organization_member_calling_endpoints_list` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/member-calling/endpoints` | `v2_organization_member_calling_endpoints_register` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}` | `v2_organization_member_calling_endpoints_revoke` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/member-calling/signaling-credentials` | `v2_organization_member_calling_signaling_credential` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/members/me/leave` | `v2_leave_organization` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/organizations/{id}/members/{userId}` | `v2_update_organization_membership` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/messaging/members/resolve` | `v2_organization_messaging_resolve_members` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/messaging/moderation/{path}` | `v2_organization_messaging_moderation_get` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/messaging/moderation/{path}` | `v2_organization_messaging_moderation_post` | `cfmeet.meeting-service.http-api` |
 | DELETE | `/api/v2/organizations/{id}/messaging/relay/{path}` | `v2_organization_messaging_delete` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/organizations/{id}/messaging/relay/{path}` | `v2_organization_messaging_get` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/organizations/{id}/messaging/relay/{path}` | `v2_organization_messaging_patch` | `cfmeet.meeting-service.http-api` |
@@ -192,6 +374,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | POST | `/api/v2/organizations/{id}/teams/{teamId}/members` | `v2_add_organization_team_member` | `cfmeet.meeting-service.http-api` |
 | DELETE | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | `v2_remove_organization_team_member` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | `v2_update_organization_team_member` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/organizations/{id}/teams/{teamId}/messaging-channel` | `v2_organization_team_messaging_channel` | `cfmeet.meeting-service.http-api` |
 
 #### `FIRST_PARTY_SESSION_DEVICES` (2)
 
@@ -200,7 +383,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | POST | `/v1/messaging/session-devices` | `issueSessionDeviceToken` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/session-devices/revoke` | `revokeSessionDevices` | `cfmeet.messaging.http-api` |
 
-#### `LEGACY_DIRECT_INGRESS` (46)
+#### `LEGACY_DIRECT_INGRESS` (43)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -210,18 +393,15 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | GET | `/api/v1/api-keys/{id}` | `get_api_key` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/api/meetings` | `api_create_meeting` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/api/meetings/{id}/join` | `api_join_meeting` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/change-password` | `change_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/forgot-password` | `forgot_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/login` | `login` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/email-change/revert` | `revert_email_change` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/auth/logout` | `logout` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/mfa/verify` | `verify_mfa` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/auth/oauth/google` | `oauth_google_init` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/auth/oauth/google/callback` | `oauth_google_callback` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/request` | `request_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/verify` | `verify_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/verify-link` | `verify_otp_link` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/auth/refresh` | `refresh_token` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/register` | `register` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/resend-verification` | `resend_verification_email` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/reset-password` | `reset_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/verify-email` | `verify_email` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/verify-reset-token` | `verify_reset_token` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/meetings` | `list_meetings` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/meetings` | `create_meeting` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/meetings/instant` | `create_instant_meeting` | `cfmeet.meeting-service.http-api` |
@@ -260,10 +440,14 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 123 
 | GET | `/v1/calling/media/rtc/v1/validate` | `validateMedia` | `cfmeet.calling.http-api` |
 | GET | `/v1/calling/media/rtc/validate` | `validateMediaLegacy` | `cfmeet.calling.http-api` |
 
-#### `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` (2)
+#### `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` (6)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
+| GET | `/api/v2/organizations/{id}/export` | `v2_export_organization` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/meeting-profile-policy` | `v2_get_organization_meeting_profile_policy` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/organizations/{id}/meeting-profile-policy` | `v2_put_organization_meeting_profile_policy` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/meeting-spaces` | `v2_list_organization_meeting_spaces` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/organizations/{id}/members` | `v2_list_organization_members` | `cfmeet.meeting-service.http-api` |
 | PUT | `/api/v2/organizations/{id}/members/{userId}` | `v2_upsert_organization_member` | `cfmeet.meeting-service.http-api` |
 

@@ -82,6 +82,13 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
         ("admin.rs", "/internal/v1"),
         ("delegation.rs", "/internal/v1"),
         ("organization_scopes.rs", "/internal/v1"),
+        ("end_users.rs", "/internal/v1"),
+        ("user_tokens.rs", "/internal/v1"),
+        ("environment_origins.rs", "/internal/v1"),
+        ("meeting_platform.rs", "/internal/v1"),
+        ("oauth.rs", "/internal/v1"),
+        ("operator_reads.rs", "/internal/v1"),
+        ("operator_commands.rs", "/internal/v1"),
     ] {
         let code = std::fs::read_to_string(src.join(file)).unwrap();
         let code: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -93,7 +100,7 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
                 continue; // the nest itself
             }
             let handlers = chunk.split(')').take(4).collect::<Vec<_>>().join(")");
-            for method in ["get", "post", "put", "delete"] {
+            for method in ["get", "post", "put", "patch", "delete"] {
                 if handlers.contains(&format!("{method}(")) {
                     let openapi_path = path
                         .split('/')
@@ -354,4 +361,199 @@ async fn real_responses_conform_to_the_identity_contract() {
         assert!(reply.status.is_client_error(), "{}", reply.body);
         conforms("Error", &reply.body);
     }
+}
+
+/// ADR 0062: the new refusals (user tokens, scopes, caps) keep the identity contract's
+/// error envelope.
+#[tokio::test]
+async fn platform_build_errors_conform_to_the_identity_contract() {
+    use std::sync::Arc;
+
+    use platform_access::{
+        config::platform_build::PlatformBuildConfig, identity::user_tokens::UserTokenKeys,
+    };
+    let Some(h) = Harness::with_build(PlatformBuildConfig {
+        end_users_enabled: true,
+        user_tokens_enabled: true,
+        environment_origins_enabled: true,
+        meeting_platform_enabled: true,
+        user_token_keys: Some(Arc::new(UserTokenKeys::generate())),
+        ..PlatformBuildConfig::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let c = h.consumer("acme", "EXTERNAL", &["principals.read"]).await;
+    let (credential, _) = h.issue(c.sa("SANDBOX"), &["principals.read"]).await;
+    let invalid = h
+        .call(
+            &h.peers.messaging,
+            Method::POST,
+            "/internal/v1/user-tokens/verify",
+            Some(json!({ "token": "cfut_sbx_a.b.c" })),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(invalid.code(), "USER_TOKEN_INVALID");
+    conforms("Error", &invalid.body);
+    let scope = h
+        .call_with_headers(
+            &h.peers.developer_platform,
+            Method::POST,
+            "/internal/v1/end-users",
+            Some(json!({ "externalId": "u-1" })),
+            None,
+            None,
+            &[(
+                "cf-forwarded-credential-id",
+                credential["id"].as_str().unwrap().to_string(),
+            )],
+        )
+        .await;
+    assert_eq!(scope.code(), "SCOPE_REQUIRED");
+    conforms("Error", &scope.body);
+}
+
+/// ADR 0064: OAuth app-token authentication, credential status, the APP_GRANT change and
+/// the OAuth refusals keep the identity contract.
+#[tokio::test]
+async fn oauth_responses_conform_to_the_identity_contract() {
+    use platform_access::config::platform_build::PlatformBuildConfig;
+    let Some(h) = Harness::with_build(PlatformBuildConfig {
+        oauth_enabled: true,
+        ..PlatformBuildConfig::default()
+    })
+    .await
+    else {
+        return;
+    };
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    let personal = h.consumer("cfmeet", "FIRST_PARTY", &[]).await;
+    let dev = h.consumer("devco", "EXTERNAL", &[]).await;
+    let app = dev.application_id;
+    let dp = &h.peers.developer_platform;
+    let put = h
+        .call(
+            dp,
+            Method::PUT,
+            &format!("/internal/v1/oauth/clients/{app}"),
+            Some(json!({ "name": "App", "redirectUris": ["https://a.example.com/cb"],
+                         "userScopes": ["meetings:read"], "distribution": "PUBLIC", "status": "PUBLISHED" })),
+            None,
+            None,
+        )
+        .await;
+    assert!(put.status.is_success(), "{}", put.body);
+    let secret = h
+        .call(
+            dp,
+            Method::POST,
+            &format!("/internal/v1/oauth/clients/{app}/secret"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .body["clientSecret"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let request = json!({ "clientId": app, "redirectUri": "https://a.example.com/cb", "scope": "meetings:read",
+        "codeChallenge": CHALLENGE, "codeChallengeMethod": "S256", "target": "USER",
+        "accountId": uuid::Uuid::new_v4(), "decision": "APPROVE" });
+    let code = h
+        .call(
+            &h.peers.meeting,
+            Method::POST,
+            "/internal/v1/oauth/authorizations",
+            Some(request.clone()),
+            Some(personal.delegated("PRODUCTION")),
+            None,
+        )
+        .await;
+    assert!(code.status.is_success(), "{}", code.body);
+    let tokens = h
+        .call(
+            dp,
+            Method::POST,
+            "/internal/v1/oauth/token",
+            Some(json!({ "clientId": app, "clientSecret": secret, "grantType": "authorization_code",
+                "code": code.body["code"], "redirectUri": "https://a.example.com/cb", "codeVerifier": VERIFIER })),
+            None,
+            None,
+        )
+        .await;
+    let access = tokens.body["accessToken"].as_str().unwrap().to_string();
+    let ok = h.authenticate(&access).await;
+    conforms("AuthenticateResponse", &ok.body);
+    assert_eq!(ok.body["authority"]["credentialKind"], "OAUTH_ACCESS");
+    let chain = &ok.body["authority"];
+    let ctx = cf_service_auth::DelegatedPlatformContext::new(
+        personal.tenant_id,
+        personal.application_id,
+        personal.env("PRODUCTION"),
+        cf_service_auth::ApplicationEnvironmentKind::Production,
+        uuid(&chain["serviceAccount"]["id"]),
+    );
+    let status = h
+        .as_calling(
+            Method::GET,
+            &format!(
+                "/internal/v1/credentials/{}",
+                chain["credential"]["id"].as_str().unwrap()
+            ),
+            None,
+            Some(ctx),
+        )
+        .await;
+    conforms("CredentialStatusResult", &status.body);
+    assert_eq!(status.body["credentialKind"], "OAUTH_ACCESS");
+    assert_eq!(status.body["scopes"], json!(["meetings.read"]));
+    assert_eq!(status.body["grantId"], chain["grantId"]);
+    assert_eq!(status.body["restrictedPrincipal"]["kind"], "NATIVE_CF_USER");
+    assert!(chain["credentialIssuedAt"].is_string());
+    let page = h
+        .as_calling(
+            Method::POST,
+            "/internal/v1/identity/changes",
+            Some(json!({ "after": 0, "limit": 500 })),
+            None,
+        )
+        .await;
+    conforms("ChangePage", &page.body);
+    assert!(page.body["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["entityKind"] == "APP_GRANT"));
+    let mut bad = request.clone();
+    bad["scope"] = json!("admin");
+    bad.as_object_mut().unwrap().remove("decision");
+    let refused = h
+        .call(
+            &h.peers.meeting,
+            Method::POST,
+            "/internal/v1/oauth/authorization-requests/validate",
+            Some(bad),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(refused.code(), "INVALID_SCOPE");
+    conforms("Error", &refused.body);
+    let grant = h
+        .call(
+            dp,
+            Method::POST,
+            "/internal/v1/oauth/token",
+            Some(json!({ "clientId": app, "clientSecret": secret, "grantType": "refresh_token", "refreshToken": "cfor_live_x" })),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(grant.code(), "invalid_grant");
+    conforms("Error", &grant.body);
 }

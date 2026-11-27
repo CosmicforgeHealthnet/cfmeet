@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json",
   "title": "CF Meet Developer Platform control plane v1",
-  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract.",
+  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract. 1.4.0 (ADR 0062 / 0063, CF Meet Platform Build): partner users (EndUser, EndUserList, Create/UpdateEndUserRequest), user tokens (UserTokenGrants, IssueUserTokenRequest, UpsertUserTokenRequest, UserToken, UserWithToken, RevokeSessionsResult), allowed websites (AllowedOrigins, PutAllowedOriginsRequest), push credential metadata (PushCredential(List), CreatePushCredentialRequest; secrets are write-only and sealed), production capabilities END_USERS and PUSH, usage type MESSAGE_SENT. 1.5.0 (ADR 0064 / 0065, CF Meet Apps): App, AppManifest, PutAppRequest, AppStatus, AppClientSecret (once), AppGrant(List), PutAppTestAccountsRequest, OperatorApp, AppDecisionRequest, DirectoryApp(List) and the OAuth wire shapes (snake_case): OAuthTokenRequest, OAuthRevokeRequest, OAuthToken, OAuthError, OAuthUserinfo, OAuthMetadata. 1.6.0 (ADR 0068): operator read models for the admin bridge (OperatorProject, OperatorEnvironment, OperatorMember, OperatorInvitation, OperatorPushProvider, OperatorWebhook, OperatorWebhookDelivery, OperatorAppSummary, OperatorAppVersion, OperatorAppInstallation and their lists): identifiers, names, states, counts and timestamps only.",
   "anyOf": [
     {
       "$ref": "#/$defs/Organization"
@@ -48,6 +48,36 @@
     },
     {
       "$ref": "#/$defs/FirstPartyRegistration"
+    },
+    {
+      "$ref": "#/$defs/EndUser"
+    },
+    {
+      "$ref": "#/$defs/EndUserList"
+    },
+    {
+      "$ref": "#/$defs/UserToken"
+    },
+    {
+      "$ref": "#/$defs/UserWithToken"
+    },
+    {
+      "$ref": "#/$defs/AllowedOrigins"
+    },
+    {
+      "$ref": "#/$defs/PushCredential"
+    },
+    {
+      "$ref": "#/$defs/PushCredentialList"
+    },
+    {
+      "$ref": "#/$defs/App"
+    },
+    {
+      "$ref": "#/$defs/DirectoryApp"
+    },
+    {
+      "$ref": "#/$defs/OAuthToken"
     }
   ],
   "$defs": {
@@ -1900,6 +1930,11 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the workspace version the change applies to."
         }
       }
     },
@@ -2575,7 +2610,9 @@
                 "PUBLIC_NETWORK_CALLING",
                 "PRIVACY_RELAY",
                 "NUMBERS",
-                "SMS"
+                "SMS",
+                "END_USERS",
+                "PUSH"
               ]
             },
             {
@@ -2695,7 +2732,9 @@
         "PUBLIC_NETWORK_CALLING",
         "PRIVACY_RELAY",
         "NUMBERS",
-        "SMS"
+        "SMS",
+        "END_USERS",
+        "PUSH"
       ]
     },
     "ProductionRequestState": {
@@ -3065,6 +3104,11 @@
         "reasonCode": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
         }
       }
     },
@@ -3077,7 +3121,8 @@
         "NUMBER_ACTIVE",
         "SMS_SEGMENT",
         "RECORDING_MINUTE",
-        "STORAGE_BYTE_TIME"
+        "STORAGE_BYTE_TIME",
+        "MESSAGE_SENT"
       ]
     },
     "UsageUnit": {
@@ -3722,6 +3767,11 @@
         "supportReference": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -3740,6 +3790,11 @@
         "occurredAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -4276,6 +4331,5552 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "EndUserStatus": {
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "DEACTIVATED"
+      ]
+    },
+    "EndUser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "externalId",
+        "displayName",
+        "imageUrl",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The Platform Access principal id (kind EXTERNAL_APPLICATION_PRINCIPAL)."
+        },
+        "externalId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "displayName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "imageUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/EndUserStatus"
+        },
+        "createdAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "ADR 0062: a partner user (a Platform Access principal of the credential's environment). DEACTIVATED: deleted (profile erased, id kept)."
+    },
+    "EndUserList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/EndUser"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "A page of partner users; pass `nextCursor` as `cursor` for the next page (null: last page)."
+    },
+    "CreateEndUserRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalId"
+      ],
+      "properties": {
+        "externalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]{1,128}$",
+          "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Display name (no control characters)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^https://",
+          "description": "https:// image URL."
+        }
+      }
+    },
+    "UpdateEndUserRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "displayName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Display name (no control characters)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "imageUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^https://",
+              "description": "https:// image URL."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED"
+          ]
+        }
+      },
+      "minProperties": 1,
+      "description": "Profile changes (`null` clears) and suspension / reactivation; deletion is DELETE."
+    },
+    "UserTokenGrants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "msg": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "read",
+              "send"
+            ]
+          },
+          "description": "Chat: needs `messages.read` / `messages.send` on the minting credential."
+        },
+        "call": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 1,
+          "items": {
+            "enum": [
+              "receive"
+            ]
+          },
+          "description": "Receive calls: needs `calls.write`."
+        },
+        "mtg": {
+          "type": "array",
+          "maxItems": 10,
+          "description": "Meetings the user may join, with a role: needs `meetings.write`. The token's compact `{c, r}` form is accepted too.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "conferenceId",
+                  "role"
+                ],
+                "properties": {
+                  "conferenceId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "role": {
+                    "enum": [
+                      "HOST",
+                      "CO_HOST",
+                      "PRESENTER",
+                      "PARTICIPANT",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "c",
+                  "r"
+                ],
+                "properties": {
+                  "c": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "r": {
+                    "enum": [
+                      "HOST",
+                      "CO_HOST",
+                      "PRESENTER",
+                      "PARTICIPANT",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "description": "ADR 0062 user token grants; effective grants are re-intersected with the minting credential's CURRENT scopes on every verification."
+    },
+    "IssueUserTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grants"
+      ],
+      "properties": {
+        "grants": {
+          "$ref": "#/$defs/UserTokenGrants"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Token lifetime in seconds (default 3600)."
+        }
+      }
+    },
+    "UpsertUserTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalId",
+        "grants"
+      ],
+      "properties": {
+        "externalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]{1,128}$",
+          "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Display name (no control characters)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^https://",
+          "description": "https:// image URL."
+        },
+        "grants": {
+          "$ref": "#/$defs/UserTokenGrants"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Token lifetime in seconds (default 3600)."
+        }
+      },
+      "description": "Creates the user if new (idempotent on externalId), then mints a token."
+    },
+    "UserToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokenId",
+        "expiresAt"
+      ],
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^cfut_(sbx|test|live)_",
+          "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+        },
+        "tokenRedacted": {
+          "const": true,
+          "description": "An Idempotency-Key replay: the token is never returned again."
+        },
+        "tokenId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UserWithToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "tokenId",
+        "expiresAt"
+      ],
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/EndUser"
+        },
+        "token": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^cfut_(sbx|test|live)_",
+          "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+        },
+        "tokenRedacted": {
+          "const": true
+        },
+        "tokenId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RevokeSessionsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokensNotBefore"
+      ],
+      "properties": {
+        "tokensNotBefore": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Tokens issued before this instant (and every device credential derived from them) no longer work."
+        }
+      }
+    },
+    "AllowedOrigins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "origins"
+      ],
+      "properties": {
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "origins": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      },
+      "description": "ADR 0062: an environment's allowed websites (exact origins)."
+    },
+    "PutAllowedOriginsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origins"
+      ],
+      "properties": {
+        "origins": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 300,
+            "pattern": "^(https://[a-z0-9.-]+(:[1-9][0-9]{0,4})?|http://(localhost|127\\.0\\.0\\.1)(:[1-9][0-9]{0,4})?)$"
+          }
+        }
+      },
+      "description": "The complete list (replaces it): exact `scheme://host[:port]`, lowercase host, no path, no wildcard, no explicit default port; https only, except http://localhost and http://127.0.0.1 in SANDBOX / TEST."
+    },
+    "PushCredentialStatus": {
+      "enum": [
+        "UNVERIFIED",
+        "VERIFIED",
+        "FAILED"
+      ]
+    },
+    "PushCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialRef",
+        "environmentId",
+        "provider",
+        "voip",
+        "teamId",
+        "keyId",
+        "bundleId",
+        "apnsHost",
+        "projectId",
+        "fingerprint",
+        "status",
+        "lastVerifiedAt",
+        "lastError",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "credentialRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "provider": {
+          "enum": [
+            "APNS",
+            "FCM"
+          ]
+        },
+        "voip": {
+          "type": "boolean",
+          "description": "APNs VoIP (PushKit) key."
+        },
+        "teamId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{10}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keyId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{10}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bundleId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 155
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apnsHost": {
+          "oneOf": [
+            {
+              "enum": [
+                "SANDBOX",
+                "PRODUCTION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 30
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the uploaded secret (hex)."
+        },
+        "status": {
+          "$ref": "#/$defs/PushCredentialStatus"
+        },
+        "lastVerifiedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastError": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0063: push credential METADATA. The secret (APNs .p8 key / FCM service-account JSON) is sealed to the Notification Service on receipt and never stored, logged or returned."
+    },
+    "PushCredentialList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/PushCredential"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "ApnsPushCredentialUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "teamId",
+        "keyId",
+        "bundleId",
+        "voip",
+        "apnsHost",
+        "p8"
+      ],
+      "properties": {
+        "provider": {
+          "const": "APNS"
+        },
+        "teamId": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{10}$"
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{10}$"
+        },
+        "bundleId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 155,
+          "pattern": "^[A-Za-z0-9.-]+$"
+        },
+        "voip": {
+          "type": "boolean"
+        },
+        "apnsHost": {
+          "enum": [
+            "SANDBOX",
+            "PRODUCTION"
+          ],
+          "description": "SANDBOX and TEST environments may only use SANDBOX."
+        },
+        "p8": {
+          "type": "string",
+          "maxLength": 8192,
+          "pattern": "^-----BEGIN PRIVATE KEY-----",
+          "description": "The APNs token signing key (.p8, PEM). Write-only."
+        }
+      }
+    },
+    "FcmPushCredentialUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "projectId",
+        "serviceAccountJson"
+      ],
+      "properties": {
+        "provider": {
+          "const": "FCM"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+        },
+        "serviceAccountJson": {
+          "type": "string",
+          "maxLength": 16384,
+          "description": "The Firebase service-account key JSON (type service_account; its project_id, when present, must equal projectId). Write-only."
+        }
+      }
+    },
+    "CreatePushCredentialRequest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ApnsPushCredentialUpload"
+        },
+        {
+          "$ref": "#/$defs/FcmPushCredentialUpload"
+        }
+      ],
+      "description": "Uploads (replaces) the environment's credential of that provider (APNS with voip false / true, or FCM)."
+    },
+    "AppStatus": {
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "IN_REVIEW",
+        "APPROVED",
+        "REJECTED",
+        "PUBLISHED",
+        "SUSPENDED"
+      ],
+      "description": "ADR 0065 review status."
+    },
+    "AppManifest": {
+      "description": "ADR 0064: an app manifest (normalized; every change is a new immutable version).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "logoUrl",
+        "privacyUrl",
+        "termsUrl",
+        "redirectUris",
+        "userScopes",
+        "botScopes",
+        "eventTypes",
+        "meetingSurface",
+        "distribution"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "logoUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacyUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "termsUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "redirectUris": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/|$))[^#*]*$",
+            "maxLength": 2048
+          }
+        },
+        "userScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "profile:read",
+              "profile:email",
+              "meetings:read",
+              "meetings:write",
+              "chat:read",
+              "chat:write",
+              "events:meetings"
+            ]
+          }
+        },
+        "botScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "chat:read:bot",
+              "chat:write:bot"
+            ]
+          }
+        },
+        "eventTypes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "app.grant_revoked",
+              "app.installed",
+              "app.uninstalled",
+              "artifact.deleted",
+              "artifact.ready",
+              "bot.mentioned",
+              "bot.message_received",
+              "conversation.created",
+              "conversation.member_added",
+              "conversation.member_removed",
+              "conversation.updated",
+              "meeting.created",
+              "meeting.ended",
+              "meeting.started",
+              "message.created",
+              "message.deleted",
+              "message.expired",
+              "message.moderated",
+              "participant.joined",
+              "participant.left"
+            ]
+          }
+        },
+        "meetingSurface": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "url",
+                "origins"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://",
+                  "maxLength": 2048
+                },
+                "origins": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^https://[^/?#]+$"
+                  }
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distribution": {
+          "enum": [
+            "PRIVATE",
+            "PUBLIC"
+          ]
+        }
+      }
+    },
+    "PutAppRequest": {
+      "description": "PUT /v1/projects/{projectId}/app: the manifest (http://localhost redirect URIs only while DRAFT; at least one user or bot scope; event types from the install-routable families).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "redirectUris"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "logoUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacyUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "termsUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "redirectUris": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/|$))[^#*]*$",
+            "maxLength": 2048
+          }
+        },
+        "userScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "profile:read",
+              "profile:email",
+              "meetings:read",
+              "meetings:write",
+              "chat:read",
+              "chat:write",
+              "events:meetings"
+            ]
+          }
+        },
+        "botScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "chat:read:bot",
+              "chat:write:bot"
+            ]
+          }
+        },
+        "eventTypes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "app.grant_revoked",
+              "app.installed",
+              "app.uninstalled",
+              "artifact.deleted",
+              "artifact.ready",
+              "bot.mentioned",
+              "bot.message_received",
+              "conversation.created",
+              "conversation.member_added",
+              "conversation.member_removed",
+              "conversation.updated",
+              "meeting.created",
+              "meeting.ended",
+              "meeting.started",
+              "message.created",
+              "message.deleted",
+              "message.expired",
+              "message.moderated",
+              "participant.joined",
+              "participant.left"
+            ]
+          }
+        },
+        "meetingSurface": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://",
+                  "maxLength": 2048
+                },
+                "origins": {
+                  "type": "array",
+                  "maxItems": 10,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^https://[^/?#]+$"
+                  }
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distribution": {
+          "enum": [
+            "PRIVATE",
+            "PUBLIC"
+          ]
+        }
+      }
+    },
+    "App": {
+      "description": "ADR 0064 / 0065: the app registered on a project (clientId = projectId = the Platform Access application id). The live version is what Platform Access serves: the published version, else the approved one, else the current draft.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "clientId",
+        "projectId",
+        "organizationId",
+        "status",
+        "currentVersion",
+        "submittedVersion",
+        "reviewedVersion",
+        "publishedVersion",
+        "liveVersion",
+        "pendingChanges",
+        "manifest",
+        "testAccountIds",
+        "secretIssuedAt",
+        "review",
+        "listedInDirectory",
+        "publishedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "appId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "clientId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AppStatus"
+        },
+        "currentVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "submittedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "liveVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pendingChanges": {
+          "type": "boolean"
+        },
+        "manifest": {
+          "$ref": "#/$defs/AppManifest"
+        },
+        "testAccountIds": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "secretIssuedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reasonCode",
+                "decidedAt"
+              ],
+              "properties": {
+                "reasonCode": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "decidedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "listedInDirectory": {
+          "type": "boolean"
+        },
+        "publishedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AppList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/App"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorApp": {
+      "description": "ADR 0065: the operator view of an app (the manifest under review and the audited review history).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "clientId",
+        "projectId",
+        "organizationId",
+        "status",
+        "currentVersion",
+        "submittedVersion",
+        "reviewedVersion",
+        "publishedVersion",
+        "liveVersion",
+        "pendingChanges",
+        "manifest",
+        "testAccountIds",
+        "secretIssuedAt",
+        "review",
+        "listedInDirectory",
+        "publishedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "appId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "clientId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AppStatus"
+        },
+        "currentVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "submittedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishedVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "liveVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pendingChanges": {
+          "type": "boolean"
+        },
+        "manifest": {
+          "$ref": "#/$defs/AppManifest"
+        },
+        "testAccountIds": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "secretIssuedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reasonCode",
+                "decidedAt"
+              ],
+              "properties": {
+                "reasonCode": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "decidedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "listedInDirectory": {
+          "type": "boolean"
+        },
+        "publishedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "submittedManifest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AppManifest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "developerName": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fromStatus",
+              "toStatus",
+              "version",
+              "actorKind",
+              "reasonCode",
+              "occurredAt"
+            ],
+            "properties": {
+              "fromStatus": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/AppStatus"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "toStatus": {
+                "$ref": "#/$defs/AppStatus"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "actorKind": {
+                "enum": [
+                  "USER",
+                  "OPERATOR",
+                  "SERVICE"
+                ]
+              },
+              "reasonCode": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "occurredAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "AppClientSecret": {
+      "description": "ADR 0064: a new client secret, returned ONCE (an idempotent replay returns clientSecretRedacted instead).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientId",
+        "secretId",
+        "issuedAt"
+      ],
+      "properties": {
+        "clientId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "clientSecret": {
+          "type": "string",
+          "pattern": "^cfcs_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+        },
+        "clientSecretRedacted": {
+          "const": true
+        },
+        "secretId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AppGrant": {
+      "description": "ADR 0064: an installation of the app (never a CF Meet account id).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "target",
+        "organizationId",
+        "scopes",
+        "status",
+        "createdAt",
+        "revokedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organizationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "status": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AppGrantList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AppGrant"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PutAppTestAccountsRequest": {
+      "description": "ADR 0064: the draft test accounts (CF Meet account ids, format checked only, at most 25).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accountIds"
+      ],
+      "properties": {
+        "accountIds": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      }
+    },
+    "AppDecisionRequest": {
+      "description": "ADR 0065: an operator app decision (reject / suspend / lift-suspension: safe reason code).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
+        }
+      }
+    },
+    "DirectoryApp": {
+      "description": "ADR 0065: a PUBLISHED, PUBLIC app of the directory (its published manifest).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "name",
+        "description",
+        "logoUrl",
+        "developerName",
+        "userScopes",
+        "botScopes",
+        "privacyUrl",
+        "termsUrl",
+        "meetingSurface",
+        "publishedAt"
+      ],
+      "properties": {
+        "appId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "logoUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "developerName": {
+          "type": "string"
+        },
+        "userScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "profile:read",
+              "profile:email",
+              "meetings:read",
+              "meetings:write",
+              "chat:read",
+              "chat:write",
+              "events:meetings"
+            ]
+          }
+        },
+        "botScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "chat:read:bot",
+              "chat:write:bot"
+            ]
+          }
+        },
+        "privacyUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "termsUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^https://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingSurface": {
+          "type": "boolean",
+          "description": "Whether the app has an in-meeting surface."
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "DirectoryAppList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryApp"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OAuthTokenRequest": {
+      "description": "RFC 6749 token request (application/x-www-form-urlencoded). Client authentication: HTTP Basic (client_secret_basic) or client_id + client_secret in the body (client_secret_post), never both. PKCE (code_verifier, S256) is mandatory for authorization_code.",
+      "type": "object",
+      "required": [
+        "grant_type"
+      ],
+      "properties": {
+        "grant_type": {
+          "enum": [
+            "authorization_code",
+            "refresh_token"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "redirect_uri": {
+          "type": "string"
+        },
+        "code_verifier": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 128
+        },
+        "refresh_token": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthRevokeRequest": {
+      "description": "RFC 7009 revocation request (application/x-www-form-urlencoded; same client authentication as the token endpoint).",
+      "type": "object",
+      "required": [
+        "token"
+      ],
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "token_type_hint": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthToken": {
+      "description": "RFC 6749 token response (snake_case). bot_token only on the first authorization-code exchange of an ORGANIZATION install with bot scopes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_token",
+        "token_type",
+        "expires_in"
+      ],
+      "properties": {
+        "access_token": {
+          "type": "string",
+          "pattern": "^cfoa_"
+        },
+        "token_type": {
+          "const": "Bearer"
+        },
+        "expires_in": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "refresh_token": {
+          "type": "string",
+          "pattern": "^cfor_"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "installation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "target"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "target": {
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            },
+            "organization_id": {
+              "type": "string"
+            }
+          }
+        },
+        "bot_token": {
+          "type": "string",
+          "pattern": "^cfob_"
+        }
+      }
+    },
+    "OAuthError": {
+      "description": "RFC 6749 §5.2 / RFC 6750 §3.1 error (fixed descriptions).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error",
+        "error_description"
+      ],
+      "properties": {
+        "error": {
+          "enum": [
+            "invalid_request",
+            "invalid_client",
+            "invalid_grant",
+            "unauthorized_client",
+            "unsupported_grant_type",
+            "invalid_scope",
+            "invalid_token",
+            "insufficient_scope",
+            "temporarily_unavailable",
+            "slow_down"
+          ]
+        },
+        "error_description": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthUserinfo": {
+      "description": "The signed-in user's profile for an app: sub is pairwise per app; email only with profile:email.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sub",
+        "name",
+        "picture"
+      ],
+      "properties": {
+        "sub": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "picture": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "email": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthMetadata": {
+      "description": "RFC 8414-style authorization server metadata.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "authorization_endpoint",
+        "token_endpoint",
+        "revocation_endpoint",
+        "userinfo_endpoint",
+        "scopes_supported",
+        "response_types_supported",
+        "grant_types_supported",
+        "code_challenge_methods_supported",
+        "token_endpoint_auth_methods_supported",
+        "revocation_endpoint_auth_methods_supported"
+      ],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "authorization_endpoint": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "token_endpoint": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "revocation_endpoint": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "userinfo_endpoint": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "scopes_supported": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "profile:read",
+              "profile:email",
+              "meetings:read",
+              "meetings:write",
+              "chat:read",
+              "chat:write",
+              "events:meetings",
+              "chat:read:bot",
+              "chat:write:bot"
+            ]
+          }
+        },
+        "response_types_supported": {
+          "const": [
+            "code"
+          ]
+        },
+        "grant_types_supported": {
+          "const": [
+            "authorization_code",
+            "refresh_token"
+          ]
+        },
+        "code_challenge_methods_supported": {
+          "const": [
+            "S256"
+          ]
+        },
+        "token_endpoint_auth_methods_supported": {
+          "const": [
+            "client_secret_basic",
+            "client_secret_post"
+          ]
+        },
+        "revocation_endpoint_auth_methods_supported": {
+          "const": [
+            "client_secret_basic",
+            "client_secret_post"
+          ]
+        }
+      }
+    },
+    "OperatorProject": {
+      "description": "ADR 0068: a project of a workspace for operators (no description, labels or support address).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "displayName",
+        "status",
+        "statusReason",
+        "environments",
+        "createdAt",
+        "updatedAt",
+        "archivedAt",
+        "version"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "statusReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "environments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorProjectList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorProject"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorEnvironment": {
+      "description": "ADR 0068: an environment of a workspace's project.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "projectId",
+        "kind",
+        "displayName",
+        "status",
+        "productionAccessState",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "productionAccessState": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorEnvironmentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorEnvironment"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorMember": {
+      "description": "ADR 0068: a workspace membership (opaque CF Meet user id; no name or address).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "membershipId",
+        "userId",
+        "role",
+        "status",
+        "joinedVia",
+        "createdAt",
+        "updatedAt",
+        "removedAt",
+        "version"
+      ],
+      "properties": {
+        "membershipId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "userId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "joinedVia": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorMemberList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorMember"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorInvitation": {
+      "description": "ADR 0068: a workspace invitation without the invitee's address or token.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "role",
+        "status",
+        "createdAt",
+        "expiresAt",
+        "decidedAt"
+      ],
+      "properties": {
+        "invitationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorInvitationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorInvitation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorPushProvider": {
+      "description": "ADR 0068: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pushProviderId",
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "provider",
+        "apnsKeyId",
+        "apnsTeamId",
+        "apnsBundleId",
+        "apnsHost",
+        "fcmProjectId",
+        "fingerprint",
+        "verification",
+        "lastVerifiedAt",
+        "lastErrorCode",
+        "createdAt",
+        "updatedAt",
+        "state",
+        "disabledAt",
+        "version"
+      ],
+      "properties": {
+        "pushProviderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "apnsKeyId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 10
+        },
+        "apnsTeamId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 10
+        },
+        "apnsBundleId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 155
+        },
+        "apnsHost": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16
+        },
+        "fcmProjectId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 30
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "verification": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "lastVerifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "lastErrorCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "DISABLED"
+          ],
+          "description": "ADR 0068 A4: DISABLED by HQ (deleted from the vault)."
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The row version (the expectedVersion of partners.push-key.disable)."
+        }
+      }
+    },
+    "OperatorPushProviderList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorPushProvider"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorWebhook": {
+      "description": "ADR 0068: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId",
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "endpointHost",
+        "eventTypes",
+        "status",
+        "consecutiveFailures",
+        "lastSuccessAt",
+        "lastFailureAt",
+        "disabledReason",
+        "origin",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "subscriptionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "endpointHost": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 253
+        },
+        "eventTypes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "consecutiveFailures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSuccessAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "lastFailureAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "disabledReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "origin": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorWebhookList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorWebhook"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorWebhookDelivery": {
+      "description": "ADR 0068: a webhook delivery outcome (no payload, no response body).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliveryId",
+        "subscriptionId",
+        "eventId",
+        "environmentId",
+        "status",
+        "attemptCount",
+        "lastHttpStatus",
+        "failureCategory",
+        "createdAt",
+        "completedAt"
+      ],
+      "properties": {
+        "deliveryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "subscriptionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "eventId": {
+          "type": "string",
+          "maxLength": 36
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "attemptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastHttpStatus": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failureCategory": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorWebhookDeliveryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorWebhookDelivery"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorAppSummary": {
+      "description": "ADR 0068: an app in operator search results (the current manifest's name and distribution).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "organizationId",
+        "name",
+        "distribution",
+        "status",
+        "currentVersion",
+        "publishedVersion",
+        "publishedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "appId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "organizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "distribution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "currentVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "publishedVersion": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "publishedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorAppSummaryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorAppSummary"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorAppVersion": {
+      "description": "ADR 0068: one manifest version of an app (name and distribution only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "distribution",
+        "createdAt"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "distribution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorAppVersionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorAppVersion"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorAppInstallation": {
+      "description": "ADR 0068: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "targetKind",
+        "organizationId",
+        "principalId",
+        "scopeCount",
+        "status",
+        "revokedReason",
+        "installedAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "grantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "targetKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "organizationId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "principalId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "scopeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "revokedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "installedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorAppInstallationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorAppInstallation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "VerificationCase": {
+      "description": "ADR 0068 A3: one case in HQ's shared verification shape (cfmeet-admin-parallel-workplan §3.6, snake_case) plus approvals_required and partner_tenant_id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "product",
+        "kind",
+        "subject_ref",
+        "state",
+        "version",
+        "assignee_ref",
+        "submitted_at",
+        "updated_at",
+        "evidence",
+        "approvals_required",
+        "partner_tenant_id"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "product": {
+          "const": "cfmeet"
+        },
+        "kind": {
+          "enum": [
+            "PARTNER_GO_LIVE",
+            "APP_REVIEW"
+          ]
+        },
+        "subject_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLAIMED",
+            "APPROVED",
+            "REJECTED",
+            "PUBLISHED",
+            "SUSPENDED",
+            "CANCELLED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignee_ref": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "ref",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "USE_CASE_SUMMARY",
+                  "APP_MANIFEST"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "approvals_required": {
+          "const": 2
+        },
+        "partner_tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "VerificationCaseList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/VerificationCase"
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "VerificationCaseDetail": {
+      "description": "VerificationCase plus its decision details (PARTNER_GO_LIVE: requested / approved capabilities; APP_REVIEW: the version under review and the published version).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "product",
+        "kind",
+        "subject_ref",
+        "state",
+        "version",
+        "assignee_ref",
+        "submitted_at",
+        "updated_at",
+        "evidence",
+        "approvals_required",
+        "partner_tenant_id",
+        "details"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "product": {
+          "const": "cfmeet"
+        },
+        "kind": {
+          "enum": [
+            "PARTNER_GO_LIVE",
+            "APP_REVIEW"
+          ]
+        },
+        "subject_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLAIMED",
+            "APPROVED",
+            "REJECTED",
+            "PUBLISHED",
+            "SUSPENDED",
+            "CANCELLED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignee_ref": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "ref",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "USE_CASE_SUMMARY",
+                  "APP_MANIFEST"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "approvals_required": {
+          "const": 2
+        },
+        "partner_tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requested_capabilities",
+                "approved_capabilities"
+              ],
+              "properties": {
+                "requested_capabilities": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  }
+                },
+                "approved_capabilities": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "app_version",
+                "published_version"
+              ],
+              "properties": {
+                "app_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "published_version": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "VerificationCaseHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "from_state",
+              "to_state",
+              "actor_kind",
+              "actor_ref",
+              "reason_code",
+              "occurred_at"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "from_state": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "OPEN",
+                      "CLAIMED",
+                      "APPROVED",
+                      "REJECTED",
+                      "PUBLISHED",
+                      "SUSPENDED",
+                      "CANCELLED"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "to_state": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "OPEN",
+                      "CLAIMED",
+                      "APPROVED",
+                      "REJECTED",
+                      "PUBLISHED",
+                      "SUSPENDED",
+                      "CANCELLED"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "actor_kind": {
+                "enum": [
+                  "STAFF",
+                  "PARTNER",
+                  "SYSTEM"
+                ]
+              },
+              "actor_ref": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason_code": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminOperationRecord": {
+      "description": "ADR 0068 A3 / A4: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404). source_status: the case state as HQ sees it for the A3 verification decisions, otherwise the command's resulting state (as its AdminCommandResult status); source_version: the resulting row version, null for unversioned subjects (a webhook delivery retry, a usage reprocess).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "outcome",
+        "source_status",
+        "source_version"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outcome": {
+          "const": "APPLIED"
+        },
+        "source_status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "source_version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminCommandResult": {
+      "description": "ADR 0068 A4: the answer of an admin bridge command: the resulting state (upper snake), the resulting row version as a string (null when the subject is unversioned) and a small closed resource (ids, states, timestamps; never an address, name, content or secret).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "version",
+        "resource"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "type": "object",
+          "maxProperties": 24,
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z]{0,39}$"
+          }
+        }
+      }
+    },
+    "PushKeyDisableRequest": {
+      "description": "ADR 0068 A4: HQ disables a partner push credential (R3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the row version the change applies to."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "description": "Default OPERATOR_DISABLED."
+        }
+      }
+    },
+    "OperatorIncident": {
+      "description": "ADR 0068 A4: a platform incident recorded against a workspace (reference and times only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incidentRecordId",
+        "organizationId",
+        "incidentRef",
+        "occurredAt",
+        "recordedAt"
+      ],
+      "properties": {
+        "incidentRecordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "organizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "incidentRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "occurredAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorIncidentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorIncident"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorUsage": {
+      "description": "ADR 0068 A4: a workspace's metered usage of one environment and usage type over the window (quantities and counts only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "usageType",
+        "unit",
+        "quantity",
+        "factCount"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "usageType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "factCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorUsageList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorUsage"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date",
+          "description": "First UTC day of the window."
+        },
+        "to": {
+          "type": "string",
+          "format": "date",
+          "description": "Last UTC day of the window."
+        }
+      }
+    },
+    "PriceBook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "productLine",
+        "currency",
+        "marketCode",
+        "effectiveVersionId",
+        "frozen",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "marketCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+        },
+        "effectiveVersionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "frozen": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price book lineage (product line, currency, market); its effective version is its latest activation already effective."
+    },
+    "PriceBookList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceBook"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price version (no rates). DRAFT → SUBMITTED → APPROVED | REJECTED → SUPERSEDED; an approval expires after 12 hours."
+    },
+    "PriceVersionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceVersion"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersionDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "productLine",
+        "marketCode",
+        "rates",
+        "submittedDigest",
+        "draftedBy",
+        "submittedBy",
+        "approvedBy",
+        "approverRef",
+        "effective"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "rates": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PartnerRateCard"
+            },
+            {
+              "$ref": "#/$defs/ConsumerPlanSet"
+            }
+          ]
+        },
+        "submittedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "draftedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "submittedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approvedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effective": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: a price version with its rates and the HQ staff who drafted, submitted and approved it."
+    },
+    "PartnerRateCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rates"
+      ],
+      "properties": {
+        "rates": {
+          "type": "array",
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "unitAmountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "enum": [
+                  "MONTHLY_ACTIVE_USERS",
+                  "MEETING_MINUTES",
+                  "IN_APP_CALL_MINUTES",
+                  "MESSAGES",
+                  "RECORDING_MINUTES",
+                  "STORAGE",
+                  "API_CALLS"
+                ]
+              },
+              "unitAmountMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minimumMonthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tiers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unitAmountMinor"
+                  ],
+                  "properties": {
+                    "upTo": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1
+                    },
+                    "unitAmountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "description": "One usage type's rate (minor units): graduated tiers over the quantity beyond the included amount, at least the minimum monthly charge."
+          }
+        }
+      },
+      "description": "ADR 0068 A6: PARTNER_PLATFORM content (one rate per usage type)."
+    },
+    "ConsumerPlanSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plans"
+      ],
+      "properties": {
+        "plans": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "label",
+              "monthlyMinor",
+              "yearlyMinor",
+              "limits"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z_]{1,23}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "monthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "yearlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetingMinutes",
+                  "participants",
+                  "recording",
+                  "storageBytes",
+                  "attachmentBytes",
+                  "webinars"
+                ],
+                "properties": {
+                  "meetingMinutes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "participants": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "recording": {
+                    "type": "boolean"
+                  },
+                  "storageBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "attachmentBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "webinars": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "ADR 0068 A6: CONSUMER content: CF Meet user plans (FREE required at 0 when submitted)."
+    },
+    "PriceActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activationId",
+        "priceBookId",
+        "versionId",
+        "kind",
+        "effectiveFrom",
+        "operatorRef",
+        "approverRef",
+        "recordedAt"
+      ],
+      "properties": {
+        "activationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "SCHEDULED",
+            "ACTIVATED",
+            "ROLLED_BACK"
+          ]
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "operatorRef": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: one entry of the append-only activation history."
+    },
+    "PriceActivationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceActivation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MarketFreeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marketCode",
+        "state",
+        "reasonCode",
+        "changedBy",
+        "frozenAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "marketCode": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "FROZEN",
+            "UNFROZEN"
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "frozenAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a market's freeze (a frozen market refuses submit, approve, schedule, activate and rollback)."
+    },
+    "MarketFreezeList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/MarketFreeze"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PricingPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "currency",
+        "marketCode",
+        "versionId",
+        "planCode",
+        "label",
+        "monthlyMinor",
+        "yearlyMinor",
+        "limits"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "monthlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "yearlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "meetingMinutes",
+                "participants",
+                "recording",
+                "storageBytes",
+                "attachmentBytes",
+                "webinars"
+              ],
+              "properties": {
+                "meetingMinutes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "participants": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "recording": {
+                  "type": "boolean"
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attachmentBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "webinars": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a CF Meet user plan of a CONSUMER lineage's effective version (FREE always listed; limits null when no version is effective)."
+    },
+    "PricingPlanList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PricingPlan"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "ConsumerPlanAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId",
+        "reasonCode",
+        "assignedBy",
+        "effectiveFrom",
+        "current"
+      ],
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "assignedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: one CF Meet user plan assignment (append-only history; a holder never assigned is on FREE)."
+    },
+    "ConsumerPlanAssignmentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/ConsumerPlanAssignment"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PlanOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overrideId",
+        "holderKind",
+        "holderId",
+        "state",
+        "limits",
+        "reasonCode",
+        "changedBy",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "overrideId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "REVOKED"
+          ]
+        },
+        "limits": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a holder's limit override."
+    },
+    "PlanOverrideList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PlanOverride"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ChargeSimulation": {
+      "description": "ADR 0068 A6: an estimate (minor units of the lineage's currency; nothing is charged). Partner: lines per rate and totalMinor; CF Meet user plan: planCode, cycle and totalMinor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "versionState",
+        "currency",
+        "estimate",
+        "totalMinor"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionState": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "totalMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "quantity",
+              "includedQuantity",
+              "billableQuantity",
+              "amountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "billableQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      }
+    },
+    "FinanceUsageReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "planCode",
+              "usageType",
+              "unit",
+              "quantity",
+              "factCount"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "planCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "usageType": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "factCount": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: metered usage per partner workspace and usage type over the window's UTC days, with the workspace's commercial plan code."
+    },
+    "EstimatedChargesReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "currency",
+        "estimate",
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "lines",
+              "totalMinor"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "usageType",
+                    "quantity",
+                    "includedQuantity",
+                    "billableQuantity",
+                    "amountMinor"
+                  ],
+                  "properties": {
+                    "usageType": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "includedQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "billableQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "amountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "totalMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: estimated charges per partner workspace under a PARTNER_PLATFORM lineage's effective version (one currency, minor units; an estimate, never revenue, nothing charged)."
+    },
+    "PlanSpreadReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "asOf"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "planCode",
+              "holderKind",
+              "holders",
+              "assignedInWindow"
+            ],
+            "properties": {
+              "planCode": {
+                "type": "string"
+              },
+              "holderKind": {
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              "holders": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assignedInWindow": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: holders per CF Meet user plan as of `asOf` (never-assigned users and organizations are on FREE and not counted) and the assignments made in the window."
+    },
+    "PriceVersionDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; rates omitted: a copy of the effective (else latest) version."
+    },
+    "PriceVersionCommandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: edit (rates, DRAFT only), submit / approve / activate (expectedVersion only), reject (reasonCode, default NOT_APPROVED), schedule (effectiveFrom, more than 1 minute and at most 366 days ahead). expectedVersion is the version's row version."
+    },
+    "PriceBookRollbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "versionId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; versionId a SUPERSEDED version of the book that was activated before."
+    },
+    "MarketFreezeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the market freeze's version (0: never frozen)."
+    },
+    "ConsumerPlanAssignRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "billingAccountRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the holder's version (0: never assigned, on FREE). The plan must exist in the CONSUMER lineage's effective version (FREE always)."
+    },
+    "PlanOverrideChangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "limits",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "minProperties": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the override's version (0: none yet); limits null revokes."
+    },
+    "ChargeSimulationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a usage vector (PARTNER_PLATFORM) or a plan and cycle (CONSUMER); versionId omitted: the effective version."
+    },
+    "OwnerDelivery": {
+      "description": "ADR 0068 A4: an owner-delivered secret as HQ may see it — a reference only. The secret (today the one-time owner invitation of a first-party workspace) goes directly to its recipient's address as a single-use claim link, sealed for the Notification Service; never the token, the link or the address.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "sentAt",
+        "createdAt",
+        "organizationId",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sentAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "FirstPartyRegistrationResource": {
+      "description": "ADR 0068 A4: the resource of the admin bridge's partners.workspace.register-first-party answer (AdminCommandResult.resource): the workspace (organizationId = the Platform Access tenant id), its state and version, and the owner delivery reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "state",
+        "version",
+        "createdAt",
+        "delivery",
+        "deliveryChannel",
+        "deliveryRef",
+        "recipientMasked",
+        "deliveryState",
+        "claimState",
+        "expiresAt",
+        "ownerInvitationId"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "delivery": {
+          "const": "OWNER_DELIVERED"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CLAIM_LINK_EMAIL"
+          ]
+        },
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recipientMasked": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Never the address."
+        },
+        "deliveryState": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "FAILED",
+            "EXPIRED"
+          ],
+          "description": "PENDING: queued for the Notification Service; SENT: accepted by it; FAILED: refused by it; EXPIRED: the link expired before it could be sent. Nothing is ever resent: HQ re-issues the command."
+        },
+        "claimState": {
+          "type": "string",
+          "enum": [
+            "UNCLAIMED",
+            "CLAIMED",
+            "EXPIRED",
+            "REVOKED"
+          ],
+          "description": "The invitation the link carries: CLAIMED once the owner accepted it (single use)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerInvitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "DatasetDay": {
+      "description": "ADR 0068 A7: one UTC day of a dataset the admin bridge pulls (datasets.v1.json): end-of-day counts reconstructed from history; null where a metric cannot be computed (never a guessed 0). cfmeet.partners_daily: workspaces_active, workspaces_restricted, workspaces_suspended (null beyond the activity history kept), partners_live, partner_mau (null: not metered). cfmeet.apps_daily: apps_draft, apps_in_review, apps_published, apps_suspended, installs (null while the installation projection is off).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "date",
+        "metrics"
+      ],
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "enum": [
+            "cfmeet.partners_daily",
+            "cfmeet.apps_daily"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "metrics": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "enum": [
+              "workspaces_active",
+              "workspaces_restricted",
+              "workspaces_suspended",
+              "partners_live",
+              "partner_mau",
+              "apps_draft",
+              "apps_in_review",
+              "apps_published",
+              "apps_suspended",
+              "installs"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "EffectivePlanLimits": {
+      "description": "ADR 0068 A6: the effective CF Meet plan limits of a user or business organization, for the services that enforce them where the usage happens (the Meeting Service, Messaging): the holder's plan (FREE when never assigned) priced by the effective version of its CONSUMER lineage, an ACTIVE override applied key by key. A null limit is not set by the plan (keep today's behaviour). cacheSeconds bounds the caller's cache.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "holderKind",
+        "holderId",
+        "planCode",
+        "assigned",
+        "holderVersion",
+        "priceBookId",
+        "versionId",
+        "overrideApplied",
+        "overrideVersion",
+        "limits",
+        "evaluatedAt",
+        "cacheSeconds"
+      ],
+      "properties": {
+        "holderKind": {
+          "type": "string",
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "assigned": {
+          "type": "boolean"
+        },
+        "holderVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "priceBookId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overrideApplied": {
+          "type": "boolean"
+        },
+        "overrideVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "meetingMinutes",
+            "participants",
+            "recording",
+            "storageBytes",
+            "attachmentBytes",
+            "webinars"
+          ],
+          "properties": {
+            "meetingMinutes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "participants": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recording": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "storageBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attachmentBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "webinars": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "evaluatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cacheSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "CredentialDelivery": {
+      "description": "ADR 0068 A4: an API key HQ staff issued or rotated through the admin bridge, held sealed by Platform Access for ONE reveal in this console (CONSOLE_REVEAL_ONCE) until expiresAt. Never a secret.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliveryRef",
+        "deliveryChannel",
+        "state",
+        "environmentId",
+        "credentialId",
+        "publicId",
+        "serviceAccountId",
+        "createdAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "deliveryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deliveryChannel": {
+          "type": "string",
+          "enum": [
+            "CONSOLE_REVEAL_ONCE"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING"
+          ]
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "publicId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CredentialDeliveryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CredentialDelivery"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
         }
       }
     }

@@ -15,8 +15,9 @@ lines through `emit` and never prints a secret, an address, an email body or a c
   failure restores the previous container (SMTP stays the transport), so Gmail is only
   retired once Resend delivery is verified.
 * `email-acceptance`: the same proof, repeatable, without changing anything else; with
-  `confirm=otp` it also runs the public OTP journey (register → Resend → verification code
-  → verify → sign in → deactivate the acceptance account).
+  `confirm=otp` it also runs the public passwordless journey (code request → Resend →
+  sign-in code → wrong / valid / reused code → authenticated session → step-up code →
+  deactivate the acceptance account).
 """
 
 import json
@@ -27,6 +28,7 @@ import urllib.error
 import urllib.request
 import uuid
 
+import controlled_otp
 import production as p
 
 MEETING_LOOPBACK = 'http://127.0.0.1:18081'
@@ -50,6 +52,9 @@ FAILURE_SIGNATURES = {
     'providerAccepted': re.compile(r'email accepted by provider'),
     'providerTemporary': re.compile(r'email delivery failed temporarily'),
     'providerRejected': re.compile(r'email rejected permanently|email not delivered'),
+    # A2: the hourly email-ledger clean-up (make_interval typing); its last failure must
+    # predate the release that fixed it.
+    'ledgerPurgeFailed': re.compile(r'email ledger purge failed'),
 }
 TIMESTAMP = re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)')
 
@@ -185,6 +190,8 @@ SELECT json_build_object(
   'invitations', (SELECT count(*) FROM organization_invitations),
   'outboxByState', (SELECT coalesce(json_object_agg(state, n), '{}') FROM
       (SELECT state, count(*) n FROM organization_outbox GROUP BY state) o),
+  'outboxByDestinationAndState', (SELECT coalesce(json_object_agg(k, n), '{}') FROM
+      (SELECT destination || ' ' || state AS k, count(*) n FROM organization_outbox GROUP BY 1) d),
   'importRuns', (SELECT count(*) FROM organization_import_runs));
 """
 
@@ -291,8 +298,8 @@ def email_acceptance_check(cr, run_id, require_delivered):
 def resend_changes(cr):
     key = p.SECRETS / SECRET_KEY_FILE
     if not key.exists() or not key.read_text().strip().startswith('re_'):
-        raise RuntimeError('No Resend API key on the VPS: set the CFMEET_RESEND_API_KEY secret of the production '
-                           'environment and dispatch again')
+        raise RuntimeError('No Resend API key on the VPS: place the key in /opt/cfmeet-core/secrets/resend-api-key '
+                           '(root-owned, 0400) and dispatch again')
     for path in (p.SECRETS / SECRET_KEY_FILE, p.SECRETS / SECRET_WEBHOOK_FILE):
         if path.exists():
             path.chmod(0o400)
@@ -338,55 +345,160 @@ def public(method, path, body=None, token=None):
             return error.code, None
 
 
-def otp_from_redis(cr, env, address):
-    """The current verification code of the acceptance account (read on the VPS only)."""
-    out = redis_command(cr, env, 'GET "$KEY"', {'KEY': 'otp:verify:' + address.lower()})
-    code = out.strip().splitlines()[-1] if out and out.strip() else ''
-    return code if re.fullmatch(r'\d{6}', code) else None
+def last_line(out):
+    return out.strip().splitlines()[-1] if out and out.strip() else ''
+
+
+def otp_from_redis(cr, env, key):
+    """A one-time code for the controlled acceptance account (VPS only). Codes are stored only
+    as salted hashes: the issued one under `key` is replaced with a fresh controlled code in
+    the same format (only if one was issued; its TTL is kept)."""
+    if last_line(redis_command(cr, env, 'EXISTS "$KEY"', {'KEY': key})) != '1':
+        return None
+    code = controlled_otp.new_code()
+    out = redis_command(cr, env, 'SET "$KEY" "$VALUE" XX KEEPTTL', {'KEY': key, 'VALUE': controlled_otp.sealed(code)})
+    return code if last_line(out) == 'OK' else None
+
+
+def address_hash_sql(address):
+    """The Meeting Service's recipient hash of an address, as SQL (sha256 of the lower-cased address)."""
+    return "encode(sha256(convert_to(lower('%s'),'UTF8')),'hex')" % address.replace("'", '')
+
+
+def sign_in_route(cr, address):
+    """The routing-fence decision of the newest sign-in code to this address (Meeting's
+    notification_route_decisions, keyed otp:signin:<recipient hash>:<code digest>). No decision
+    means the category is LEGACY_ONLY: the code is in the Meeting ledger."""
+    out = cr.meeting_psql(
+        "SELECT route || '|' || decision_id || '|' || reason FROM notification_route_decisions "
+        "WHERE idempotency_key LIKE 'otp:signin:' || %s || ':%%' ORDER BY decided_at DESC LIMIT 1;"
+        % address_hash_sql(address))
+    if not out:
+        return {'route': 'OLD', 'decisionId': None, 'reason': 'NO_DECISION'}
+    route, decision_id, reason = out.split('|')
+    return {'route': route, 'decisionId': decision_id, 'reason': reason}
+
+
+def wait_for_service_email(cr, decision_id, seconds):
+    """The Notification Service's email for a CRITICAL route decision (notif_email_messages,
+    route_decision_id), once Resend has accepted it. Status and provider only."""
+    assert re.fullmatch(r'[0-9a-f-]{36}', decision_id or '')
+    db = cr.SERVICES['notifications']['db']
+    deadline = time.monotonic() + seconds
+    while True:
+        out = cr.release.db_sql(db, "SELECT coalesce(json_agg(json_build_object('status', status, 'provider', provider)), "
+                                    "'[]') FROM notif_email_messages WHERE route_decision_id = '%s';" % decision_id)
+        rows = json.loads(out or '[]')
+        if rows and rows[0]['status'] in ('ACCEPTED', 'DELIVERED'):
+            return rows[0]
+        if time.monotonic() > deadline:
+            return None
+        time.sleep(3)
 
 
 def otp_journey(cr, run_id):
-    """Register → Resend → verify → sign in → deactivate, through the public API."""
+    """Passwordless sign-in through the public API, with the code mailed through Resend:
+    request → Resend → wrong / valid / reused code → session → step-up → deactivate."""
     env = p.env_of(p.inspect(cr.MEETING))
     label = 'cfmeetotp' + uuid.uuid4().hex[:10]
     address = labelled(acceptance_recipient(cr), label)
-    password = 'Acc!' + uuid.uuid4().hex + 'Z9'
     checks = {}
-    status, _ = public('POST', '/api/v1/auth/register', {
-        'username': label, 'email': address, 'password': password, 'confirm_password': password})
-    checks['register'] = 'PASS' if status == 201 else 'FAIL %s' % status
-    if status != 201:
+    status, _ = public('POST', '/api/v1/auth/otp/request', {'email': address})
+    checks['code_requested'] = 'PASS' if status == 200 else 'FAIL %s' % status
+    if status != 200:
         return checks
     time.sleep(2)
-    rows = cr.meeting_psql(
-        "SELECT id || '|' || status FROM email_deliveries WHERE category='AUTH_VERIFICATION' "
-        "AND recipient_hash = encode(sha256(convert_to(lower('%s'),'UTF8')),'hex') "
-        "ORDER BY created_at DESC LIMIT 1;" % address.replace("'", ''))
-    delivery_id = rows.split('|')[0] if rows else None
-    checks['verification_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
-    if delivery_id:
-        accepted = wait_for(env, delivery_id, ('ACCEPTED', 'DELIVERED'), 90)
-        checks['verification_email_accepted_by_resend'] = (
-            'PASS' if accepted and accepted['status'] in ('ACCEPTED', 'DELIVERED') and accepted['provider'] == 'resend'
-            else 'FAIL %s' % json.dumps(accepted))
-    code = otp_from_redis(cr, env, address)
+    route = sign_in_route(cr, address)
+    checks['sign_in_route'] = route['route']
+    if route['route'] == 'NEW':
+        # N12: the Notification Service sends it under an X6 lease (FENCED_NEW); a failover
+        # moves the same code back to the Meeting ledger (reason AUTO_FAILOVER, route OLD).
+        message = wait_for_service_email(cr, route['decisionId'], 90)
+        if message is None and sign_in_route(cr, address)['route'] == 'OLD':
+            route = sign_in_route(cr, address)
+            checks['sign_in_route'] = 'OLD after %s' % route['reason']
+        else:
+            checks['sign_in_email_recorded'] = 'PASS' if message else 'FAIL'
+            checks['sign_in_email_accepted_by_resend'] = (
+                'PASS' if message and message['provider'] == 'resend' else 'FAIL %s' % json.dumps(message))
+    if 'sign_in_email_recorded' not in checks:
+        rows = cr.meeting_psql(
+            "SELECT id || '|' || status FROM email_deliveries WHERE category='AUTH_VERIFICATION' "
+            "AND idempotency_key LIKE 'otp:signin:%%' "
+            "AND recipient_hash = %s "
+            "ORDER BY created_at DESC LIMIT 1;" % address_hash_sql(address))
+        delivery_id = rows.split('|')[0] if rows else None
+        checks['sign_in_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
+        if delivery_id:
+            accepted = wait_for(env, delivery_id, ('ACCEPTED', 'DELIVERED'), 90)
+            checks['sign_in_email_accepted_by_resend'] = (
+                'PASS' if accepted and accepted['status'] in ('ACCEPTED', 'DELIVERED') and accepted['provider'] == 'resend'
+                else 'FAIL %s' % json.dumps(accepted))
+    code = otp_from_redis(cr, env, controlled_otp.hashed_key(address))
     checks['code_issued'] = 'PASS' if code else 'FAIL'
     wrong = '000000' if code != '000000' else '111111'
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': wrong})
+    status, _ = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': wrong})
     checks['invalid_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': code or '999999'})
-    checks['valid_code_verifies'] = 'PASS' if status == 200 else 'FAIL %s' % status
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': code or '999999'})
-    checks['used_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
-    status, body = public('POST', '/api/v1/auth/login', {'email': address, 'password': password})
+    status, body = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': code or '999999'})
     token = (body or {}).get('access_token')
-    checks['sign_in_after_verification'] = 'PASS' if status == 200 and token else 'FAIL %s' % status
+    checks['valid_code_signs_in_and_creates_the_account'] = (
+        'PASS' if status == 200 and token and (body or {}).get('is_new_account') is True else 'FAIL %s' % status)
+    status, _ = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': code or '999999'})
+    checks['used_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
+    status, _ = public('POST', '/api/v1/auth/login', {'email': address, 'password': 'not-a-password-1A!'})
+    checks['password_sign_in_removed'] = 'PASS' if status == 404 else 'FAIL %s' % status
     if token:
         status, _ = public('GET', '/api/v2/me/profile', token=token)
         checks['authenticated_session'] = 'PASS' if status == 200 else 'FAIL %s' % status
-        status, _ = public('POST', '/api/v1/users/me/deactivate', {'current_password': password}, token=token)
-        checks['cleanup_deactivated'] = 'PASS' if status in (200, 204) else 'MANUAL %s' % status
+        checks['cleanup_deactivated'] = deactivate(cr, env, token, body['user']['id'])
     return checks
+
+
+def deactivate(cr, env, token, user_id):
+    """Cleanup through the real step-up path: a code to the account address, replaced with a
+    controlled one, exchanged for a step-up token, then the deactivation."""
+    purpose = 'DEACTIVATE_ACCOUNT'
+    status, _ = public('POST', '/api/v2/me/step-up/request', {'purpose': purpose}, token=token)
+    if status != 200:
+        return 'MANUAL step-up request %s' % status
+    code = otp_from_redis(cr, env, controlled_otp.step_up_key(user_id, purpose))
+    status, value = public('POST', '/api/v2/me/step-up/verify', {'purpose': purpose, 'code': code or '999999'},
+                           token=token)
+    step_up = (value or {}).get('stepUpToken')
+    if status != 200 or not step_up:
+        return 'MANUAL step-up verify %s' % status
+    status, _ = public('POST', '/api/v1/users/me/deactivate', {'step_up_token': step_up}, token=token)
+    return 'PASS' if status in (200, 204) else 'MANUAL %s' % status
+
+
+def fallback_drill(cr, run_id):
+    """N12: the Account CRITICAL fallback path. One drill email, sealed and opened with the
+    Account fallback key (CF_ACCOUNT_FALLBACK_KEY_FILE) on the Meeting Service, sent through the
+    legacy ledger to the acceptance recipient: ACCEPTED, then a signed DELIVERED."""
+    env = p.env_of(p.inspect(cr.MEETING))
+    recipient = acceptance_recipient(cr)
+    reference = 'drill-' + re.sub(r'[^0-9a-z-]', '-', run_id.lower())[:40]
+    status, body = internal(env, 'POST', '/internal/operations/email/fallback-drill',
+                            {'to': recipient, 'reference': reference})
+    result = {'reference': reference, 'recipientDomain': domain_of(recipient), 'status': status}
+    if status != 202 or not body or not body.get('deliveryId'):
+        emit('fallbackDrill', result)
+        raise RuntimeError('The fallback drill could not be queued (HTTP %s; the fallback key may be missing)' % status)
+    result['deliveryId'] = body['deliveryId']
+    result['accepted'] = wait_for(env, body['deliveryId'], ('ACCEPTED', 'DELIVERED'), 90)
+    result['delivered'] = wait_for(env, body['deliveryId'], ('DELIVERED',), 180)
+    emit('fallbackDrill', result)
+    if not result['delivered'] or result['delivered']['status'] != 'DELIVERED':
+        raise RuntimeError('The fallback drill email was not delivered: %s' % json.dumps(result['delivered']))
+    return result
+
+
+# Recorded with the checks, never judged: where the fence sent the code (NEW / OLD ...).
+OTP_INFO_KEYS = ('sign_in_route',)
+
+
+def journey_passed(checks):
+    return all(v.startswith(('PASS', 'MANUAL')) for k, v in checks.items() if k not in OTP_INFO_KEYS)
 
 
 def email_acceptance(cr, sha, run_id, confirm):
@@ -395,8 +507,10 @@ def email_acceptance(cr, sha, run_id, confirm):
     if env.get('EMAIL_PROVIDER') != 'resend':
         raise RuntimeError('Resend is not the active provider (run activate-resend-email)')
     email_acceptance_check(cr, run_id, bool(env.get('RESEND_WEBHOOK_SECRET_FILE')))
+    if 'fallback' in (confirm or '').split(','):
+        fallback_drill(cr, run_id)
     if 'otp' in (confirm or '').split(','):
         checks = otp_journey(cr, run_id)
         emit('otpJourney', checks)
-        if any(not v.startswith(('PASS', 'MANUAL')) for v in checks.values()):
-            raise RuntimeError('OTP journey failed')
+        if not journey_passed(checks):
+            raise RuntimeError('Passwordless sign-in journey failed')

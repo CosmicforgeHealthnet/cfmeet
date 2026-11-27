@@ -1,0 +1,3629 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/notifications/events/v1.schema.json",
+  "title": "CF Meet notification event envelope v1 (cfmeet.notifications.event)",
+  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#38, #41, #42), with exactly the catalogue's `sealed` fields plus any of its `sealedOptional` fields. CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue. 1.4.0 (ADR 0063 N-P4, partner push): recipient kind platform-principal:<environmentId>:<principalId> (a partner's end user, delivered only through that environment's own push provider credentials) for the catalogue types marked partnerRecipients (messaging.message.created): metadata-only (ids, never content), never mixed with other recipient kinds, and in the envelope's scope when it names one. Accepted by the service only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on. 1.6.0 (ADR 0068 A4, owner-delivered secret): NORMAL #41 developer-platform.workspace.owner-invitation.email-requested from cfmeet.developer-platform (DEVELOPER_UPDATES, subject ORGANIZATION_INVITATION = the invitation): the one-time owner invitation of a first-party workspace HQ registers through the admin bridge, delivered only to the invited address as a single-use claim link; the token and the address are sealed, exactly one meeting-email-principal recipient keyed by the invitation; data invitationId, organizationId and optionally expiresAt. 1.7.0 (ADR 0068 A4, owner-delivered export): NORMAL #42 organizations.organization.export_ready from cfmeet.organizations (ORGANIZATION_UPDATES, subject ORGANIZATION_EXPORT = the export): the single-use download link of an organization export HQ requested, delivered only to the owner's account (exactly one cfmeet-user recipient; the service resolves the verified address); the link token is sealed; data organizationId, exportId, deliveryId, expiresAt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "producer",
+    "occurredAt",
+    "correlationId",
+    "recipients",
+    "delivery",
+    "route",
+    "data"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "eventId": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^evt_[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "eventType": {
+      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/EventType"
+    },
+    "eventVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99
+    },
+    "producer": {
+      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/ProducerId"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlationId": {
+      "type": "string",
+      "pattern": "^corr_[0-9a-f]{32}$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "applicationId",
+        "environmentId"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "applicationId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ACCOUNT",
+            "CALL",
+            "CONFERENCE",
+            "CONNECTION",
+            "CONVERSATION",
+            "CREDENTIAL",
+            "MEETING_INVITATION",
+            "OPERATOR_ALERT",
+            "ORGANIZATION",
+            "ORGANIZATION_EXPORT",
+            "ORGANIZATION_INVITATION",
+            "ORGANIZATION_MEMBERSHIP",
+            "PRODUCTION_ACCESS_REQUEST"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "recipients": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref"
+        ],
+        "properties": {
+          "ref": {
+            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/RecipientRef"
+          }
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priority",
+        "dedupeKey"
+      ],
+      "properties": {
+        "priority": {
+          "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Priority"
+        },
+        "dedupeKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[\\x21-\\x7e]+$"
+        },
+        "idempotencyKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[\\x21-\\x7e]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coalesceKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deliverAfter": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancelKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "route": {
+      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Route"
+    },
+    "data": {
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": {
+        "pattern": "^[a-z][a-zA-Z0-9]{0,47}$",
+        "not": {
+          "pattern": "([sS][eE][cC][rR][eE][tT]|[pP][rR][iI][vV][aA][tT][eE]|[tT][oO][kK][eE][nN]|[cC][iI][pP][hH][eE][rR][tT][eE][xX][tT]|[pP][lL][aA][iI][nN][tT][eE][xX][tT]|[cC][oO][nN][tT][eE][nN][tT]|[bB][oO][dD][yY]|[pP][aA][sS][sS][wW][oO][rR][dD]|[eE][mM][aA][iI][lL]|[pP][hH][oO][nN][eE]|[kK][eE][yY]|[cC][oO][dD][eE])"
+        }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "sealed": {
+      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Sealed"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.invitation.created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "invitationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.invitation.accepted"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "invitationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.invitation.declined"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "invitationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.invitation.revoked"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "invitationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.invitation.expired"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "invitationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.membership.role_changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "membershipId",
+              "organizationId",
+              "role"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "membershipId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "ADMIN",
+                  "MEMBER",
+                  "GUEST"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.membership.suspended"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "membershipId",
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "membershipId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.membership.removed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "membershipId",
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "membershipId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.ownership.transferred"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.organization.suspended"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.organization.archived"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.organization.reactivated"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "developer-platform.workspace.owner-invitation.email-requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.developer-platform"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "invitationId",
+              "organizationId"
+            ],
+            "properties": {
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.organization.export_ready"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "exportId",
+              "deliveryId",
+              "expiresAt"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "exportId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "deliveryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "communications.connection.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.communications"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actorRef",
+              "connectionId"
+            ],
+            "properties": {
+              "connectionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "actorRef": {
+                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "communications.connection.connected"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.communications"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actorRef",
+              "connectionId"
+            ],
+            "properties": {
+              "connectionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "actorRef": {
+                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "messaging.message.created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.messaging"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "HIGH"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversationId",
+              "conversationKind",
+              "eventSequence",
+              "securityProfile"
+            ],
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "eventSequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "conversationKind": {
+                "type": "string",
+                "enum": [
+                  "DIRECT",
+                  "GROUP"
+                ]
+              },
+              "securityProfile": {
+                "type": "string",
+                "enum": [
+                  "PRIVATE_E2EE",
+                  "MANAGED"
+                ]
+              },
+              "sequence": {
+                "description": "1.1.0 (N9): the message sequence, carried into the 5-key metadata wake-up payload (parity with Messaging's legacy push).",
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "messaging.member.invited"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.messaging"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conversationId",
+              "eventSequence"
+            ],
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "eventSequence": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "calling.call.participant-missed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.calling"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "HIGH"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "callId",
+              "callKind"
+            ],
+            "properties": {
+              "callId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "callKind": {
+                "type": "string",
+                "enum": [
+                  "AUDIO",
+                  "VIDEO"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "calling.voicemail.ready"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.calling"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "callId",
+              "voiceMessageId"
+            ],
+            "properties": {
+              "callId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "voiceMessageId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "calling.recording.ready"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.calling"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "callId",
+              "recordingId"
+            ],
+            "properties": {
+              "callId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "recordingId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "meeting-service.conference.scheduled"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^meeting-notification:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conferenceId",
+              "startsAt"
+            ],
+            "properties": {
+              "conferenceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "startsAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "meeting-service.conference.rescheduled"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^meeting-notification:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conferenceId",
+              "startsAt"
+            ],
+            "properties": {
+              "conferenceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "startsAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "meeting-service.conference.cancelled"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^meeting-notification:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conferenceId",
+              "startsAt"
+            ],
+            "properties": {
+              "conferenceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "startsAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "meeting-service.invitation.email-requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^meeting-invitation:[0-9a-f-]{36}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "conferenceId",
+              "invitationId"
+            ],
+            "properties": {
+              "conferenceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "meeting-service.organization-invitation.email-requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^org-invitation:[0-9a-f-]{36}:[0-9]{1,9}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "invitationId",
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "invitationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.verification-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:verify:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.password-reset-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:reset:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.device-step-up-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^device-step-up:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accountDeviceId",
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              },
+              "accountDeviceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.security.password-changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^password-changed:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changedAt"
+            ],
+            "properties": {
+              "changedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.security.device-linked"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^device-linked:[0-9a-f-]{36}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accountDeviceId",
+              "linkId"
+            ],
+            "properties": {
+              "accountDeviceId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "linkId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "developer-platform.credential.expiring-soon"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.developer-platform"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "applicationId",
+              "credentialId",
+              "expiresAt"
+            ],
+            "properties": {
+              "credentialId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "applicationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "developer-platform.credential.expired"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.developer-platform"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "applicationId",
+              "credentialId",
+              "expiresAt"
+            ],
+            "properties": {
+              "credentialId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "applicationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "developer-platform.production-access.decided"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.developer-platform"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^devplat-access:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision",
+              "requestId"
+            ],
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "APPROVED",
+                  "REJECTED"
+                ]
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "operator.alert.fired"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "alertmanager"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "HIGH"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alertName",
+              "severity",
+              "status"
+            ],
+            "properties": {
+              "alertName": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,99}$"
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "critical",
+                  "warning",
+                  "info"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "firing",
+                  "resolved"
+                ]
+              }
+            }
+          },
+          "recipients": {
+            "items": {
+              "properties": {
+                "ref": {
+                  "pattern": "^operator-group:[a-z][a-z-]{0,39}$"
+                }
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.sign-in-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:signin:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedAt",
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              },
+              "requestedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "requestClient": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+              },
+              "requestNetwork": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "pattern": "^[0-9A-Fa-f.:]*x[0-9A-Fa-fx.:]*$"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ],
+        "not": {
+          "required": [
+            "subject"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.email-change-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:emailchange:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.step-up-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:stepup:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "purpose",
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "DEACTIVATE_ACCOUNT",
+                  "CHANGE_EMAIL"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.welcome.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^welcome:[0-9a-f-]{36}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.security.new-sign-in"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^new-sign-in:[0-9a-f-]{36}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedAt"
+            ],
+            "properties": {
+              "requestedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.security.email-in-use"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^email-in-use:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        },
+        "required": [
+          "sealed"
+        ],
+        "not": {
+          "required": [
+            "subject"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.security.email-changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^email-changed:(old|new):[0-9a-f-]{36}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "changedAt",
+              "side"
+            ],
+            "properties": {
+              "changedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "side": {
+                "type": "string",
+                "enum": [
+                  "OLD",
+                  "NEW"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "data": {
+                  "properties": {
+                    "side": {
+                      "const": "OLD"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "delivery": {
+                  "properties": {
+                    "idempotencyKey": {
+                      "pattern": "^email-changed:old:"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data": {
+                  "properties": {
+                    "side": {
+                      "const": "NEW"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "delivery": {
+                  "properties": {
+                    "idempotencyKey": {
+                      "pattern": "^email-changed:new:"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "notifications.cancel"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "enum": [
+              "cfmeet.meeting-service",
+              "cfmeet.organizations",
+              "cfmeet.communications",
+              "cfmeet.calling",
+              "cfmeet.messaging",
+              "cfmeet.developer-platform"
+            ]
+          },
+          "recipients": {
+            "maxItems": 0
+          },
+          "data": {
+            "maxProperties": 0
+          },
+          "delivery": {
+            "required": [
+              "cancelKey"
+            ],
+            "properties": {
+              "cancelKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "not": {
+              "const": "notifications.cancel"
+            }
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "recipients": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "recipients"
+        ],
+        "properties": {
+          "recipients": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "recipients": {
+            "items": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-cfmeet-catalogue": [
+    {
+      "number": 1,
+      "eventType": "organizations.invitation.created",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Organizations outbox event; recipients via X5 (D-5)",
+      "dataKeys": [
+        "invitationId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 2,
+      "eventType": "organizations.invitation.accepted",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Organizations outbox event; recipients via X5 (D-5)",
+      "dataKeys": [
+        "invitationId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 3,
+      "eventType": "organizations.invitation.declined",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Organizations outbox event; recipients via X5 (D-5)",
+      "dataKeys": [
+        "invitationId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 4,
+      "eventType": "organizations.invitation.revoked",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Organizations outbox event; recipients via X5 (D-5)",
+      "dataKeys": [
+        "invitationId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 5,
+      "eventType": "organizations.invitation.expired",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Organizations outbox event; recipients via X5 (D-5)",
+      "dataKeys": [
+        "invitationId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 6,
+      "eventType": "organizations.membership.role_changed",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_MEMBERSHIP",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "membershipId",
+        "organizationId",
+        "role"
+      ]
+    },
+    {
+      "number": 7,
+      "eventType": "organizations.membership.suspended",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_MEMBERSHIP",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "membershipId",
+        "organizationId"
+      ]
+    },
+    {
+      "number": 8,
+      "eventType": "organizations.membership.removed",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_MEMBERSHIP",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "membershipId",
+        "organizationId"
+      ]
+    },
+    {
+      "number": 9,
+      "eventType": "organizations.ownership.transferred",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "organizationId"
+      ]
+    },
+    {
+      "number": 10,
+      "eventType": "organizations.organization.suspended",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "organizationId"
+      ]
+    },
+    {
+      "number": 11,
+      "eventType": "communications.connection.requested",
+      "producer": "cfmeet.communications",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "CONTACT_REQUESTS",
+      "subjectKind": "CONNECTION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "existing Hub outbox event → destination NOTIFICATIONS; X4 recheck",
+      "dataKeys": [
+        "actorRef",
+        "connectionId"
+      ]
+    },
+    {
+      "number": 12,
+      "eventType": "communications.connection.connected",
+      "producer": "cfmeet.communications",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "CONTACT_REQUESTS",
+      "subjectKind": "CONNECTION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "actorRef",
+        "connectionId"
+      ]
+    },
+    {
+      "number": 13,
+      "eventType": "messaging.message.created",
+      "producer": "cfmeet.messaging",
+      "priority": "HIGH",
+      "lane": "HIGH",
+      "category": "MESSAGES",
+      "subjectKind": "CONVERSATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content; optional sequence (message sequence, 1.1.0) keeps the 5-key wake-up payload; 1.4.0: may instead address platform-principal:<environmentId>:<principalId> recipients (partner push, ADR 0063): one metadata-only push per registered APNS / FCM installation through the partner's own credentials, collapsed per conversation",
+      "dataKeys": [
+        "conversationId",
+        "conversationKind",
+        "eventSequence",
+        "securityProfile",
+        "sequence"
+      ],
+      "partnerRecipients": true
+    },
+    {
+      "number": 14,
+      "eventType": "messaging.member.invited",
+      "producer": "cfmeet.messaging",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "GROUP_INVITATIONS",
+      "subjectKind": "CONVERSATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "conversationId",
+        "eventSequence"
+      ]
+    },
+    {
+      "number": 15,
+      "eventType": "calling.call.participant-missed",
+      "producer": "cfmeet.calling",
+      "priority": "HIGH",
+      "lane": "HIGH",
+      "category": "MISSED_CALLS",
+      "subjectKind": "CALL",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "new derived Calling fact (D-10 approved)",
+      "dataKeys": [
+        "callId",
+        "callKind"
+      ]
+    },
+    {
+      "number": 16,
+      "eventType": "calling.voicemail.ready",
+      "producer": "cfmeet.calling",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "VOICEMAIL",
+      "subjectKind": "CALL",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "callId",
+        "voiceMessageId"
+      ]
+    },
+    {
+      "number": 17,
+      "eventType": "calling.recording.ready",
+      "producer": "cfmeet.calling",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "VOICEMAIL",
+      "subjectKind": "CALL",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "call media ready; governed by the voicemail preference",
+      "dataKeys": [
+        "callId",
+        "recordingId"
+      ]
+    },
+    {
+      "number": 18,
+      "eventType": "meeting-service.conference.scheduled",
+      "producer": "cfmeet.meeting-service",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "MEETING_INVITATIONS",
+      "subjectKind": "CONFERENCE",
+      "sealed": null,
+      "idempotencyKey": "meeting-notification",
+      "optional": false,
+      "note": "written with the existing record_* calls in the same transaction (outbox_events channel NOTIFICATION); meetingInvitations governs every meeting email today",
+      "dataKeys": [
+        "conferenceId",
+        "startsAt"
+      ]
+    },
+    {
+      "number": 19,
+      "eventType": "meeting-service.conference.rescheduled",
+      "producer": "cfmeet.meeting-service",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "MEETING_INVITATIONS",
+      "subjectKind": "CONFERENCE",
+      "sealed": null,
+      "idempotencyKey": "meeting-notification",
+      "optional": false,
+      "note": "written with the existing record_* calls in the same transaction (outbox_events channel NOTIFICATION); meetingInvitations governs every meeting email today",
+      "dataKeys": [
+        "conferenceId",
+        "startsAt"
+      ]
+    },
+    {
+      "number": 20,
+      "eventType": "meeting-service.conference.cancelled",
+      "producer": "cfmeet.meeting-service",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "MEETING_INVITATIONS",
+      "subjectKind": "CONFERENCE",
+      "sealed": null,
+      "idempotencyKey": "meeting-notification",
+      "optional": false,
+      "note": "written with the existing record_* calls in the same transaction (outbox_events channel NOTIFICATION); meetingInvitations governs every meeting email today",
+      "dataKeys": [
+        "conferenceId",
+        "startsAt"
+      ]
+    },
+    {
+      "number": 21,
+      "eventType": "meeting-service.invitation.email-requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "MEETING_INVITATIONS",
+      "subjectKind": "MEETING_INVITATION",
+      "sealed": [
+        "token"
+      ],
+      "idempotencyKey": "meeting-invitation",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "conferenceId",
+        "invitationId"
+      ]
+    },
+    {
+      "number": 22,
+      "eventType": "meeting-service.organization-invitation.email-requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": [
+        "token",
+        "address"
+      ],
+      "idempotencyKey": "org-invitation",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "invitationId",
+        "organizationId"
+      ]
+    },
+    {
+      "number": 23,
+      "eventType": "account.verification-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code"
+      ],
+      "idempotencyKey": "otp-verify",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 24,
+      "eventType": "account.password-reset-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code"
+      ],
+      "idempotencyKey": "otp-reset",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 25,
+      "eventType": "account.device-step-up-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code"
+      ],
+      "idempotencyKey": "device-step-up",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "accountDeviceId",
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 26,
+      "eventType": "account.security.password-changed",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": null,
+      "idempotencyKey": "password-changed",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "changedAt"
+      ]
+    },
+    {
+      "number": 27,
+      "eventType": "account.security.device-linked",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": null,
+      "idempotencyKey": "device-linked",
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "accountDeviceId",
+        "linkId"
+      ]
+    },
+    {
+      "number": 28,
+      "eventType": "developer-platform.credential.expiring-soon",
+      "producer": "cfmeet.developer-platform",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DEVELOPER_UPDATES",
+      "subjectKind": "CREDENTIAL",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "applicationId",
+        "credentialId",
+        "expiresAt"
+      ]
+    },
+    {
+      "number": 29,
+      "eventType": "developer-platform.credential.expired",
+      "producer": "cfmeet.developer-platform",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DEVELOPER_UPDATES",
+      "subjectKind": "CREDENTIAL",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "",
+      "dataKeys": [
+        "applicationId",
+        "credentialId",
+        "expiresAt"
+      ]
+    },
+    {
+      "number": 30,
+      "eventType": "developer-platform.production-access.decided",
+      "producer": "cfmeet.developer-platform",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DEVELOPER_UPDATES",
+      "subjectKind": "PRODUCTION_ACCESS_REQUEST",
+      "sealed": null,
+      "idempotencyKey": "devplat-access",
+      "optional": false,
+      "note": "replaces the ops-script email",
+      "dataKeys": [
+        "decision",
+        "requestId"
+      ]
+    },
+    {
+      "number": 31,
+      "eventType": "operator.alert.fired",
+      "producer": "alertmanager",
+      "priority": "HIGH",
+      "lane": "HIGH",
+      "category": "OPERATOR_ALERTS",
+      "subjectKind": "OPERATOR_ALERT",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": true,
+      "note": "D-15 approved: operator alerts delivered by the service; built by I12 from the Alertmanager webhook. The service's own health alerts use an independent path",
+      "dataKeys": [
+        "alertName",
+        "severity",
+        "status"
+      ]
+    },
+    {
+      "number": 32,
+      "eventType": "account.sign-in-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code",
+        "token",
+        "address"
+      ],
+      "idempotencyKey": "otp-signin",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "passwordless sign-in / sign-up code and magic link (PR #97), to the typed address, which may have no account yet: no subject, one email principal (derived from the normalized address) with the address sealed; requestClient / requestNetwork are the client label and masked network prefix the email shows, never an address",
+      "dataKeys": [
+        "requestClient",
+        "requestNetwork",
+        "requestedAt",
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 33,
+      "eventType": "account.email-change-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code",
+        "address"
+      ],
+      "idempotencyKey": "otp-emailchange",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "email-change code to the NEW address, which is not (yet) the account's: one email principal with the address sealed; the ACCOUNT subject authorizes the send and names the greeting (X1)",
+      "dataKeys": [
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 34,
+      "eventType": "account.step-up-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code"
+      ],
+      "idempotencyKey": "otp-stepup",
+      "optional": false,
+      "recipient": "cfmeet-user",
+      "note": "action step-up code to the account's current address; purpose is the closed StepUpPurpose enum",
+      "dataKeys": [
+        "purpose",
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 35,
+      "eventType": "account.welcome.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "address"
+      ],
+      "idempotencyKey": "welcome",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "the welcome email once the account's address is verified (Meeting AUTH_WELCOME, key welcome:<account id>): one email principal with the address sealed, on behalf of the ACCOUNT subject (X1 authorizes it and names the greeting)",
+      "dataKeys": []
+    },
+    {
+      "number": 36,
+      "eventType": "account.security.new-sign-in",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "address"
+      ],
+      "sealedOptional": [
+        "requestClient",
+        "requestNetwork"
+      ],
+      "idempotencyKey": "new-sign-in",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "the alert of a sign-in from a device not seen recently (key new-sign-in:<session id>): one email principal with the address sealed, ACCOUNT subject; the client label and masked network the email shows are sealed (requestClient / requestNetwork), never data",
+      "dataKeys": [
+        "requestedAt"
+      ]
+    },
+    {
+      "number": 37,
+      "eventType": "account.security.email-in-use",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "address"
+      ],
+      "idempotencyKey": "email-in-use",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "an email change attempted to an address that already has an account (key email-in-use:<recipient hash>:<hour>): one email principal with the address sealed and no subject, so the event never names the account",
+      "dataKeys": []
+    },
+    {
+      "number": 38,
+      "eventType": "account.security.email-changed",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "address"
+      ],
+      "sealedOptional": [
+        "maskedAddress",
+        "token"
+      ],
+      "idempotencyKey": "email-changed",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "the email-changed notices (key email-changed:{old,new}:<change id>): side OLD to the previous address with the masked new address sealed and, for a self-service change, the undo token sealed (no token: the support-assisted change); side NEW to the new address; one email principal with the address sealed, ACCOUNT subject",
+      "dataKeys": [
+        "changedAt",
+        "side"
+      ]
+    },
+    {
+      "number": 39,
+      "eventType": "organizations.organization.archived",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "Gap audit G19 (1.4.0): mirrors #10; published by Organizations only with ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED.",
+      "dataKeys": [
+        "organizationId"
+      ]
+    },
+    {
+      "number": 40,
+      "eventType": "organizations.organization.reactivated",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "Gap audit G19 (1.4.0): mirrors #10; published by Organizations only with ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED.",
+      "dataKeys": [
+        "organizationId"
+      ]
+    },
+    {
+      "number": 41,
+      "eventType": "developer-platform.workspace.owner-invitation.email-requested",
+      "producer": "cfmeet.developer-platform",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DEVELOPER_UPDATES",
+      "subjectKind": "ORGANIZATION_INVITATION",
+      "sealed": [
+        "token",
+        "address"
+      ],
+      "idempotencyKey": null,
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "ADR 0068 A4 (1.6.0): the one-time owner invitation of a first-party workspace registered through the admin bridge, delivered only to the invited address as a single-use claim link (HQ never sees the token); one email principal keyed by the invitation, address and token sealed",
+      "dataKeys": [
+        "expiresAt",
+        "invitationId",
+        "organizationId"
+      ]
+    },
+    {
+      "number": 42,
+      "eventType": "organizations.organization.export_ready",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION_EXPORT",
+      "sealed": [
+        "token"
+      ],
+      "idempotencyKey": null,
+      "optional": false,
+      "recipient": "cfmeet-user",
+      "note": "ADR 0068 A4 (1.7.0): the single-use download link of an organization export HQ requested through the admin bridge, to the owner's account only (the service resolves the verified address); the link token sealed, never data",
+      "dataKeys": [
+        "deliveryId",
+        "expiresAt",
+        "exportId",
+        "organizationId"
+      ]
+    },
+    {
+      "number": 0,
+      "eventType": "notifications.cancel",
+      "producer": null,
+      "producers": [
+        "cfmeet.meeting-service",
+        "cfmeet.organizations",
+        "cfmeet.communications",
+        "cfmeet.calling",
+        "cfmeet.messaging",
+        "cfmeet.developer-platform"
+      ],
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": null,
+      "subjectKind": null,
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "dataKeys": [],
+      "note": "control event: cancels pending notifications by delivery.cancelKey"
+    }
+  ],
+  "x-cfmeet-legacy-idempotency-keys": {
+    "otp-verify": "^otp:verify:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-reset": "^otp:reset:[A-Za-z0-9:_.-]{1,140}$",
+    "device-step-up": "^device-step-up:[A-Za-z0-9:_.-]{1,140}$",
+    "password-changed": "^password-changed:[A-Za-z0-9:_.-]{1,140}$",
+    "device-linked": "^device-linked:[0-9a-f-]{36}$",
+    "meeting-invitation": "^meeting-invitation:[0-9a-f-]{36}$",
+    "org-invitation": "^org-invitation:[0-9a-f-]{36}:[0-9]{1,9}$",
+    "meeting-notification": "^meeting-notification:[A-Za-z0-9:_.-]{1,140}$",
+    "devplat-access": "^devplat-access:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-signin": "^otp:signin:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-emailchange": "^otp:emailchange:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-stepup": "^otp:stepup:[A-Za-z0-9:_.-]{1,140}$",
+    "welcome": "^welcome:[0-9a-f-]{36}$",
+    "new-sign-in": "^new-sign-in:[0-9a-f-]{36}$",
+    "email-in-use": "^email-in-use:[A-Za-z0-9:_.-]{1,140}$",
+    "email-changed": "^email-changed:(old|new):[0-9a-f-]{36}$"
+  }
+}

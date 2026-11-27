@@ -624,7 +624,11 @@ async fn resolve_and_evaluate_truth_tables() {
     }
     let o = resolve(&h, owner, None).await;
     assert_eq!(o[0]["organizationStatus"], "SUSPENDED");
-    assert_eq!(o[0]["capabilities"], json!(["organization.read"]));
+    // The audit history stays readable to the owner while suspended (gap audit G8).
+    assert_eq!(
+        o[0]["capabilities"],
+        json!(["organization.read", "organization.audit.read"])
+    );
     assert_eq!(
         resolve(&h, member, None).await[0]["capabilities"],
         json!([])
@@ -739,6 +743,24 @@ async fn operator_administration_and_the_platform_admin_facade() {
         .get("/internal/v1/admin/organizations?status=GONE")
         .await
         .expect_error(400, "VALIDATION_ERROR");
+    // Gap audit G10: search by name or slug (case-insensitive, LIKE characters literal).
+    let found = h
+        .by(&h.peers.operator)
+        .get("/internal/v1/admin/organizations?q=FACADE")
+        .await;
+    let items = found.expect(200)["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 1, "{:?}", items);
+    assert_eq!(items[0]["slug"], "facade-org");
+    let by_slug = h
+        .by(&h.peers.operator)
+        .get("/internal/v1/admin/organizations?q=ade-or")
+        .await;
+    assert_eq!(by_slug.expect(200)["items"].as_array().unwrap().len(), 1);
+    let none = h
+        .by(&h.peers.operator)
+        .get("/internal/v1/admin/organizations?q=%25")
+        .await;
+    assert_eq!(none.expect(200)["items"].as_array().unwrap().len(), 0);
     // Provisioning is truthful (nothing provisioned in Section 5).
     let p = h
         .by(&h.peers.messaging)

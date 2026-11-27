@@ -89,6 +89,7 @@ impl SessionRow {
                 .map(str::to_string)
                 .collect(),
             principal_restriction: Some([self.principal_id].into_iter().collect()),
+            oauth: None,
         })
     }
 
@@ -150,10 +151,13 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
     // client sees must not depend on which signal reached this gateway first. A session
     // device (Section 13) is checked in its own table, and ends when the operator
     // switches session devices off.
+    let mut partner_credential = None;
     let device_active = if current.is_session_device() {
-        super::session_devices::active(
+        // ADR 0062: a partner session device (exchanged from a CF Meet user token) is
+        // usable only while the partner flag is on; a first-party one while session
+        // devices are on.
+        match super::session_devices::active_device(
             &state.db,
-            state.realtime.settings.session_devices_enabled,
             current.device_id,
             current.principal_id,
             current.environment_id,
@@ -161,6 +165,14 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         )
         .await
         .map_err(|_| Invalid::Unavailable)?
+        {
+            Some(d) if d.is_partner() => {
+                partner_credential = Some(current.credential_id);
+                state.partner.settings.session_devices_enabled
+            }
+            Some(_) => state.realtime.settings.session_devices_enabled,
+            None => false,
+        }
     } else {
         db::scalar_i64(
             &state.db,
@@ -181,6 +193,18 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         return Err(Invalid::Expired);
     }
     let scope = current.owner_scope().ok_or(Invalid::SessionRevoked)?;
+    // ADR 0062: revoking the partner's minting credential ends its partner devices (at
+    // use and on the periodic re-validation of open connections).
+    if let Some(credential) = partner_credential {
+        match state.partner.credential_active(&scope, credential).await {
+            Ok(true) => {}
+            Ok(false) => return Err(Invalid::SessionRevoked),
+            Err(e) => {
+                tracing::warn!(error = %e, "credential status unavailable during session validation");
+                return Err(Invalid::Unavailable);
+            }
+        }
+    }
     let personal = cf_communications_policy::Scope {
         tenant_id: scope.tenant_id,
         application_id: scope.application_id,
@@ -212,6 +236,11 @@ pub struct IssueRequest {
     pub device_id: Uuid,
     #[serde(default)]
     pub ttl_seconds: Option<i64>,
+    /// Gap audit A11: first-party relays only. The opaque reference of the VERIFIED
+    /// account session the token is issued for; ending that account session
+    /// (`POST /v1/messaging/session-devices/revoke`) ends this client session too.
+    #[serde(default)]
+    pub account_session_ref: Option<String>,
 }
 
 /// `POST /v1/messaging/client-tokens`.
@@ -232,6 +261,16 @@ pub async fn issue_token(
         return Err(Error::validation(format!(
             "ttlSeconds must be between 60 and {max}"
         )));
+    }
+    if let Some(reference) = request.account_session_ref.as_deref() {
+        if !ctx.first_party {
+            return Err(Error::code(ErrorCode::InsufficientScope));
+        }
+        if !super::session_devices::valid_reference(reference) {
+            return Err(Error::validation(
+                "accountSessionRef must be 64 lower-case hexadecimal characters",
+            ));
+        }
     }
     crate::messages::e2ee::require_own_device(
         &state.db,
@@ -260,8 +299,9 @@ pub async fn issue_token(
     db::exec(
         &state.db,
         "INSERT INTO messaging_client_sessions (id, tenant_id, application_id, environment_id, environment_kind, \
-           service_account_id, principal_id, device_id, credential_id, scopes, created_at, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+           service_account_id, principal_id, device_id, credential_id, scopes, created_at, expires_at, \
+           account_session_sha256) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         vec![
             session_id.into(),
             ctx.scope.tenant_id.into(),
@@ -275,6 +315,7 @@ pub async fn issue_token(
             scopes.join(" ").into(),
             now.into(),
             expires.into(),
+            request.account_session_ref.clone().into(),
         ],
     )
     .await?;

@@ -36,8 +36,21 @@ pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// ([`InternalServiceClient::exchange_json_query_with_headers`]): never an authorization,
 /// identity or routing header. `x-cf-delegated-actor` names the acting member of a
 /// Developer Platform delegation (Platform Access honours it only under
-/// `platform-identity.delegate`).
-pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &["idempotency-key", "x-cf-delegated-actor"];
+/// `platform-identity.delegate`). `cf-forwarded-credential-id` names the gateway-forwarded
+/// partner credential of a Partner Users call (Platform Access honours it only under
+/// `platform-end-users.delegate`, cross-checks it against the signed delegated context and
+/// re-authenticates it live). The four `x-cf-*` operator attribution headers
+/// (`crate::operator`, ADR 0068) are sent only by the admin bridge; every receiver refuses
+/// them from any other caller.
+pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &[
+    "idempotency-key",
+    "x-cf-delegated-actor",
+    "cf-forwarded-credential-id",
+    "x-cf-operator",
+    "x-cf-approver",
+    "x-cf-approval-ref",
+    "x-cf-intent-digest",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientConfigError {
@@ -233,9 +246,38 @@ fn valid_internal_path(path: &str) -> bool {
         && path.len() <= 512
         && !path.contains("//")
         && !path.split('/').any(|s| s == "." || s == "..")
-        && path
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~'))
+        && unreserved_or_utf8_escapes(path.as_bytes())
+}
+
+/// Unreserved ASCII, plus percent-escapes of NON-ASCII bytes only (`%80`-`%FF`, upper-case
+/// hex): how a UTF-8 path segment such as an emoji reaction travels. An escape of an ASCII
+/// byte (`%2F`, `%2E`, `%25`, ...) is refused, so an escape can never smuggle a separator,
+/// a dot segment or a second decoding into the receiver's routing.
+fn unreserved_or_utf8_escapes(bytes: &[u8]) -> bool {
+    let hex = |b: u8| b.is_ascii_digit() || (b'A'..=b'F').contains(&b);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' {
+            match (bytes.get(i + 1), bytes.get(i + 2)) {
+                (Some(&h), Some(&l))
+                    if (b'8'..=b'9').contains(&h) || (b'A'..=b'F').contains(&h) =>
+                {
+                    if !hex(l) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+            i += 3;
+            continue;
+        }
+        if !(b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~')) {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 fn valid_query(query: &[(&str, &str)]) -> bool {
@@ -541,6 +583,25 @@ mod tests {
             "/internal/v1/x#f",
             "/internal/v1/x y",
             "https://evil/internal/v1/x",
+        ] {
+            assert!(!valid_internal_path(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn utf8_segments_travel_as_high_byte_escapes_only() {
+        // An emoji reaction: UTF-8 bytes, percent-encoded.
+        assert!(valid_internal_path(
+            "/internal/v1/delegated/v1/conversations/c/messages/m/reactions/%F0%9F%91%8D"
+        ));
+        for bad in [
+            "/internal/v1/x/%2F",       // an encoded separator
+            "/internal/v1/x/%2E%2E",    // an encoded dot segment
+            "/internal/v1/x/%25F0",     // a double encoding
+            "/internal/v1/x/%f0%9f",    // lower-case hex (not the canonical form)
+            "/internal/v1/x/%F",        // truncated
+            "/internal/v1/x/%FG",       // not hex
+            "/internal/v1/x/\u{1F44D}", // a raw non-ASCII character
         ] {
             assert!(!valid_internal_path(bad), "{bad}");
         }

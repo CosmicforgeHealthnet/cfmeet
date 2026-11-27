@@ -7,7 +7,15 @@
 //!    `organization_service_nonces` (`INSERT … ON CONFLICT DO NOTHING`; a replay inserts
 //!    nothing and is refused 401);
 //! 3. may name the acting user (`X-CF-Acting-User`, `X-CF-Acting-User-Verified-Email`) only
-//!    if the caller holds `organization.act-for-user` (else 403 `ACTOR_NOT_ALLOWED`).
+//!    if the caller holds `organization.act-for-user` (else 403 `ACTOR_NOT_ALLOWED`);
+//! 4. operator attribution (`X-CF-Operator`, `X-CF-Approver`, `X-CF-Approval-Ref`,
+//!    `X-CF-Intent-Digest`, ADR 0068), checked on every route (else 403 `ACTOR_NOT_ALLOWED`):
+//!    * from the admin bridge (`cfmeet.admin-bridge`): strict `hq:<staff>` attribution,
+//!      well-formed, approver different from the operator;
+//!    * from the operator console: its legacy named operator (`X-CF-Operator` only, as
+//!      before ADR 0068); the approval headers are refused;
+//!    * from any other caller: any of the four headers is refused, so no other caller can
+//!      claim an HQ operator.
 //!
 //! Each handler then requires its route permission ([`Caller::require`]). Spans carry the
 //! matched route pattern, never the path; tokens and emails are never logged.
@@ -19,7 +27,9 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use cf_service_auth::{headers, InternalPermission, InternalServiceContext, RequestId};
+use cf_service_auth::{
+    headers, InternalPermission, InternalServiceContext, OperatorAttribution, RequestId,
+};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -50,6 +60,9 @@ pub struct Caller {
     pub acting_user: Option<Uuid>,
     /// `X-CF-Acting-User-Verified-Email`, normalized (same rule).
     pub verified_email: Option<String>,
+    /// The HQ staff member (and approver) the admin bridge acts for; only ever set for
+    /// `cfmeet.admin-bridge` (ADR 0068).
+    pub operator: Option<OperatorAttribution>,
 }
 
 impl Caller {
@@ -70,6 +83,18 @@ impl Caller {
                 "internal permission denied");
                 ApiError::new(ErrorCode::InternalPermissionDenied)
             })
+    }
+
+    /// The admin bridge's operator reads (`/internal/v1/operator/*`): the caller holds
+    /// `organization.operator-read` AND names the HQ staff member (`X-CF-Operator`).
+    pub fn require_operator_read(&self) -> Result<&OperatorAttribution, ApiError> {
+        self.require(InternalPermission::OrganizationOperatorRead)?;
+        self.operator.as_ref().ok_or_else(|| {
+            ApiError::with_message(
+                ErrorCode::ActorNotAllowed,
+                "X-CF-Operator is required for operator reads",
+            )
+        })
     }
 
     /// The acting user, required by operations performed for a human.
@@ -149,6 +174,37 @@ async fn first_use(state: &AppState, ctx: &InternalServiceContext) -> Result<boo
     Ok(inserted == 1)
 }
 
+/// Applies the attribution rule of this module (point 4) to a verified caller.
+fn attribution_of(
+    ctx: &InternalServiceContext,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<OperatorAttribution>, &'static str> {
+    use cf_service_auth::{operator as attribution, services};
+    let caller = ctx.authenticated_service();
+    if caller.as_str() == services::ADMIN_BRIDGE {
+        return OperatorAttribution::from_headers(caller, headers)
+            .map_err(|_| "bridge attribution malformed, incomplete or self-approved");
+    }
+    let present = |h: &axum::http::HeaderName| headers.contains_key(h);
+    if caller.as_str() == services::OPERATOR_CONSOLE {
+        if [
+            &attribution::APPROVER,
+            &attribution::APPROVAL_REF,
+            &attribution::INTENT_DIGEST,
+        ]
+        .into_iter()
+        .any(present)
+        {
+            return Err("approval attribution is accepted only from the admin bridge");
+        }
+        return Ok(None);
+    }
+    if attribution::ALL_HEADERS.iter().any(present) {
+        return Err("operator attribution from a caller that may not claim an operator");
+    }
+    Ok(None)
+}
+
 pub async fn require_internal_service(
     State(state): State<AppState>,
     mut request: Request,
@@ -191,6 +247,7 @@ pub async fn require_internal_service(
         method = %request.method(), route = %route);
     // Parsed before any await: the request body is not `Sync`.
     let actor = actor_headers(request.headers());
+    let operator = attribution_of(&ctx, request.headers());
     let outcome: Result<Caller, ApiError> = async {
         if !first_use(&state, &ctx).await? {
             tracing::warn!("replayed service token refused");
@@ -203,10 +260,15 @@ pub async fn require_internal_service(
             );
             return Err(ApiError::new(ErrorCode::ActorNotAllowed));
         }
+        let operator = operator.map_err(|refused| {
+            tracing::warn!(reason = %refused, "operator attribution refused");
+            ApiError::with_message(ErrorCode::ActorNotAllowed, "operator attribution refused")
+        })?;
         Ok(Caller {
             context: ctx.clone(),
             acting_user,
             verified_email,
+            operator,
         })
     }
     .instrument(span.clone())

@@ -5,6 +5,7 @@ import type { CollaborationPolicyPatch, ChatPolicyUpdateRequest, Role, RolePolic
 import { useCollaborationState, useUpdateChatPolicy, useUpdateCollaborationPolicy } from "@/hooks/v2/useCollaboration";
 import { meetingAllows } from "@/lib/meeting-authority";
 import { ActionDialog, Field, RequestError } from "@/components/meeting-spaces/ManagementUI";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 export default function CollaborationPolicyControls({
   conferenceId,
@@ -65,13 +66,8 @@ export default function CollaborationPolicyControls({
         <input type="checkbox" checked={draft.videoLocked === true} onChange={e => setDraft(value => ({ ...value, videoLocked: e.target.checked }))} />
         Lock cameras by default
       </label>
-      <label className="grid gap-2 text-sm font-medium">Screen sharing policy
-        <select className="h-10 rounded-md border border-input bg-background px-3" value={draft.screenSharePolicy} onChange={e => setDraft(value => ({ ...value, screenSharePolicy: e.target.value as ScreenSharePolicy }))}>
-          <option value="HOST_ONLY">Hosts and co-hosts</option>
-          <option value="PRESENTERS_ONLY">Presenters and above</option>
-          <option value="ALL_INTERACTIVE">All roles with screen-share permission</option>
-        </select>
-      </label>
+      <NiceSelect<ScreenSharePolicy> label="Screen sharing policy" value={draft.screenSharePolicy ?? ""} onChange={v => setDraft(value => ({ ...value, screenSharePolicy: v }))}
+        options={[{ value: "HOST_ONLY", label: "Hosts and co-hosts" }, { value: "PRESENTERS_ONLY", label: "Presenters and above" }, { value: "ALL_INTERACTIVE", label: "All roles with screen-share permission" }]} />
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={draft.reactionsEnabled === true} onChange={e => setDraft(value => ({ ...value, reactionsEnabled: e.target.checked }))} />
         Enable reactions
@@ -107,19 +103,10 @@ export default function CollaborationPolicyControls({
         <input type="checkbox" checked={chatDraft.chatEnabled === true} onChange={e => setChatDraft(value => ({ ...value, chatEnabled: e.target.checked }))} />
         Enable conference chat
       </label>
-      <label className="grid gap-2 text-sm font-medium">Who can send chat?
-        <select className="h-10 rounded-md border border-input bg-background px-3" value={chatDraft.chatSendMode} onChange={e => setChatDraft(value => ({ ...value, chatSendMode: e.target.value as ChatSendMode }))}>
-          <option value="EVERYONE">Everyone</option>
-          <option value="HOSTS_ONLY">Hosts only</option>
-        </select>
-      </label>
-      <label className="grid gap-2 text-sm font-medium">Private chat
-        <select className="h-10 rounded-md border border-input bg-background px-3" value={chatDraft.privateChatMode} onChange={e => setChatDraft(value => ({ ...value, privateChatMode: e.target.value as PrivateChatMode }))}>
-          <option value="EVERYONE">Everyone</option>
-          <option value="HOSTS_ONLY">Hosts only</option>
-          <option value="DISABLED">Disabled</option>
-        </select>
-      </label>
+      <NiceSelect<ChatSendMode> label="Who can send chat?" value={chatDraft.chatSendMode ?? ""} onChange={v => setChatDraft(value => ({ ...value, chatSendMode: v }))}
+        options={[{ value: "EVERYONE", label: "Everyone" }, { value: "HOSTS_ONLY", label: "Hosts only" }]} />
+      <NiceSelect<PrivateChatMode> label="Private chat" value={chatDraft.privateChatMode ?? ""} onChange={v => setChatDraft(value => ({ ...value, privateChatMode: v }))}
+        options={[{ value: "EVERYONE", label: "Everyone" }, { value: "HOSTS_ONLY", label: "Hosts only" }, { value: "DISABLED", label: "Off" }]} />
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={chatDraft.breakoutChatEnabled === true} onChange={e => setChatDraft(value => ({ ...value, breakoutChatEnabled: e.target.checked }))} />
         Enable chat in breakouts

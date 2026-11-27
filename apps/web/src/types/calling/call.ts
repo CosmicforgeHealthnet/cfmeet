@@ -103,12 +103,40 @@ export interface CallTransfer {
 }
 
 export interface Call extends CallCore {
+  /** Whether this caller may read the call's recordings (ask for them only when true). */
+  canViewRecordings?: boolean;
   connectedDurationMs: number | null;
   durationsAsOf: string;
   participants: CallParticipant[];
   sessions: CallSession[];
+  /** C4: the group call's host participant. */
+  hostParticipantId?: string | null;
+  /** C4: participants the host muted. */
+  mutedParticipantIds?: string[];
   invitations: CallInvitation[];
   transfers: CallTransfer[];
+  /** C6: who is presenting a screen now (null when nobody is). */
+  screenShare?: ScreenShare | null;
+}
+
+/** C6: the Call's current presenter. */
+export interface ScreenShare {
+  participantId: Uuid;
+  startedAt: string;
+}
+
+export interface ScreenShareResult {
+  call: CallSummary;
+  operation: "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
+  screenShare: ScreenShare | null;
+}
+
+/** C7: result of inviting people into an ongoing call. */
+export interface AddParticipantsResult {
+  call: CallSummary;
+  operation: "ADD_PARTICIPANTS";
+  invitingParticipantId: Uuid;
+  participants: { participantId: Uuid; principalId: Uuid; role: "RECIPIENT"; liveInvitationCount: number }[];
 }
 
 export interface CallList {
@@ -151,6 +179,17 @@ export interface AcceptResult {
   sessionId: Uuid;
   outcome: "ACCEPTED";
   callAnswered: boolean;
+}
+
+/** POST /v1/calling/invitations/{id}/acknowledge: the device received the offer (C1). */
+export interface AcknowledgeResult {
+  invitationId: Uuid;
+  callId: Uuid;
+  status: "PENDING" | "RINGING";
+  ringingAt: string | null;
+  expiresAt: string;
+  callState: CallState;
+  callVersion: number;
 }
 
 export interface DeclineResult {

@@ -236,6 +236,10 @@ export function signInNotice(reason: string | null | undefined): string | null {
       return "Your session has ended. Sign in again to continue.";
     case "deactivated":
       return "Your account was deactivated.";
+    case "data_export":
+      return "For your security, sign in again to download your data.";
+    case "secure_messaging":
+      return "For your security, sign in again to finish setting up private messaging on this browser.";
     default:
       return null;
   }

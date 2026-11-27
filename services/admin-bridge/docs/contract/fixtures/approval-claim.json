@@ -1,0 +1,16 @@
+{
+  "description": "Approval claim carried in the staff assertion of a TWO_PERSON command. requester_ref and approver_ref are raw HQ subs; the bridge forwards them as X-CF-Operator: hq:<sub> and X-CF-Approver: hq:<sub>. Command bodies are defined per phase; this body is illustrative.",
+  "method": "POST",
+  "uri": "/internal/cfmeet-admin/v1/verification/cases/case-0001/partner-go-live/approve?market=GLOBAL&organization=cfmeet&zone=production&tenant=cfmeet-first-party&purpose=verification-review",
+  "body_utf8": "{\"expected_version\":3,\"note_ref\":\"evidence-0001\"}",
+  "request_digest": "fc01355b254c06fe929e11e94074cba366f0be9efada5bcb33c49b04088dfc5f",
+  "approval": {
+    "approval_id": "0b7e7f0e-2b9c-4c8e-9d7a-1f2e3d4c5b6a",
+    "capability": "verification.partner-go-live.approve",
+    "requester_ref": "staff-0001",
+    "approver_ref": "staff-0002",
+    "intent_digest": "e67361f58a6ffdf8a925d75e9e2180faa3924d33782294e7a32c81ae88c99667",
+    "decided_at": "2026-11-19T10:00:00Z",
+    "expires_at": "2026-11-19T22:00:00Z"
+  }
+}

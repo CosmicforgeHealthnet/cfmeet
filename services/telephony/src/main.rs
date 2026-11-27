@@ -9,6 +9,7 @@ use telephony::{
     config::{ServiceAuthSettings, TelephonyConfig},
     error::summarize_db_error,
     internal,
+    numbering_reports::NumberingReportSettings,
     ports::{HttpCalling, HttpPrivacyRelay},
     providers::registry_from_database,
     routes,
@@ -32,6 +33,13 @@ async fn main() -> anyhow::Result<()> {
         Ok(settings) => settings,
         Err(err) => {
             eprintln!("telephony: execution configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    let numbering_reports = match NumberingReportSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("telephony: Numbering report configuration error: {err}");
             std::process::exit(2);
         }
     };
@@ -128,6 +136,21 @@ async fn main() -> anyhow::Result<()> {
         sip_edge = edge.name(),
         "telephony configuration"
     );
+    // Gap C10: reporting to Numbering needs Numbering configured (and its trust bundle to
+    // grant number-usage.report / number-risk.report to cfmeet.telephony).
+    if (numbering_reports.usage_reports_enabled || numbering_reports.risk_signals_enabled)
+        && settings.numbering_base_url.is_none()
+    {
+        tracing::error!(
+            "TELEPHONY_NUMBERING_USAGE_REPORTS_ENABLED / TELEPHONY_NUMBERING_RISK_SIGNALS_ENABLED need NUMBERING_INTERNAL_BASE_URL"
+        );
+        std::process::exit(2);
+    }
+    tracing::info!(
+        numbering_usage_reports_enabled = numbering_reports.usage_reports_enabled,
+        numbering_risk_signals_enabled = numbering_reports.risk_signals_enabled,
+        "telephony Numbering reporting"
+    );
     let telephony = TelephonyService::new(db, clock, flags)
         .with_providers(providers)
         .with_edge(edge.clone())
@@ -138,7 +161,8 @@ async fn main() -> anyhow::Result<()> {
         } else {
             Arc::new(telephony::ports::UnconfiguredNumbering)
         })
-        .with_settings(execution);
+        .with_settings(execution)
+        .with_numbering_reports(numbering_reports);
     // Edge events (inbound dialogs, call progress, application media joins).
     tokio::spawn(telephony.clone().run_edge_events());
     // Commands, outbox, reconciliation, usage, health: every instance (SKIP LOCKED).

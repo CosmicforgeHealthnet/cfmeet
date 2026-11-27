@@ -77,6 +77,15 @@ async fn main() -> anyhow::Result<()> {
     if !config.devices.enabled {
         tracing::warn!("E2EE device registration and KeyPackage publication are disabled (MESSAGING_E2EE_DEVICES_ENABLED)");
     }
+    if let Some(release) = &config.devices.production_release {
+        // Never a certification claim: the record states the actual assessment status.
+        tracing::warn!(
+            decision_id = %release.decision_id,
+            independent_assessment = %release.independent_assessment,
+            accepted_residual_risks = ?release.accepted_residual_risks,
+            "production personal E2EE enabled by owner release decision"
+        );
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime,
@@ -133,14 +142,53 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
-    let personal = cf_communications_policy::Scope::from_env()
-        .map_err(anyhow::Error::msg)?
+    let personal_scope = cf_communications_policy::Scope::from_env().map_err(anyhow::Error::msg)?;
+    let personal = personal_scope
         .map(|scope| cf_communications_policy::PolicyClient::new(service_auth.client(), scope));
     if personal.is_some() && !messaging_migration::communications_ready(&db).await? {
         anyhow::bail!("Communications integration migration is required");
     }
+    let local_send_policy = match std::env::var("MESSAGING_LOCAL_SEND_POLICY_ENABLED")
+        .ok()
+        .as_deref()
+    {
+        None | Some("false") => false,
+        Some("true") => true,
+        _ => anyhow::bail!("MESSAGING_LOCAL_SEND_POLICY_ENABLED must be true or false"),
+    };
+    let local_send_generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+        .ok()
+        .map(|v| uuid::Uuid::parse_str(&v))
+        .transpose()
+        .map_err(|_| anyhow!("invalid send policy generation"))?;
+    if local_send_policy && (personal.is_none() || local_send_generation.is_none()) {
+        anyhow::bail!("Local send policy requires its scope and generation");
+    }
+    if personal.is_some() && !messaging_migration::send_policy_projection_ready(&db).await? {
+        anyhow::bail!("Send policy projection migration is required");
+    }
+    // CF Meet chat remediation M1: CF Meet's own personal application environment gets
+    // the first-party policy baseline (attachments on, 25 MiB, every kind). No other
+    // application environment is touched, and its own application policy still wins.
+    if let Some(scope) = &personal_scope {
+        messaging::conversations::policy::register_baseline(
+            &db,
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            messaging::conversations::policy::ApplicationBaseline::CfMeetFirstParty,
+            chrono::Utc::now(),
+        )
+        .await
+        .map_err(|e| anyhow!("cannot register the CF Meet policy baseline ({e})"))?;
+        tracing::info!(
+            environment_id = %scope.environment_id,
+            "CF Meet first-party messaging policy baseline registered"
+        );
+    }
     let mut state = AppState::new(db.clone(), clock, authority, service_auth.clone())
         .with_communications(personal)
+        .with_local_send_policy(local_send_policy, local_send_generation)
         .with_principals(Arc::new(PlatformAccessPrincipals::new(
             service_auth.client(),
         )))
@@ -258,7 +306,7 @@ async fn main() -> anyhow::Result<()> {
         .targets
         .iter()
         .any(|(s, _)| s.as_str() == cf_service_auth::services::SMS_GATEWAY);
-    let state = if sms_configured {
+    let mut state = if sms_configured {
         let client = state.service_auth.client();
         state.with_sms_transport(Arc::new(messaging::sms_bridge::HttpSmsTransport::new(
             client,
@@ -334,10 +382,79 @@ async fn main() -> anyhow::Result<()> {
         public_events_destination = destination.as_str(),
         "webhook relay receivers"
     );
+    // ADR 0064 (CF Meet Apps): OAuth credentials and app bots (default off). Bot events
+    // travel only to the Developer Platform's central event ingestion.
+    {
+        let developer_platform = destination
+            .destinations()
+            .contains(&messaging::webhook_relay::EventDestination::DeveloperPlatform);
+        let apps =
+            messaging::apps::AppsSettings::from_env(|k| std::env::var(k).ok(), developer_platform)
+                .map_err(|e| anyhow!("apps configuration: {e}"))?;
+        if apps.enabled {
+            tracing::info!(
+                bot_events = apps.bot_events,
+                "CF Meet Apps are enabled (MESSAGING_APPS_ENABLED)"
+            );
+            if !apps.bot_events {
+                tracing::warn!("MESSAGING_APPS_ENABLED is set but MESSAGING_PUBLIC_EVENTS_DESTINATION does not include developer-platform: bot events are not recorded");
+            }
+        }
+        state.apps = apps;
+    }
+    // ADR 0062 / 0063 (CF Meet Platform "Build"): partner session devices, partner push
+    // and MESSAGE_SENT facts, each behind its own default-off flag.
+    let partner_settings = messaging::partner::PartnerSettings::from_env(|k| std::env::var(k).ok())
+        .map_err(|e| anyhow!("partner configuration: {e}"))?;
+    messaging::partner::install_process_flags(&partner_settings);
+    {
+        let mut partner = messaging::partner::Partner::new(
+            partner_settings,
+            Arc::new(messaging::partner::PlatformAccessPartners::new(
+                state.service_auth.client(),
+            )),
+        );
+        if partner_settings.push_enabled {
+            if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+                anyhow::bail!(
+                    "MESSAGING_PARTNER_PUSH_ENABLED=true needs CF_NOTIFICATIONS_BASE_URL"
+                );
+            }
+            partner = partner.with_push(
+                Arc::new(
+                    messaging::partner::push::NotificationServicePartnerRegistrations::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+                Arc::new(
+                    messaging::notification_publications::NotificationServiceEvents::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+            );
+        }
+        state.partner = Arc::new(partner);
+        if partner_settings.session_devices_enabled {
+            tokio::spawn(messaging::partner::revocation::run(
+                state.clone(),
+                Duration::from_secs(15),
+            ));
+            tracing::info!(
+                "partner session devices are enabled (MESSAGING_PARTNER_SESSION_DEVICES_ENABLED)"
+            );
+        }
+        if partner_settings.push_enabled {
+            tokio::spawn(messaging::partner::push::run(
+                state.clone(),
+                Duration::from_secs(2),
+            ));
+            tracing::info!("partner push is enabled (MESSAGING_PARTNER_PUSH_ENABLED)");
+        }
+    }
     // Part VI §55: attachment STORAGE_BYTE_TIME usage facts to the Developer Platform.
     match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
         Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
-            let exporter = cf_usage_facts::exporter::Exporter::new(
+            let mut exporter = cf_usage_facts::exporter::Exporter::new(
                 Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
                     state.service_auth.client(),
                 )),
@@ -346,6 +463,19 @@ async fn main() -> anyhow::Result<()> {
             .with_intervals(Arc::new(messaging::usage_export::AttachmentStorage::new(
                 state.db.clone(),
             )));
+            // ADR 0062: MESSAGE_SENT facts, only once the usage catalogue knows the type.
+            if partner_settings.message_sent_export_enabled {
+                if messaging::usage_export::MessageSent::catalogued() {
+                    exporter = exporter.with_events(Arc::new(
+                        messaging::usage_export::MessageSent::new(state.db.clone()),
+                    ));
+                    tracing::info!(
+                        "MESSAGE_SENT usage facts are exported to the Developer Platform"
+                    );
+                } else {
+                    tracing::warn!("MESSAGING_MESSAGE_SENT_EXPORT_ENABLED is set but the usage catalogue does not know MESSAGE_SENT: not exported");
+                }
+            }
             tokio::spawn(Arc::new(exporter).run());
             tracing::info!("attachment storage usage facts are exported to the Developer Platform");
         }
@@ -360,6 +490,127 @@ async fn main() -> anyhow::Result<()> {
         webhook_sinks,
         config.workers.interval,
     ));
+    // Notification Service N9 (D-1b copy path): the push-registration facade. Off unless
+    // MESSAGING_PUSH_REGISTRATION_MIRROR=on; then the service target and CF Meet's personal
+    // scope are required (only first-party registrations are ever mirrored).
+    match messaging::push_mirror::interval_from_env(|k| std::env::var(k).ok()) {
+        Err(e) => anyhow::bail!("push-registration mirror configuration: {e}"),
+        Ok(None) => {}
+        Ok(Some(interval)) => {
+            if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+                anyhow::bail!(
+                    "MESSAGING_PUSH_REGISTRATION_MIRROR=on needs CF_NOTIFICATIONS_BASE_URL"
+                );
+            }
+            let Some(scope) = personal_scope else {
+                anyhow::bail!(
+                    "MESSAGING_PUSH_REGISTRATION_MIRROR=on needs CF Meet's personal scope (CF_COMMUNICATIONS_PERSONAL_*)"
+                );
+            };
+            let mirror = std::sync::Arc::new(messaging::push_mirror::PushMirror {
+                scope,
+                sink: std::sync::Arc::new(
+                    messaging::push_mirror::NotificationServiceRegistrations::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+            });
+            state.push_mirror = Some(mirror.clone());
+            tokio::spawn(messaging::push_mirror::run(state.clone(), mirror, interval));
+            tracing::info!(
+                interval_seconds = interval.as_secs(),
+                "push registrations are mirrored to the Notification Service"
+            );
+        }
+    }
+    // Gap audit S1: organization conversations' wake-ups through the Notification Service.
+    // Off unless MESSAGING_ORGANIZATION_WAKEUPS=on; then the service target, CF Meet's
+    // personal scope (to tell an organization's scope from it) and the routing-fence
+    // history (decisions and publications) are required.
+    if messaging::notifications::organization_wakeups_from_env(|k| std::env::var(k).ok())
+        .map_err(anyhow::Error::msg)?
+    {
+        if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+            anyhow::bail!("MESSAGING_ORGANIZATION_WAKEUPS=on needs CF_NOTIFICATIONS_BASE_URL");
+        }
+        if personal_scope.is_none() {
+            anyhow::bail!(
+                "MESSAGING_ORGANIZATION_WAKEUPS=on needs CF Meet's personal scope (CF_COMMUNICATIONS_PERSONAL_*)"
+            );
+        }
+        if !messaging_migration::notification_fence_ready(&state.db).await? {
+            anyhow::bail!(
+                "MESSAGING_ORGANIZATION_WAKEUPS=on needs the notification-fence migration history"
+            );
+        }
+        state.organization_wakeups = true;
+        tracing::info!("organization conversation wake-ups go to the Notification Service");
+    }
+    // Notification Service N7: the relay of Messaging's publications (shadow copies in
+    // SHADOW, publications of NEW decisions) to I1. Off unless the service is configured:
+    // the routing mode alone decides what is enqueued, and nothing is ever sent without it.
+    if has_target(cf_service_auth::services::NOTIFICATIONS) {
+        tokio::spawn(messaging::notification_publications::run(
+            state.clone(),
+            Arc::new(
+                messaging::notification_publications::NotificationServiceEvents::new(
+                    state.service_auth.client(),
+                ),
+            ),
+            config.workers.interval,
+        ));
+        tracing::info!("notification publications are relayed to the Notification Service");
+        // "Added to a group" notices (catalogue #14, GROUP_INVITATIONS): written and relayed
+        // only with the service configured (no legacy path, no routing fence).
+        state.member_notices = true;
+        tokio::spawn(messaging::member_notifications::run(
+            state.clone(),
+            Arc::new(
+                messaging::notification_publications::NotificationServiceEvents::new(
+                    state.service_auth.client(),
+                ),
+            ),
+            config.workers.interval,
+        ));
+    } else {
+        tracing::info!(
+            "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
+        );
+    }
+    // ADR 0068 A7: owner events to the HQ admin bridge (abuse.report.changed.v1,
+    // incident.changed.v1). Off unless CF_ADMIN_BRIDGE_BASE_URL is set: then they are
+    // written in the change's transaction and relayed at least once.
+    if has_target(cf_service_auth::services::ADMIN_BRIDGE) {
+        messaging::bridge_events::install(true);
+        tokio::spawn(messaging::bridge_events::run(
+            state.clone(),
+            Arc::new(messaging::bridge_events::AdminBridgeEvents::new(
+                state.service_auth.client(),
+            )),
+            config.workers.interval,
+        ));
+        tracing::info!("owner events are published to the admin bridge");
+    } else {
+        tracing::info!(
+            "CF_ADMIN_BRIDGE_BASE_URL is not set: no owner events are stored or published"
+        );
+    }
+    // ADR 0068 A6: CF Meet user plan limits (default off; fail open to today's limits).
+    {
+        let plan = messaging::plans::PlanSettings::from_env(|k| std::env::var(k).ok())
+            .map_err(|e| anyhow!("plan enforcement configuration: {e}"))?;
+        if plan.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) {
+            state.plans = Some(Arc::new(messaging::plans::PlanEnforcement::new(
+                Arc::new(messaging::plans::DeveloperPlatformPlans::new(
+                    state.service_auth.client(),
+                )),
+                plan.cache_ttl,
+            )));
+            tracing::info!("CF Meet plan limits are enforced (MESSAGING_PLAN_ENFORCEMENT)");
+        } else if plan.enabled {
+            tracing::warn!("MESSAGING_PLAN_ENFORCEMENT=on needs CF_DEVELOPER_PLATFORM_BASE_URL: plan limits are not enforced (today's limits apply)");
+        }
+    }
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

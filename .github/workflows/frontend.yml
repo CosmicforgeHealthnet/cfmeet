@@ -62,6 +62,26 @@ jobs:
       - name: Messaging MANAGED sync, outbox and Communications tests
         run: node --experimental-strip-types --test tests/messaging-managed-sync.test.mjs tests/messaging-outbox.test.mjs tests/communications-core.test.mjs
 
+      # Private chats (MLS) like WhatsApp: senders add every registered device, devices keep
+      # KeyPackages published, removals never block a chat, unreadable messages show a label.
+      - name: Messaging private-chat membership tests
+        run: |
+          node --experimental-strip-types --test tests/messaging-e2ee-membership.test.mjs
+          node --test tests/messaging-crypto-external-join.test.mjs
+      # Chat titles: a direct chat is the other person (alias first, never a member list); a
+      # group shows its name; a private group's name travels only inside its encrypted group.
+      - name: Chat title tests
+        run: node --experimental-strip-types --test tests/messaging-titles.test.mjs
+
+      # The bell lists every notification of the account (pages merged, no category filter)
+      # and each one opens the chat, call history, contact requests or meeting it is about.
+      - name: Notification bell tests
+        run: node --experimental-strip-types --test tests/notification-inbox.test.mjs
+      # Chat controls: archive / pin (F1) and private-chat polls, locations, contact cards and
+      # link previews (F4-F7) inside the encrypted content, validated by the crypto worker.
+      - name: Messaging chat controls tests
+        run: node --experimental-strip-types --test tests/messaging-chat-controls.test.mjs
+
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh
         run: node scripts/generate-contract-types.mjs --check
@@ -72,10 +92,22 @@ jobs:
       - name: Account session tests
         run: node --experimental-strip-types --test tests/account-session.test.mjs
 
+      # Gap A22: the profile photo is shrunk in the browser (EXIF orientation, <= 512 px,
+      # JPEG at decreasing quality) to fit the Meeting Service's 512 KiB avatar limit.
+      - name: Avatar image shrinking tests
+        run: node --experimental-strip-types --test tests/avatar-image.test.mjs
+
+      # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
+      # password reset, password change), with the message-only fallback.
+      - name: Form validation error mapping tests
+        run: node --experimental-strip-types --test tests/validation-errors.test.mjs
+
       # Section 17 account + organization administration: capability gating (default deny),
       # workspace context, stable error envelopes, optimistic-concurrency bodies.
       - name: Account and organization administration tests
         run: node --experimental-strip-types --test tests/organization-admin.test.mjs
+      - name: Owner-delivered export links and lists (ADR 0068)
+        run: node --experimental-strip-types --test tests/owner-exports.test.mjs
 
       # Organization-scope Messaging (final closure, J-10): organization paths, refusal
       # explanations and the colleague rules of the organization Messages view.
@@ -97,6 +129,11 @@ jobs:
           node --test tests/calling-adapter.test.mjs tests/calling-origin.test.mjs tests/calling-contract.test.mjs
           node --experimental-strip-types --test tests/calling-logic.test.mjs
 
+      # S-10 (Notification Service N0-11): logout revokes this browser's Calling endpoint
+      # (bounded, best effort, before the session is cleared) and forgets its stored id.
+      - name: Calling endpoint sign-out tests
+        run: node --experimental-strip-types --test tests/calling-signout.test.mjs
+
       # Section 17 meetings + calendar: meeting-zone time conversion (America/New_York,
       # Europe/Rome, Africa/Lagos, DST gap/overlap), agenda ranges and opaque-cursor
       # pagination, occurrence controls, artefact fields (FE-007), the pre-join contract
@@ -114,7 +151,9 @@ jobs:
         run: node --experimental-strip-types --test tests/csp.test.mjs
 
       # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
-      # Reported but non-blocking until they are fixed in a dedicated change.
+      # Reported but non-blocking until they are fixed in a dedicated change: on
+      # 2026-11-17 `npm run lint` reported 20 errors (react-hooks set-state-in-effect /
+      # purity) and 35 warnings. Remove continue-on-error once it exits 0.
       - name: lint
         continue-on-error: true
         run: npm run lint

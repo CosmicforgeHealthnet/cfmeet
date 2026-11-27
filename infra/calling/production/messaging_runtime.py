@@ -313,9 +313,23 @@ def scanner_mode():
     return 'gateway', {'url': scan_gateway.URL, 'ready': ready, 'verdictKeys': str(keys)}
 
 
+E2EE_RELEASE_TARGET = '/run/messaging/e2ee-production-release.json'
+
+
+def e2ee_setting(env):
+    """The production E2EE switch a reconfiguration must keep: off, or on ONLY under the owner's
+    release record (coordinated activate-personal-encryption). Anything else is refused."""
+    if env.get('MESSAGING_E2EE_DEVICES_ENABLED', 'false') == 'false':
+        return {'MESSAGING_E2EE_DEVICES_ENABLED': 'false'}
+    assert env.get('MESSAGING_E2EE_DEVICES_ENABLED') == 'true' \
+        and env.get('MESSAGING_E2EE_PRODUCTION_RELEASE_FILE') == E2EE_RELEASE_TARGET, \
+        'Production E2EE requires the owner release record'
+    return {'MESSAGING_E2EE_DEVICES_ENABLED': 'true', 'MESSAGING_E2EE_PRODUCTION_RELEASE_FILE': E2EE_RELEASE_TARGET}
+
+
 def runtime_overrides(env, user, redis_password, scan='gateway'):
     assert env.get('CF_RUNTIME_ENVIRONMENT') == 'production'
-    assert env.get('MESSAGING_E2EE_DEVICES_ENABLED', 'false') == 'false', 'Production cryptographic guard required'
+    e2ee = e2ee_setting(env)
     assert not env.get('MESSAGING_MANAGED_KEYRING_FILE') or env['MESSAGING_MANAGED_KEYRING_FILE'] == '/run/messaging/managed.ring'
     assert scan in ('gateway', 'quarantine')
     scanner = {'MESSAGING_SCAN_GATEWAY_URL': 'https://api.cfmeet.com:8449',
@@ -323,8 +337,11 @@ def runtime_overrides(env, user, redis_password, scan='gateway'):
                'MESSAGING_SCAN_GATEWAY_TIMEOUT_MS': '75000'} if scan == 'gateway' else {}
     return {**scanner,
         'MESSAGING_MANAGED_SCAN_MAX_BYTES': str(MANAGED_SCAN_MAX_BYTES),
-        'MESSAGING_E2EE_DEVICES_ENABLED': 'false',
+        **e2ee,
         'MESSAGING_MANAGED_KEYRING_FILE': '/run/messaging/managed.ring',
+        # Server media is a 14-day delivery copy; long-term copies live on the user's
+        # devices and in their own cloud backup (product decision, 26 November 2026).
+        'MESSAGING_MANAGED_MEDIA_RETENTION_DAYS': '14',
         'MESSAGING_ATTACHMENTS_S3_ENDPOINT': 'http://cfmeet-calling-artifacts:9000',
         'MESSAGING_ATTACHMENTS_S3_PUBLIC_ENDPOINT': 'https://api.cfmeet.com',
         'MESSAGING_ATTACHMENTS_S3_REGION': 'us-east-1', 'MESSAGING_ATTACHMENTS_S3_BUCKET': BUCKET,
@@ -545,7 +562,8 @@ def configure(sha, run_id):
     p.identity()
     WORK.mkdir(parents=True, exist_ok=True, mode=0o700)
     old = p.inspect('cfmeet-messaging'); env = p.env_of(old)
-    assert env.get('CF_RUNTIME_ENVIRONMENT') == 'production' and env.get('MESSAGING_E2EE_DEVICES_ENABLED', 'false') == 'false'
+    assert env.get('CF_RUNTIME_ENVIRONMENT') == 'production'
+    e2ee_setting(env)
     assert not old['HostConfig']['PortBindings']
     baseline = messaging_release.database_summary()
     assert (WORK / 'managed.ring').exists() or baseline['conversations'] == 0, 'Cannot invent a keyring for existing content'

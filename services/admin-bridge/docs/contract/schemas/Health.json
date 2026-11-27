@@ -1,0 +1,56 @@
+{
+  "description": "Aggregate health (HQ shape). services lists the bridge and every owner it is configured to probe; an owner without a probe is omitted (never shown as OK). Overall: DOWN when the bridge's own database is down, DEGRADED when a listed service is not OK, UNKNOWN when no owner probe is configured, otherwise OK.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "as_of",
+    "status",
+    "services"
+  ],
+  "properties": {
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "DEGRADED",
+        "DOWN",
+        "UNKNOWN"
+      ]
+    },
+    "services": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "service",
+          "status",
+          "checked_at"
+        ],
+        "properties": {
+          "service": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          },
+          "status": {
+            "enum": [
+              "OK",
+              "DEGRADED",
+              "DOWN",
+              "UNKNOWN"
+            ]
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

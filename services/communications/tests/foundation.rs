@@ -233,10 +233,14 @@ async fn invitation_digest_purpose_expiry_revocation_usage_and_owner_are_enforce
             .await
             .unwrap()
     );
-    not_found(
+    // K7: the same person opening the invite again (a page refresh makes a new key) sees
+    // the profile again; the invite is not used twice.
+    assert_eq!(
+        profile,
         h.state
             .resolve_invite(&h.scope, &b, resolve.clone(), Uuid::new_v4())
-            .await,
+            .await
+            .unwrap()
     );
     not_found(
         h.state
@@ -469,6 +473,10 @@ async fn aliases_are_per_owner_and_removal_preserves_preferences_but_revokes_per
     let cb = h.state.list_contacts(&b, 10, Uuid::nil()).await.unwrap();
     let aid = Uuid::parse_str(ca["data"][0]["contactId"].as_str().unwrap()).unwrap();
     let bid = Uuid::parse_str(cb["data"][0]["contactId"].as_str().unwrap()).unwrap();
+    // A CONNECTED contact names the other person's calling principal (so clients can tell
+    // which contacts are already in a call), and only theirs.
+    assert_eq!(ca["data"][0]["principalId"], json!(b.principal_id));
+    assert_eq!(cb["data"][0]["principalId"], json!(a.principal_id));
     h.state.patch_contact(&a,aid,json!({"expectedVersion":1,"alias":"My saved name","favorite":true,"notifications":"MUTED"}),Uuid::new_v4()).await.unwrap();
     assert_eq!(
         h.state.contact_view(&a, aid).await.unwrap()["alias"],
@@ -492,6 +500,15 @@ async fn aliases_are_per_owner_and_removal_preserves_preferences_but_revokes_per
         .remove_contact(&a, aid, Uuid::new_v4())
         .await
         .unwrap();
+    // Once the relationship has ended the principal is no longer shown.
+    assert_eq!(
+        h.state
+            .contact_view(&b, bid)
+            .await
+            .map(|v| v["principalId"].clone())
+            .unwrap_or(Value::Null),
+        Value::Null
+    );
     assert!(
         !h.state
             .check_policy(&h.scope, &check(Action::MessageSend, &a, &b))
@@ -539,10 +556,61 @@ async fn blocking_and_domain_blocks_are_immediate_and_unblocking_never_reconnect
         );
     }
     not_found(h.state.visible_profile(&h.scope, &a, &b, false).await);
-    h.state
+    // K5 (contacts audit): unblocking keeps the contact, like WhatsApp: the pair was
+    // connected before the block, so it is connected again.
+    let unblocked = h
+        .state
         .set_block(&b, &a, false, Uuid::new_v4())
         .await
         .unwrap();
+    assert_eq!(unblocked["relationship"], "CONNECTED");
+    assert!(
+        h.state
+            .check_policy(&h.scope, &check(Action::DirectCall, &a, &b))
+            .await
+            .unwrap()
+            .allowed
+    );
+    // Both blocking: one unblock is not enough; the contact comes back after the last.
+    h.state
+        .set_block(&b, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    h.state
+        .set_block(&a, &b, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    let one = h
+        .state
+        .set_block(&b, &a, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(one["relationship"], "BLOCKED");
+    let both = h
+        .state
+        .set_block(&a, &b, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(both["relationship"], "CONNECTED");
+    // Removed while blocked (here by the blocked person): unblocking never reconnects.
+    h.state
+        .set_block(&b, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    let a_contact: Value = communications::store::one(&h.state.store.db,
+        "SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a WHERE a.owner_profile_id=$1",
+        vec![a.id.into()]).await.unwrap().unwrap();
+    let a_contact = Uuid::parse_str(a_contact["id"].as_str().unwrap()).unwrap();
+    h.state
+        .remove_contact(&a, a_contact, Uuid::new_v4())
+        .await
+        .unwrap();
+    let after = h
+        .state
+        .set_block(&b, &a, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(after["relationship"], "REVOKED");
     assert!(
         !h.state
             .check_policy(&h.scope, &check(Action::DirectCall, &a, &b))
@@ -550,6 +618,15 @@ async fn blocking_and_domain_blocks_are_immediate_and_unblocking_never_reconnect
             .unwrap()
             .allowed
     );
+    // Unblocking someone who was never blocked leaves the relationship alone.
+    let c = h.profile(&h.account()).await;
+    h.connected(&a, &c).await;
+    let untouched = h
+        .state
+        .set_block(&a, &c, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(untouched["relationship"], "CONNECTED");
     h.close().await;
 }
 #[tokio::test]
@@ -1134,4 +1211,200 @@ async fn account_session_events_are_shape_checked() {
     let p = h.profile(&a).await;
     assert!(p.credentials_not_before.is_none());
     h.close().await;
+}
+
+/// Gap audit A16: a deactivated profile returns only when Account reactivates the
+/// account; credentials issued before the deactivation stay invalid.
+#[tokio::test]
+async fn reactivated_accounts_leave_deactivation() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let p = h.profile(&a).await;
+    let path = "/internal/v1/communications/account-events";
+    let send = |version: i64, kind: &str, state: &str| json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":version,"kind":kind,"state":state,"occurredAt":chrono::Utc::now()});
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            path,
+            send(2, "STATUS_CHANGED", "DEACTIVATED"),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let read = || async {
+        h.state
+            .store
+            .principal(&h.state.store.db, p.scope(), p.principal_id)
+            .await
+            .unwrap()
+    };
+    let deactivated = read().await;
+    assert_eq!(
+        deactivated.activation_state,
+        communications::model::Activation::Deactivated
+    );
+    let epoch = deactivated.credentials_not_before.unwrap();
+    // A session event does not bring it back.
+    h.http(
+        &h.account_signer,
+        path,
+        send(3, "SESSION_REVOKED", "ACCOUNT_CREATED"),
+        h.scope.clone(),
+    )
+    .await;
+    assert_eq!(
+        read().await.activation_state,
+        communications::model::Activation::Deactivated
+    );
+    // Reactivation does.
+    let (status, r) = h
+        .http(
+            &h.account_signer,
+            path,
+            send(4, "STATUS_CHANGED", "ACCOUNT_CREATED"),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 200, "{r}");
+    let back = read().await;
+    assert_eq!(
+        back.activation_state,
+        communications::model::Activation::AccountCreated
+    );
+    assert!(back.credentials_not_before.unwrap() >= epoch);
+    // The database still refuses any other way out of deactivation.
+    execute(
+        &h.state.store.db,
+        "UPDATE communication_profiles SET activation_state='DEACTIVATED',version=version+1 WHERE id=$1",
+        vec![p.id.into()],
+    )
+    .await
+    .unwrap();
+    assert!(execute(
+        &h.state.store.db,
+        "UPDATE communication_profiles SET activation_state='ACTIVE',version=version+1 WHERE id=$1",
+        vec![p.id.into()]
+    )
+    .await
+    .is_err());
+    h.close().await;
+}
+
+/// Owner decision 2026-11-19: anyone who has a person's CF Meet ID can add them, chat and
+/// call them without a request (AUTOMATIC, the default); MANUAL keeps contact requests.
+/// Short IDs are typed case-insensitively, with or without the hyphen.
+#[tokio::test]
+async fn direct_contact_by_short_cf_meet_id_connects_at_once_unless_the_person_wants_requests() {
+    let h = Harness::new().await;
+    let a = h.direct_profile(&h.account()).await;
+    let b = h.direct_profile(&h.account()).await;
+    let b_id = h.public_id(&b).await;
+    assert_eq!(b_id.len(), 9, "short CF Meet ID: {b_id}");
+    assert_eq!(
+        h.state.get_privacy(&b).await.unwrap()["privacy"]["contactApproval"],
+        "AUTOMATIC"
+    );
+    // Typed in lower case without the hyphen.
+    let typed = b_id.replace('-', "").to_lowercase();
+    let r = h
+        .state
+        .send_request(&h.scope, &a, json!({"cfMeetId": typed}), Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(r["state"], "ACCEPTED", "{r}");
+    assert_eq!(r["relationship"], "CONNECTED");
+    assert_eq!(r["cfMeetId"], json!(b_id));
+    // Both are contacts straight away, and chat and calls are allowed (CONNECTIONS).
+    for (viewer, other) in [(&a, &b), (&b, &a)] {
+        let c = h
+            .state
+            .list_contacts(viewer, 10, Uuid::nil())
+            .await
+            .unwrap();
+        assert_eq!(c["data"][0]["principalId"], json!(other.principal_id));
+    }
+    for action in [Action::DirectConversation, Action::DirectCall] {
+        assert!(
+            h.state
+                .check_policy(&h.scope, &check(action, &a, &b))
+                .await
+                .unwrap()
+                .allowed,
+            "{action:?}"
+        );
+    }
+    // Nothing is left pending for the added person.
+    let incoming = h
+        .state
+        .list_requests(&b, true, 10, Uuid::nil())
+        .await
+        .unwrap();
+    assert!(
+        incoming["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["state"] != "PENDING"),
+        "{incoming}"
+    );
+
+    // A person who wants requests (MANUAL) still gets one.
+    let c = h.direct_profile(&h.account()).await;
+    let privacy = h.state.get_privacy(&c).await.unwrap();
+    let mut settings = privacy["privacy"].clone();
+    settings["contactApproval"] = json!("MANUAL");
+    h.state
+        .set_privacy(
+            &c,
+            json!({"expectedVersion": privacy["version"], "privacy": settings}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let r = h
+        .state
+        .send_request(
+            &h.scope,
+            &a,
+            json!({"cfMeetId": h.public_id(&c).await}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["state"], "PENDING", "{r}");
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &check(Action::DirectConversation, &a, &c))
+            .await
+            .unwrap()
+            .allowed
+    );
+
+    // A person who blocked you cannot be added, even with their ID.
+    let d = h.direct_profile(&h.account()).await;
+    h.state
+        .set_block(&d, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    not_found(
+        h.state
+            .send_request(
+                &h.scope,
+                &a,
+                json!({"cfMeetId": h.public_id(&d).await}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    // An old-format long ID no longer resolves.
+    not_found(
+        h.state
+            .send_request(
+                &h.scope,
+                &a,
+                json!({"cfMeetId": "CF-ABCDEFGHIJKLMNOPQRSTUVWXYZ"}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
 }

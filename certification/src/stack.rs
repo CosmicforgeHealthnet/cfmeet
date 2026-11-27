@@ -49,6 +49,12 @@ pub const BINARIES: &[&str] = &[
     "account-hardening-migration",
     "organization-integration-migration",
     "lifecycle-delivery-migration",
+    "notification-fence-migration",
+    "gap-closure-migration",
+    "meeting-audit-migration",
+    "account-privacy-migration",
+    "account-phone-migration",
+    "admin-operations-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -356,6 +362,18 @@ impl Stack {
             db::migrate(&self.bin("organization-integration-migration"), &url)?;
             // Final completion: durable email delivery and conference presence.
             db::migrate(&self.bin("lifecycle-delivery-migration"), &url)?;
+            // Notification Service N7: routing fence v1 (every category LEGACY_ONLY, so the
+            // legacy-table guard triggers are inert); journeys run with them installed.
+            db::migrate(&self.bin("notification-fence-migration"), &url)?;
+            // Backend gap audit: its own additive history.
+            db::migrate(&self.bin("gap-closure-migration"), &url)?;
+            // Server audit MF2: calendar feed tokens, their own additive history.
+            db::migrate(&self.bin("meeting-audit-migration"), &url)?;
+            // S2: account-deletion erasure jobs, required at startup.
+            db::migrate(&self.bin("account-privacy-migration"), &url)?;
+            db::migrate(&self.bin("account-phone-migration"), &url)?;
+            // ADR 0068: the admin bridge operations ledger and the account version.
+            db::migrate(&self.bin("admin-operations-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

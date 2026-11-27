@@ -51,3 +51,31 @@ path = "src/organization-integration-main.rs"
 [[bin]]
 name = "lifecycle-delivery-migration"
 path = "src/lifecycle-delivery-main.rs"
+
+[[bin]]
+name = "notification-fence-migration"
+path = "src/notification-fence-main.rs"
+
+[[bin]]
+name = "gap-closure-migration"
+path = "src/gap-closure-main.rs"
+
+[[bin]]
+name = "platform-build-migration"
+path = "src/platform-build-main.rs"
+
+[[bin]]
+name = "meeting-audit-migration"
+path = "src/meeting-audit-main.rs"
+
+[[bin]]
+name = "account-privacy-migration"
+path = "src/account-privacy-main.rs"
+
+[[bin]]
+name = "account-phone-migration"
+path = "src/account-phone-main.rs"
+
+[[bin]]
+name = "admin-operations-migration"
+path = "src/admin-operations-main.rs"

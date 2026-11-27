@@ -52,9 +52,15 @@ fn cases() -> Vec<Case> {
             bin: "calling-migration",
             // + Blueprint Section 12 follow-up (enterprise audit acting principal): one
             // nullable column on the append-only audit; its down only drops that column.
+            // + C5 / C6 / C7 in-call collaboration: kind-upgrade guards (triggers, a cascading
+            // foreign key), the nullable presenter column with its partial unique index, and
+            // widened event / command vocabularies; each down only restores what it changed.
             part_vi: &[
                 "m20261201_000047_public_event_destinations",
                 "m20261201_000048_enterprise_audit_acting_principal",
+                "m20261202_000049_call_kind_upgrade",
+                "m20261202_000050_call_screen_share",
+                "m20261202_000051_call_add_participants",
             ],
             seed: Box::leak(
                 format!(
@@ -92,10 +98,13 @@ fn cases() -> Vec<Case> {
             // new tables; its down only drops what it added.
             // + audit MSG-018 / MSG-009: two new tables (receipt coalescing, Hub timeline
             // versions); its down only drops them.
+            // + CF Meet chat remediation M1: one new table (named application policy
+            // baselines); its down only drops it.
             part_vi: &[
                 "m20261201_000029_public_event_destinations",
                 "m20261202_000030_session_devices_inbox",
                 "m20261203_000031_receipt_coalescing_timeline",
+                "m20261204_000032_application_baselines",
             ],
             seed: "INSERT INTO messaging_webhook_relay (event_id, environment_id, status, attempts, next_attempt_at, \
                      created_at, relayed_at) VALUES \
@@ -199,12 +208,22 @@ fn cases() -> Vec<Case> {
             service: "platform-access",
             bin: "platform-access-migration",
             // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058) and Section 15
-            // (credential last use, TENANT_RENAMED): all newer than the deployed schema and
-            // upgraded / rolled back together.
+            // (credential last use, TENANT_RENAMED), then ADR 0058 Amendment A2 (automatic
+            // organization service bindings), then the CF Meet Platform Build (partner end
+            // users, user-token mint windows and allowed websites; OAuth apps; OAuth client
+            // presentation, ADR 0064), then the ADR 0068 A4 admin bridge (operations ledger
+            // and suspension change counters; owner-delivered API keys): all newer than the
+            // deployed schema and upgraded / rolled back together.
             part_vi: &[
                 "m20261120_000004_credential_suspension_production_activation",
                 "m20261121_000005_first_party_organization_scopes",
                 "m20261122_000006_credential_usage_tenant_rename",
+                "m20261123_000007_organization_service_bindings",
+                "m20261124_000008_partner_users_tokens_origins",
+                "m20261125_000009_oauth_apps",
+                "m20261126_000010_oauth_client_presentation",
+                "m20261127_000011_admin_operations",
+                "m20261128_000012_credential_deliveries",
             ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
@@ -256,15 +275,42 @@ fn cases() -> Vec<Case> {
                     "SELECT count(*) = 0 FROM platform_credential_usage",
                 ),
                 (
+                    "no partner end-user profile or allowed website is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_end_user_profiles) = 0 \
+                       AND (SELECT count(*) FROM platform_environment_origins) = 0",
+                ),
+                (
+                    "no OAuth client or app grant is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_oauth_clients) = 0 \
+                       AND (SELECT count(*) FROM platform_oauth_grants) = 0",
+                ),
+                (
+                    "no admin bridge operation, suspension change or key delivery is created by the upgrade",
+                    "SELECT (SELECT count(*) FROM platform_access_admin_operations) = 0 \
+                       AND (SELECT count(*) FROM platform_credential_suspension_changes) = 0 \
+                       AND (SELECT count(*) FROM platform_credential_deliveries) = 0",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
                 ),
             ],
             // Data of the newest migration first refuses its own down (so nothing is rolled
-            // back), and the Part VI audit row would refuse 000004's.
+            // back), and the Part VI audit row would refuse 000004's. The bridge-issued key
+            // record (`KEY_ISSUE`) refuses 000012's (and 000011's) down; the OAuth client with
+            // its presentation set would refuse 000010's (and 000009's).
             part_vi_data: Some(
-                "INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
+                "INSERT INTO platform_access_admin_operations (idempotency_key, command, subject_kind, subject_id, \
+                   tenant_id, resulting_id, operator_ref, resulting_state, recorded_at) VALUES \
+                   ('7e000000-0000-4000-8000-0000000000bb', 'identity.key.issue', 'KEY_ISSUE', \
+                    '7e000000-0000-4000-8000-000000000004', '7e000000-0000-4000-8000-000000000001', \
+                    '7e000000-0000-4000-8000-000000000005', 'hq:staff-upgrade', 'ACTIVE', now()); \
+                 INSERT INTO platform_oauth_clients (application_id, tenant_id, name, redirect_uris, distribution, \
+                   status, created_at, updated_at, developer_name) VALUES \
+                   ('7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000001', 'Acme App', \
+                    ARRAY['https://acme.example/callback'], 'PRIVATE', 'DRAFT', now(), now(), 'Acme'); \
+                 INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
                    (gen_random_uuid(), 'operator@cfmeet', 'corr-upgrade-sus', 'CREDENTIAL_SUSPENDED', 'CREDENTIAL', \
                     '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001'); \
                  INSERT INTO platform_organization_scopes (organization_ref, capability, tenant_id, application_id, \

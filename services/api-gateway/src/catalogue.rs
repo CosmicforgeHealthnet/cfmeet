@@ -32,6 +32,8 @@ struct ManifestRoute {
     forward_headers: Vec<String>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    #[serde(default)]
+    forward_authorization: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +97,7 @@ pub fn definitions(controls: &RoutingControls) -> Result<Vec<RouteDefinition>, R
             required_scope: r.required_scope,
             forward_headers: r.forward_headers,
             timeout: r.timeout_ms.map(Duration::from_millis),
+            forward_authorization: r.forward_authorization,
         };
         if (controls.central_webhooks && crate::routing::is_webhook_route(&d))
             || (controls.central_usage && crate::routing::is_usage_route(&d))

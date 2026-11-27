@@ -93,7 +93,7 @@ impl MiniStack {
         ])
     }
 
-    async fn start(admin: String, bin: PathBuf) -> anyhow::Result<Self> {
+    async fn start(admin: String, bin: PathBuf, bindings: bool) -> anyhow::Result<Self> {
         let dir = std::env::temp_dir().join(format!("cfmeet-orgs-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("logs"))?;
         let http = reqwest::Client::builder()
@@ -117,7 +117,7 @@ impl MiniStack {
             org_url: format!("http://127.0.0.1:{org_port}"),
             pa_db: String::new(),
         };
-        if let Err(e) = s.boot(&bin, pa_port, org_port).await {
+        if let Err(e) = s.boot(&bin, pa_port, org_port, bindings).await {
             s.dump_logs();
             s.close().await;
             return Err(e);
@@ -130,6 +130,7 @@ impl MiniStack {
         bin: &std::path::Path,
         pa_port: u16,
         org_port: u16,
+        bindings: bool,
     ) -> anyhow::Result<()> {
         let mut urls = Vec::new();
         for (name, migration) in [
@@ -172,6 +173,10 @@ impl MiniStack {
             ("ORGANIZATIONS_WORKER_INTERVAL_MS".into(), "1000".into()),
             ("ORGANIZATIONS_PROVISIONING_ENABLED".into(), "true".into()),
             ("CF_PLATFORM_ACCESS_BASE_URL".into(), self.pa_url.clone()),
+            (
+                "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED".into(),
+                bindings.to_string(),
+            ),
         ]);
         self.launch("organizations", bin, env, &self.org_url.clone())
             .await?;
@@ -456,7 +461,7 @@ async fn organizations_provision_first_party_scopes_through_the_real_platform_ac
         }
         panic!("organizations certification needs TEST_DATABASE_URL and CFMEET_BIN_DIR with {BINARIES:?}");
     }
-    let stack = MiniStack::start(admin.unwrap(), bin.unwrap())
+    let stack = MiniStack::start(admin.unwrap(), bin.unwrap(), false)
         .await
         .expect("mini stack starts");
     let outcome = journey(&stack).await;
@@ -465,4 +470,144 @@ async fn organizations_provision_first_party_scopes_through_the_real_platform_ac
     }
     stack.close().await;
     outcome.expect("organizations provisioning journey");
+}
+
+/// ADR 0058 Amendment A2 across the REAL processes: with automatic bindings on, an
+/// organization becomes READY only with its Calling and Messaging bindings created by
+/// Platform Access inside its own triple (exact scopes, no operator step), the bindings
+/// resolve, retries create nothing twice, and archiving revokes them at Platform Access.
+async fn bindings_journey(s: &MiniStack) -> anyhow::Result<()> {
+    let owner = Uuid::new_v4();
+    let (status, v) = s
+        .org(
+            services::MEETING_SERVICE,
+            Some(owner),
+            reqwest::Method::POST,
+            "/internal/v1/organizations",
+            Some(json!({ "name": "cert-bind-alpha", "slug": "cert-bind-alpha" })),
+        )
+        .await?;
+    anyhow::ensure!(status == 201, "create {status}: {v}");
+    let org = v["id"].as_str().context("id")?.to_string();
+    let org = org.as_str();
+    s.wait_for("READY with bindings", move || async move {
+        Ok(s.provisioning(org).await?["provisioningState"] == "READY")
+    })
+    .await?;
+    let (status, scope) = s
+        .org(
+            services::MEETING_SERVICE,
+            Some(owner),
+            reqwest::Method::POST,
+            "/internal/v1/organizations/scopes/resolve",
+            Some(json!({ "organizationId": org })),
+        )
+        .await?;
+    anyhow::ensure!(status == 200, "resolve {status}: {scope}");
+    let env = scope["environmentId"].as_str().context("env")?.to_string();
+    for (service, scopes) in [
+        (
+            "calling",
+            "calls.read,enterprise.config.read,enterprise.config.write",
+        ),
+        ("messaging", "messages.read"),
+    ] {
+        let b = &scope["serviceBindings"][service];
+        let sa = b["serviceAccountId"].as_str().context("service account")?;
+        let cred = b["credentialId"].as_str().context("credential")?;
+        // Platform Access's own registry: the same ids, inside the organization's
+        // environment, an active credential with exactly the service's scope set.
+        anyhow::ensure!(
+            s.pa_scalar(&format!(
+                "SELECT count(*) FROM platform_organization_service_bindings b \
+                 JOIN platform_service_accounts a ON a.id = b.service_account_id \
+                 JOIN platform_api_credentials c ON c.id = b.credential_id \
+                 WHERE b.organization_ref = '{org}' AND b.service = '{service}' \
+                   AND b.service_account_id = '{sa}' AND b.credential_id = '{cred}' \
+                   AND a.environment_id = '{env}' AND c.environment_id = '{env}' \
+                   AND b.revoked_at IS NULL AND c.revoked_at IS NULL \
+                   AND (SELECT string_agg(scope, ',' ORDER BY scope) FROM platform_api_credential_scopes \
+                        WHERE credential_id = c.id) = '{scopes}'"
+            ))
+            .await?
+                == 1,
+            "Platform Access does not confirm the {service} binding"
+        );
+    }
+    // Several worker passes later: still exactly one binding, service account and
+    // credential per service (idempotent retries and reconciliation).
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    anyhow::ensure!(
+        s.pa_scalar(&format!(
+            "SELECT count(*) FROM platform_organization_service_bindings WHERE organization_ref = '{org}'"
+        ))
+        .await?
+            == 2
+            && s.pa_scalar("SELECT count(*) FROM platform_service_accounts").await? == 2
+            && s.pa_scalar("SELECT count(*) FROM platform_api_credentials").await? == 2,
+        "automatic bindings were duplicated"
+    );
+    // Archive: resolution refuses at once; Platform Access revokes both bindings.
+    let (status, v) = s
+        .org(
+            services::MEETING_SERVICE,
+            Some(owner),
+            reqwest::Method::POST,
+            &format!("/internal/v1/organizations/{org}/archive"),
+            Some(json!({})),
+        )
+        .await?;
+    anyhow::ensure!(status == 200, "archive {status}: {v}");
+    let (status, _) = s
+        .org(
+            services::MEETING_SERVICE,
+            None,
+            reqwest::Method::POST,
+            "/internal/v1/organizations/scopes/resolve",
+            Some(json!({ "organizationId": org })),
+        )
+        .await?;
+    anyhow::ensure!(status != 200, "an archived organization's scope resolved");
+    s.wait_for("bindings revoked at Platform Access", move || async move {
+        Ok(s.pa_scalar(&format!(
+            "SELECT count(*) FROM platform_organization_service_bindings b \
+             JOIN platform_api_credentials c ON c.id = b.credential_id \
+             WHERE b.organization_ref = '{org}' AND b.revoked_at IS NOT NULL AND c.revoked_at IS NOT NULL"
+        ))
+        .await?
+            == 2)
+    })
+    .await?;
+    anyhow::ensure!(
+        s.pa_scalar("SELECT count(*) FROM platform_access_audit WHERE action = 'CREDENTIAL_CREATED' AND actor = 'cfmeet.organizations'").await? == 2,
+        "binding audit"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn organizations_bind_calling_and_messaging_automatically_through_the_real_platform_access() {
+    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    let bin = var("CFMEET_BIN_DIR").map(PathBuf::from);
+    let admin = var("TEST_DATABASE_URL");
+    let missing = admin.is_none()
+        || bin
+            .as_ref()
+            .is_none_or(|b| BINARIES.iter().any(|n| !b.join(n).is_file()));
+    if missing {
+        if std::env::var("CFMEET_SKIP_DB_TESTS").as_deref() == Ok("1") {
+            eprintln!("SKIPPED (CFMEET_SKIP_DB_TESTS=1): Organizations / Platform Access binaries or TEST_DATABASE_URL missing");
+            return;
+        }
+        panic!("organizations certification needs TEST_DATABASE_URL and CFMEET_BIN_DIR with {BINARIES:?}");
+    }
+    let stack = MiniStack::start(admin.unwrap(), bin.unwrap(), true)
+        .await
+        .expect("mini stack starts");
+    let outcome = bindings_journey(&stack).await;
+    if outcome.is_err() {
+        stack.dump_logs();
+    }
+    stack.close().await;
+    outcome.expect("automatic organization service bindings journey");
 }

@@ -1,0 +1,55 @@
+{
+  "description": "One outbox event in DEAD_LETTER. Its payload and error string are not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "sequence",
+    "event_type",
+    "aggregate_type",
+    "aggregate_id",
+    "tenant_id",
+    "environment_id",
+    "attempts",
+    "occurred_at"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^messaging(\\.[a-z][a-z0-9-]*){2,}$",
+      "maxLength": 80
+    },
+    "aggregate_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]{1,39}$"
+    },
+    "aggregate_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

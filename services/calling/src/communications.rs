@@ -52,11 +52,55 @@ impl AppCallService {
             .db()
             .query_one(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1",
+                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1 AND entry_extension_id IS NOT NULL",
                 [call.id.into()],
             ))
             .await?
             .is_none())
+    }
+
+    pub(crate) async fn confirm_block_projection(
+        &self,
+        ctx: &crate::platform::context::PlatformAuthContext,
+        rule: &crate::calls::app::blocks::BlockRuleView,
+    ) -> CallResult<()> {
+        if std::env::var("CALLING_SYNCHRONOUS_BLOCK_PROJECTION_ENABLED")
+            .ok()
+            .as_deref()
+            != Some("true")
+            || rule.blocked_kind != "PRINCIPAL"
+        {
+            return Ok(());
+        }
+        let client = self
+            .communications
+            .as_ref()
+            .ok_or(CallError::CommunicationsPolicyUnavailable)?;
+        if !client.governs(scope(CallScope::of_platform(ctx))) {
+            return Ok(());
+        }
+        let generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+            .ok()
+            .and_then(|v| Uuid::parse_str(&v).ok())
+            .ok_or(CallError::CommunicationsPolicyUnavailable)?;
+        let delegated = crate::internal_auth::delegation::delegated_context(ctx, None)
+            .map_err(|_| CallError::CommunicationsPolicyUnavailable)?;
+        client
+            .project_block_rule(
+                delegated,
+                &cf_communications_policy::BlockRuleProjection {
+                    rule_id: rule.id,
+                    actor: rule.blocker_principal_id,
+                    target: rule
+                        .blocked_principal_id
+                        .ok_or(CallError::CommunicationsPolicyUnavailable)?,
+                    version: rule.version,
+                    active: rule.status == "ACTIVE",
+                    generation,
+                },
+            )
+            .await
+            .map_err(policy_error)
     }
 
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
@@ -92,6 +136,7 @@ impl AppCallService {
                         credential_issued_at: None,
                         credential_principal_id: None,
                         conversation_id: None,
+                        mentioned: None,
                     },
                 )
                 .await
@@ -117,7 +162,7 @@ impl AppCallService {
             .db()
             .query_one(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1",
+                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1 AND entry_extension_id IS NOT NULL",
                 [call.id.into()],
             ))
             .await?;
@@ -160,7 +205,18 @@ impl AppCallService {
             }
         }
         let actor = actor.ok_or(CallError::TargetUnavailable)?;
+        // The device evidence belongs to one party. Communications denies a check whose
+        // credential belongs to neither the actor nor the target, so it is attached only
+        // to the pairs its owner is part of (every pair of the initiator, or the owner's
+        // own pair). Every pair is still checked. Evidence of a principal who is not an
+        // active party is refused outright (C7: a Call can have more than one target).
+        if let Some((owner, _)) = evidence {
+            if owner != actor && !targets.contains(&owner) {
+                return Err(CallError::TargetUnavailable);
+            }
+        }
         for target in targets {
+            let own = evidence.filter(|(owner, _)| *owner == actor || *owner == target);
             client
                 .check(
                     delegated.clone(),
@@ -168,9 +224,10 @@ impl AppCallService {
                         action: Action::DirectCall,
                         actor_principal_id: actor,
                         target_principal_id: target,
-                        credential_issued_at: evidence.map(|x| x.1),
-                        credential_principal_id: evidence.map(|x| x.0),
+                        credential_issued_at: own.map(|x| x.1),
+                        credential_principal_id: own.map(|x| x.0),
                         conversation_id: None,
+                        mentioned: None,
                     },
                 )
                 .await
@@ -214,6 +271,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/communications/calls",
             post(launch).layer(DefaultBodyLimit::max(OWNER_BODY_LIMIT)),
+        )
+        .route(
+            "/communications/calls/participants",
+            post(invite).layer(DefaultBodyLimit::max(OWNER_BODY_LIMIT)),
         )
         .route(
             "/communications/calls/participation",
@@ -426,6 +487,10 @@ struct LaunchBody {
     initiator_endpoint_id: Uuid,
     target_principal_ids: Vec<Uuid>,
     kind: crate::calls::kinds::CallKind,
+    /// The caller's Hub display name, shown to the callee on the incoming call. Best effort:
+    /// an invalid name is dropped. Not part of the idempotency fingerprint.
+    #[serde(default)]
+    initiator_display_name: Option<String>,
 }
 
 /// The creation command key of a Hub launch (see [`HUB_KEY_PREFIX`]).
@@ -553,7 +618,10 @@ async fn launch(
                     .iter()
                     .map(|p| PrincipalId::from_uuid(*p))
                     .collect(),
-                initiator_display_name: None,
+                initiator_display_name: request
+                    .initiator_display_name
+                    .as_deref()
+                    .and_then(crate::calls::participants::DisplayName::lenient),
                 privacy_relay_session: None,
                 key,
             },
@@ -572,6 +640,123 @@ async fn launch(
         "createdAt": call["createdAt"],
         "replayed": created.replayed,
     })))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InviteBody {
+    idempotency_key: String,
+    acting_principal_id: Uuid,
+    call_id: Uuid,
+    inviting_participant_id: Uuid,
+    target_principal_ids: Vec<Uuid>,
+    expected_version: i64,
+}
+
+/// Add people to a running call for the delegated user (the Hub resolves the user's
+/// connected contacts to principals; the client never sees a principal id). The very
+/// domain path of `POST /v1/calls/{callId}/participants`: per-target personal policy,
+/// blocks, group limit and ringing. The inviting participant must be the acting user's
+/// own participant of that call.
+async fn invite(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    request: Result<Json<InviteBody>, JsonRejection>,
+) -> Result<Json<Value>, CallingError> {
+    use crate::calls::ids::{CallId, CallParticipantId};
+    use crate::calls::{
+        kinds::CommandOperation,
+        service::{fingerprint, CommandKey, IdempotencyKey},
+    };
+    use crate::domain::PrincipalId;
+    use sha2::{Digest, Sha256};
+    let d = own(
+        &state,
+        &caller,
+        InternalPermission::CallingCommunicationsLaunch,
+    )?;
+    let request = body(request)?;
+    let acting = acting_user(&d, request.acting_principal_id)?;
+    if request.target_principal_ids.is_empty()
+        || request.target_principal_ids.len() > MAX_LAUNCH_TARGETS
+    {
+        return Err(CallingError::Validation(
+            "targetPrincipalIds must hold at least one principal and stay within the group limit.",
+        ));
+    }
+    let own_participant = state
+        .db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 FROM call_participants WHERE id = $1 AND call_id = $2 AND principal_id = $3",
+            [
+                request.inviting_participant_id.into(),
+                request.call_id.into(),
+                acting.as_uuid().into(),
+            ],
+        ))
+        .await
+        .map_err(|_| CallingError::ServiceUnavailable)?;
+    if own_participant.is_none() {
+        return Err(CallingError::NotFound);
+    }
+    let raw = request.idempotency_key.as_bytes();
+    if raw.is_empty()
+        || raw.len() > MAX_HUB_KEY_LEN
+        || !raw.iter().all(|b| (0x20..=0x7e).contains(b))
+    {
+        return Err(CallingError::Validation(
+            "idempotencyKey must be 1-200 printable ASCII characters.",
+        ));
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(acting.as_uuid().as_bytes());
+    hasher.update([1u8]);
+    hasher.update(raw);
+    let key = IdempotencyKey::parse(&format!(
+        "{HUB_KEY_PREFIX}{}",
+        hex::encode(hasher.finalize())
+    ))
+    .map_err(|_| CallingError::Internal)?;
+    let canonical = json!({
+        "source": HUB_SOURCE,
+        "invitingParticipantId": request.inviting_participant_id,
+        "targetPrincipalIds": request.target_principal_ids,
+        "expectedVersion": request.expected_version,
+    });
+    let key = CommandKey {
+        operation: CommandOperation::AddParticipants,
+        key,
+        fingerprint: fingerprint(
+            CommandOperation::AddParticipants,
+            Some(request.call_id),
+            &canonical,
+        ),
+    };
+    let ctx = launch_authority(&state, &caller, &d).await?;
+    let outcome = state
+        .app
+        .invite_participants(
+            &ctx,
+            CallId::from_uuid(request.call_id),
+            crate::calls::app::InviteParticipants {
+                inviting_participant: CallParticipantId::from_uuid(request.inviting_participant_id),
+                targets: request
+                    .target_principal_ids
+                    .iter()
+                    .map(|p| PrincipalId::from_uuid(*p))
+                    .collect(),
+                expected_version: request.expected_version,
+            },
+            Some(&key),
+        )
+        .await?;
+    let mut body = outcome.body;
+    if let Some(map) = body.as_object_mut() {
+        map.insert("schemaVersion".into(), json!(1));
+        map.insert("replayed".into(), json!(outcome.replayed));
+    }
+    Ok(Json(body))
 }
 
 /// One Call of the delegated user's canonical history (CL-2 / CL-3).
@@ -823,6 +1008,7 @@ mod tests {
             initiator_endpoint_id: Uuid::new_v4(),
             target_principal_ids: vec![Uuid::new_v4()],
             kind: crate::calls::kinds::CallKind::Voice,
+            initiator_display_name: None,
         }
     }
 

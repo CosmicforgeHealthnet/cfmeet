@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organization_id",
+        "export_id",
+        "export_state",
+        "delivery",
+        "delivery_channel",
+        "delivery_ref",
+        "recipient_masked",
+        "recipient_count",
+        "size_bytes",
+        "sha256",
+        "created_at",
+        "expires_at",
+        "delivered_at",
+        "purged_at"
+      ],
+      "properties": {
+        "organization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "export_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "export_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "delivery": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "delivery_channel": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "delivery_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "recipient_masked": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120,
+          "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+          "description": "A masked address (first character of the local part and of the domain label), never the address."
+        },
+        "recipient_count": {
+          "type": "integer"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "delivered_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "purged_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after organizations.organization.export; status: READY."
+    }
+  }
+}

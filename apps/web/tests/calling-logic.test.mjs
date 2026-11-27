@@ -3,11 +3,12 @@
 // incoming-call presentation (CAL-004). Run: node --experimental-strip-types --test tests/calling-logic.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mayControl, ownSession, visibleControls } from "../src/lib/calling/call-permissions.ts";
+import { isPresenter, mayControl, ownSession, visibleControls } from "../src/lib/calling/call-permissions.ts";
 import { DEFAULT_RECONNECT_POLICY, INITIAL_MEDIA_STATE, backoffDelay, isRetryableCredentialFailure, mediaReducer, mediaStatusLabel } from "../src/lib/calling/media-reconnect.ts";
 import { CallingConfigurationError, callingBaseUrl, callingRuntimeMode, renewalDelay } from "../src/lib/calling/runtime-guard.ts";
 import { callerLabel, offerHeadline, ringingOffers } from "../src/lib/calling/incoming-call.ts";
 import { signalingSocketUrl } from "../src/lib/calling/origin.mjs";
+import { endedCallText, launchStep } from "../src/lib/calling/launch.ts";
 
 const me = "me";
 const call = (overrides = {}) => ({
@@ -62,10 +63,28 @@ test("IVR keypad input belongs to the active caller", () => {
 
 test("the UI shows only controls that are both permitted and available, never on a finished call", () => {
   const actions = (names) => (name) => names.includes(name);
-  assert.deepEqual(visibleControls(call(), me, actions(["END", "HOLD"])), { cancel: false, end: true, hold: true, resume: false, transfer: false });
-  assert.deepEqual(visibleControls(call({ state: "ENDED" }), me, all), { cancel: false, end: false, hold: false, resume: false, transfer: false });
+  const none = { cancel: false, end: false, hold: false, resume: false, transfer: false, upgrade: false, screenShare: false, invite: false };
+  assert.deepEqual(visibleControls(call(), me, actions(["END", "HOLD"])), { ...none, end: true, hold: true });
+  assert.deepEqual(visibleControls(call({ state: "ENDED" }), me, all), none);
   assert.equal(visibleControls(call({ state: "REQUESTED", initiatorPrincipalId: me }), me, all).end, false);
   assert.equal(visibleControls(call({ state: "REQUESTED", initiatorPrincipalId: me }), me, all).cancel, true);
+});
+
+test("upgrade, screen share and add people are for active parties the server offers them to (C5-C7)", () => {
+  const actions = (names) => (name) => names.includes(name);
+  const offered = actions(["UPGRADE", "START_SCREEN_SHARE", "ADD_PARTICIPANTS"]);
+  for (const op of ["upgrade", "screenShare", "invite"]) {
+    assert.equal(mayControl(call(), me, op), true, op);
+    assert.equal(mayControl(call(), "stranger", op), false, op);
+    assert.equal(visibleControls(call(), me, offered)[op], true, op);
+    assert.equal(visibleControls(call(), me, actions([]))[op], false, `${op} needs the server's action`);
+    assert.equal(visibleControls(call({ state: "ENDING" }), me, offered)[op], false, `${op} on a finished call`);
+  }
+  const left = call({ participants: [{ participantId: "p-me", principalId: me, endedAt: "2026-10-23T12:00:00Z" }, { participantId: "p-c", principalId: "caller", endedAt: null }] });
+  assert.equal(mayControl(left, me, "invite"), false, "a party that left cannot invite");
+  assert.equal(isPresenter({ ...call(), screenShare: { participantId: "p-me" } }, me), true);
+  assert.equal(isPresenter({ ...call(), screenShare: { participantId: "p-c" } }, me), false);
+  assert.equal(isPresenter({ ...call(), screenShare: null }, me), false);
 });
 
 test("own session is the live session of my active participant on this endpoint", () => {
@@ -191,4 +210,77 @@ test("the caller is named from the call view, then from Meeting's principal name
   assert.equal(callerLabel(undefined, me), "Incoming call");
   assert.equal(offerHeadline({ callKind: "VIDEO", purpose: "TRANSFER" }), "Transferred video call");
   assert.equal(offerHeadline({ callKind: "VOICE", purpose: "INITIAL" }), "Incoming voice call");
+});
+
+// ---- C4 signaling credential failures / C1 receipt acknowledgement ----
+
+test("a 401 signaling failure is classified so the same credential is never retried", async () => {
+  const { signalingFailure } = await import("../src/lib/calling/signaling-auth.ts");
+  const failure = (status, code) => ({ response: { status, data: { error: { code } } } });
+  assert.equal(signalingFailure(failure(401, "SIGNALING_CREDENTIAL_EXPIRED")), "expired");
+  assert.equal(signalingFailure(failure(401, "AUTHENTICATION_FAILED")), "rejected");
+  assert.equal(signalingFailure(failure(401, undefined)), "rejected");
+  assert.equal(signalingFailure(failure(503, "SERVICE_UNAVAILABLE")), "transient");
+  assert.equal(signalingFailure(new Error("network")), "transient");
+  assert.equal(signalingFailure(undefined), "transient");
+});
+
+test("a rejected endpoint re-registers at most once per window", async () => {
+  const { mayReregister, REREGISTER_WINDOW_MS } = await import("../src/lib/calling/signaling-auth.ts");
+  const now = Date.parse("2026-11-16T10:00:00Z");
+  assert.equal(mayReregister(null, now), true);
+  assert.equal(mayReregister(now - 1_000, now), false);
+  assert.equal(mayReregister(now - REREGISTER_WINDOW_MS, now), true);
+});
+
+test("only new, actionable PENDING offers are acknowledged", async () => {
+  const { offersToAcknowledge } = await import("../src/lib/calling/signaling-auth.ts");
+  const offers = [
+    { invitationId: "new", status: "PENDING", actionable: true },
+    { invitationId: "done", status: "PENDING", actionable: true },
+    { invitationId: "ringing", status: "RINGING", actionable: true },
+    { invitationId: "over", status: "CANCELLED", actionable: false },
+    { invitationId: "late", status: "PENDING", actionable: false },
+  ];
+  assert.deepEqual(offersToAcknowledge(offers, new Set(["done"])), ["new"]);
+});
+
+// ---- Call buttons elsewhere (Contacts / chats) → the Calls page places the call ----
+
+/** Replays the Calls page renders: what it did with the launch. */
+function replayLaunch(renders) {
+  let saw = false;
+  let pending = true;
+  const steps = [];
+  for (const r of renders) {
+    const d = launchStep({ pending, sawPlacing: saw, endpointReady: true, inCall: false, ...r });
+    saw = d.sawPlacing;
+    steps.push(d.step);
+    if (d.step !== "wait") pending = false;
+  }
+  return steps;
+}
+
+test("a call from Contacts is placed once the calling screen is up (owner report: new contact stuck on Calling…)", () => {
+  // Render 1 puts the calling screen up; its own effects still see it down (React state).
+  // That must not read as "cancelled": render 2 sees it up and places the call.
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true }]), ["wait", "place"]);
+  // The address bar drops ?contactId= (the launch prop goes away): the remembered launch is still placed.
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true, endpointReady: false }, { placing: true }]), ["wait", "wait", "place"]);
+});
+
+test("a call cancelled on the calling screen before this browser connected is never placed", () => {
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true, endpointReady: false }, { placing: false }, { placing: false }]),
+    ["wait", "wait", "drop", "wait"]);
+  // Nothing pending: nothing happens.
+  assert.equal(launchStep({ pending: false, placing: true, sawPlacing: true, endpointReady: true, inCall: false }).step, "wait");
+  // Already in a call: wait (the page never places a second one over it).
+  assert.equal(launchStep({ pending: true, placing: true, sawPlacing: true, endpointReady: true, inCall: true }).step, "wait");
+});
+
+test("CF1: a call to someone already on a call says so", () => {
+  assert.equal(endedCallText("BUSY", "Ada"), "Ada is on another call");
+  assert.equal(endedCallText("BUSY", "  "), "They're on another call");
+  assert.equal(endedCallText("BUSY", null), "They're on another call");
+  assert.equal(endedCallText("FAILED", "Ada"), "");
 });

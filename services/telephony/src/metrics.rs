@@ -237,6 +237,41 @@ impl TelephonyService {
         );
         let _ = writeln!(out, "# TYPE telephony_outbox_dead_lettered gauge");
         let _ = writeln!(out, "telephony_outbox_dead_lettered {dead_events}");
+        // Gap C10: usage / risk reports to Numbering (pending and dead-lettered);
+        // absent while the schema is older than migration 18.
+        let reports_table = db::scalar_i64(
+            &self.db,
+            "SELECT (CASE WHEN to_regclass('telephony_numbering_reports') IS NULL THEN 0 ELSE 1 END)::bigint",
+            vec![],
+        )
+        .await?;
+        if reports_table == 1 {
+            let numbering_pending = db::scalar_i64(
+                &self.db,
+                "SELECT count(*) FROM telephony_numbering_reports WHERE status = 'PENDING'",
+                vec![],
+            )
+            .await?;
+            let numbering_dead = db::scalar_i64(
+                &self.db,
+                "SELECT count(*) FROM telephony_numbering_reports WHERE status = 'DEAD_LETTER'",
+                vec![],
+            )
+            .await?;
+            let _ = writeln!(out, "# TYPE telephony_numbering_reports_backlog gauge");
+            let _ = writeln!(
+                out,
+                "telephony_numbering_reports_backlog {numbering_pending}"
+            );
+            let _ = writeln!(
+                out,
+                "# TYPE telephony_numbering_reports_dead_lettered gauge"
+            );
+            let _ = writeln!(
+                out,
+                "telephony_numbering_reports_dead_lettered {numbering_dead}"
+            );
+        }
         // The SIP / media edge health this instance last observed (absent: no edge).
         if let Some(health) = self.dependencies.sip_edge_health() {
             let _ = writeln!(out, "# TYPE telephony_sip_edge_health gauge");

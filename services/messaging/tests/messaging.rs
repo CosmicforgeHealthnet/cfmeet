@@ -755,14 +755,6 @@ async fn muted_members_and_closed_conversations_cannot_send() {
         )
         .await;
     assert_eq!(r.reason(), "NOT_ADMIN");
-    let r = h
-        .delete(
-            &c,
-            Some(people[0]),
-            &format!("/v1/conversations/{cid}/members/{}", people[0]),
-        )
-        .await;
-    assert_eq!(r.reason(), "OWNER_CANNOT_BE_REMOVED");
     let v = h
         .get(&c, Some(people[0]), &format!("/v1/conversations/{cid}"))
         .await;
@@ -1085,4 +1077,904 @@ async fn managed_text_is_plain_text_never_interpreted_markup() {
     // Control characters are refused (the only content rule besides the length bound).
     let bad = h.send_managed(&c, &conv, people[0], "bell\u{7}").await;
     assert_eq!(bad.code(), "CONTENT_REJECTED", "{}", bad.text);
+}
+
+/// Multi-device personal E2EE (linked devices): one account with a primary mobile and two
+/// web devices talks to another account through REAL OpenMLS clients. Every device of the
+/// account receives and decrypts locally; sends from one device reach the account's other
+/// devices; the mobile is replaced (revoked, removed by an MLS commit at the next epoch)
+/// while both web devices keep working; the removed mobile cannot decrypt anything after
+/// the rekey; the new mobile joins with fresh keys and gets future messages only.
+#[tokio::test]
+async fn one_account_with_mobile_and_two_web_devices_replaces_its_mobile() {
+    use common::{flows::*, *};
+    use serde_json::json;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let alice = h.principal(&c);
+    let mut mobile_a = h.device_of(&c, alice, 0).await;
+    let mut web_a = h.device_of(&c, alice, 1).await;
+    let mut web_b = h.device_of(&c, alice, 1).await;
+    let mut bob = h.member(&c, 1).await;
+    let r = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob.principal }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conv = r.json;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let gid = unb64(&conv["encryption"]["mlsGroupId"]);
+    mobile_a.group = Some(mobile_a.device.create_group(&gid).unwrap());
+    h.add_member_devices(
+        &c,
+        &conv,
+        &mut mobile_a,
+        &mut [&mut web_a, &mut web_b, &mut bob],
+        &mut [],
+    )
+    .await;
+    let mut members = mobile_a.group.as_ref().unwrap().member_devices();
+    members.sort();
+    let mut want = vec![
+        mobile_a.device_id(),
+        web_a.device_id(),
+        web_b.device_id(),
+        bob.device_id(),
+    ];
+    want.sort();
+    assert_eq!(members, want, "one leaf per authorized device");
+
+    // Bob → every device of Alice decrypts locally.
+    let r = h
+        .send_e2ee(&c, &conv, &mut bob, "multi-device hello from bob")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let old_bob_seq = r.json["sequence"].as_i64().unwrap();
+    for d in [&mut mobile_a, &mut web_a, &mut web_b] {
+        let got = h.receive(&c, &conv, d).await;
+        assert_eq!(got.last().unwrap().1, "multi-device hello from bob");
+    }
+    // Web A → Bob, and Alice's own mobile and Web B (conversation sync across devices).
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut web_a, "sent from web a")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut bob, &mut mobile_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "sent from web a"
+        );
+    }
+    // Mobile → web.
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_a, "sent from mobile a")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut web_a, &mut web_b, &mut bob] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "sent from mobile a"
+        );
+    }
+    // A retried delivery is idempotent (same id and bytes: no duplicate message).
+    let id = uuid::Uuid::new_v4();
+    let ct = h.encrypt_for(&c, &conv, &mut web_b, id, "retry once");
+    let body = json!({ "clientMessageId": id, "deviceId": web_b.device_id(), "epoch": web_b.group.as_ref().unwrap().epoch(), "ciphertext": b64(&ct) });
+    let path = format!("/v1/conversations/{cid}/messages");
+    let first = h.post(&c, Some(alice), &path, body.clone()).await;
+    assert_eq!(first.status, StatusCode::CREATED, "{}", first.text);
+    let again = h.post(&c, Some(alice), &path, body).await;
+    assert!(again.status.is_success(), "{}", again.text);
+    assert_eq!(again.json["messageId"], first.json["messageId"]);
+    for d in [&mut web_a, &mut mobile_a, &mut bob] {
+        let got = h.receive(&c, &conv, d).await;
+        assert_eq!(got.iter().filter(|(_, t)| t == "retry once").count(), 1);
+    }
+
+    // Mobile replacement: the old mobile is revoked; sends wait for the rekey commit that
+    // removes it; Web A commits the removal; Web B and Bob process it.
+    let r = h
+        .post(
+            &c,
+            Some(alice),
+            &format!("/v1/messaging/devices/{}/revoke", mobile_a.device_id()),
+            json!({ "reason": "REPLACED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let state = h
+        .get(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["rekeyRequired"], true, "{}", state.text);
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut web_b, "too early").await.code(),
+        "MLS_REKEY_REQUIRED"
+    );
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_a, "revoked")
+            .await
+            .code(),
+        "DEVICE_REVOKED"
+    );
+    let epoch = web_a.group.as_ref().unwrap().epoch();
+    let out = web_a
+        .device
+        .remove_devices(web_a.group.as_mut().unwrap(), &[mobile_a.device_id()])
+        .unwrap();
+    let r = h
+        .commit(
+            &c,
+            &cid,
+            &web_a,
+            &out.commit,
+            epoch,
+            None,
+            &[],
+            &[mobile_a.device_id()],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    web_a.cursor = r.json["sequence"].as_i64().unwrap();
+    for d in [&mut web_b, &mut bob] {
+        h.receive(&c, &conv, d).await;
+        assert_eq!(d.group.as_ref().unwrap().epoch(), epoch + 1);
+    }
+    assert!(!web_b
+        .group
+        .as_ref()
+        .unwrap()
+        .member_devices()
+        .contains(&mobile_a.device_id()));
+
+    // After the rekey boundary the removed mobile cannot decrypt new traffic.
+    let r = h.send_e2ee(&c, &conv, &mut bob, "after replacement").await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let fresh = h
+        .get(
+            &c,
+            Some(alice),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                r.json["sequence"].as_i64().unwrap() - 1
+            ),
+        )
+        .await;
+    let ciphertext = unb64(&fresh.json["messages"][0]["e2ee"]["ciphertext"]);
+    assert!(mobile_a
+        .device
+        .process(mobile_a.group.as_mut().unwrap(), &ciphertext)
+        .is_err());
+    for d in [&mut web_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "after replacement"
+        );
+    }
+
+    // The new mobile enrolls with FRESH keys and is added by a web device; it reads
+    // future messages only (no old decryption secrets are handed over).
+    let mut mobile_b = h.device_of(&c, alice, 1).await;
+    h.add_member_devices(
+        &c,
+        &conv,
+        &mut web_a,
+        &mut [&mut mobile_b],
+        &mut [&mut web_b, &mut bob],
+    )
+    .await;
+    assert_ne!(
+        mobile_b.device.signature_public_key(),
+        mobile_a.device.signature_public_key()
+    );
+    let old = h
+        .get(
+            &c,
+            Some(alice),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                old_bob_seq - 1
+            ),
+        )
+        .await;
+    let old_ct = unb64(&old.json["messages"][0]["e2ee"]["ciphertext"]);
+    assert!(
+        mobile_b
+            .device
+            .process(mobile_b.group.as_mut().unwrap(), &old_ct)
+            .is_err(),
+        "no history without an explicit transfer"
+    );
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut bob, "welcome new phone")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut mobile_b, &mut web_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "welcome new phone"
+        );
+    }
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_b, "new phone writes")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        h.receive(&c, &conv, &mut bob).await.last().unwrap().1,
+        "new phone writes"
+    );
+
+    // The server holds ciphertext only: no phrase is stored anywhere in Messaging.
+    for phrase in [
+        "multi-device hello",
+        "sent from web a",
+        "after replacement",
+        "new phone writes",
+    ] {
+        let n = h
+            .scalar(&format!(
+                "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND (position(convert_to('{phrase}', 'UTF8') in coalesce(mls_ciphertext, ''::bytea)) > 0 OR managed_sealed IS NOT NULL)"
+            ))
+            .await;
+        assert_eq!(n, 0, "{phrase}");
+    }
+}
+
+/// Gap audit S3: the owner hands a group over (becoming ADMIN), only the owner may, and an
+/// owner who leaves passes ownership to the most senior member; nobody removes the owner.
+#[tokio::test]
+async fn group_ownership_transfers_and_the_owner_can_leave() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 3).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let (owner, a, b) = (people[0], people[1], people[2]);
+    let owner_of = |v: &common::Response| v.json["ownerPrincipalId"].clone();
+    // Only the owner transfers.
+    let r = h
+        .post(
+            &c,
+            Some(a),
+            &format!("/v1/conversations/{cid}/owner"),
+            json!({ "principalId": a }),
+        )
+        .await;
+    assert_eq!(r.reason(), "OWNER_ONLY", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/owner"),
+            json!({ "principalId": a }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["ownerPrincipalId"], json!(a));
+    let v = h
+        .get(&c, Some(a), &format!("/v1/conversations/{cid}"))
+        .await;
+    assert_eq!(owner_of(&v), json!(a), "{}", v.text);
+    // The previous owner is now an ADMIN and cannot remove the new owner.
+    let r = h
+        .delete(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members/{a}"),
+        )
+        .await;
+    assert_eq!(r.reason(), "OWNER_CANNOT_BE_REMOVED", "{}", r.text);
+    // The owner leaves: the most senior remaining member (the ADMIN) becomes owner.
+    let r = h
+        .delete(&c, Some(a), &format!("/v1/conversations/{cid}/members/{a}"))
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let v = h
+        .get(&c, Some(owner), &format!("/v1/conversations/{cid}"))
+        .await;
+    assert_eq!(owner_of(&v), json!(owner), "{}", v.text);
+    let _ = b;
+}
+
+/// Gap audit S5: published events past retention are pruned (each conversation keeps its
+/// newest event), and replay from before the retained window asks for a resync.
+#[tokio::test]
+async fn old_conversation_events_are_pruned_and_replay_asks_for_resync() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    for text in ["one", "two", "three"] {
+        let r = h
+            .post(
+                &c,
+                Some(people[0]),
+                &format!("/v1/conversations/{cid}/messages"),
+                json!({ "clientMessageId": Uuid::new_v4(), "text": text }),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text);
+    }
+    let in_conv =
+        format!("SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}'");
+    let total = h.scalar(&in_conv).await;
+    assert!(total >= 4, "{total}");
+    use sea_orm::ConnectionTrait;
+    h.db.conn
+        .execute_unprepared(&format!(
+            "UPDATE messaging_outbox_events SET status = 'PUBLISHED', published_at = now(), \
+             occurred_at = now() - interval '100 days' WHERE conversation_id = '{cid}'"
+        ))
+        .await
+        .unwrap();
+    // An event still owed to the webhook relay is kept; settle the relay first.
+    h.db.conn
+        .execute_unprepared(
+            "UPDATE messaging_webhook_relay SET status = 'RELAYED', relayed_at = now()",
+        )
+        .await
+        .unwrap();
+    let pruned =
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 90, 1000)
+            .await
+            .unwrap();
+    assert_eq!(pruned as i64, total - 1);
+    assert_eq!(h.scalar(&in_conv).await, 1, "the newest event is kept");
+    let r = h
+        .get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/events?after=0"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["syncRequired"], true, "{}", r.text);
+    // Within retention nothing goes.
+    assert_eq!(
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 365, 1000)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+use cf_messaging_crypto::{device::Device, group::Processed};
+use serde_json::Value;
+
+/// An external commit as a device of `acting` submits it (`extra` adds or overrides fields).
+async fn external_commit(
+    h: &Harness,
+    c: &Customer,
+    cid: &str,
+    acting: Uuid,
+    device: Uuid,
+    commit: &[u8],
+    extra: Value,
+) -> Response {
+    let mut body = json!({
+        "clientMessageId": Uuid::new_v4(), "deviceId": device, "epoch": 1, "commit": b64(commit),
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        body[k] = v.clone();
+    }
+    h.post(
+        c,
+        Some(acting),
+        &format!("/v1/conversations/{cid}/mls/commits"),
+        body,
+    )
+    .await
+}
+
+/// The production incident: a private 1:1 chat was created while the recipient had no
+/// device in the group, and the recipient's browser then waited for "someone in the chat
+/// to be online" for hours. Now the sender's device publishes the GroupInfo with its
+/// commit, and the recipient's device joins BY ITSELF (an MLS external commit) while the
+/// sender is offline; the sender's client merges the join only after verifying the joining
+/// device against the directory (its registered key), and both read each other.
+#[tokio::test]
+async fn a_member_device_joins_by_itself_while_no_other_member_is_online() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let mut alice = h.member(&c, 1).await;
+    // Bob has no messaging device yet when Alice starts the chat.
+    let bob_principal = h.principal(&c);
+    let r = h
+        .create_conversation(
+            &c,
+            alice.principal,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob_principal }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conv = r.json;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let gid = unb64(&conv["encryption"]["mlsGroupId"]);
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob_principal] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    assert_eq!(claim.json["keyPackages"], json!([]));
+    // Nothing to add yet: Alice's group starts with her device, and she publishes its
+    // GroupInfo with a self-update commit.
+    let mut group = alice.device.create_group(&gid).unwrap();
+    let out = alice.device.update_keys(&mut group).unwrap();
+    let info = alice.device.export_group_info(&group).unwrap();
+    alice.group = Some(group);
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/commits"),
+            json!({
+                "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+                "commit": b64(&out.commit), "removedDeviceIds": [], "groupInfo": b64(&info),
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    alice.cursor = r.json["sequence"].as_i64().unwrap();
+    let sent = h.send_e2ee(&c, &conv, &mut alice, "sent at 8:36").await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    alice.cursor = sent.json["sequence"].as_i64().unwrap();
+
+    // Alice goes offline. Bob's phone browser registers later (no KeyPackage needed).
+    let mut bob = h.device_of(&c, bob_principal, 0).await;
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.status, StatusCode::OK, "{}", state.text);
+    assert_eq!(state.json["groupInfoEpoch"], state.json["mlsEpoch"]);
+    let (gb, join) = bob
+        .device
+        .join_by_external_commit(&unb64(&state.json["groupInfo"]))
+        .unwrap();
+    let new_info = bob.device.export_group_info(&gb).unwrap();
+    let joined = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob.device_id(),
+        &join.commit,
+        json!({ "epoch": join.epoch, "groupInfo": b64(&new_info) }),
+    )
+    .await;
+    assert_eq!(joined.status, StatusCode::CREATED, "{}", joined.text);
+    assert_eq!(joined.json["kind"], "MLS_COMMIT");
+    assert_eq!(joined.json["senderDeviceId"], json!(bob.device_id()));
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["mlsEpoch"], gb.epoch());
+    assert_eq!(state.json["groupInfoEpoch"], gb.epoch());
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/MlsGroupState",
+        &state.json,
+    );
+    // Bob writes at once. The message from before his device existed stays unreadable to
+    // it (MLS forward secrecy); the client shows a placeholder for it.
+    bob.cursor = joined.json["sequence"].as_i64().unwrap();
+    bob.group = Some(gb);
+    let hi = h.send_e2ee(&c, &conv, &mut bob, "hi from the phone").await;
+    assert_eq!(hi.status, StatusCode::CREATED, "{}", hi.text);
+
+    // Alice comes back: the external commit is merged only for Bob's registered device
+    // with exactly its directory key.
+    let dir = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/messaging/principals/{bob_principal}/devices"),
+        )
+        .await;
+    assert_eq!(dir.status, StatusCode::OK, "{}", dir.text);
+    assert!(
+        dir.json["devices"][0].get("keyPackagesAvailable").is_none(),
+        "another principal's KeyPackage stock is not shown"
+    );
+    let registered: Vec<(Uuid, Vec<u8>)> = dir.json["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (uuid(&d["deviceId"]), unb64(&d["signaturePublicKey"])))
+        .collect();
+    let list = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                alice.cursor
+            ),
+        )
+        .await;
+    let msgs = list.json["messages"].as_array().unwrap().clone();
+    assert_eq!(msgs.len(), 2, "{}", list.text);
+    assert_eq!(msgs[0]["kind"], "MLS_COMMIT");
+    let joiner = uuid(&msgs[0]["senderDeviceId"]);
+    let ga = alice.group.as_mut().unwrap();
+    let processed = alice
+        .device
+        .process_with_joiners(ga, &unb64(&msgs[0]["e2ee"]["ciphertext"]), |d, k| {
+            d == joiner && registered.iter().any(|(id, key)| *id == d && key == k)
+        })
+        .unwrap();
+    assert!(
+        matches!(processed, Processed::ExternalJoin { device_id, .. } if device_id == bob.device_id())
+    );
+    match alice
+        .device
+        .process(ga, &unb64(&msgs[1]["e2ee"]["ciphertext"]))
+        .unwrap()
+    {
+        Processed::Application { plaintext, .. } => assert_eq!(plaintext, b"hi from the phone"),
+        other => panic!("{other:?}"),
+    }
+    alice.cursor = msgs[1]["sequence"].as_i64().unwrap();
+    let reply = h.send_e2ee(&c, &conv, &mut alice, "got it").await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.text);
+    assert_eq!(h.receive(&c, &conv, &mut bob).await[0].1, "got it");
+    // Bob's own directory view shows his KeyPackage stock (none published).
+    let own = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/principals/{bob_principal}/devices"),
+        )
+        .await;
+    assert_eq!(own.json["devices"][0]["keyPackagesAvailable"], 0);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Device",
+        &own.json["devices"][0],
+    );
+    let dump = h.dump().await;
+    for canary in ["sent at 8:36", "hi from the phone", "got it"] {
+        assert!(
+            !dump.contains(canary),
+            "plaintext `{canary}` in the database"
+        );
+    }
+}
+
+/// Only the acting principal's own ACTIVE device, of an ACTIVE member, joins by an
+/// external commit — never a non-member, another principal's device or a revoked device,
+/// never past a pending removal of a device still in the tree; it welcomes and removes
+/// nobody. A revoked device that never entered the tree blocks nothing.
+#[tokio::test]
+async fn external_commits_only_admit_own_active_devices_of_members() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, mut alice, bob) = h.e2ee_direct(&c).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    // The establishing commit carried no GroupInfo: none is served.
+    let state = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["groupInfo"], Value::Null);
+    let info = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let ext = |device: &Device| device.join_by_external_commit(&info).unwrap().1.commit;
+    // A non-member's device.
+    let carol = h.member(&c, 0).await;
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        carol.principal,
+        carol.device_id(),
+        &ext(&carol.device),
+        json!({}),
+    )
+    .await;
+    assert!(
+        r.status == StatusCode::NOT_FOUND || r.status == StatusCode::FORBIDDEN,
+        "{}",
+        r.text
+    );
+    // Another principal's device.
+    let bob2 = h.device_of(&c, bob.principal, 0).await;
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        alice.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // With a Welcome, or removing someone.
+    let mut other = alice.device.create_group(&[3u8; 32]).unwrap();
+    let welcome = alice
+        .device
+        .add_devices(&mut other, &[carol.device.key_package().unwrap()])
+        .unwrap()
+        .welcome
+        .unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "welcome": b64(&welcome), "welcomeDeviceIds": [bob2.device_id()] }),
+    )
+    .await;
+    assert_eq!(
+        r.reason(),
+        "EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE",
+        "{}",
+        r.text
+    );
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "removedDeviceIds": [alice.device_id()] }),
+    )
+    .await;
+    assert_eq!(
+        r.reason(),
+        "EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE",
+        "{}",
+        r.text
+    );
+    // A GroupInfo of another epoch than the one the commit creates.
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "groupInfo": b64(&info) }),
+    )
+    .await;
+    assert_eq!(r.reason(), "GROUP_INFO_MISMATCH", "{}", r.text);
+    // A revoked device.
+    let bob3 = h.device_of(&c, bob.principal, 0).await;
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob3.device_id()),
+            json!({ "reason": "USER_REQUESTED" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob3.device_id(),
+        &ext(&bob3.device),
+        json!({}),
+    )
+    .await;
+    assert_eq!(r.code(), "DEVICE_REVOKED", "{}", r.text);
+    // Alice publishes the GroupInfo with a self-update; bob3 is not in its tree, so its
+    // revocation is moot there and does not block anyone.
+    let out = alice
+        .device
+        .update_keys(alice.group.as_mut().unwrap())
+        .unwrap();
+    let info2 = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let r = h
+        .post(&c, Some(alice.principal), &format!("/v1/conversations/{cid}/mls/commits"), json!({
+            "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+            "commit": b64(&out.commit), "removedDeviceIds": [bob3.device_id()], "groupInfo": b64(&info2),
+        }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let bob4 = h.device_of(&c, bob.principal, 0).await;
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob4.device_id()),
+            json!({ "reason": "USER_REQUESTED" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let state = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["rekeyRequired"], false, "{}", state.text);
+    assert_eq!(state.json["pendingRemovals"], json!([]));
+    // A device still IN the tree (Bob's first) is revoked: nobody joins until its removal
+    // is committed — the joiner's UpdatePath would reach the removed leaf.
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob.device_id()),
+            json!({ "reason": "LOST_OR_STOLEN" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let (_, join) = bob2.device.join_by_external_commit(&info2).unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &join.commit,
+        json!({ "epoch": 2 }),
+    )
+    .await;
+    assert_eq!(r.code(), "MLS_REKEY_REQUIRED", "{}", r.text);
+    assert_eq!(r.reason(), "REMOVALS_PENDING_BEFORE_JOIN", "{}", r.text);
+    // Once Alice committed the removal (with a GroupInfo), Bob's other device joins.
+    let out = alice
+        .device
+        .remove_devices(alice.group.as_mut().unwrap(), &[bob.device_id()])
+        .unwrap();
+    let info3 = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let r = h
+        .post(&c, Some(alice.principal), &format!("/v1/conversations/{cid}/mls/commits"), json!({
+            "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+            "commit": b64(&out.commit), "removedDeviceIds": [bob.device_id()], "groupInfo": b64(&info3),
+        }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["groupInfoEpoch"], 3);
+    let (_, join) = bob2
+        .device
+        .join_by_external_commit(&unb64(&state.json["groupInfo"]))
+        .unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &join.commit,
+        json!({ "epoch": join.epoch }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    // That commit carried no GroupInfo: none is served for the new epoch, never a stale one.
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["mlsEpoch"], 4);
+    assert_eq!(state.json["groupInfo"], Value::Null);
+}
+
+/// A member adding a principal's NEW device claims only that device's KeyPackage: the
+/// stock of the principal's devices already in the tree is not spent (so it stays
+/// available for the groups that still need it).
+#[tokio::test]
+async fn a_claim_limited_to_new_devices_spares_the_stock_of_the_others() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, alice, bob) = h.e2ee_direct(&c).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let kps: Vec<Vec<u8>> = (0..2).map(|_| bob.device.key_package().unwrap()).collect();
+    let r = h.publish(&c, bob.principal, bob.device_id(), &kps).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let bob2 = h.device_of(&c, bob.principal, 1).await;
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob.principal], "deviceIds": [bob2.device_id()] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    let got: Vec<Value> = claim.json["keyPackages"].as_array().unwrap().clone();
+    assert_eq!(got.len(), 1, "{}", claim.text);
+    assert_eq!(got[0]["deviceId"], json!(bob2.device_id()));
+    let own = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/principals/{}/devices", bob.principal),
+        )
+        .await;
+    let stock = |id: Uuid| {
+        own.json["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["deviceId"] == json!(id))
+            .unwrap()["keyPackagesAvailable"]
+            .clone()
+    };
+    assert_eq!(stock(bob.device_id()), 2, "{}", own.text);
+    assert_eq!(stock(bob2.device_id()), 0, "{}", own.text);
+    // A device of a principal that is not listed yields nothing; an empty list is refused.
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [alice.principal], "deviceIds": [bob.device_id()] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    assert_eq!(claim.json["keyPackages"], json!([]));
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob.principal], "deviceIds": [] }),
+        )
+        .await;
+    assert_eq!(claim.status.as_u16(), 400, "{}", claim.text);
 }

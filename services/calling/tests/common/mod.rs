@@ -14,6 +14,7 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod bridge;
 pub mod calls;
 pub mod contracts;
 pub mod deployment;
@@ -61,7 +62,6 @@ use calling::{
     signaling::{InMemorySignalBus, NoPushTransport, RealtimeSignalBus, SignalingKeys},
     state::{AppState, CallingRuntime},
 };
-use calling_migration::MigratorTrait;
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
     InternalPermission, KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey,
@@ -159,7 +159,7 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
-            calling_migration::Migrator::up(&tmpl, None)
+            calling_migration::up_all(&tmpl)
                 .await
                 .expect("migrations apply");
             tmpl.close().await.ok();
@@ -282,8 +282,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// The public API Gateway: `calling-request.forward` only (Part VI §51).
     pub api_gateway: Arc<ServiceTokenSigner>,
-    /// The Meeting Service: `calling-request.act-for-organization` only (Blueprint
-    /// Section 12 follow-up, CAL-007; accepted only while the Calling flag is on).
+    /// The Meeting Service: `calling-request.act-for-organization` (Blueprint Section 12
+    /// follow-up, CAL-007; accepted only while the Calling flag is on) and the gap audit
+    /// G3 organization member permissions `calling-organization-member.act` / `.offboard`.
     pub meeting_service: Arc<ServiceTokenSigner>,
     /// The Developer Platform: the webhook migration export and rollback only
     /// (`webhook-migration.export`, `webhook-migration.import`; Part VI §53).
@@ -291,6 +292,10 @@ pub struct Peers {
     /// The Communications Hub: `calling-communications.read`, `.apply` and `.launch`
     /// (the private owner interfaces of src/communications.rs).
     pub communications: Arc<ServiceTokenSigner>,
+    /// The operator console: `calling-abuse-reports.review` only (C21).
+    pub operator_console: Arc<ServiceTokenSigner>,
+    /// The HQ admin bridge (ADR 0068): `calling.administer` only (operator reads).
+    pub admin_bridge: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -343,6 +348,8 @@ pub fn service_auth_fixture_targeting(
     let meeting_service_key = service_key("meeting-service-test-1");
     let developer_platform_key = service_key("developer-platform-test-1");
     let communications_key = service_key("communications-test-1");
+    let operator_console_key = service_key("operator-console-test-1");
+    let admin_bridge_key = service_key("admin-bridge-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -389,7 +396,12 @@ pub fn service_auth_fixture_targeting(
                 (
                     cf_service_auth::services::MEETING_SERVICE,
                     vec![meeting_service_key.public_jwk()],
-                    &["calling-request.act-for-organization"],
+                    &[
+                        "calling-request.act-for-organization",
+                        "calling-organization-member.act",
+                        "calling-organization-member.offboard",
+                        "calling-account.privacy",
+                    ],
                 ),
                 (
                     cf_service_auth::services::DEVELOPER_PLATFORM,
@@ -404,6 +416,16 @@ pub fn service_auth_fixture_targeting(
                         "calling-communications.apply",
                         "calling-communications.launch",
                     ],
+                ),
+                (
+                    cf_service_auth::services::OPERATOR_CONSOLE,
+                    vec![operator_console_key.public_jwk()],
+                    &["calling-abuse-reports.review"],
+                ),
+                (
+                    cf_service_auth::services::ADMIN_BRIDGE,
+                    vec![admin_bridge_key.public_jwk()],
+                    &["calling.administer"],
                 ),
             ],
         ),
@@ -512,6 +534,20 @@ pub fn service_auth_fixture_targeting(
             TokenTtl::default(),
             shared.clone(),
         )),
+        operator_console: Arc::new(ServiceTokenSigner::new(
+            ServiceId::operator_console(),
+            env,
+            operator_console_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        admin_bridge: Arc::new(ServiceTokenSigner::new(
+            ServiceId::admin_bridge(),
+            env,
+            admin_bridge_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
         untrusted: Arc::new(ServiceTokenSigner::new(
             ServiceId::parse("cfmeet.numbering").unwrap(),
             env,
@@ -547,11 +583,29 @@ pub struct Harness {
 #[derive(Default)]
 pub struct RecordingPush {
     sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
+    offers: std::sync::Mutex<Vec<calling::signaling::PushOffer>>,
+    partner_offers: std::sync::Mutex<Vec<calling::signaling::PartnerPushOffer>>,
+    cancels: std::sync::Mutex<Vec<calling::signaling::PushCancel>>,
 }
 
 impl RecordingPush {
     pub fn sent(&self) -> Vec<(uuid::Uuid, Value)> {
         self.sent.lock().unwrap().clone()
+    }
+
+    /// Every offer with its recipient facts (N9).
+    pub fn offers(&self) -> Vec<calling::signaling::PushOffer> {
+        self.offers.lock().unwrap().clone()
+    }
+
+    /// Every partner (`platform-principal`) offer (ADR 0063).
+    pub fn partner_offers(&self) -> Vec<calling::signaling::PartnerPushOffer> {
+        self.partner_offers.lock().unwrap().clone()
+    }
+
+    /// Every ring cancellation Calling dispatched (gap audit C1).
+    pub fn cancels(&self) -> Vec<calling::signaling::PushCancel> {
+        self.cancels.lock().unwrap().clone()
     }
 }
 
@@ -559,6 +613,19 @@ impl RecordingPush {
 impl calling::signaling::PushDispatcher for RecordingPush {
     async fn dispatch(&self, push_target_ref: uuid::Uuid, payload: Value) {
         self.sent.lock().unwrap().push((push_target_ref, payload));
+    }
+
+    async fn dispatch_offer(&self, offer: calling::signaling::PushOffer) {
+        self.offers.lock().unwrap().push(offer.clone());
+        self.dispatch(offer.push_target_ref, offer.payload).await;
+    }
+
+    async fn dispatch_partner_offer(&self, offer: calling::signaling::PartnerPushOffer) {
+        self.partner_offers.lock().unwrap().push(offer);
+    }
+
+    async fn dispatch_cancel(&self, cancel: calling::signaling::PushCancel) {
+        self.cancels.lock().unwrap().push(cancel);
     }
 }
 
@@ -586,7 +653,14 @@ pub fn test_runtime(
         credential_policy: MediaCredentialPolicy::default(),
         bus,
         push: Arc::new(NoPushTransport),
-        app_config: AppCallingConfig::default(),
+        // CF1 ("on another call") is on in the service; the shared harness turns it off
+        // because most suites place calls between the same two parties while an earlier
+        // call of theirs is still live. tests/app_busy.rs turns it
+        // back on with `AppWorld::busy_on_another_call`.
+        app_config: AppCallingConfig {
+            busy_on_another_call: false,
+            ..AppCallingConfig::default()
+        },
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
         numbering: Arc::new(calling::numbering::UnconfiguredNumbering),
@@ -828,6 +902,24 @@ impl Harness {
     }
 
     pub async fn request_with(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let response = self
+            .request_unsettled(method, path, token, body, headers)
+            .await;
+        // C1: cancel / end answer before their media clean-up, which runs in the
+        // background; tests observe the settled state (the reply itself is tested apart).
+        self.state.app.settle_background().await;
+        response
+    }
+
+    /// [`Self::request_with`] without waiting for background clean-up (C1 tests).
+    pub async fn request_unsettled(
         &self,
         method: Method,
         path: &str,

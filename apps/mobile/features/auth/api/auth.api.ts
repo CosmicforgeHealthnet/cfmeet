@@ -1,12 +1,14 @@
 import { send } from "@/lib/api/client";
 import { ROUTES } from "@/lib/api/routes";
 import type {
-  ChangePasswordRequest,
-  ForgotPasswordRequest,
   GoogleExchangeRequest,
-  LoginRequest,
   LoginResponse,
   MessageResponse,
+} from "@/lib/api/generated/meeting-service";
+import type {
+  ChangePasswordRequest,
+  ForgotPasswordRequest,
+  LoginRequest,
   RegisterRequest,
   RegisterResponse,
   ResendVerificationRequest,
@@ -14,7 +16,7 @@ import type {
   VerifyEmailRequest,
   VerifyResetTokenRequest,
   VerifyResetTokenResponse,
-} from "@/lib/api/generated/meeting-service";
+} from "../legacy-contract";
 
 /** Account operations (served under /api/v1; v1 is the account service's current version). */
 export const authApi = {

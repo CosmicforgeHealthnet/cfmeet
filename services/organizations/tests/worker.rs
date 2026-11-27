@@ -437,3 +437,44 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
         .await
         .expect_error(400, "VALIDATION_ERROR");
 }
+
+/// `/ready` reports whether consumer delivery is enabled (it used to say `disabled`
+/// whatever the configuration) and counts consumer rows only: the never-dispatched
+/// reconciliation record is not a delivery backlog.
+#[tokio::test]
+async fn readiness_reports_delivery_state_and_excludes_reconciliation_records() {
+    let Some(off) = Harness::new().await else {
+        return;
+    };
+    off.create_org(Uuid::new_v4(), "ready-off-org").await;
+    let r = off
+        .raw(axum::http::Method::GET, "/ready", Default::default(), None)
+        .await;
+    let body = r.expect(200);
+    assert_eq!(body["outbox"]["delivery"], "disabled");
+    assert_eq!(body["outbox"]["destinations"], serde_json::json!([]));
+    // Two Meeting rows wait; the two reconciliation records are not counted.
+    assert_eq!(body["outbox"]["pending"], 2);
+
+    let Some(on) = Harness::with_event_destinations(meeting()).await else {
+        return;
+    };
+    on.create_org(Uuid::new_v4(), "ready-on-org").await;
+    let ok = Recording {
+        sent: AtomicUsize::new(0),
+        fail: false,
+    };
+    worker::run_once(&on.db.conn, &ok).await.unwrap();
+    let ready = on
+        .raw(axum::http::Method::GET, "/ready", Default::default(), None)
+        .await;
+    let body = ready.expect(200);
+    assert_eq!(body["outbox"]["delivery"], "enabled");
+    assert_eq!(body["outbox"]["destinations"], serde_json::json!([MEETING]));
+    assert_eq!(body["outbox"]["pending"], 0, "{body}");
+    assert_eq!(
+        on.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND state = 'PENDING'").await,
+        2,
+        "reconciliation records are kept (history), never dispatched"
+    );
+}

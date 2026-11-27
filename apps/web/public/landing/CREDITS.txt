@@ -1,0 +1,17 @@
+Landing page photos (Pexels License: free for commercial use, no attribution required).
+https://www.pexels.com/license/
+
+hero-1.jpg  https://www.pexels.com/photo/13377869/
+hero-2.jpg  https://www.pexels.com/photo/12911766/
+hero-3.jpg  https://www.pexels.com/photo/10376252/
+hero-4.jpg  https://www.pexels.com/photo/8546749/
+hero-5.jpg  https://www.pexels.com/photo/19747906/
+hero-6.jpg  https://www.pexels.com/photo/4126695/
+avatar-caller.jpg  https://www.pexels.com/photo/5905745/
+avatar-chat.jpg  https://www.pexels.com/photo/6999225/
+feature-meetings.jpg  https://www.pexels.com/photo/3184338/
+feature-calls.jpg  https://www.pexels.com/photo/6000097/
+feature-messages.jpg  https://www.pexels.com/photo/6146927/
+feature-contacts.jpg  https://www.pexels.com/photo/6147187/
+auth-1.jpg  https://www.pexels.com/photo/7792744/
+auth-grace.jpg  https://www.pexels.com/photo/7516347/

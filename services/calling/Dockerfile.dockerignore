@@ -7,6 +7,7 @@
 !packages/usage-facts
 !packages/object-storage
 !packages/webhooks
+!packages/notification-client
 !packages/contracts
 !services/calling
 

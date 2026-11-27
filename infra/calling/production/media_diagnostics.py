@@ -254,6 +254,14 @@ def network_state():
         'sysctl': sysctl, 'firewall_media_rules': firewall})
 
 
+def calling_key_matches(api_key):
+    """Whether a LiveKit key id is the one Calling verifies callbacks with (boolean only)."""
+    try:
+        return bool(api_key) and Path('/opt/cfmeet-core/secrets/calling-livekit-api-key').read_text().strip() == api_key
+    except OSError:
+        return None
+
+
 def livekit_config(public_ip):
     import yaml
     config = yaml.safe_load(Path('/opt/livekit/livekit.yaml').read_text()) or {}
@@ -267,6 +275,19 @@ def livekit_config(public_ip):
     safe_rtc['stun_server_count'] = len(rtc.get('stun_servers') or [])
     safe_rtc['interfaces_configured'] = bool(rtc.get('interfaces'))
     safe_rtc['ips_configured'] = bool(rtc.get('ips'))
+    webhook = config.get('webhook') or {}
+    urls = [str(u) for u in (webhook.get('urls') or [])]
+    from urllib.parse import urlsplit
+    targets = [urlsplit(u) for u in urls]
+    emit('livekitWebhook', {
+        'configured': bool(urls), 'url_count': len(urls),
+        'calling_callback_path': [t.path == '/internal/provider/media/events' for t in targets],
+        'schemes': [t.scheme for t in targets],
+        'loopback_or_internal_host': [bool(t.hostname) and (t.hostname in ('127.0.0.1', 'localhost') or '.' not in t.hostname)
+                                      for t in targets],
+        'api_key_set': bool(webhook.get('api_key')),
+        'api_key_in_keys': bool(webhook.get('api_key')) and webhook.get('api_key') in (config.get('keys') or {}),
+        'api_key_is_callings': calling_key_matches(webhook.get('api_key'))})
     container = json.loads(sh('docker', 'inspect', 'lk-server') or '[{}]')[0]
     host = container.get('HostConfig', {})
     emit('livekitConfig', {'rtc': safe_rtc, 'turn': {k: turn.get(k) for k in ('enabled', 'udp_port', 'tls_port', 'external_tls')},
@@ -303,6 +324,65 @@ def active_media():
     query = "SELECT current_state, count(*) FROM calls WHERE current_state NOT IN ('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED') GROUP BY 1;"
     output = sh('docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'psql', '-XAtq', '-U', 'postgres', '-d', 'cfmeet_calling', '-c', query)
     emit('activeCalls', [line.split('|') for line in (output or '').splitlines()] if output is not None else 'UNREADABLE')
+
+
+CONNECT_PATH_SQL = r"""
+WITH ev AS (
+  SELECT event_kind, outcome, identity_status, received_at, processed_at, occurred_at
+    FROM call_media_provider_events WHERE received_at > now() - interval '7 days'),
+kinds AS (
+  SELECT coalesce(json_agg(json_build_object('kind', event_kind, 'outcome', coalesce(outcome, 'UNPROCESSED'),
+           'identity', identity_status, 'count', n, 'lastReceivedHoursAgo', last_h,
+           'deliveryP50s', d50, 'deliveryMaxS', dmax, 'processingP50s', p50) ORDER BY event_kind, outcome), '[]')
+    FROM (SELECT event_kind, outcome, identity_status, count(*) n,
+                 round(extract(epoch FROM now() - max(received_at)) / 3600, 1) last_h,
+                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM received_at - occurred_at))::numeric, 2) d50,
+                 round(max(extract(epoch FROM received_at - occurred_at))::numeric, 2) dmax,
+                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM processed_at - received_at))::numeric, 3) p50
+            FROM ev GROUP BY 1, 2, 3) k),
+connected AS (
+  SELECT c.call_id, c.occurred_at connected_at,
+         (SELECT max(a.occurred_at) FROM call_events a WHERE a.call_id = c.call_id
+             AND a.event_type = 'CALL_STATE_CHANGED' AND a.to_state = 'ANSWERED') answered_at,
+         (SELECT max(e.processed_at) FROM call_media_provider_events e WHERE e.call_id = c.call_id
+             AND e.event_kind = 'PARTICIPANT_JOINED' AND e.processed_at <= c.occurred_at + interval '1 second') last_join,
+         (SELECT count(*) FROM call_media_provider_events e WHERE e.call_id = c.call_id
+             AND e.event_kind = 'PARTICIPANT_JOINED') joins
+    FROM call_events c
+   WHERE c.event_type = 'CALL_STATE_CHANGED' AND c.to_state = 'CONNECTED'
+     AND c.occurred_at > now() - interval '7 days'),
+gaps AS (
+  SELECT extract(epoch FROM connected_at - answered_at) answer_to_connect,
+         extract(epoch FROM connected_at - last_join) join_to_connect, joins FROM connected)
+SELECT json_build_object(
+  'providerEvents7d', (SELECT * FROM kinds),
+  'connectedCalls7d', (SELECT count(*) FROM gaps),
+  'answerToConnectSeconds', (SELECT json_build_object(
+      'p50', round(percentile_cont(0.5) WITHIN GROUP (ORDER BY answer_to_connect)::numeric, 2),
+      'p90', round(percentile_cont(0.9) WITHIN GROUP (ORDER BY answer_to_connect)::numeric, 2),
+      'max', round(max(answer_to_connect)::numeric, 2)) FROM gaps),
+  'connectWithin2sOfProcessedJoin', (SELECT count(*) FROM gaps WHERE join_to_connect BETWEEN -1 AND 2),
+  'connectLaterThanLastProcessedJoin', (SELECT count(*) FROM gaps WHERE join_to_connect > 2),
+  'connectedWithoutAnyJoinEvent', (SELECT count(*) FROM gaps WHERE joins = 0),
+  'joinToConnectSeconds', (SELECT json_build_object(
+      'p50', round(percentile_cont(0.5) WITHIN GROUP (ORDER BY join_to_connect)::numeric, 2),
+      'p90', round(percentile_cont(0.9) WITHIN GROUP (ORDER BY join_to_connect)::numeric, 2)) FROM gaps
+      WHERE join_to_connect IS NOT NULL));
+"""
+
+
+def connect_path():
+    """Count-only: do LiveKit callbacks reach Calling, and does the webhook or the reconcile tick
+    move ANSWERED to CONNECTED? Aggregates only; no ids, identities or payloads."""
+    output = sh('docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'psql', '-XAtq', '-U', 'postgres',
+                '-d', 'cfmeet_calling', '-c', CONNECT_PATH_SQL)
+    try:
+        emit('callConnectPath', json.loads(output) if output else 'UNREADABLE')
+    except ValueError:
+        emit('callConnectPath', 'UNPARSEABLE')
+    pattern = re.compile(r'webhook|callback|participant_joined|reconcil|connected on verified', re.I)
+    lines = sh('docker', 'logs', '--since', '24h', 'cfmeet-calling', timeout=120) or ''
+    emit('callingConnectLogTemplates', histogram([l for l in lines.splitlines() if pattern.search(l)], top=25))
 
 
 def probe_latency(public_ip):
@@ -575,7 +655,7 @@ def livekit_timelines():
 
 def run():
     public_ip = socket.gethostbyname('api.cfmeet.com')
-    for step in (livekit_timelines, lambda: media_path_facts(public_ip), host_resources, kernel_events, sysstat_history, container_resources,
+    for step in (connect_path, livekit_timelines, lambda: media_path_facts(public_ip), host_resources, kernel_events, sysstat_history, container_resources,
                  network_state, lambda: livekit_config(public_ip), active_media, lambda: probe_latency(public_ip), window_logs, client_logs):
         try:
             step()

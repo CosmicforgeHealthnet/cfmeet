@@ -13,7 +13,6 @@
 //!
 //! Every verifier — v1 middleware, v2 actor resolution, the refresh endpoint and the
 //! Developer Platform session bridge — calls [`authorize_user_token`].
-use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -36,7 +35,11 @@ pub const SESSION_ABSOLUTE_LIFETIME_DAYS: i64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {
+    /// Historical: email-and-password sign-in (no longer issued; kept for stored rows).
     Password,
+    /// Passwordless sign-in with an emailed one-time code or magic link.
+    EmailOtp,
+    PhoneOtp,
     Google,
     LegacyRefresh,
 }
@@ -45,6 +48,8 @@ impl AuthMethod {
     fn as_str(self) -> &'static str {
         match self {
             AuthMethod::Password => "PASSWORD",
+            AuthMethod::EmailOtp => "EMAIL_OTP",
+            AuthMethod::PhoneOtp => "PHONE_OTP",
             AuthMethod::Google => "GOOGLE",
             AuthMethod::LegacyRefresh => "LEGACY_REFRESH",
         }
@@ -58,6 +63,8 @@ pub enum RevokeReason {
     UserRevoked,
     RefreshReuse,
     AdminRevoked,
+    /// The account's sign-in identity changed (email change or revert).
+    CredentialsChanged,
 }
 
 impl RevokeReason {
@@ -68,6 +75,7 @@ impl RevokeReason {
             RevokeReason::UserRevoked => "USER_REVOKED",
             RevokeReason::RefreshReuse => "REFRESH_REUSE",
             RevokeReason::AdminRevoked => "ADMIN_REVOKED",
+            RevokeReason::CredentialsChanged => "CREDENTIALS_CHANGED",
         }
     }
 }
@@ -75,22 +83,29 @@ impl RevokeReason {
 /// Runtime policy read once from the environment (no secret values).
 #[derive(Debug, Clone)]
 pub struct AuthPolicy {
-    /// `exchange_code` (one-time code, ACC-005) or `legacy_query` (tokens in the redirect
-    /// URL, kept only until the live web client adopts the exchange endpoint).
+    /// `exchange_code` (one-time code, ACC-005; the default) or `legacy_query` (tokens in
+    /// the redirect URL; explicit opt-in only).
     pub google_token_delivery: GoogleTokenDelivery,
     /// Require the browser-binding cookie set by the OAuth start redirect.
     pub google_browser_binding: bool,
     /// Header set by the trusted reverse proxy with the client address (for example
-    /// `x-real-ip`). Unset: per-address limits are off (the proxy address would be shared).
+    /// `x-real-ip`, which the host nginx overwrites with `$remote_addr`). Unset: per-address
+    /// limits are off (the proxy address would be shared).
     pub client_ip_header: Option<axum::http::HeaderName>,
+    /// S1: how many trusted proxies APPEND to the header (`AUTH_TRUSTED_PROXY_HOPS`, 1-5,
+    /// default 1). The address is the entry that many places from the RIGHT: the one the
+    /// outermost trusted proxy wrote. Entries further left were supplied by the visitor
+    /// (a forged `X-Forwarded-For`) and are never used. With a header the proxy overwrites
+    /// (`X-Real-IP $remote_addr`) there is one entry and the default is right.
+    pub trusted_proxy_hops: usize,
     /// ACC-022: the `status` string of the v1 sign-in responses (register, login, Google
-    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). `ACCOUNT_STATUS_FORMAT=canonical`
-    /// returns the contract value (`pending_verification`); the default `legacy` keeps the
-    /// historical `pendingverification` spelling until every deployed client accepts both.
+    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). By default the contract value
+    /// (`pending_verification`); `ACCOUNT_STATUS_FORMAT=legacy` keeps the historical
+    /// `pendingverification` spelling (explicit opt-in only; both clients accept both).
     /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
     pub status_format: AccountStatusFormat,
-    /// ACC-026: self-deactivation needs the current password or a recent sign-in
-    /// (`ACCOUNT_DEACTIVATION_REQUIRE_REAUTH`, default on).
+    /// ACC-026: self-deactivation needs a step-up confirmation (an emailed code, see
+    /// [`crate::services::step_up`]) (`ACCOUNT_DEACTIVATION_REQUIRE_REAUTH`, default on).
     pub deactivation_requires_reauth: bool,
     /// ACC-026: how recent a sign-in counts as re-authentication
     /// (`ACCOUNT_REAUTH_MAX_AGE_SECS`, default 600, bounded 60-3600).
@@ -107,6 +122,12 @@ pub struct AuthPolicy {
     /// (`EMAIL_VERIFICATION_GRACE_UNTIL`, RFC 3339). Unset: they are never refused at
     /// sign-in (they are prompted to verify instead).
     pub email_verification_grace_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Multi-device policy (web device limit, linking window, proof window, email step-up,
+    /// E2EE enrollment gate). See [`crate::services::account_devices`].
+    pub devices: crate::services::account_devices::DevicePolicy,
+    /// Fixed-code app-review / acceptance accounts (`AUTH_TEST_ACCOUNTS`; see
+    /// [`crate::services::passwordless::TestAccounts`]).
+    pub test_accounts: crate::services::passwordless::TestAccounts,
 }
 
 /// ACC-016: enforcement points for unverified (pending) accounts.
@@ -117,7 +138,9 @@ pub enum EmailVerificationEnforcement {
     /// The Communications Hub relay and the Messaging bridge refuse accounts without a
     /// verified email address (`EMAIL_VERIFICATION_REQUIRED`); meetings stay usable.
     Communications,
-    /// As `Communications`, and password sign-in refuses pending accounts.
+    /// As `Communications`, and sign-in refuses pending accounts. With passwordless
+    /// sign-in a correct code proves the address, so this only matters for Google-less
+    /// legacy flows; kept for configuration compatibility.
     Login,
 }
 
@@ -172,8 +195,10 @@ impl AuthPolicy {
             .to_ascii_lowercase()
             .as_str()
         {
-            "exchange_code" => GoogleTokenDelivery::ExchangeCode,
-            _ => GoogleTokenDelivery::LegacyQuery,
+            // Gap audit A3: the one-time exchange code is the default (both first-party
+            // clients redeem it); tokens in the redirect URL only on explicit opt-in.
+            "legacy_query" => GoogleTokenDelivery::LegacyQuery,
+            _ => GoogleTokenDelivery::ExchangeCode,
         };
         let google_browser_binding = !matches!(
             get("GOOGLE_OAUTH_BROWSER_BINDING")
@@ -187,14 +212,20 @@ impl AuthPolicy {
             .map(|h| h.trim().to_ascii_lowercase())
             .filter(|h| !h.is_empty())
             .and_then(|h| axum::http::HeaderName::from_bytes(h.as_bytes()).ok());
+        let trusted_proxy_hops = get("AUTH_TRUSTED_PROXY_HOPS")
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 5);
         let status_format = match get("ACCOUNT_STATUS_FORMAT")
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase()
             .as_str()
         {
-            "canonical" => AccountStatusFormat::Canonical,
-            _ => AccountStatusFormat::Legacy,
+            // Gap audit A18: the contract spelling is the default (both first-party clients
+            // accept both); the historical `pendingverification` only on explicit opt-in.
+            "legacy" => AccountStatusFormat::Legacy,
+            _ => AccountStatusFormat::Canonical,
         };
         let deactivation_requires_reauth = !matches!(
             get("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH")
@@ -223,12 +254,21 @@ impl AuthPolicy {
                 .and_then(|v| chrono::DateTime::parse_from_rfc3339(v.trim()).ok())
                 .map(|t| t.with_timezone(&chrono::Utc))
         };
+        let mut devices = crate::services::account_devices::DevicePolicy::from_lookup(&get);
+        devices.declaration_window_secs = reauth_max_age_secs;
+        // A misconfiguration here is a startup refusal (fail closed), never a silent
+        // production backdoor.
+        let test_accounts = crate::services::passwordless::TestAccounts::from_lookup(&get)
+            .unwrap_or_else(|reason| panic!("{reason}"));
         Self {
+            devices,
+            test_accounts,
             email_verification_enforce_from: instant("EMAIL_VERIFICATION_ENFORCE_FROM"),
             email_verification_grace_until: instant("EMAIL_VERIFICATION_GRACE_UNTIL"),
             google_token_delivery,
             google_browser_binding,
             client_ip_header,
+            trusted_proxy_hops,
             status_format,
             deactivation_requires_reauth,
             reauth_max_age_secs,
@@ -283,13 +323,48 @@ impl AuthPolicy {
         Ok(())
     }
 
-    /// The client address from the trusted proxy header (first entry), if configured.
+    /// S1: the client address from the trusted proxy header, if configured: the entry
+    /// [`Self::trusted_proxy_hops`] places from the right (what the trusted proxy wrote),
+    /// never a visitor-supplied entry further left. Only a well-formed IP address counts
+    /// (normalized, IPv4-mapped IPv6 as IPv4), so a forged value can neither pick another
+    /// limit bucket by spelling nor reach a log as free text.
     pub fn client_ip(&self, headers: &axum::http::HeaderMap) -> Option<String> {
         let name = self.client_ip_header.as_ref()?;
-        let raw = headers.get(name)?.to_str().ok()?;
-        let first = raw.split(',').next()?.trim();
-        (!first.is_empty() && first.len() <= 64).then(|| first.to_string())
+        // Several header lines are one list (RFC 9110 5.3): the proxy's line is the last.
+        let mut entries: Vec<&str> = Vec::new();
+        for value in headers.get_all(name) {
+            entries.extend(value.to_str().ok()?.split(','));
+        }
+        let index = entries.len().checked_sub(self.trusted_proxy_hops)?;
+        parse_client_address(entries[index])
     }
+}
+
+/// One forwarded-header entry as a normalized IP address (`203.0.113.7`, `[2001:db8::1]`,
+/// `203.0.113.7:4711`, `"[2001:db8::1]:4711"` accepted), or `None`.
+fn parse_client_address(entry: &str) -> Option<String> {
+    use std::net::{IpAddr, SocketAddr};
+    let raw = entry.trim().trim_matches('"');
+    if raw.is_empty() || raw.len() > 64 {
+        return None;
+    }
+    let ip = raw
+        .parse::<IpAddr>()
+        .ok()
+        .or_else(|| raw.parse::<SocketAddr>().ok().map(|a| a.ip()))
+        .or_else(|| {
+            raw.strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .and_then(|r| r.parse::<IpAddr>().ok())
+        })?;
+    let ip = match ip {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(v6)),
+        v4 => v4,
+    };
+    Some(ip.to_string())
 }
 
 /// `403 EMAIL_VERIFICATION_REQUIRED` (ACC-016).
@@ -330,11 +405,242 @@ pub async fn open_session_by_reference(
     environment_id: Uuid,
     reference: &str,
 ) -> ApiResult<Option<Uuid>> {
-    Ok(list_sessions(db, user_id, false, None)
+    // Gap audit A21: every open session is considered, not only the newest 100.
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id FROM account_sessions \
+              WHERE user_id = $1 AND revoked_at IS NULL AND absolute_expires_at > now()",
+            [user_id.into()],
+        ))
+        .await?;
+    for row in rows {
+        let id: Uuid = row.try_get("", "id")?;
+        if session_reference(environment_id, id) == reference {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// Gap audit A17: whether `name` is taken by another account, regardless of case
+/// (`Alice` and `alice` are one username).
+pub async fn username_taken<C: ConnectionTrait>(
+    db: &C,
+    name: &str,
+    except: Option<Uuid>,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM users WHERE LOWER(username) = LOWER($1) \
+               AND ($2::uuid IS NULL OR id <> $2) LIMIT 1",
+            [name.into(), except.into()],
+        ))
         .await?
-        .into_iter()
-        .map(|s| s.session_id)
-        .find(|id| session_reference(environment_id, *id) == reference))
+        .is_some())
+}
+
+/// Gap audit A13: tells the account owner of a security event by email (best effort:
+/// queued in the durable email ledger; a failure is logged, never returned). Accounts
+/// without a deliverable address (guests) get nothing.
+pub async fn notify_security(
+    state: &AppState,
+    user_id: Uuid,
+    notice: crate::services::email::SecurityNotice,
+    dedupe: &str,
+) {
+    let user = match users::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) if u.role != users::UserRole::Guest && !u.email.trim().is_empty() => u,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::warn!(%user_id, "security notice skipped: {e}");
+            return;
+        }
+    };
+    if let Err(e) = state
+        .email_service
+        .send_security_notice(&user.email, &user.username, notice, dedupe)
+        .await
+    {
+        tracing::warn!(%user_id, notice = notice.key(), "security notice not queued: {e}");
+    }
+}
+
+/// Gap audit A17: case-insensitive uniqueness of one identity field.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityUniqueness {
+    /// True when the database enforces it (the unique index exists).
+    pub enforced: bool,
+    /// Accounts that differ only by case, grouped (at most 100 groups); empty when none.
+    pub duplicate_groups: Vec<Vec<Uuid>>,
+}
+
+/// Gap audit A17: the case-insensitive uniqueness report.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityDuplicatesReport {
+    pub email: IdentityUniqueness,
+    pub username: IdentityUniqueness,
+}
+
+pub async fn identity_report<C: ConnectionTrait>(db: &C) -> ApiResult<IdentityDuplicatesReport> {
+    let mut out = Vec::new();
+    for (column, index) in [
+        ("email", "uq_users_email_lower"),
+        ("username", "uq_users_username_lower"),
+    ] {
+        let enforced = db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS x FROM pg_indexes WHERE tablename = 'users' AND indexname = $1",
+                [index.into()],
+            ))
+            .await?
+            .is_some();
+        let rows = db
+            .query_all(Statement::from_string(
+                DbBackend::Postgres,
+                format!(
+                    "SELECT array_agg(id ORDER BY created_at) AS ids FROM users \
+                      GROUP BY LOWER({column}) HAVING count(*) > 1 LIMIT 100"
+                ),
+            ))
+            .await?;
+        let mut groups = Vec::new();
+        for r in rows {
+            groups.push(r.try_get::<Vec<Uuid>>("", "ids")?);
+        }
+        out.push(IdentityUniqueness {
+            enforced,
+            duplicate_groups: groups,
+        });
+    }
+    let username = out.pop().expect("two fields");
+    let email = out.pop().expect("two fields");
+    Ok(IdentityDuplicatesReport { email, username })
+}
+
+/// Gap audit A17: creates each case-insensitive unique index whose field has no
+/// case-only duplicates left (idempotent).
+pub async fn enforce_identity_uniqueness<C: ConnectionTrait>(db: &C) -> ApiResult<()> {
+    db.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT ensure_case_insensitive_identity()",
+    ))
+    .await?;
+    Ok(())
+}
+
+/// How long after deactivating their own account a person can sign back in to reactivate
+/// it (gap audit A16).
+pub const SELF_REACTIVATION_DAYS: i64 = 30;
+
+/// Gap audit A16: whether the account's most recent status change is its owner's own
+/// deactivation, made less than [`SELF_REACTIVATION_DAYS`] ago. An account an
+/// administrator deactivated or suspended is never reactivated by signing in.
+pub async fn self_reactivation_allowed<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+) -> ApiResult<bool> {
+    let row = db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT event_type, actor_kind, actor_user_id, \
+                    occurred_at > now() - make_interval(days => $2) AS recent \
+             FROM account_security_events \
+             WHERE user_id = $1 AND outcome = 'SUCCESS' \
+               AND event_type IN ('ACCOUNT_DEACTIVATED', 'ACCOUNT_STATUS_CHANGED', 'ACCOUNT_REACTIVATED') \
+             ORDER BY seq DESC LIMIT 1",
+            [user_id.into(), (SELF_REACTIVATION_DAYS as i32).into()],
+        ))
+        .await?;
+    let Some(row) = row else { return Ok(false) };
+    let kind: String = row.try_get("", "event_type")?;
+    let actor: String = row.try_get("", "actor_kind")?;
+    let actor_user: Option<Uuid> = row.try_get("", "actor_user_id")?;
+    let recent: bool = row.try_get("", "recent")?;
+    Ok(kind == "ACCOUNT_DEACTIVATED" && actor == "USER" && actor_user == Some(user_id) && recent)
+}
+
+/// Whether an account with this id exists.
+pub async fn user_exists<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
+    Ok(users::Entity::find_by_id(user_id).one(db).await?.is_some())
+}
+
+/// Gap audit A21: whether `session_id` is one of the user's sessions (open or ended),
+/// whatever its age.
+pub async fn owns_session<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM account_sessions WHERE id = $1 AND user_id = $2",
+            [session_id.into(), user_id.into()],
+        ))
+        .await?
+        .is_some())
+}
+
+/// Gap audit A21: the most sign-ins an account keeps open at once
+/// (`ACCOUNT_MAX_OPEN_SESSIONS`, default 50, at least 5). Signing in past it ends the
+/// least recently used sign-ins (SUPERSEDED), never the new one.
+pub fn max_open_sessions() -> i64 {
+    static MAX: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("ACCOUNT_MAX_OPEN_SESSIONS")
+            .ok()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(50)
+            .max(5)
+    })
+}
+
+/// Ends the user's open sign-ins beyond [`max_open_sessions`] (least recently used
+/// first, `keep` excepted) and fans each end out. Returns how many ended.
+pub async fn enforce_session_cap(state: &AppState, user_id: Uuid, keep: Uuid) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'SUPERSEDED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL \
+                              AND absolute_expires_at > now() \
+                            ORDER BY COALESCE(last_refreshed_at, created_at) DESC, id \
+                            OFFSET $3) \
+                AND revoked_at IS NULL \
+              RETURNING id",
+            [
+                user_id.into(),
+                keep.into(),
+                (max_open_sessions() - 1).into(),
+            ],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("SESSION_REVOKED", Outcome::Success)
+                .by_user(user_id)
+                .session(session_id)
+                .detail(json!({"trigger":"SESSION_CAP"})),
+        )
+        .await;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a superseded sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 pub fn normalize_email(email: &str) -> String {
@@ -343,8 +649,8 @@ pub fn normalize_email(email: &str) -> String {
 
 /// Case-insensitive account lookup. If legacy rows differ only by case, the exact
 /// spelling wins; an ambiguous match is treated as "no account" and logged.
-pub async fn find_user_by_email(
-    db: &DatabaseConnection,
+pub async fn find_user_by_email<C: ConnectionTrait>(
+    db: &C,
     email: &str,
 ) -> ApiResult<Option<users::Model>> {
     let normalized = normalize_email(email);
@@ -371,15 +677,6 @@ pub async fn find_user_by_email(
             }
         }
     }
-}
-
-/// A bcrypt hash used to keep "unknown account" and "wrong password" equally slow.
-pub fn timing_equalizer_hash() -> &'static str {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| {
-        bcrypt::hash("cfmeet-timing-equalizer", bcrypt::DEFAULT_COST)
-            .unwrap_or_else(|_| String::new())
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +742,28 @@ pub async fn authorize_user_token(
     user_id: Uuid,
     expected: TokenKind,
 ) -> ApiResult<TokenAuthorization> {
+    authorize_inner(state, claims, user_id, expected, false).await
+}
+
+/// As [`authorize_user_token`], but also accepts the sign-in of a mobile whose
+/// primary-mobile replacement is still pending. Used ONLY by the device endpoints, so
+/// the new mobile can complete (or cancel) its replacement.
+pub async fn authorize_user_token_allow_pending(
+    state: &AppState,
+    claims: &Claims,
+    user_id: Uuid,
+    expected: TokenKind,
+) -> ApiResult<TokenAuthorization> {
+    authorize_inner(state, claims, user_id, expected, true).await
+}
+
+async fn authorize_inner(
+    state: &AppState,
+    claims: &Claims,
+    user_id: Uuid,
+    expected: TokenKind,
+    allow_pending_device: bool,
+) -> ApiResult<TokenAuthorization> {
     if !claims.is_kind(expected) {
         return Err(ApiError::Unauthorized("Invalid token type".into()));
     }
@@ -461,16 +780,43 @@ pub async fn authorize_user_token(
                 .db
                 .query_one(Statement::from_sql_and_values(
                     DbBackend::Postgres,
-                    "SELECT user_id, revoked_at IS NULL AND absolute_expires_at > now() AS open \
-                     FROM account_sessions WHERE id = $1",
+                    "SELECT s.user_id, s.revoked_at IS NULL AND s.absolute_expires_at > now() AS open, \
+                            d.state AS device_state, s.device_id IS NULL AS unclassified, \
+                            s.authenticated_at \
+                     FROM account_sessions s LEFT JOIN account_devices d ON d.id = s.device_id \
+                     WHERE s.id = $1",
                     [session_id.into()],
                 ))
                 .await?
                 .ok_or_else(revoked)?;
             let owner: Uuid = row.try_get("", "user_id")?;
             let open: bool = row.try_get("", "open")?;
-            if owner != user_id || !open {
+            let device_state: Option<String> = row.try_get("", "device_state")?;
+            if owner != user_id || !open || device_state.as_deref() == Some("REVOKED") {
                 return Err(revoked());
+            }
+            // Multi-device policy: a new mobile waiting for its primary-mobile replacement
+            // has no authority until the replacement completes.
+            if device_state.as_deref() == Some("REPLACEMENT_PENDING") && !allow_pending_device {
+                return Err(ApiError::domain(
+                    crate::error::ErrorCode::DeviceReplacementPending,
+                    "Confirm this phone as your primary mobile first (approve it from a trusted device or with the emailed code)",
+                ));
+            }
+            // Device declaration enforcement (compatibility mode while unset): an
+            // unclassified sign-in past its declaration window has no authority. The device
+            // endpoints (allow_pending_device) still answer it, so the client can explain.
+            let unclassified: bool = row.try_get("", "unclassified")?;
+            if unclassified && !allow_pending_device {
+                let authenticated_at: chrono::DateTime<chrono::Utc> =
+                    row.try_get("", "authenticated_at")?;
+                if state
+                    .auth_policy
+                    .devices
+                    .unclassified_refused(authenticated_at, chrono::Utc::now())
+                {
+                    return Err(crate::services::account_devices::declaration_required());
+                }
             }
             Ok(TokenAuthorization {
                 session_verified: true,
@@ -544,6 +890,10 @@ pub async fn start_session(
         .await?
         .ok_or_else(|| ApiError::InternalError("session was not created".into()))?;
     let auth_time: i64 = row.try_get("", "auth_time")?;
+    // Gap audit A21: a bounded number of open sign-ins per account.
+    if let Err(e) = enforce_session_cap(state, user.id, session_id).await {
+        tracing::warn!(user_id = %user.id, "session cap not enforced: {e}");
+    }
     let (access_token, refresh_token) = state.jwt_service.session_tokens(
         user.id,
         &role_claim(user),
@@ -564,8 +914,17 @@ pub async fn rotate_session(
     state: &AppState,
     claims: &Claims,
     user: &users::Model,
+    device_proof: Option<&crate::services::account_devices::DeviceProof>,
 ) -> ApiResult<(String, String)> {
     let session_id = claims.session_id().ok_or_else(revoked)?;
+    // A device-bound sign-in refreshes only with a proof of the device key.
+    crate::services::account_devices::check_refresh_binding(
+        &state.db,
+        &state.auth_policy.devices,
+        session_id,
+        device_proof,
+    )
+    .await?;
     let presented = claims.refresh_id();
     let txn = state.db.begin().await?;
     let row = txn
@@ -604,6 +963,20 @@ pub async fn rotate_session(
         .await?;
         txn.commit().await?;
         tracing::warn!(%session_id, "refresh token reuse detected; session revoked");
+        // Gap audit A10: a stolen refresh token ends the sign-in everywhere, including the
+        // Hub, Messaging and Calling credentials tied to it (best effort; durable events).
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user.id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a reused sign-in failed: {e}");
+        }
+        notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::RefreshTokenReuse,
+            &session_id.to_string(),
+        )
+        .await;
         return Err(ApiError::Unauthorized(
             "This session has ended. Please sign in again.".into(),
         ));
@@ -625,6 +998,36 @@ pub async fn rotate_session(
         session_id,
         next,
     )
+}
+
+/// Gap audit A10: sign-ins past their absolute lifetime are recorded EXPIRED and their
+/// end is fanned out like any other (Hub, Messaging and Calling credentials of the sign-in
+/// end with it). Bounded per call; multi-instance safe (`SKIP LOCKED`).
+pub async fn sweep_expired_sessions(state: &AppState) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'EXPIRED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE revoked_at IS NULL AND absolute_expires_at <= now() \
+                            ORDER BY absolute_expires_at LIMIT 200 FOR UPDATE SKIP LOCKED) \
+              RETURNING id, user_id",
+            [],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        let user_id: Uuid = row.try_get("", "user_id")?;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of an expired sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 /// Revoke one of the user's sessions. `false` if it was not open or not theirs.
@@ -668,7 +1071,38 @@ pub async fn revoke_all<C: ConnectionTrait>(
             [user_id.into(), reason.as_str().into()],
         ))
         .await?;
+    // Sign-out everywhere also ends every linked device (multi-device policy).
+    if reason == RevokeReason::LogoutAll {
+        crate::services::account_devices::revoke_all_devices(db, user_id).await?;
+    }
     Ok(result.rows_affected())
+}
+
+/// End every session of the account except `keep_session_id` (the one making the
+/// request) and return the ended session ids, so the caller can end what each of them
+/// holds (`communications::session_ended`). The account epoch is NOT advanced (that would
+/// also end the kept session).
+pub async fn revoke_others<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    keep_session_id: Uuid,
+    reason: RevokeReason,
+) -> ApiResult<Vec<Uuid>> {
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = $3 \
+             WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL RETURNING id",
+            [
+                user_id.into(),
+                keep_session_id.into(),
+                reason.as_str().into(),
+            ],
+        ))
+        .await?;
+    rows.into_iter()
+        .map(|r| r.try_get::<Uuid>("", "id").map_err(ApiError::from))
+        .collect()
 }
 
 /// One account session as shown to its owner.
@@ -676,7 +1110,8 @@ pub async fn revoke_all<C: ConnectionTrait>(
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
     pub session_id: Uuid,
-    /// PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward).
+    /// EMAIL_OTP, GOOGLE, PASSWORD (historical) or LEGACY_REFRESH (a pre-session sign-in
+    /// carried forward).
     pub auth_method: String,
     pub authenticated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -691,6 +1126,9 @@ pub struct SessionRecord {
     pub end_reason: Option<String>,
     /// True for the session the request was made with.
     pub current: bool,
+    /// The linked device this sign-in belongs to (`GET /api/v2/me/devices`); absent for
+    /// unclassified sign-ins.
+    pub device_id: Option<Uuid>,
 }
 
 /// The user's sessions, newest first (open ones, plus ended ones on request).
@@ -703,7 +1141,7 @@ pub async fn list_sessions(
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "SELECT id, auth_method, authenticated_at, created_at, last_refreshed_at,                     absolute_expires_at, client_label, revoked_at, revoke_reason,                     revoked_at IS NULL AND absolute_expires_at > now() AS open              FROM account_sessions              WHERE user_id = $1 AND ($2 OR (revoked_at IS NULL AND absolute_expires_at > now()))              ORDER BY created_at DESC LIMIT 100",
+            "SELECT id, auth_method, authenticated_at, created_at, last_refreshed_at,                     absolute_expires_at, client_label, revoked_at, revoke_reason, device_id,                     revoked_at IS NULL AND absolute_expires_at > now() AS open              FROM account_sessions              WHERE user_id = $1 AND ($2 OR (revoked_at IS NULL AND absolute_expires_at > now()))              ORDER BY created_at DESC LIMIT 100",
             [user_id.into(), include_ended.into()],
         ))
         .await?;
@@ -732,6 +1170,7 @@ pub async fn list_sessions(
                 ended_at: revoked_at.or((!open).then_some(expires_at)),
                 end_reason: r.try_get("", "revoke_reason")?,
                 current: current == Some(id),
+                device_id: r.try_get("", "device_id")?,
             })
         })
         .collect::<Result<Vec<_>, sea_orm::DbErr>>()
@@ -1034,6 +1473,8 @@ mod tests {
             typ: Some("access".into()),
             sid: sid.then(|| Uuid::new_v4().to_string()),
             rti: None,
+            iss: None,
+            aud: None,
         }
     }
 
@@ -1100,9 +1541,16 @@ mod tests {
     }
 
     #[test]
-    fn account_status_format_is_legacy_until_switched() {
+    fn account_status_format_is_canonical_unless_legacy_is_chosen() {
         use crate::models::users::UserStatus;
-        let legacy = AuthPolicy::from_lookup(|_| None).status_format;
+        assert_eq!(
+            AuthPolicy::from_lookup(|_| None).status_format,
+            AccountStatusFormat::Canonical
+        );
+        let legacy = AuthPolicy::from_lookup(|k| {
+            (k == "ACCOUNT_STATUS_FORMAT").then(|| " Legacy ".to_string())
+        })
+        .status_format;
         assert_eq!(legacy, AccountStatusFormat::Legacy);
         assert_eq!(
             legacy.render(&UserStatus::PendingVerification),
@@ -1129,9 +1577,20 @@ mod tests {
     }
 
     #[test]
-    fn policy_defaults_keep_live_client_compatibility_and_bind_browsers() {
+    fn policy_defaults_use_the_exchange_code_and_bind_browsers() {
         let p = AuthPolicy::from_lookup(|_| None);
-        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::LegacyQuery);
+        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::ExchangeCode);
+        assert_eq!(p.status_format, AccountStatusFormat::Canonical);
+        let legacy = AuthPolicy::from_lookup(|k| match k {
+            "GOOGLE_OAUTH_TOKEN_DELIVERY" => Some("legacy_query".into()),
+            "ACCOUNT_STATUS_FORMAT" => Some("legacy".into()),
+            _ => None,
+        });
+        assert_eq!(
+            legacy.google_token_delivery,
+            GoogleTokenDelivery::LegacyQuery
+        );
+        assert_eq!(legacy.status_format, AccountStatusFormat::Legacy);
         assert!(p.google_browser_binding);
         assert!(p.client_ip_header.is_none());
         let p = AuthPolicy::from_lookup(|k| match k {
@@ -1143,8 +1602,60 @@ mod tests {
         assert_eq!(p.google_token_delivery, GoogleTokenDelivery::ExchangeCode);
         assert!(!p.google_browser_binding);
         let mut h = axum::http::HeaderMap::new();
-        h.insert("x-real-ip", "203.0.113.7, 10.0.0.1".parse().unwrap());
+        h.insert("x-real-ip", "203.0.113.7".parse().unwrap());
         assert_eq!(p.client_ip(&h).as_deref(), Some("203.0.113.7"));
+    }
+
+    /// S1: a visitor-supplied entry (left of what the trusted proxy appended) is never the
+    /// address; malformed values are refused; the hop count selects from the right.
+    #[test]
+    fn client_address_is_the_entry_the_trusted_proxy_wrote() {
+        let policy = |hops: Option<&str>| {
+            let hops = hops.map(str::to_string);
+            AuthPolicy::from_lookup(move |k| match k {
+                "AUTH_CLIENT_IP_HEADER" => Some("X-Forwarded-For".into()),
+                "AUTH_TRUSTED_PROXY_HOPS" => hops.clone(),
+                _ => None,
+            })
+        };
+        let headers = |values: &[&str]| {
+            let mut h = axum::http::HeaderMap::new();
+            for v in values {
+                h.append("x-forwarded-for", v.parse().unwrap());
+            }
+            h
+        };
+        let one = policy(None);
+        assert_eq!(one.trusted_proxy_hops, 1);
+        // Forged first entry, real address appended by the proxy.
+        let forged = headers(&["198.51.100.1, 203.0.113.7"]);
+        assert_eq!(one.client_ip(&forged).as_deref(), Some("203.0.113.7"));
+        // Two header lines are one list; the proxy's line is last.
+        let lines = headers(&["198.51.100.1", "203.0.113.8"]);
+        assert_eq!(one.client_ip(&lines).as_deref(), Some("203.0.113.8"));
+        // Two trusted hops: the outer proxy's entry, never the visitor's.
+        let two = policy(Some("2"));
+        let chain = headers(&["198.51.100.1, 203.0.113.9, 10.0.0.2"]);
+        assert_eq!(two.client_ip(&chain).as_deref(), Some("203.0.113.9"));
+        // Fewer entries than trusted hops: no address (never a visitor value).
+        assert_eq!(two.client_ip(&headers(&["203.0.113.9"])), None);
+        // Normalization and refusal of non-addresses.
+        assert_eq!(
+            one.client_ip(&headers(&["[2001:db8::1]:4711"])).as_deref(),
+            Some("2001:db8::1")
+        );
+        assert_eq!(
+            one.client_ip(&headers(&["::ffff:203.0.113.7"])).as_deref(),
+            Some("203.0.113.7")
+        );
+        assert_eq!(
+            one.client_ip(&headers(&["203.0.113.7:51000"])).as_deref(),
+            Some("203.0.113.7")
+        );
+        assert_eq!(one.client_ip(&headers(&["unknown"])), None);
+        assert_eq!(one.client_ip(&headers(&["198.51.100.1, not-an-ip"])), None);
+        assert_eq!(policy(Some("99")).trusted_proxy_hops, 5);
+        assert_eq!(AuthPolicy::default().client_ip(&forged), None);
     }
 
     #[test]

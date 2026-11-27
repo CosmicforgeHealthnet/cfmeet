@@ -50,7 +50,7 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
         for method in item.as_object().unwrap().keys() {
             let m: Method = method.to_uppercase().parse().unwrap();
             let uri = fill(path);
-            let body = (m != Method::GET && m != Method::DELETE).then_some("{}");
+            let body = item[method].get("requestBody").is_some().then_some("{}");
             let (s, h, v) = raw(&app, m.clone(), &uri, &[], body).await;
             probed += 1;
             assert_ne!(code(&v), "ENDPOINT_NOT_FOUND", "{method} {path} not routed");
@@ -73,8 +73,21 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // POST / PUT / PATCH / DELETE) + 6 final-closure operations (organization-scope
     // Messaging relay GET / POST / PUT / PATCH / DELETE and its session tokens) + 11
     // Section 17 ORG-006 operations (teams, team members and policies relay) + the
-    // organization Messaging member resolution + Q&A restore.
-    assert_eq!(probed, 207, "all v2 operations probed");
+    // organization Messaging member resolution + Q&A restore + 13 multi-device policy
+    // operations (device policy, devices, declaration, revocation, linking, security log) +
+    // 9 Document 4 §3.1 Notification Service user operations (U1–U9 relay) + 4
+    // passwordless account-security operations (step-up request / verify, email change
+    // request / verify) + 7 gap-closure operations (my organization invitations, accept /
+    // decline one by id, operator owner appointment, registrant self-cancel, sign out other
+    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes, data export, account deletion, 4 two-step sign-in operations) + 4 gap audit G3 member calling operations (endpoints list / register / revoke, signaling credential) + 9 ADR 0064 / 0065 CF Meet Apps
+    // operations (authorize context / decision, my apps list / revoke, organization apps
+    // list / revoke, conference apps, app-context token, app-context keys).
+    // + 5 server-audit operations (conference extend; calendar feed read / create / delete and
+    // the token-authenticated feed).
+    // + 5 optional phone binding, privacy and removal operations.
+    // + 3 admin bridge owner-delivered export operations (organization export download;
+    // Messaging export deliveries and the claim-once).
+    assert_eq!(probed, 292, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

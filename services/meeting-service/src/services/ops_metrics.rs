@@ -104,6 +104,7 @@ counters!(
     organizations_shadow_failures,
     organizations_shadow_skipped,
     organizations_authority_failures,
+    organization_access_unscoped,
     organizations_relay_unavailable,
     organizations_projection_upserts,
     organizations_projection_failures,
@@ -120,10 +121,65 @@ counters!(
     email_complained,
     email_webhook_rejected,
     email_webhook_duplicates,
+    // Notification Service N5: provider events for messages the Notification Service sent,
+    // handed on to it (counts only).
+    email_webhook_forwarded,
+    email_webhook_forward_failures,
+    // Notification Service N0: lease renewal (S-8), bounce / complaint suppression (S-12)
+    // and invalid meeting-notice recipients that no longer block the others (S-11).
+    email_lease_lost,
+    email_suppressed,
+    meeting_notification_invalid_recipients,
+    notification_publications_acked,
+    notification_publications_dead,
+    notification_publications_retried,
+    notification_publications_expired,
+    notification_publications_unpublishable,
+    // Notification Service N12: the Account CRITICAL lane (codes and security notices).
+    // `critical_auto_failover` / `critical_possible_duplicate` / `critical_dead` /
+    // `critical_fallback_unavailable` page (D-9, meeting-service.rules.yml).
+    critical_enqueued_new,
+    critical_shadowed,
+    critical_unpublishable,
+    critical_acked,
+    critical_retried,
+    critical_rejected,
+    critical_dead,
+    critical_expired,
+    critical_auto_failover,
+    critical_operator_reroutes,
+    critical_possible_duplicate,
+    critical_fallback_unavailable,
+    critical_leases_granted,
+    critical_lease_revoked,
+    critical_lease_busy,
+    critical_completions,
+    critical_completion_after_reroute,
+    critical_fallback_drills,
     // Final completion: conference lifecycle (empty instant conferences, archive).
     conferences_empty_ended,
     conferences_archive_ended,
     conference_presence_checks_unknown,
+    // Passwordless sign-in (label-free; never addresses or codes).
+    auth_otp_requested,
+    auth_otp_sent,
+    auth_otp_verified,
+    auth_otp_wrong,
+    auth_otp_expired,
+    auth_otp_locked,
+    auth_magic_link_verified,
+    auth_account_created,
+    auth_test_account_sign_in,
+    auth_new_sign_in_alerts,
+    auth_step_up_requested,
+    auth_step_up_issued,
+    auth_email_change_requested,
+    auth_email_changed,
+    auth_email_change_reverted,
+    auth_admin_email_changed,
+    // Code emails (sign-in, step-up, email-change) accepted by the provider more than
+    // 30 seconds after they were queued.
+    auth_code_email_slow,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();

@@ -7,10 +7,17 @@
 
 pub mod admin;
 pub mod delegation;
+pub mod end_users;
+pub mod environment_origins;
 pub mod error;
 pub mod internal;
+pub mod meeting_platform;
 pub mod middleware;
+pub mod oauth;
+pub mod operator_commands;
+pub mod operator_reads;
 pub mod organization_scopes;
+pub mod user_tokens;
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -49,6 +56,17 @@ pub fn app(state: AppState) -> Router {
                 .merge(admin::routes())
                 .merge(delegation::routes())
                 .merge(organization_scopes::routes())
+                // ADR 0062 (CF Meet Platform "Build"): each behind a default-off flag.
+                .merge(end_users::routes())
+                .merge(user_tokens::routes())
+                .merge(environment_origins::routes())
+                .merge(meeting_platform::routes())
+                // ADR 0064 (CF Meet Apps): behind PLATFORM_ACCESS_OAUTH_ENABLED.
+                .merge(oauth::routes())
+                // ADR 0068: the admin bridge's operator reads.
+                .merge(operator_reads::routes())
+                // ADR 0068 A4: the admin bridge's identity commands.
+                .merge(operator_commands::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

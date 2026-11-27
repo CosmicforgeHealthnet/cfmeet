@@ -142,6 +142,9 @@ pub struct WebhookService {
     /// `true` once the process is shutting down: the worker finishes the delivery it is
     /// sending and releases the rest of its claimed batch (never abandons a send).
     stop: Option<tokio::sync::watch::Receiver<bool>>,
+    /// ADR 0064 (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`): ingestion also routes
+    /// install-target events to the installed apps' subscriptions.
+    install_events: bool,
 }
 
 pub(crate) fn ts(at: DateTime<Utc>) -> String {
@@ -338,7 +341,18 @@ impl WebhookService {
             client,
             clock: Arc::new(Utc::now),
             stop: None,
+            install_events: false,
         }
+    }
+
+    /// ADR 0064: the install routing pass of ingestion (default off).
+    pub fn with_install_events(mut self, on: bool) -> Self {
+        self.install_events = on;
+        self
+    }
+
+    pub fn install_events(&self) -> bool {
+        self.install_events
     }
 
     /// Observes the process's shutdown signal (the worker binary).
@@ -878,7 +892,223 @@ impl WebhookService {
         txn.commit().await?;
         Ok(row)
     }
+
+    /// ADR 0068 A4 (`partners.webhook-delivery.retry`, admin bridge only): a NEW delivery
+    /// of a dead-lettered (FAILED) delivery's event to its still ACTIVE subscription,
+    /// exactly like a customer replay. The new delivery's id is the bridge command's
+    /// Idempotency-Key, so the command is recorded and answered once.
+    pub async fn operator_retry(
+        &self,
+        operator: &str,
+        request: &crate::domain::RequestContext,
+        tenant_id: Uuid,
+        delivery: Uuid,
+        bridge: &crate::control::bridge_command::BridgeCommand,
+    ) -> Result<Value, ApiError> {
+        use crate::control::bridge_command::{self as bc, Subject};
+        const COMMAND: &str = "partners.webhook-delivery.retry";
+        let original = self
+            .db
+            .query_one(stmt(
+                "SELECT d.status, s.status AS subscription_state FROM devplat_webhook_deliveries d                  JOIN devplat_webhook_subscriptions s ON s.id = d.subscription_id                  WHERE d.id = $1 AND d.tenant_id = $2",
+                vec![delivery.into(), tenant_id.into()],
+            ))
+            .await?
+            .ok_or(ApiError(ErrorCode::NotFound))?;
+        if let Some((st, v)) = bc::prior(
+            &self.db,
+            bridge,
+            COMMAND,
+            Subject::WebhookDelivery,
+            delivery,
+        )
+        .await?
+        {
+            return Ok(bc::answer(
+                &st,
+                v,
+                retry_resource(&self.db, bridge.key).await?,
+            ));
+        }
+        let status: String = original.try_get("", "status")?;
+        let subscription: String = original.try_get("", "subscription_state")?;
+        if status != "FAILED" || subscription != "ACTIVE" {
+            return Err(ApiError(ErrorCode::InvalidState));
+        }
+        let now = self.now();
+        let id = bridge.key;
+        let shadow = self.settings.mode == DeliveryMode::Shadow;
+        let txn = self.db.begin().await?;
+        let inserted = txn
+            .execute(stmt(
+                "INSERT INTO devplat_webhook_deliveries (id, subscription_id, event_id, tenant_id,                    application_id, environment_id, replay_of, status, attempt_count, next_attempt_at,                    created_at, updated_at, completed_at)                  SELECT $1, d.subscription_id, d.event_id, d.tenant_id, d.application_id,                         d.environment_id, d.id, CASE WHEN $5 THEN 'SHADOW' ELSE 'PENDING' END, 0,                         $4, $4, $4, CASE WHEN $5 THEN $4 END                    FROM devplat_webhook_deliveries d                    JOIN devplat_webhook_subscriptions s ON s.id = d.subscription_id AND s.status = 'ACTIVE'                   WHERE d.id = $2 AND d.tenant_id = $3 AND d.status = 'FAILED'                  ON CONFLICT (id) DO NOTHING",
+                vec![
+                    id.into(),
+                    delivery.into(),
+                    tenant_id.into(),
+                    now.into(),
+                    shadow.into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+        if inserted == 0 {
+            // Changed concurrently, or the key already names another delivery.
+            return Err(ApiError(ErrorCode::VersionConflict));
+        }
+        let row = txn
+            .query_one(stmt(
+                "SELECT subscription_id, environment_id FROM devplat_webhook_deliveries WHERE id = $1",
+                vec![id.into()],
+            ))
+            .await?
+            .ok_or(ApiError(ErrorCode::InternalError))?;
+        let subscription_id: Uuid = row.try_get("", "subscription_id")?;
+        let environment_id: Uuid = row.try_get("", "environment_id")?;
+        activity::record_operator(
+            &txn,
+            operator,
+            request.request_id.as_str(),
+            request.correlation_id.as_str(),
+            activity::Event {
+                tenant_id,
+                action: "webhook.delivery_replayed",
+                target_type: "WEBHOOK_DELIVERY",
+                target_id: id.to_string(),
+                summary: json!({
+                    "environmentId": environment_id,
+                    "webhookId": subscription_id,
+                    "replayOf": delivery,
+                }),
+            },
+        )
+        .await?;
+        bc::record_result(
+            &txn,
+            bridge,
+            COMMAND,
+            Subject::WebhookDelivery,
+            delivery,
+            tenant_id,
+            "RETRIED",
+            None,
+        )
+        .await?;
+        let resource = retry_resource(&txn, id).await?;
+        txn.commit().await?;
+        Ok(bc::answer("RETRIED", None, resource))
+    }
+
+    /// DF1: a TEST event to one ACTIVE subscription — a new `webhook.test` event
+    /// (producer `cfmeet.developer-platform`, `"test": true` at the top level and in
+    /// `data`) and one delivery to that subscription only, delivered, signed and retried by
+    /// the worker exactly like every other delivery. At most [`TEST_EVENTS_PER_MINUTE`] per
+    /// subscription per minute (429 RATE_LIMITED). In shadow mode it is recorded SHADOW.
+    pub async fn send_test(
+        &self,
+        caller: &Caller,
+        scope: &Scope,
+        subscription: Uuid,
+    ) -> Result<DeliveryRow, ApiError> {
+        let now = self.now();
+        let txn = self.db.begin().await?;
+        let row = self.row(&txn, scope, subscription, true).await?;
+        if row.status != "ACTIVE" {
+            return Err(ApiError(ErrorCode::InvalidState));
+        }
+        let recent: i64 = txn
+            .query_one(stmt(
+                "SELECT count(*) FROM devplat_webhook_deliveries d \
+                   JOIN devplat_webhook_events e ON e.event_id = d.event_id \
+                  WHERE d.subscription_id = $1 AND d.created_at > $2 AND e.event_type = $3",
+                vec![
+                    subscription.into(),
+                    (now - chrono::Duration::minutes(1)).into(),
+                    TEST_EVENT_TYPE.into(),
+                ],
+            ))
+            .await?
+            .and_then(|r| r.try_get_by_index::<i64>(0).ok())
+            .unwrap_or(0);
+        if recent >= TEST_EVENTS_PER_MINUTE {
+            return Err(ApiError(ErrorCode::RateLimited));
+        }
+        let key = Uuid::new_v4().simple().to_string();
+        let event_id = format!("whe_{key}");
+        let body = json!({
+            "id": event_id,
+            "type": TEST_EVENT_TYPE,
+            "apiVersion": "v1",
+            "occurredAt": now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "test": true,
+            "data": {
+                "test": true,
+                "webhookId": subscription,
+                "environmentId": scope.environment_id,
+                "message": "Test event sent from the CF Meet developer portal. No real activity happened.",
+            },
+        });
+        txn.execute(stmt(
+            "INSERT INTO devplat_webhook_events (event_id, producer, source_event_id, event_type, \
+               tenant_id, application_id, environment_id, occurred_at, payload, received_at) \
+             VALUES ($1, 'cfmeet.developer-platform', $2, $3, $4, $5, $6, $7, $8, $7)",
+            vec![
+                event_id.clone().into(),
+                format!("test_{key}").into(),
+                TEST_EVENT_TYPE.into(),
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                now.into(),
+                body.into(),
+            ],
+        ))
+        .await?;
+        let id = Uuid::new_v4();
+        let shadow = self.settings.mode == DeliveryMode::Shadow;
+        txn.execute(stmt(
+            "INSERT INTO devplat_webhook_deliveries (id, subscription_id, event_id, tenant_id, \
+               application_id, environment_id, status, attempt_count, next_attempt_at, \
+               created_at, updated_at, completed_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $8 THEN 'SHADOW' ELSE 'PENDING' END, 0, \
+                     $7, $7, $7, CASE WHEN $8 THEN $7 END)",
+            vec![
+                id.into(),
+                subscription.into(),
+                event_id.clone().into(),
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                now.into(),
+                shadow.into(),
+            ],
+        ))
+        .await?;
+        let delivery = self.delivery_in_scope(&txn, scope, id).await?;
+        activity::record(
+            &txn,
+            caller,
+            activity::Event {
+                tenant_id: scope.tenant_id,
+                action: "webhook.test_sent",
+                target_type: "WEBHOOK_DELIVERY",
+                target_id: id.to_string(),
+                summary: json!({
+                    "environmentId": scope.environment_id,
+                    "webhookId": subscription,
+                }),
+            },
+        )
+        .await?;
+        txn.commit().await?;
+        Ok(delivery)
+    }
 }
+
+/// DF1: the event type of a test event (never produced by a real activity).
+pub const TEST_EVENT_TYPE: &str = "webhook.test";
+/// DF1: test events per subscription per minute.
+pub const TEST_EVENTS_PER_MINUTE: i64 = 5;
 
 fn cursor_of(page: &Page) -> Result<(Option<DateTime<Utc>>, Option<Uuid>), ApiError> {
     match page.cursor_key() {
@@ -886,6 +1116,18 @@ fn cursor_of(page: &Page) -> Result<(Option<DateTime<Utc>>, Option<Uuid>), ApiEr
         None if page.has_cursor() => Err(ApiError(ErrorCode::ValidationError)),
         None => Ok((None, None)),
     }
+}
+
+/// The delivery a bridge retry created, as the command answer shows it.
+async fn retry_resource<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Value, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT jsonb_build_object('deliveryId', id, 'retryOf', replay_of,                     'subscriptionId', subscription_id, 'environmentId', environment_id,                     'state', status, 'createdAt', created_at) AS v              FROM devplat_webhook_deliveries WHERE id = $1",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    Ok(row.try_get("", "v")?)
 }
 
 /// Startup check of an enabled deployment: every stored signing secret must be openable

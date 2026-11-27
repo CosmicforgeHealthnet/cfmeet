@@ -646,6 +646,19 @@ pub trait NumberingPort: Send + Sync {
         number_resource_id: Uuid,
         route: &DcnVoiceRoute,
     ) -> Result<(), PortError>;
+
+    /// Gap C10: `POST /internal/v1/number-usage` (`number-usage.report`) — one
+    /// `UsageReport` body (idempotent at Numbering per source key). `Denied`: Numbering
+    /// refused the report permanently; `Unavailable`: retry later.
+    async fn report_usage(&self, _report: &Value) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    /// Gap C10: `POST /internal/v1/number-risk-signals` (`number-risk.report`) — one
+    /// `RiskSignalReport` body (idempotent at Numbering per source key).
+    async fn report_risk_signal(&self, _signal: &Value) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
 }
 
 /// Not configured: every DCN operation fails closed (relay-number and enterprise paths are
@@ -873,5 +886,79 @@ impl NumberingPort for HttpNumbering {
             .await
             .map(|_| ())
             .map_err(port_error)
+    }
+
+    async fn report_usage(&self, report: &Value) -> Result<(), PortError> {
+        let outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        self.auth
+            .client()
+            .post_json(&outbound, "/internal/v1/number-usage", report)
+            .await
+            .map(|_| ())
+            .map_err(report_error)
+    }
+
+    async fn report_risk_signal(&self, signal: &Value) -> Result<(), PortError> {
+        let outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        self.auth
+            .client()
+            .post_json(&outbound, "/internal/v1/number-risk-signals", signal)
+            .await
+            .map(|_| ())
+            .map_err(report_error)
+    }
+}
+
+/// A Numbering report failure: authentication / authorization (`401` / `403`: the trust
+/// bundle does not grant the permission yet — an operator fixes it), rate limiting and
+/// every transport failure are retried; any other refusal is permanent (the report is
+/// dead-lettered, never resent forever).
+fn report_error(e: InternalCallError) -> PortError {
+    match e {
+        InternalCallError::Status {
+            status: 401 | 403 | 408 | 429,
+            ..
+        } => {
+            tracing::warn!(error = %e, "Numbering report not accepted yet; retrying later");
+            PortError::Unavailable
+        }
+        other => port_error(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(status: u16, code: Option<&str>) -> InternalCallError {
+        InternalCallError::Status {
+            target: ServiceId::numbering(),
+            status,
+            code: code.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn numbering_report_failures_retry_unless_numbering_refused_permanently() {
+        // Not granted yet / throttled / down: retried.
+        for s in [401, 403, 408, 429, 500, 503] {
+            assert_eq!(report_error(status(s, None)), PortError::Unavailable, "{s}");
+        }
+        assert_eq!(
+            report_error(InternalCallError::Timeout {
+                target: ServiceId::numbering()
+            }),
+            PortError::Unavailable
+        );
+        // Refused: permanent.
+        assert_eq!(report_error(status(404, None)), PortError::NotFound);
+        assert_eq!(
+            report_error(status(409, Some("USAGE_SOURCE_CONFLICT"))),
+            PortError::Denied("USAGE_SOURCE_CONFLICT".into())
+        );
+        assert_eq!(
+            report_error(status(422, None)),
+            PortError::Denied("DENIED".into())
+        );
     }
 }

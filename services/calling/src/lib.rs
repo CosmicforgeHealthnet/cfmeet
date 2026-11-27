@@ -24,6 +24,11 @@
 #[macro_use]
 pub mod domain;
 
+/// S2: account deletion / data download (Meeting Service only).
+pub mod account_privacy;
+/// ADR 0068 A7: owner events to the HQ admin bridge (abuse reports, incidents), only while
+/// `CF_ADMIN_BRIDGE_BASE_URL` is configured.
+pub mod admin_bridge_events;
 pub mod calls;
 pub mod config;
 pub mod endpoints;
@@ -34,7 +39,13 @@ pub mod media;
 pub mod metrics;
 pub mod middleware;
 pub mod models;
+/// Roadmap N7: publications to the Notification Service (missed call, voicemail and
+/// recording ready), only while `CF_NOTIFICATIONS_BASE_URL` is configured.
+pub mod notification_publications;
 pub mod numbering;
+pub mod operator_commands;
+pub mod operator_reads;
+pub mod organization_members;
 pub mod platform;
 pub mod privacy_relay;
 pub mod public_docs;

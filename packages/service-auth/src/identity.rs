@@ -44,6 +44,18 @@ pub mod services {
     /// relay), Calling, Messaging, Communications and operator tooling; owns no account
     /// credential, meeting, message or call data.
     pub const ORGANIZATIONS: &str = "cfmeet.organizations";
+    /// Unified Notification Service (Notification Service blueprint, owner decision D-0 /
+    /// D-13): the single notification authority (preferences, email, push, in-app,
+    /// operator alerts). Receives events from producer outboxes and the call-push fast
+    /// lane; asks owners (Account, Meeting, Messaging, Hub, Organizations) for recipients
+    /// and entitlement instead of copying them. Never in a synchronous business path.
+    pub const NOTIFICATIONS: &str = "cfmeet.notifications";
+    /// HQ admin bridge (ADR 0068): the ONLY doorway from the CosmicForge central admin
+    /// (HQ) into CF Meet. Authenticates HQ (mTLS, HMAC v2, Ed25519 staff token), checks the
+    /// signed access policy, calls the owning services with its own service token and the
+    /// acting staff member in `X-CF-Operator` (see [`crate::operator`]), and writes audit.
+    /// Owns no business data and never reads end-to-end encrypted content.
+    pub const ADMIN_BRIDGE: &str = "cfmeet.admin-bridge";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -147,6 +159,14 @@ impl ServiceId {
     pub fn organizations() -> Self {
         Self(services::ORGANIZATIONS.to_string())
     }
+
+    pub fn notifications() -> Self {
+        Self(services::NOTIFICATIONS.to_string())
+    }
+
+    pub fn admin_bridge() -> Self {
+        Self(services::ADMIN_BRIDGE.to_string())
+    }
 }
 
 impl fmt::Display for ServiceId {
@@ -244,6 +264,9 @@ mod tests {
             services::MESSAGING,
             services::DEVELOPER_PLATFORM,
             services::API_GATEWAY,
+            services::ORGANIZATIONS,
+            services::NOTIFICATIONS,
+            services::ADMIN_BRIDGE,
             "cfmeet.a1",
         ] {
             assert_eq!(ServiceId::parse(id).unwrap().as_str(), id);

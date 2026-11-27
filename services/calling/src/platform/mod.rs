@@ -33,6 +33,7 @@ pub mod projection;
 pub mod scopes;
 pub mod service_accounts;
 pub mod tenants;
+pub mod user_tokens;
 
 use sea_orm::DatabaseConnection;
 

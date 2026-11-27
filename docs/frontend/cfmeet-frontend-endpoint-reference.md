@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 246 |
-| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.3.0 | 73 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.16.0 | 129 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.16.0 | 98 |
-| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **619** |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
+| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
+| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
+| **Total** | | | **758** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.11.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -36,49 +36,106 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | POST | `/api/v1/api/meetings` | legacy API key | **DEPRECATED** Create a new meeting via API key | 201, 400, 401, 403 | — | `openapi/meeting-service.json#api_create_meeting` |
 | POST | `/api/v1/api/meetings/{id}/join` | legacy API key | Join a meeting via API key | 200, 400, 401, 403, 404, 409 | — | `openapi/meeting-service.json#api_join_meeting` |
 
+### Account devices (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/me/device-links` | account session | List link requests awaiting approval | 200, 403 | DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_list_pending_device_links` |
+| POST | `/api/v2/me/device-links` | account session | Request to link this device | 201, 401, 404, 409, 429 | DEVICE_DECLARATION_REFUSED, DEVICE_NOT_FOUND, DEVICE_PROOF_INVALID, RATE_LIMITED | `openapi/meeting-service.json#v2_create_device_link` |
+| GET | `/api/v2/me/device-links/{linkId}` | account session | Read my link request | 200, 410 | DEVICE_LINK_INVALID | `openapi/meeting-service.json#v2_get_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/approve` | account session | Approve a link request | 200, 400, 401, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID, VALIDATION_ERROR | `openapi/meeting-service.json#v2_approve_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/cancel` | account session | Cancel my link request | 200, 410 | DEVICE_LINK_INVALID | `openapi/meeting-service.json#v2_cancel_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/complete` | account session | Complete my link | 200, 401, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_complete_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/email-code` | account session | Email me a step-up code for this link | 200, 404, 410, 429 | DEVICE_LINK_INVALID, FEATURE_DISABLED, RATE_LIMITED | `openapi/meeting-service.json#v2_send_device_link_email_code` |
+| POST | `/api/v2/me/device-links/{linkId}/reject` | account session | Reject a link request | 200, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_reject_device_link` |
+| GET | `/api/v2/me/device-policy` | account session | Read my device policy and state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_device_policy` |
+| GET | `/api/v2/me/devices` | account session | List my devices | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_devices` |
+| POST | `/api/v2/me/devices/current` | account session | Declare this sign-in's device | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, DEVICE_DECLARATION_REFUSED, DEVICE_KEY_IN_USE, DEVICE_PROOF_INVALID, VALIDATION_ERROR | `openapi/meeting-service.json#v2_declare_my_device` |
+| POST | `/api/v2/me/devices/{deviceId}/revoke` | account session | Revoke a device | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_FOUND, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_revoke_my_device` |
+| GET | `/api/v2/me/security-events` | account session | Read my security log | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_security_events` |
+
 ### Account profile (v2)
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/api/v2/avatars/{avatarId}` | optional / public | Get an avatar image | 200, 404 | AVATAR_NOT_FOUND | `openapi/meeting-service.json#v2_get_avatar` |
+| DELETE | `/api/v2/me/avatar` | account session | Remove my avatar | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_my_avatar` |
+| PUT | `/api/v2/me/avatar` | account session | Upload my avatar | 200, 400, 401, 404, 413 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, REQUEST_TOO_LARGE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_upload_my_avatar` |
 | GET | `/api/v2/me/profile` | account session | Get my profile | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_profile` |
 | PATCH | `/api/v2/me/profile` | account session | Update my profile | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, USERNAME_TAKEN, VALIDATION_ERROR | `openapi/meeting-service.json#v2_update_my_profile` |
+
+### Account security (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| POST | `/api/v2/me/account/delete` | account session | Delete my account | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_my_account` |
+| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 400, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, REAUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_export_my_data` |
+| POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
+| POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
+| GET | `/api/v2/me/mfa` | account session | My two-step sign-in state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_mfa` |
+| POST | `/api/v2/me/mfa/disable` | account session | Turn two-step sign-in off | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_disable_my_mfa` |
+| POST | `/api/v2/me/mfa/totp/confirm` | account session | Enable the authenticator app | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_my_totp` |
+| POST | `/api/v2/me/mfa/totp/setup` | account session | Start enrolling an authenticator app | 200, 401, 403, 409 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_setup_my_totp` |
+| DELETE | `/api/v2/me/phone` | account session | Remove my phone | 204, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_phone` |
+| GET | `/api/v2/me/phone` | account session | Get my linked phone | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_phone` |
+| PATCH | `/api/v2/me/phone` | account session | Update phone discovery | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_update_phone_privacy` |
+| POST | `/api/v2/me/phone/confirm` | account session | Confirm phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_phone_binding` |
+| POST | `/api/v2/me/phone/verification` | account session | Request phone binding | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_phone_binding` |
+| POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |
+| POST | `/api/v2/me/step-up/verify` | account session | Verify a step-up code | 200, 400, 401, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_verify_step_up` |
 
 ### Account sessions (v2)
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/me/sessions` | account session | List my sessions | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_sessions` |
-| POST | `/api/v2/me/sessions/revoke-all` | account session | Sign out everywhere | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_revoke_all_my_sessions` |
-| POST | `/api/v2/me/sessions/{sessionId}/revoke` | account session | Sign out one session | 200, 401, 404 | AUTHENTICATION_REQUIRED, SESSION_NOT_FOUND | `openapi/meeting-service.json#v2_revoke_my_session` |
+| POST | `/api/v2/me/sessions/revoke-all` | account session | Sign out everywhere | 200, 401, 403 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_revoke_all_my_sessions` |
+| POST | `/api/v2/me/sessions/revoke-others` | account session | Sign out every other session | 200, 401, 403 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_revoke_other_account_sessions` |
+| POST | `/api/v2/me/sessions/{sessionId}/revoke` | account session | Sign out one session | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, SESSION_NOT_FOUND | `openapi/meeting-service.json#v2_revoke_my_session` |
+
+### Apps (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/app-context-keys` | optional / public | Public keys of app-context tokens (JWKS). | 200, 404 | FEATURE_DISABLED | `openapi/meeting-service.json#v2_app_context_keys` |
+| GET | `/api/v2/conferences/{id}/apps` | account session; participant token | Apps with an in-meeting panel for this conference. | 200, 404, 503 | CONFERENCE_NOT_FOUND, FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_conference_apps` |
+| POST | `/api/v2/conferences/{id}/apps/{appId}/context` | account session; participant token | A 5-minute app-context token for an in-meeting app. | 200, 404, 503 | APP_NOT_FOUND, CONFERENCE_NOT_FOUND, FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_create_app_context` |
+| GET | `/api/v2/me/apps` | account session | The signed-in account's connected apps (personal installs). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_my_apps` |
+| DELETE | `/api/v2/me/apps/{grantId}` | account session | Disconnect one of the signed-in account's apps. | 204, 401, 404, 503 | APP_NOT_FOUND, AUTHENTICATION_REQUIRED, FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_my_app` |
+| POST | `/api/v2/oauth/authorize/approve` | account session | Approve or deny an app's authorization request. | 200, 400, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, NOT_ALLOWLISTED, NOT_A_MEMBER, OAUTH_REQUEST_INVALID, ORGANIZATION_NOT_READY, PERMISSION_DENIED, ROLE_REQUIRED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_oauth_authorize_decide` |
+| GET | `/api/v2/oauth/authorize/context` | account session | Consent data for an app's authorization request. | 200, 400, 401, 404, 503 | APP_NOT_AVAILABLE, AUTHENTICATION_REQUIRED, FEATURE_DISABLED, INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, OAUTH_REQUEST_INVALID, PKCE_REQUIRED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_oauth_authorize_context` |
+| GET | `/api/v2/organizations/{id}/apps` | account session | The apps installed for an organization. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_organization_apps` |
+| DELETE | `/api/v2/organizations/{id}/apps/{grantId}` | account session | Uninstall an app from an organization. | 204, 401, 403, 404, 503 | APP_NOT_FOUND, AUTHENTICATION_REQUIRED, FEATURE_DISABLED, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_organization_app` |
 
 ### Artifacts (v2)
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/conferences/{id}/artifacts` | account session; participant token | Artefacts of a conference (historical access still requires authorization). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_artifacts` |
-| POST | `/api/v2/conferences/{id}/artifacts/reports` | account session; participant token | Generate an attendance report, poll report or chat export (policy-gated). | 201, 403, 503 | ARTIFACT_STORAGE_UNAVAILABLE, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_generate_report` |
+| POST | `/api/v2/conferences/{id}/artifacts/reports` | account session; participant token | Generate an attendance report, poll report or chat export (policy-gated). | 201, 403, 501, 503 | ARTIFACT_STORAGE_NOT_CONFIGURED, ARTIFACT_STORAGE_UNAVAILABLE, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_generate_report` |
 | DELETE | `/api/v2/conferences/{id}/artifacts/{artifactId}` | account session; participant token | Delete an artefact (DELETED only after the object's absence is confirmed). | 200, 403, 409 | PERMISSION_DENIED, PROFILE_POLICY_DENIED, RECORDING_STATE_CONFLICT | `openapi/meeting-service.json#v2_delete_artifact` |
 | GET | `/api/v2/conferences/{id}/artifacts/{artifactId}` | account session; participant token | One artefact (conference id + artefact id; knowing an id is not authorization). | 200, 403, 404 | ARTIFACT_ACCESS_DENIED, ARTIFACT_NOT_FOUND | `openapi/meeting-service.json#v2_get_artifact` |
 | POST | `/api/v2/conferences/{id}/artifacts/{artifactId}/access` | account session; participant token | Mint a short-lived, read-only, single-object signed URL (never stored). | 200, 403, 404, 409, 410, 503 | ARTIFACT_ACCESS_DENIED, ARTIFACT_DELETED, ARTIFACT_NOT_FOUND, ARTIFACT_NOT_READY, ARTIFACT_STORAGE_UNAVAILABLE | `openapi/meeting-service.json#v2_artifact_access` |
-| GET | `/api/v2/conferences/{id}/attendance` | account session; participant token; platform credential (server-side only) | Conference attendance (Part J). | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, CONFERENCE_NOT_FOUND, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_conference_attendance` |
+| GET | `/api/v2/conferences/{id}/attendance` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Conference attendance (Part J). | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, CONFERENCE_NOT_FOUND, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_conference_attendance` |
+| GET | `/api/v2/conferences/{id}/exports/{artifactType}` | account session; participant token | Download an attendance report, poll report or chat export directly. | 200, 400, 403 | PERMISSION_DENIED, PROFILE_POLICY_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_export_report` |
 
 ### Authentication
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/auth/change-password` | account session | Change password for authenticated user | 200, 400, 401 | — | `openapi/meeting-service.json#change_password` |
-| POST | `/api/v1/auth/forgot-password` | none (public) | Request password reset | 200, 400, 429 | — | `openapi/meeting-service.json#forgot_password` |
-| POST | `/api/v1/auth/login` | none (public) | Login user | 200, 401, 403, 429 | — | `openapi/meeting-service.json#login` |
+| POST | `/api/v1/auth/email-change/revert` | none (public) | Undo an email change | 200, 400, 409, 429 | — | `openapi/meeting-service.json#revert_email_change` |
 | POST | `/api/v1/auth/logout` | account session | Logout user | 200, 401 | — | `openapi/meeting-service.json#logout` |
+| POST | `/api/v1/auth/mfa/verify` | none (public) | Finish a sign-in with the second factor | 200, 400, 429 | — | `openapi/meeting-service.json#verify_mfa` |
 | GET | `/api/v1/auth/oauth/google` | none (public) | Initiate Google OAuth flow | 303, 500 | — | `openapi/meeting-service.json#oauth_google_init` |
 | GET | `/api/v1/auth/oauth/google/callback` | none (public) | Google OAuth callback handler | 303 | — | `openapi/meeting-service.json#oauth_google_callback` |
 | POST | `/api/v1/auth/oauth/google/exchange` | none (public) | Exchange a one-time Google sign-in code for tokens | 200, 400 | — | `openapi/meeting-service.json#oauth_google_exchange` |
+| POST | `/api/v1/auth/oauth/google/native` | none (public) | Sign in with Google on a native app | 200, 401, 403, 409, 503 | MFA_REQUIRED | `openapi/meeting-service.json#oauth_google_native` |
+| POST | `/api/v1/auth/otp/request` | none (public) | Request a sign-in code | 200, 400, 429 | — | `openapi/meeting-service.json#request_otp` |
+| POST | `/api/v1/auth/otp/verify` | none (public) | Verify a sign-in code | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp` |
+| POST | `/api/v1/auth/otp/verify-link` | none (public) | Verify a sign-in link | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp_link` |
+| POST | `/api/v1/auth/phone/request` | none (public) | Request phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#request_phone_otp` |
+| POST | `/api/v1/auth/phone/verify` | none (public) | Verify phone sign-in code | 200, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#verify_phone_otp` |
 | POST | `/api/v1/auth/refresh` | none (public) | Refresh access token | 200, 401 | — | `openapi/meeting-service.json#refresh_token` |
-| POST | `/api/v1/auth/register` | none (public) | Register a new user | 201, 400, 409, 429 | — | `openapi/meeting-service.json#register` |
-| POST | `/api/v1/auth/resend-verification` | none (public) | Resend verification email | 200, 400, 429 | — | `openapi/meeting-service.json#resend_verification_email` |
-| POST | `/api/v1/auth/reset-password` | none (public) | Reset password with token | 200, 400, 429 | — | `openapi/meeting-service.json#reset_password` |
-| POST | `/api/v1/auth/verify-email` | none (public) | Verify email with token | 200, 400, 429 | — | `openapi/meeting-service.json#verify_email` |
-| POST | `/api/v1/auth/verify-reset-token` | none (public) | Verify password reset token | 200, 400 | — | `openapi/meeting-service.json#verify_reset_token` |
 
 ### Backstage (v2)
 
@@ -119,6 +176,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | GET | `/api/v2/conferences/{id}/messages` | account session; participant token | Meeting chat history (database cursor pagination, newest first). | 200, 403, 404 | BREAKOUT_NOT_FOUND, CHAT_DISABLED, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_messages` |
 | POST | `/api/v2/conferences/{id}/messages` | account session; participant token | Send a message (sender is always the caller's own participant). | 201, 400, 403, 404, 409, 429 | BREAKOUT_CLOSED, BREAKOUT_NOT_FOUND, CHAT_DISABLED, CHAT_PARTICIPANT_RESTRICTED, CONFERENCE_NOT_LIVE, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED, PRIVATE_CHAT_DISABLED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_send_message` |
 | DELETE | `/api/v2/conferences/{id}/messages/{messageId}` | account session; participant token | Delete / hide a message (moderators, or the sender). | 200, 403, 404 | MESSAGE_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_delete_message` |
+| PATCH | `/api/v2/conferences/{id}/messages/{messageId}` | account session; participant token | Edit my message. | 200, 400, 403, 404 | MESSAGE_NOT_FOUND, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_edit_message` |
 | DELETE | `/api/v2/conferences/{id}/participants/{participantId}/chat-restriction` | account session; participant token | Re-enable chat for a participant. | 200, 403, 404 | PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_unrestrict_chat` |
 | POST | `/api/v2/conferences/{id}/participants/{participantId}/chat-restriction` | account session; participant token | Disable chat for a participant. | 200, 403, 404 | PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_restrict_chat` |
 
@@ -134,20 +192,25 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/api/v2/conferences/{id}` | optional / public; account session; participant token; platform credential (server-side only) | Read a conference. Callers without authority get the SUMMARY view. | 200, 404 | CONFERENCE_NOT_FOUND | `openapi/meeting-service.json#v2_get_conference` |
+| GET | `/api/v2/calendar-feeds/{file}` | optional / public | Read a calendar feed (audit MF2). | 200, 404 | CALENDAR_FEED_NOT_FOUND | `openapi/meeting-service.json#v2_read_calendar_feed` |
+| GET | `/api/v2/conferences/{id}` | optional / public; account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Read a conference. Callers without authority get the SUMMARY view. | 200, 404 | CONFERENCE_NOT_FOUND | `openapi/meeting-service.json#v2_get_conference` |
 | GET | `/api/v2/conferences/{id}/calendar.ics` | account session; participant token | Export one conference occurrence as an iCalendar (RFC 5545) file. | 200, 403, 404, 409 | CONFERENCE_NOT_FOUND, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_conference_calendar` |
-| POST | `/api/v2/conferences/{id}/cancel` | account session; participant token; platform credential (server-side only) | Cancel an unstarted conference (single-occurrence exception for recurring series). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_cancel_conference` |
-| POST | `/api/v2/conferences/{id}/end` | account session; participant token; platform credential (server-side only) | LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_end_conference` |
-| POST | `/api/v2/conferences/{id}/join` | optional / public; account session; participant token | Join (or reconnect to) a conference. | 200, 401, 403, 409, 410, 503 | AUTHENTICATION_REQUIRED, CONFERENCE_LOCKED, CONFERENCE_NOT_LIVE, INVITATION_EXPIRED, INVITATION_INVALID, MEETING_ACCESS_DENIED, MEETING_CAPACITY_REACHED, MEETING_PASSCODE_INVALID, MEETING_PASSCODE_REQUIRED, PARTICIPANT_BANNED, RTC_PROVIDER_UNAVAILABLE | `openapi/meeting-service.json#v2_join_conference` |
+| POST | `/api/v2/conferences/{id}/cancel` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Cancel an unstarted conference (single-occurrence exception for recurring series). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_cancel_conference` |
+| POST | `/api/v2/conferences/{id}/end` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_end_conference` |
+| POST | `/api/v2/conferences/{id}/extend` | account session; participant token | Extend a live conference (MF1). | 200, 400, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_extend_conference` |
+| POST | `/api/v2/conferences/{id}/join` | optional / public; account session; participant token; CF Meet user token (partner end-user device) | Join (or reconnect to) a conference. | 200, 401, 403, 404, 409, 410, 503 | AUTHENTICATION_REQUIRED, CONFERENCE_LOCKED, CONFERENCE_NOT_FOUND, CONFERENCE_NOT_LIVE, INVITATION_EXPIRED, INVITATION_INVALID, MEETING_ACCESS_DENIED, MEETING_CAPACITY_REACHED, MEETING_PASSCODE_INVALID, MEETING_PASSCODE_REQUIRED, PARTICIPANT_BANNED, RTC_PROVIDER_UNAVAILABLE, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_join_conference` |
 | POST | `/api/v2/conferences/{id}/leave` | account session; participant token | Leave: close the caller's own session(s). Admission is unchanged. | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_leave_conference` |
 | POST | `/api/v2/conferences/{id}/lock` | account session; participant token | Lock a live conference: no new non-exempt entrants. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_lock_conference` |
 | POST | `/api/v2/conferences/{id}/prepare` | account session; participant token | CREATED → PREPARING → (provider room confirmed) → WAITING. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_prepare_conference` |
 | POST | `/api/v2/conferences/{id}/reschedule` | account session | Reschedule one unstarted occurrence (series untouched). | 200, 400, 409 | CONFERENCE_STATE_CONFLICT, MEETING_VERSION_CONFLICT, VALIDATION_ERROR | `openapi/meeting-service.json#v2_reschedule_conference` |
-| POST | `/api/v2/conferences/{id}/start` | account session; participant token; platform credential (server-side only) | Start a conference. Concurrent starts yield exactly one LIVE authority. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_start_conference` |
+| POST | `/api/v2/conferences/{id}/start` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Start a conference. Concurrent starts yield exactly one LIVE authority. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_start_conference` |
 | POST | `/api/v2/conferences/{id}/unlock` | account session; participant token | Unlock a live conference. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_unlock_conference` |
+| DELETE | `/api/v2/me/calendar-feed` | account session | Delete my calendar feed (audit MF2). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_calendar_feed` |
+| GET | `/api/v2/me/calendar-feed` | account session | My calendar feed (audit MF2). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_calendar_feed` |
+| POST | `/api/v2/me/calendar-feed` | account session | Create (or replace) my calendar feed (audit MF2). | 201, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_create_calendar_feed` |
 | GET | `/api/v2/me/conferences` | account session | List the caller's occurrences across meeting spaces (agenda / calendar range). | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_my_conferences` |
-| GET | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only) | List occurrences of a meeting space (members only). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_conferences` |
-| POST | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only) | Create a one-time scheduled conference occurrence. | 201, 400, 403, 409 | CONFERENCE_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_conference` |
+| GET | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | List occurrences of a meeting space (members only). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_conferences` |
+| POST | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Create a one-time scheduled conference occurrence. | 201, 400, 403, 409, 429 | CONFERENCE_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_conference` |
 
 ### Consent (v2)
 
@@ -184,9 +247,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/invitations/{token}/resolve` | optional / public | Resolve an invitation token (read-only; does not consume a use). | 200, 410 | INVITATION_EXPIRED, INVITATION_INVALID | `openapi/meeting-service.json#v2_resolve_invitation` |
-| GET | `/api/v2/meeting-spaces/{id}/invitations` | account session; platform credential (server-side only) | List invitations of a space (no tokens or hashes). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_invitations` |
-| POST | `/api/v2/meeting-spaces/{id}/invitations` | account session; platform credential (server-side only) | Create an invitation. The raw token is returned once and never stored. | 201, 400, 403, 429 | PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_invitation` |
-| POST | `/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke` | account session; platform credential (server-side only) | Revoke an invitation. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_revoke_invitation` |
+| GET | `/api/v2/meeting-spaces/{id}/invitations` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | List invitations of a space (no tokens or hashes). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_invitations` |
+| POST | `/api/v2/meeting-spaces/{id}/invitations` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Create an invitation. The raw token is returned once and never stored. | 201, 400, 403, 429 | PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_invitation` |
+| POST | `/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Revoke an invitation. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_revoke_invitation` |
 
 ### Media Control
 
@@ -216,12 +279,12 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/api/v2/instant-meetings` | account session; platform credential (server-side only) | Instant meeting: creates a meeting space and a LIVE conference atomically. | 201, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_create_instant_meeting` |
-| GET | `/api/v2/meeting-spaces` | account session; platform credential (server-side only) | List meeting spaces the caller owns or is a member of. | 200, 400, 401 | AUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_meeting_spaces` |
-| POST | `/api/v2/meeting-spaces` | account session; platform credential (server-side only) | Create a meeting space. The owner is always the authenticated caller. | 201, 400, 401, 403, 409 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_meeting_space` |
-| GET | `/api/v2/meeting-spaces/{id}` | optional / public; account session; platform credential (server-side only) | Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code. | 200, 401, 404 | AUTHENTICATION_REQUIRED, MEETING_NOT_FOUND | `openapi/meeting-service.json#v2_get_meeting_space` |
-| PATCH | `/api/v2/meeting-spaces/{id}` | account session; platform credential (server-side only) | Update a meeting space (optimistic concurrency via `version`). | 200, 403, 409 | MEETING_VERSION_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_update_meeting_space` |
-| POST | `/api/v2/meeting-spaces/{id}/archive` | account session; platform credential (server-side only) | Soft-archive a meeting space (owner only). History is preserved. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_archive_meeting_space` |
+| POST | `/api/v2/instant-meetings` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Instant meeting: creates a meeting space and a LIVE conference atomically. | 201, 401, 429 | AUTHENTICATION_REQUIRED, RATE_LIMITED | `openapi/meeting-service.json#v2_create_instant_meeting` |
+| GET | `/api/v2/meeting-spaces` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | List meeting spaces the caller owns or is a member of. | 200, 400, 401 | AUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_meeting_spaces` |
+| POST | `/api/v2/meeting-spaces` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Create a meeting space. The owner is always the authenticated caller. | 201, 400, 401, 403, 409, 429 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_meeting_space` |
+| GET | `/api/v2/meeting-spaces/{id}` | optional / public; account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code. | 200, 401, 404 | AUTHENTICATION_REQUIRED, MEETING_NOT_FOUND | `openapi/meeting-service.json#v2_get_meeting_space` |
+| PATCH | `/api/v2/meeting-spaces/{id}` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Update a meeting space (optimistic concurrency via `version`). | 200, 403, 409 | MEETING_VERSION_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_update_meeting_space` |
+| POST | `/api/v2/meeting-spaces/{id}/archive` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Soft-archive a meeting space (owner only). History is preserved. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_archive_meeting_space` |
 | GET | `/api/v2/meeting-spaces/{id}/calendar.ics` | account session | Export a meeting space's schedule as an iCalendar (RFC 5545) file. | 200, 403, 404 | MEETING_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_meeting_space_calendar` |
 | POST | `/api/v2/meeting-spaces/{id}/duplicate` | account session | Duplicate reusable configuration into a new space owned by the caller. | 201, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_duplicate_meeting_space` |
 | POST | `/api/v2/meeting-spaces/{id}/owner-transfer` | account session | Transfer ownership (dedicated, protected operation). | 200, 403, 409 | MEETING_VERSION_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_transfer_owner` |
@@ -248,6 +311,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/meeting-spaces/{id}/members` | account session | List members (owner / host / co-host members). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_members` |
 | POST | `/api/v2/meeting-spaces/{id}/members` | account session | Add a member. The granted role is bounded by the caller's grant authority. | 201, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_add_member` |
+| POST | `/api/v2/meeting-spaces/{id}/members/team` | account session | Add a team of the organization. | 200, 400, 403, 404, 503 | FEATURE_DISABLED, MEETING_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_add_team_members` |
 | DELETE | `/api/v2/meeting-spaces/{id}/members/{memberId}` | account session | Revoke a membership. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_revoke_member` |
 | PATCH | `/api/v2/meeting-spaces/{id}/members/{memberId}` | account session | Change a member's role. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_update_member` |
 
@@ -257,14 +321,16 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/messaging/client-sessions/revoke-all` | account session | End every Messaging client session of the caller (all devices). | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_all_sessions` |
 | POST | `/api/v2/messaging/client-tokens` | account session | Issue a short-lived, device-bound Messaging client token (for the realtime gateway). | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_client_token` |
-| POST | `/api/v2/messaging/devices` | account session | Register a device with its proof-of-possession KeyPackage. | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_register_device` |
-| POST | `/api/v2/messaging/devices/registration-challenges` | account session | Start a device registration (the challenge the device signs with its own key). | 201, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_registration_challenge` |
+| POST | `/api/v2/messaging/devices` | account session | Register a device with its proof-of-possession KeyPackage. | 201, 401, 403, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_messaging_register_device` |
+| POST | `/api/v2/messaging/devices/registration-challenges` | account session | Start a device registration (the challenge the device signs with its own key). | 201, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_registration_challenge` |
 | POST | `/api/v2/messaging/devices/{deviceId}/key-packages` | account session | Publish one-time KeyPackages of the caller's device. | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_publish_key_packages` |
 | POST | `/api/v2/messaging/devices/{deviceId}/revoke` | account session | Revoke one of the caller's devices. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_device` |
 | GET | `/api/v2/messaging/directory` | account session | Colleagues (active members of the caller's organizations) the caller may message. | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_directory` |
 | POST | `/api/v2/messaging/directory/resolve` | account session | The Messaging principals of directory colleagues (so they can be added). | 200, 404 | NOT_FOUND | `openapi/meeting-service.json#v2_messaging_directory_resolve` |
+| GET | `/api/v2/messaging/export-deliveries` | account session | Data exports waiting for me (Messaging) | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_export_deliveries` |
+| POST | `/api/v2/messaging/exports/{exportId}/claim` | account session | Claim a Messaging data export once | 200, 401, 404, 409, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, EXPORT_ALREADY_DELIVERED, EXPORT_EXPIRED, EXPORT_NOT_READY, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_claim_export` |
 | GET | `/api/v2/messaging/me` | account session | The caller's Messaging principal and device binding scope. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_me` |
-| POST | `/api/v2/messaging/principals/names` | account session | Display names of the principals the caller can see (self and colleagues). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_principal_names` |
+| POST | `/api/v2/messaging/principals/names` | account session | Display names of the principals the caller can see (self, colleagues and connected contacts). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_principal_names` |
 | DELETE | `/api/v2/messaging/relay/{path}` | account session | Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_delete` |
 | GET | `/api/v2/messaging/relay/{path}` | account session | Relayed read (allowlisted path under `v1/`, e.g. `v1/conversations/{id}/messages`). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_get` |
 | PATCH | `/api/v2/messaging/relay/{path}` | account session | Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_patch` |
@@ -272,15 +338,32 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | PUT | `/api/v2/messaging/relay/{path}` | account session | Relayed replace (allowlisted path under `v1/`, e.g. a read cursor or sealed history). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_put` |
 | POST | `/api/v2/messaging/session-tokens` | account session | Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed). | 201, 400, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_messaging_session_token` |
 
+### Notifications (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/notifications` | account session | List my notifications (U1). | 200, 400, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_list` |
+| DELETE | `/api/v2/notifications/devices/{accountDeviceId}/push` | account session | Remove my push endpoint for an Account device (U9). | 200, 204, 400, 401, 404, 429, 503 | AUTHENTICATION_REQUIRED, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_push_remove` |
+| PUT | `/api/v2/notifications/devices/{accountDeviceId}/push` | account session | Register my push endpoint for an Account device (U8). | 200, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_push_register` |
+| POST | `/api/v2/notifications/dismiss` | account session | Dismiss my notifications (U5). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_dismiss` |
+| GET | `/api/v2/notifications/preferences` | account session | My notification preferences (U6). | 200, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_notifications_preferences_get` |
+| PUT | `/api/v2/notifications/preferences` | account session | Update my notification preferences (U7). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_notifications_preferences_update` |
+| POST | `/api/v2/notifications/read` | account session | Mark my notifications read (U4). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_mark_read` |
+| GET | `/api/v2/notifications/unread-count` | account session | My unread notification count (U2). | 200, 304, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_notifications_unread_count` |
+| PATCH | `/api/v2/notifications/{notificationId}` | account session | Update one of my notifications (U3). | 200, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_notifications_update` |
+
 ### Organizations (v2)
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/api/v2/me/organization-invitations` | account session | My pending organization invitations. | 200, 404, 503 | FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_organization_invitations` |
 | GET | `/api/v2/me/organizations` | account session | Organizations the caller verifiably belongs to. | 200, 401, 503 | AUTHENTICATION_REQUIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_organizations` |
 | GET | `/api/v2/me/workspaces` | account session | List the caller's workspaces (Personal and organizations). | 200, 400, 401, 503 | AUTHENTICATION_REQUIRED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_my_workspaces` |
 | GET | `/api/v2/me/workspaces/{workspaceId}/capabilities` | account session | Capabilities of one workspace, derived by the server. | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_workspace_capabilities` |
 | POST | `/api/v2/organization-invitations/accept` | account session | Accept an organization invitation. | 200, 403, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_accept_organization_invitation` |
 | POST | `/api/v2/organization-invitations/decline` | account session | Decline an organization invitation. | 200, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_decline_organization_invitation` |
+| POST | `/api/v2/organization-invitations/{invitationId}/accept` | account session | Accept one of my organization invitations. | 200, 404, 409, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, ORGANIZATION_ARCHIVED, ORGANIZATION_SUSPENDED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_accept_my_organization_invitation` |
+| POST | `/api/v2/organization-invitations/{invitationId}/decline` | account session | Decline one of my organization invitations. | 200, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_decline_my_organization_invitation` |
 | POST | `/api/v2/organizations` | account session | Create a business organization (the caller becomes OWNER). | 201, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, SLUG_TAKEN, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_business_organization` |
 | GET | `/api/v2/organizations/{id}` | account session | Get a business organization. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_get_business_organization` |
 | PATCH | `/api/v2/organizations/{id}` | account session | Update a business organization's name, slug or profile. | 200, 400, 403, 404, 409, 503 | FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, SLUG_TAKEN, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_business_organization` |
@@ -291,14 +374,25 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | PATCH | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling partial update (allowlisted path). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_patch` |
 | POST | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling create / action (allowlisted path). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_post` |
 | PUT | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling replace (allowlisted path, e.g. members or schedules). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_put` |
+| GET | `/api/v2/organizations/{id}/export` | account session | Export the organization's data. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_export_organization` |
+| POST | `/api/v2/organizations/{id}/exports/{exportId}/download` | account session | Download an owner-delivered organization export. | 200, 400, 401, 404, 410, 503 | AUTHENTICATION_REQUIRED, EXPORT_LINK_EXPIRED, EXPORT_LINK_INVALID, FEATURE_DISABLED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_download_organization_export` |
 | GET | `/api/v2/organizations/{id}/invitations` | account session | List an organization's invitations. | 200, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_organization_invitations` |
 | POST | `/api/v2/organizations/{id}/invitations` | account session | Invite someone to an organization by email or CF Meet ID. | 201, 400, 403, 404, 409, 429, 503 | ALREADY_MEMBER, CF_MEET_ID, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, INVITEE_NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_organization_invitation` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | account session | Revoke an organization invitation. | 200, 403, 404, 503 | FEATURE_DISABLED, INVITATION_INVALID, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_organization_invitation` |
+| GET | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Organization meeting profile policy. | 200, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_get_organization_meeting_profile_policy` |
+| PUT | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Replace the organization meeting profile policy. | 200, 400, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_put_organization_meeting_profile_policy` |
+| GET | `/api/v2/organizations/{id}/meeting-spaces` | account session | Meeting spaces of an organization (managers). | 200, 400, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_meeting_spaces` |
+| GET | `/api/v2/organizations/{id}/member-calling/endpoints` | account session | List my calling endpoints in the organization's own Calling scope. | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_list` |
+| POST | `/api/v2/organizations/{id}/member-calling/endpoints` | account session | Register (or refresh) my calling endpoint in the organization's own Calling scope. | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_register` |
+| DELETE | `/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}` | account session | Revoke my calling endpoint in the organization's own Calling scope. | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_revoke` |
+| POST | `/api/v2/organizations/{id}/member-calling/signaling-credentials` | account session | Obtain a signaling credential for my calling endpoint in the organization's scope. | 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_signaling_credential` |
 | GET | `/api/v2/organizations/{id}/members` | account session | List members (platform admins, organization OWNER/ADMIN). | 200, 400, 403, 404, 503 | MEETING_NOT_FOUND, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_members` |
 | POST | `/api/v2/organizations/{id}/members/me/leave` | account session | Leave an organization. | 200, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_leave_organization` |
 | PATCH | `/api/v2/organizations/{id}/members/{userId}` | account session | Change a member's role or status. | 200, 400, 403, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_organization_membership` |
 | PUT | `/api/v2/organizations/{id}/members/{userId}` | account session | Add or change a membership (platform admins, organization OWNER/ADMIN within limits). | 200, 403, 409, 503 | INVITATION_REQUIRED, LAST_OWNER, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_upsert_organization_member` |
 | POST | `/api/v2/organizations/{id}/messaging/members/resolve` | account session | Resolve organization colleagues to their organization-scope Messaging principals. | 200, 400, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_resolve_members` |
+| GET | `/api/v2/organizations/{id}/messaging/moderation/{path}` | account session | Read the organization's Messaging moderation queue, a report or the actions. | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_moderation_get` |
+| POST | `/api/v2/organizations/{id}/messaging/moderation/{path}` | account session | Organization moderation action (gap audit G6): `moderation/actions`. | 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_moderation_post` |
 | DELETE | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging delete (allowlisted path under `v1/`, e.g. remove a member). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_delete` |
 | GET | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging read (allowlisted path under `v1/`, e.g. `v1/conversations`). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_get` |
 | PATCH | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging update (allowlisted path under `v1/`, e.g. edit a message). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_patch` |
@@ -320,6 +414,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | POST | `/api/v2/organizations/{id}/teams/{teamId}/members` | account session | Add a member to a team. | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_ARCHIVED, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_add_organization_team_member` |
 | DELETE | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | account session | Remove a member from a team. | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND | `openapi/meeting-service.json#v2_remove_organization_team_member` |
 | PATCH | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | account session | Change a team member's role. | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_ARCHIVED, TEAM_NOT_FOUND, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_organization_team_member` |
+| PUT | `/api/v2/organizations/{id}/teams/{teamId}/messaging-channel` | account session | Create or resync a team's Messaging channel (gap audit G7). | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_team_messaging_channel` |
 
 ### Participants
 
@@ -332,11 +427,11 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/api/v2/conferences/{id}/participants` | account session; participant token; platform credential (server-side only) | Admitted participants (roster). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_participants` |
+| GET | `/api/v2/conferences/{id}/participants` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Admitted participants (roster). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_participants` |
 | GET | `/api/v2/conferences/{id}/participants/me` | account session; participant token | The caller's own participant state (registered user or participant token). | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_get_me` |
 | POST | `/api/v2/conferences/{id}/participants/{participantId}/ban` | account session; participant token | Ban a participant (conference or space scope). | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_ban` |
 | POST | `/api/v2/conferences/{id}/participants/{participantId}/mute` | account session; participant token | Server-side mute of a participant's published tracks. | 200, 403, 404, 409, 503 | CONFERENCE_NOT_LIVE, FEATURE_DISABLED, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED, RTC_PROVIDER_UNAVAILABLE | `openapi/meeting-service.json#v2_mute_participant` |
-| POST | `/api/v2/conferences/{id}/participants/{participantId}/remove` | account session; participant token; platform credential (server-side only) | Remove a participant (business authority; media disconnect enforced by the RTC provider). | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_remove` |
+| POST | `/api/v2/conferences/{id}/participants/{participantId}/remove` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Remove a participant (business authority; media disconnect enforced by the RTC provider). | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_remove` |
 | PATCH | `/api/v2/conferences/{id}/participants/{participantId}/role` | account session; participant token | Change a participant's role (grant authority enforced). | 200, 403, 404, 409 | PARTICIPANT_NOT_FOUND, PARTICIPANT_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_change_role` |
 
 ### Polls (v2)
@@ -403,9 +498,10 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/meeting-spaces/{id}/registrations` | account session | Registrations of a meeting space (organizer view). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_registrations` |
-| POST | `/api/v2/meeting-spaces/{id}/registrations` | optional / public; account session | Register for a webinar / town hall (public when the profile enables registration). | 200, 201, 400, 404, 409, 429 | RATE_LIMITED, REGISTRATION_CLOSED, REGISTRATION_DISABLED, REGISTRATION_DUPLICATE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_register` |
+| POST | `/api/v2/meeting-spaces/{id}/registrations` | optional / public; account session | Register for a webinar / town hall (public when the profile enables registration). | 200, 201, 400, 404, 409, 429 | IDEMPOTENCY_CONFLICT, RATE_LIMITED, REGISTRATION_CLOSED, REGISTRATION_DISABLED, REGISTRATION_DUPLICATE, REGISTRATION_FULL, VALIDATION_ERROR | `openapi/meeting-service.json#v2_register` |
 | DELETE | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | Cancel a registration (revokes its admission token). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_cancel_registration` |
 | GET | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | One registration (organizer view). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_get_registration` |
+| POST | `/api/v2/registrations/cancel` | optional / public | Cancel my own registration (with its admission token). | 200, 400, 404 | REGISTRATION_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_cancel_own_registration` |
 
 ### Scheduling (v2)
 
@@ -448,9 +544,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/conferences/{id}/participants/{participantId}/return-to-waiting` | account session; participant token | Return an admitted participant to the waiting room. | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_return_to_waiting` |
-| GET | `/api/v2/conferences/{id}/waiting-room` | account session; participant token; platform credential (server-side only) | Waiting queue (requires `participant.admit`). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_get_waiting_room` |
-| POST | `/api/v2/conferences/{id}/waiting-room/admit` | account session; participant token; platform credential (server-side only) | Admit one, selected or all waiting participants (transactional, idempotent). | 200, 403, 404, 409 | CONFERENCE_NOT_LIVE, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_admit` |
-| POST | `/api/v2/conferences/{id}/waiting-room/deny` | account session; participant token; platform credential (server-side only) | Deny one, selected or all waiting participants. | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_deny` |
+| GET | `/api/v2/conferences/{id}/waiting-room` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Waiting queue (requires `participant.admit`). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_get_waiting_room` |
+| POST | `/api/v2/conferences/{id}/waiting-room/admit` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Admit one, selected or all waiting participants (transactional, idempotent). | 200, 403, 404, 409 | CONFERENCE_NOT_LIVE, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_admit` |
+| POST | `/api/v2/conferences/{id}/waiting-room/deny` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Deny one, selected or all waiting participants. | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_deny` |
 
 ### Webhooks
 
@@ -463,7 +559,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 
 ## Communications Hub (contacts, CF Meet ID / QR, timeline, activity)
 
-Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
+Contract `packages/contracts/communications/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
 
 ### Calls
 
@@ -471,6 +567,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/communications/calls/history` | account session | Call history with public counterpart identities | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#listCommunicationsCallHistory` |
 | GET | `/api/v2/communications/calls/{callId}/context` | account session | One call, for a participant | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsCallContext` |
+| POST | `/api/v2/communications/calls/{callId}/participants` | account session | Add connected contacts to a running call | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#addContactsToCall` |
 | POST | `/api/v2/communications/contacts/{contactId}/calls` | account session | Start a voice or video call with an accepted contact | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#startContactCall` |
 | POST | `/api/v2/communications/conversations/{conversationId}/calls` | account session | Start a voice or video call from a conversation | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#startConversationCall` |
 
@@ -539,7 +636,9 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| POST | `/api/v2/communications/discovery/email/resolve` | account session | Find a person by their verified email address | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsEmail` |
 | POST | `/api/v2/communications/discovery/invites/resolve` | account session | Resolve an invitation without granting a connection | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsInvitation` |
+| POST | `/api/v2/communications/discovery/phone/resolve` | account session | Find a profile by a verified, opted-in phone number | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveProfileByPhone` |
 | POST | `/api/v2/communications/discovery/public-id/resolve` | account session | Resolve an exact permitted public ID | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsPublicId` |
 | GET | `/api/v2/communications/profiles/{cfMeetId}` | account session | Read a permitted exact public profile | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsPublicProfile` |
 
@@ -549,6 +648,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/communications/activation` | account session | Read server-controlled activation state | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsActivation` |
 | GET | `/api/v2/communications/me` | account session | Get or lazily activate a stable Communications profile | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsProfile` |
+| PATCH | `/api/v2/communications/me` | account session | Edit the About line contacts see | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#updateCommunicationsProfile` |
 | GET | `/api/v2/communications/me/capabilities` | account session | Read actual backend and device-security readiness | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsCapabilities` |
 | GET | `/api/v2/communications/me/public-id` | account session | Read the current public CF Meet ID | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsPublicId` |
 | POST | `/api/v2/communications/me/public-id/rotate` | account session | Rotate a public ID with recent authentication | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#rotateCommunicationsPublicId` |
@@ -605,7 +705,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -650,13 +750,25 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/v1/calls/{call_id}/accept` | platform credential (server-side only) | Accept a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptCall` |
+| POST | `/v1/calls/{call_id}/acknowledge` | platform credential (server-side only) | Acknowledge receipt of a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acknowledgeCallInvitation` |
 | GET | `/v1/calls/{call_id}/actions` | platform credential (server-side only) | Actions currently available on a call | 200, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#getCallActions` |
 | POST | `/v1/calls/{call_id}/cancel` | platform credential (server-side only) | Cancel a call before it is active | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#cancelCall` |
+| POST | `/v1/calls/{call_id}/consultations` | platform credential (server-side only) | Consult a target before transferring (attended transfer) | 201, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#startConsultation` |
+| POST | `/v1/calls/{call_id}/consultations/{consultation_id}/cancel` | platform credential (server-side only) | Cancel an attended transfer | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#cancelConsultation` |
+| POST | `/v1/calls/{call_id}/consultations/{consultation_id}/complete` | platform credential (server-side only) | Complete an attended transfer | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#completeConsultation` |
 | POST | `/v1/calls/{call_id}/decline` | platform credential (server-side only) | Decline a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineCall` |
 | POST | `/v1/calls/{call_id}/end` | platform credential (server-side only) | End an active call | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#endCall` |
 | POST | `/v1/calls/{call_id}/hold` | platform credential (server-side only) | Hold a connected call | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#holdCall` |
+| POST | `/v1/calls/{call_id}/host` | platform credential (server-side only) | Hand the host role to another participant | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#transferCallHost` |
+| POST | `/v1/calls/{call_id}/participants` | platform credential (server-side only) | Invite participants into an ongoing call | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#addCallParticipants` |
+| POST | `/v1/calls/{call_id}/participants/{participant_id}/mute` | platform credential (server-side only) | Mute or unmute a participant (host only) | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#muteCallParticipant` |
+| POST | `/v1/calls/{call_id}/participants/{participant_id}/rejoin` | platform credential (server-side only) | Rejoin an ongoing call | 200, 201, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#rejoinCall` |
+| POST | `/v1/calls/{call_id}/participants/{participant_id}/remove` | platform credential (server-side only) | Remove a participant (host only) | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#removeCallParticipant` |
 | POST | `/v1/calls/{call_id}/resume` | platform credential (server-side only) | Resume a held call | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#resumeCall` |
+| POST | `/v1/calls/{call_id}/screen-share` | platform credential (server-side only) | Start presenting a screen | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#startScreenShare` |
+| POST | `/v1/calls/{call_id}/screen-share/stop` | platform credential (server-side only) | Stop presenting a screen | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#stopScreenShare` |
 | POST | `/v1/calls/{call_id}/transfer` | platform credential (server-side only) | Transfer a participant's place to another principal | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#transferCall` |
+| POST | `/v1/calls/{call_id}/upgrade` | platform credential (server-side only) | Upgrade a voice call to video | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#upgradeCall` |
 
 ### Call Forwarding
 
@@ -672,15 +784,17 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/history` | signaling credential | The endpoint's principal's call history | 200, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#recoverCallHistory` |
+| GET | `/v1/calling/history` | signaling credential | The endpoint's principal's call history | 200, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, VALIDATION_ERROR | `calling/http/v1.openapi.json#recoverCallHistory` |
+| DELETE | `/v1/calls/{call_id}/history` | platform credential (server-side only) | Hide a finished call from a principal's history | 204, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#hideCallFromHistory` |
 
 ### Call Invitations
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/invitations` | signaling credential | Recover the endpoint's offers | 200, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#recoverInvitations` |
-| POST | `/v1/calling/invitations/{invitation_id}/accept` | signaling credential | Accept one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptInvitation` |
-| POST | `/v1/calling/invitations/{invitation_id}/decline` | signaling credential | Decline one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineInvitation` |
+| GET | `/v1/calling/invitations` | signaling credential | Recover the endpoint's offers | 200, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED | `calling/http/v1.openapi.json#recoverInvitations` |
+| POST | `/v1/calling/invitations/{invitation_id}/accept` | signaling credential | Accept one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptInvitation` |
+| POST | `/v1/calling/invitations/{invitation_id}/acknowledge` | signaling credential | Acknowledge receipt of one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acknowledgeInvitation` |
+| POST | `/v1/calling/invitations/{invitation_id}/decline` | signaling credential | Decline one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineInvitation` |
 
 ### Call Management
 
@@ -694,7 +808,9 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/calls/{call_id}/quality` | platform credential (server-side only) | Per-participant call quality | 200, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#getCallQuality` |
 | POST | `/v1/calls/{call_id}/sessions/{session_id}/media-credentials` | platform credential (server-side only) | Issue a media credential for a session | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueSessionMediaCredential` |
+| POST | `/v1/calls/{call_id}/sessions/{session_id}/quality-samples` | platform credential (server-side only) | Report a session's call-quality sample | 201, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#recordCallQualitySample` |
 | POST | `/v1/calls/{call_id}/sessions/{session_id}/remove` | platform credential (server-side only) | Remove one session from a call | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#removeCallSession` |
 
 ### Call Queues
@@ -736,6 +852,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 | GET | `/v1/calling/endpoints` | platform credential (server-side only) | List a principal's endpoints | 200, 400, 401, 403, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#listEndpoints` |
 | POST | `/v1/calling/endpoints` | platform credential (server-side only) | Register an application endpoint of a principal | 200, 201, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#registerEndpoint` |
 | DELETE | `/v1/calling/endpoints/{endpoint_id}` | platform credential (server-side only) | Revoke an endpoint | 200, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#revokeEndpoint` |
+| POST | `/v1/calling/user-sessions` | CF Meet user token (partner end-user device) | Exchange a CF Meet user token for an endpoint and a signaling credential | 200, 201, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#exchangeUserSession` |
 
 ### Calling Media & RTC
 
@@ -745,13 +862,13 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 | GET | `/v1/calling/media/rtc/v1` | media credential | Open a media signaling connection | 101, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#connectMedia` |
 | GET | `/v1/calling/media/rtc/v1/validate` | media credential | Check whether a media credential would be admitted | 200, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#validateMedia` |
 | GET | `/v1/calling/media/rtc/validate` | media credential | Check whether a media credential would be admitted (SDK legacy path) | 200, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#validateMediaLegacy` |
-| POST | `/v1/calling/sessions/{session_id}/media-credentials` | signaling credential | Issue a media credential for one's own session | 200, 400, 401, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueOwnMediaCredential` |
+| POST | `/v1/calling/sessions/{session_id}/media-credentials` | signaling credential | Issue a media credential for one's own session | 200, 400, 401, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueOwnMediaCredential` |
 
 ### Calling Signaling
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/signaling` | signaling credential | Open the endpoint's realtime signaling channel (WebSocket) | 101, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#openSignalingChannel` |
+| GET | `/v1/calling/signaling` | signaling credential | Open the endpoint's realtime signaling channel (WebSocket) | 101, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, VALIDATION_ERROR | `calling/http/v1.openapi.json#openSignalingChannel` |
 | POST | `/v1/calling/signaling-credentials` | platform credential (server-side only) | Mint a signaling credential for one endpoint | 201, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#mintSignalingCredential` |
 
 ### Departments & Membership
@@ -883,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -902,6 +1019,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 | POST | `/v1/messaging/client-tokens` | customer credential (server-side only) | issue Client Token | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#issueClientToken` |
 | POST | `/v1/messaging/session-devices` | customer credential (server-side only) | issue Session Device Token | 201, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#issueSessionDeviceToken` |
 | POST | `/v1/messaging/session-devices/revoke` | customer credential (server-side only) | revoke Session Devices | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#revokeSessionDevices` |
+| POST | `/v1/messaging/user-sessions` | CF Meet user token (partner end-user device) | exchange User Session | 201, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#exchangeUserSession` |
 
 ### Compliance & Data Exports
 
@@ -918,26 +1036,28 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/v1/conversations/{conversationId}/invitation/accept` | customer credential (server-side only); Messaging client token | accept Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#acceptInvitation` |
-| POST | `/v1/conversations/{conversationId}/invitation/decline` | customer credential (server-side only); Messaging client token | decline Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#declineInvitation` |
+| POST | `/v1/conversations/{conversationId}/invitation/accept` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | accept Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#acceptInvitation` |
+| POST | `/v1/conversations/{conversationId}/invitation/decline` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | decline Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#declineInvitation` |
 | GET | `/v1/messaging/invitations` | customer credential (server-side only); Messaging client token | list Invitations | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listInvitations` |
+| POST | `/v1/messaging/invite-links/join` | customer credential (server-side only); Messaging client token | join Invite Link | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#joinInviteLink` |
 
 ### Conversation Messages
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/conversations/{conversationId}/messages` | customer credential (server-side only); Messaging client token | list Messages | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listMessages` |
-| POST | `/v1/conversations/{conversationId}/messages` | customer credential (server-side only); Messaging client token | send Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#sendMessage` |
-| DELETE | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | delete Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#deleteMessage` |
-| GET | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | resolve Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#resolveMessage` |
-| PATCH | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | edit Managed Message | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editManagedMessage` |
+| GET | `/v1/conversations/{conversationId}/messages` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | list Messages | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listMessages` |
+| POST | `/v1/conversations/{conversationId}/messages` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | send Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#sendMessage` |
+| DELETE | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | delete Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#deleteMessage` |
+| GET | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | resolve Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#resolveMessage` |
+| PATCH | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | edit Managed Message | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editManagedMessage` |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | customer credential (server-side only); Messaging client token | forward Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardMessage` |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}/revisions` | customer credential (server-side only); Messaging client token | list Message Revisions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listMessageRevisions` |
 
 ### Conversation Reports
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/v1/conversations/{conversationId}/reports` | customer credential (server-side only); Messaging client token | create Report | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createReport` |
+| POST | `/v1/conversations/{conversationId}/reports` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | create Report | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createReport` |
 
 ### Conversation SMS Bridge
 
@@ -952,16 +1072,17 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/conversations/{conversationId}/search` | customer credential (server-side only); Messaging client token | search Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#searchConversation` |
+| GET | `/v1/conversations/{conversationId}/search` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | search Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#searchConversation` |
 
 ### Conversations
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/conversations` | customer credential (server-side only); Messaging client token | list Conversations | 200, 400, 401, 403, 429, 503 | — | `messaging/http/v1.openapi.json#listConversations` |
+| GET | `/v1/conversations` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | list Conversations | 200, 400, 401, 403, 429, 503 | — | `messaging/http/v1.openapi.json#listConversations` |
 | POST | `/v1/conversations` | customer credential (server-side only) | create Conversation | 201, 400, 401, 403, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createConversation` |
-| GET | `/v1/conversations/{conversationId}` | customer credential (server-side only); Messaging client token | get Conversation | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getConversation` |
+| GET | `/v1/conversations/{conversationId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | get Conversation | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getConversation` |
 | PATCH | `/v1/conversations/{conversationId}` | customer credential (server-side only) | update Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#updateConversation` |
+| PUT | `/v1/conversations/{conversationId}/inbox-settings` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | set Conversation Inbox Settings | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#setConversationInboxSettings` |
 
 ### Device Keys & E2EE
 
@@ -977,6 +1098,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 | POST | `/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume` | customer credential (server-side only); Messaging client token | consume Welcome | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#consumeWelcome` |
 | GET | `/v1/messaging/key-transparency/proofs` | customer credential (server-side only); Messaging client token | get Key Transparency Proofs | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getKeyTransparencyProofs` |
 | GET | `/v1/messaging/principals/{principalId}/devices` | customer credential (server-side only); Messaging client token | list Principal Devices | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#listPrincipalDevices` |
+| GET | `/v1/messaging/push/configuration` | customer credential (server-side only) | get Push Configuration | 200, 401, 403, 429, 503 | — | `messaging/http/v1.openapi.json#getPushConfiguration` |
 
 ### Encrypted Backups
 
@@ -995,10 +1117,14 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 | GET | `/v1/conversations/{conversationId}/bans` | customer credential (server-side only) | list Bans | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listBans` |
 | POST | `/v1/conversations/{conversationId}/bans` | customer credential (server-side only) | ban Member | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#banMember` |
 | DELETE | `/v1/conversations/{conversationId}/bans/{principalId}` | customer credential (server-side only) | unban Member | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unbanMember` |
-| GET | `/v1/conversations/{conversationId}/members` | customer credential (server-side only); Messaging client token | list Members | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listMembers` |
+| GET | `/v1/conversations/{conversationId}/invite-links` | customer credential (server-side only) | list Invite Links | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listInviteLinks` |
+| POST | `/v1/conversations/{conversationId}/invite-links` | customer credential (server-side only) | create Invite Link | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createInviteLink` |
+| POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | customer credential (server-side only) | revoke Invite Link | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#revokeInviteLink` |
+| GET | `/v1/conversations/{conversationId}/members` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | list Members | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listMembers` |
 | POST | `/v1/conversations/{conversationId}/members` | customer credential (server-side only) | add Member | 200, 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#addMember` |
 | DELETE | `/v1/conversations/{conversationId}/members/{principalId}` | customer credential (server-side only) | remove Member | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeMember` |
 | PATCH | `/v1/conversations/{conversationId}/members/{principalId}` | customer credential (server-side only) | change Member Role | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#changeMemberRole` |
+| POST | `/v1/conversations/{conversationId}/owner` | customer credential (server-side only) | Transfer conversation ownership | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#transferConversationOwnership` |
 
 ### History Transfers
 
@@ -1033,26 +1159,26 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/v1/conversations/{conversationId}/attachments` | customer credential (server-side only); Messaging client token | create Attachment Intent | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createAttachmentIntent` |
-| GET | `/v1/conversations/{conversationId}/attachments/{attachmentId}` | customer credential (server-side only); Messaging client token | get Attachment | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#getAttachment` |
+| POST | `/v1/conversations/{conversationId}/attachments` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | create Attachment Intent | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createAttachmentIntent` |
+| GET | `/v1/conversations/{conversationId}/attachments/{attachmentId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | get Attachment | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#getAttachment` |
 | GET | `/v1/conversations/{conversationId}/attachments/{attachmentId}/content` | customer credential (server-side only); Messaging client token | read Attachment Content | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#readAttachmentContent` |
-| POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants` | customer credential (server-side only); Messaging client token | grant Attachment Download | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#grantAttachmentDownload` |
-| POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | customer credential (server-side only); Messaging client token | finalize Attachment | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#finalizeAttachment` |
+| POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | grant Attachment Download | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#grantAttachmentDownload` |
+| POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | finalize Attachment | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#finalizeAttachment` |
 | POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants` | customer credential (server-side only); Messaging client token | create Thumbnail Grant | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createThumbnailGrant` |
 
 ### Message Reactions
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/conversations/{conversationId}/messages/{messageId}/reactions` | customer credential (server-side only); Messaging client token | list Reactions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listReactions` |
-| DELETE | `/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}` | customer credential (server-side only); Messaging client token | remove Reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#removeReaction` |
-| PUT | `/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}` | customer credential (server-side only); Messaging client token | add Reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#addReaction` |
+| GET | `/v1/conversations/{conversationId}/messages/{messageId}/reactions` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | list Reactions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listReactions` |
+| DELETE | `/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | remove Reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#removeReaction` |
+| PUT | `/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | add Reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#addReaction` |
 
 ### Message Search
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/messaging/search` | customer credential (server-side only); Messaging client token | search Messages | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#searchMessages` |
+| GET | `/v1/messaging/search` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | search Messages | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#searchMessages` |
 
 ### Message Threads
 
@@ -1103,14 +1229,16 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 |---|---|---|---|---|---|---|
 | GET | `/v1/messaging/presence/settings` | customer credential (server-side only); Messaging client token | get Presence Settings | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#getPresenceSettings` |
 | PUT | `/v1/messaging/presence/settings` | customer credential (server-side only); Messaging client token | put Presence Settings | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#putPresenceSettings` |
+| DELETE | `/v1/messaging/user-push-registrations/{installationId}` | CF Meet user token (partner end-user device) | unregister User Push | 204, 400, 401, 403, 503 | — | `messaging/http/v1.openapi.json#unregisterUserPush` |
+| PUT | `/v1/messaging/user-push-registrations/{installationId}` | CF Meet user token (partner end-user device) | register User Push | 200, 400, 401, 403, 429, 503 | — | `messaging/http/v1.openapi.json#registerUserPush` |
 
 ### Read State & Events
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/conversations/{conversationId}/events` | customer credential (server-side only); Messaging client token | replay Conversation Events | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#replayConversationEvents` |
-| PUT | `/v1/conversations/{conversationId}/read-cursor` | customer credential (server-side only); Messaging client token | set Read Cursor | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#setReadCursor` |
-| GET | `/v1/conversations/{conversationId}/unread` | customer credential (server-side only); Messaging client token | get Unread Count | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getUnreadCount` |
+| GET | `/v1/conversations/{conversationId}/events` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | replay Conversation Events | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#replayConversationEvents` |
+| PUT | `/v1/conversations/{conversationId}/read-cursor` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | set Read Cursor | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#setReadCursor` |
+| GET | `/v1/conversations/{conversationId}/unread` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | get Unread Count | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getUnreadCount` |
 
 ### SMS Bridge
 
@@ -1120,13 +1248,38 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 
 ## Developer Portal (Developer Platform)
 
-Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.6.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
+Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.10.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
 
 ### Activity
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/v1/organizations/{organizationId}/activity` | account session (developer bridge); platform credential (server-side only) | Immutable activity history of the organization, newest first | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listActivity` |
+
+### Allowed websites
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/allowed-origins` | account session (developer bridge); platform credential (server-side only) | Read the environment's allowed websites (exact origins that may use device logins from a browser) | 200, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getAllowedOrigins` |
+| PUT | `/v1/environments/{environmentId}/allowed-origins` | account session (developer bridge); platform credential (server-side only) | Replace the environment's allowed websites (at most 20; https only, http://localhost and http://127.0.0.1 in SANDBOX / TEST) | 200, 400, 401, 403, 404, 422, 503 | — | `platform-developer/http/v1.openapi.json#putAllowedOrigins` |
+
+### App directory
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/app-directory` | none (public) | List the published public apps | 200, 400, 404, 429, 503 | — | `platform-developer/http/v1.openapi.json#listAppDirectory` |
+| GET | `/v1/app-directory/{appId}` | none (public) | Read one published public app | 200, 404, 429, 503 | — | `platform-developer/http/v1.openapi.json#getAppDirectoryEntry` |
+
+### Apps
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/projects/{projectId}/app` | account session (developer bridge) | Read the app registered on the project (current manifest, review status, live version) | 200, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getProjectApp` |
+| PUT | `/v1/projects/{projectId}/app` | account session (developer bridge) | Register or change the project's app (a changed manifest is a new immutable version; SUBMITTED / IN_REVIEW / SUSPENDED apps are locked) | 200, 201, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#putProjectApp` |
+| GET | `/v1/projects/{projectId}/app/grants` | account session (developer bridge) | List the app's installations (from Platform Access; no CF Meet account id) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listProjectAppGrants` |
+| POST | `/v1/projects/{projectId}/app/secret` | account session (developer bridge) | Issue or rotate the app's client secret (returned once; the previous secret keeps Platform Access's 24 h overlap) | 201, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#rotateProjectAppSecret` |
+| POST | `/v1/projects/{projectId}/app/submit` | account session (developer bridge) | Submit the current version for review (DRAFT / REJECTED, or an APPROVED / PUBLISHED app with pending changes; no loopback redirect; PUBLIC apps name privacy policy and terms) | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#submitProjectApp` |
+| PUT | `/v1/projects/{projectId}/app/test-accounts` | account session (developer bridge) | Replace the draft test accounts (CF Meet account ids, at most 25, format checked only) | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#putProjectAppTestAccounts` |
 
 ### Commercial
 
@@ -1141,6 +1294,8 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/credential-deliveries` | account session (developer bridge); platform credential (server-side only) | List API keys waiting for their one reveal | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listCredentialDeliveries` |
+| POST | `/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal` | account session (developer bridge) | Reveal an owner-delivered API key once | 200, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#revealCredentialDelivery` |
 | GET | `/v1/environments/{environmentId}/credentials/{credentialId}` | account session (developer bridge); platform credential (server-side only) | Read one credential's metadata | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getCredential` |
 | PUT | `/v1/environments/{environmentId}/credentials/{credentialId}/limits` | account session (developer bridge); platform credential (server-side only) | Restrict a credential's API quota (only ever stricter) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#putCredentialLimits` |
 | POST | `/v1/environments/{environmentId}/credentials/{credentialId}/resume` | account session (developer bridge); platform credential (server-side only) | Resume a suspended credential | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#resumeCredential` |
@@ -1187,6 +1342,15 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 | DELETE | `/v1/organizations/{organizationId}/members/{memberId}` | account session (developer bridge) | Remove a member (OWNER) or leave (self); never the last OWNER | 204, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#removeMember` |
 | PATCH | `/v1/organizations/{organizationId}/members/{memberId}` | account session (developer bridge) | Change a member's role (the last OWNER can never be demoted) | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#changeMemberRole` |
 
+### OAuth
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/oauth/metadata` | none (public) | Read the OAuth authorization server metadata | 200, 404, 429 | — | `platform-developer/http/v1.openapi.json#oauthMetadata` |
+| POST | `/v1/oauth/revoke` | none (public) | Revoke an access or refresh token (RFC 7009) | 200, 400, 401, 429, 503 | — | `platform-developer/http/v1.openapi.json#oauthRevoke` |
+| POST | `/v1/oauth/token` | none (public) | Exchange an authorization code (PKCE S256) or a refresh token for tokens | 200, 400, 401, 429, 503 | — | `platform-developer/http/v1.openapi.json#oauthToken` |
+| GET | `/v1/oauth/userinfo` | none (public) | Read the signed-in user's profile with a user access token | 200, 401, 403, 429, 503 | — | `platform-developer/http/v1.openapi.json#oauthUserinfo` |
+
 ### Organizations
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
@@ -1197,6 +1361,21 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 | PATCH | `/v1/organizations/{organizationId}` | account session (developer bridge); platform credential (server-side only) | Update the organization profile (optimistic concurrency) | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#updateOrganization` |
 | POST | `/v1/organizations/{organizationId}/close` | account session (developer bridge) | Close the organization (terminal; machine access is withdrawn in Platform Access first) | 200, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#closeOrganization` |
 | POST | `/v1/organizations/{organizationId}/ownership-transfer` | account session (developer bridge) | Transfer ownership: the target member becomes OWNER and the caller becomes ADMIN, atomically | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#transferOwnership` |
+
+### Partner users
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| POST | `/v1/environments/{environmentId}/test-user-tokens` | account session (developer bridge) | Development token generator: create the user if new and mint a user token in a SANDBOX environment (other kinds: 422 POLICY_VIOLATION) | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `platform-developer/http/v1.openapi.json#issueTestUserToken` |
+| GET | `/v1/environments/{environmentId}/users` | account session (developer bridge) | List an environment's partner users in the Developer Console | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listEnvironmentUsers` |
+| GET | `/v1/users` | platform credential (server-side only) | List the partner users of the credential's environment (optionally by `externalId`) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listUsers` |
+| POST | `/v1/users` | platform credential (server-side only) | Create a partner user (idempotent on `externalId`: 201 new, 200 existing; environment caps answer 409 LIMIT_EXCEEDED) | 200, 201, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#createUser` |
+| POST | `/v1/users/tokens` | platform credential (server-side only) | Create the user if new and mint a CF Meet user token (returned once; Cache-Control no-store; a replay never returns the token) | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `platform-developer/http/v1.openapi.json#upsertUserToken` |
+| DELETE | `/v1/users/{userId}` | platform credential (server-side only) | Delete a partner user (tombstone: profile erased, id kept; their tokens and device credentials stop working) | 204, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#deleteUser` |
+| GET | `/v1/users/{userId}` | platform credential (server-side only) | Read a partner user (another environment's user is 404) | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#getUser` |
+| PATCH | `/v1/users/{userId}` | platform credential (server-side only) | Change a partner user's profile or suspend / reactivate them | 200, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#updateUser` |
+| POST | `/v1/users/{userId}/revoke-sessions` | platform credential (server-side only) | Revoke every token and device session of a partner user issued so far | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#revokeUserSessions` |
+| POST | `/v1/users/{userId}/tokens` | platform credential (server-side only) | Mint a CF Meet user token for a partner user (grants within the credential's scopes; returned once; at most 120 per user per hour) | 201, 400, 401, 403, 404, 422, 429, 503 | — | `platform-developer/http/v1.openapi.json#issueUserToken` |
 
 ### Production access
 
@@ -1221,6 +1400,15 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 | POST | `/v1/projects/{projectId}/resume` | account session (developer bridge); platform credential (server-side only) | Resume a suspended project | 200, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#resumeProject` |
 | GET | `/v1/projects/{projectId}/scopes` | account session (developer bridge); platform credential (server-side only) | The project's scope grants as Platform Access reports them | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listProjectScopes` |
 | POST | `/v1/projects/{projectId}/suspend` | account session (developer bridge); platform credential (server-side only) | Suspend the project (its Platform Access application is suspended) | 200, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#suspendProject` |
+
+### Push credentials
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/environments/{environmentId}/push-credentials` | account session (developer bridge) | List the environment's push credentials (metadata only) | 200, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listPushCredentials` |
+| POST | `/v1/environments/{environmentId}/push-credentials` | account session (developer bridge) | Upload (replace) an APNs or FCM push credential: the secret is sealed to the Notification Service on receipt and never stored or returned; SANDBOX / TEST may only use the APNs sandbox host; PRODUCTION needs the PUSH capability live | 201, 400, 401, 403, 404, 409, 422, 503 | — | `platform-developer/http/v1.openapi.json#createPushCredential` |
+| DELETE | `/v1/environments/{environmentId}/push-credentials/{credentialRef}` | account session (developer bridge) | Delete a push credential (removed from the Notification Service; pushes with it stop) | 204, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#deletePushCredential` |
+| POST | `/v1/environments/{environmentId}/push-credentials/{credentialRef}/verify` | account session (developer bridge) | Verify a push credential with its provider (APNs JWT / FCM OAuth token) and record the outcome | 200, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#verifyPushCredential` |
 
 ### Scopes
 
@@ -1269,3 +1457,4 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 | PATCH | `/v1/environments/{environmentId}/webhooks/{webhookId}` | account session (developer bridge) | Update a webhook subscription of an environment | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#updateEnvironmentWebhook` |
 | GET | `/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries` | account session (developer bridge) | List deliveries of a subscription | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listEnvironmentWebhookDeliveries` |
 | POST | `/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret` | account session (developer bridge) | Rotate the signing secret of a subscription | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#rotateEnvironmentWebhookSecret` |
+| POST | `/v1/environments/{environmentId}/webhooks/{webhookId}/test` | account session (developer bridge) | Send a test event | 201, 401, 403, 404, 409, 429, 503 | — | `platform-developer/http/v1.openapi.json#sendEnvironmentWebhookTest` |

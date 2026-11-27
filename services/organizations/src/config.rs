@@ -11,17 +11,25 @@
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the receiver-authoritative trust bundle of `cfmeet.organizations` |
 //! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
+//! | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`): the saga also creates, verifies, renews and (on archive) revokes each organization's Calling and Messaging service bindings through Platform Access (`platform-identity.bind-organization-services`, ADR 0058 A2); an organization is READY only once both are verified. Refused without provisioning |
+//! | `ORGANIZATIONS_APP_INSTALLS_ENABLED` | no | `true` / `false` (default `false`): ADR 0064 workspace app installs — the policy section `apps` and `POST /internal/v1/organizations/{id}/app-install-check` (`organization-apps.evaluate`, Meeting Service only); off: the section is refused and the route answers 404 like any unknown route |
 //! | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated consumers that receive organization events (today only `cfmeet.meeting-service`); empty (default): events stay PENDING in the outbox |
-//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning or event delivery | `kid` of the Organizations signing key |
-//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning or event delivery | PKCS#8 PEM Ed25519 private key FILE |
-//! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`) |
+//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
+//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key FILE |
+//! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`; with service bindings also `platform-identity.bind-organization-services`) |
 //! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (I1, `notifications-event.publish`, roadmap N7): when set, the catalogue events `organizations.*` are published from the committed outbox record rows; unset (default): nothing is published and nothing is written |
+//! | `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED` | no | `true` / `false` (default `false`; gap audit G19): with `CF_NOTIFICATIONS_BASE_URL`, also notify the organization's ACTIVE members of `organization.archived` / `organization.reactivated` (`organizations.organization.{archived, reactivated}`). Leave off until the Notification Service catalogue carries both types: an event whose type the catalogue does not know is recorded `SKIPPED` (`NOT_IN_CATALOGUE`), never sent |
+//! | `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED` | no | `true` / `false` (default `false`; ADR 0068 A4): owner-delivered exports (the admin bridge's `organizations.organization.export`). Requires `CF_NOTIFICATIONS_BASE_URL`, `CF_NOTIFICATIONS_SEALING_KEY` and `ORGANIZATIONS_EXPORT_KEYS_FILE`, and the Notification Service catalogue type `organizations.organization.export_ready` (the service refuses to start without it). Off: the command answers 409 `EXPORT_DELIVERY_UNAVAILABLE` |
+//! | `CF_NOTIFICATIONS_SEALING_KEY` | with export delivery | the Notification Service's PUBLIC HPKE key `<kid>:<base64url>`: each link's token is sealed to it |
+//! | `ORGANIZATIONS_EXPORT_KEYS_FILE` | with export delivery | FILE of `<key id>:<base64url 32 bytes>` lines (XChaCha20-Poly1305 at-rest keys of exports; the first seals, all open; keep a retired key 7 days) |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
-//! Outbound, Organizations calls Platform Access when provisioning is enabled and each
-//! configured event consumer's signed ingress; both sign with its own key file (inline
-//! keys are refused regardless). With provisioning off (the default) organizations stay
+//! Outbound, Organizations calls Platform Access when provisioning is enabled, each
+//! configured event consumer's signed ingress and, with `CF_NOTIFICATIONS_BASE_URL`, the
+//! Notification Service's I1; all sign with its own key file (inline keys are refused
+//! regardless). With provisioning off (the default) organizations stay
 //! PENDING and the provisioning read reports it truthfully. Error messages never echo a
 //! value.
 
@@ -34,6 +42,8 @@ use cf_service_auth::{
 };
 
 use crate::{
+    exports::{ExportDelivery, ExportNotices, ExportVault, NotificationExportNotices},
+    notification_publications::{NotificationEventSink, NotificationServiceEvents},
     outbox::{DisabledDispatcher, EventDispatcher, HttpEventDispatcher},
     provisioning::{HttpPlatformScopes, PlatformScopes},
 };
@@ -88,6 +98,15 @@ pub struct SigningSettings {
     pub http_timeout: Duration,
 }
 
+/// Owner-delivered exports (`ORGANIZATIONS_EXPORT_DELIVERY_ENABLED=true`).
+#[derive(Debug, Clone)]
+pub struct ExportSettings {
+    /// `CF_NOTIFICATIONS_SEALING_KEY` (public, validated).
+    pub sealing_key: String,
+    /// `ORGANIZATIONS_EXPORT_KEYS_FILE` (read at startup).
+    pub keys_file: PathBuf,
+}
+
 /// Outbound service authentication for the provisioning saga.
 #[derive(Debug, Clone)]
 pub struct OutboundSettings {
@@ -108,10 +127,21 @@ pub struct OrganizationsConfig {
     pub trust_bundle_file: PathBuf,
     /// `Some` iff `ORGANIZATIONS_PROVISIONING_ENABLED=true`.
     pub provisioning: Option<OutboundSettings>,
+    /// `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning).
+    pub service_bindings_enabled: bool,
+    /// `ORGANIZATIONS_APP_INSTALLS_ENABLED=true` (ADR 0064).
+    pub app_installs_enabled: bool,
     /// Consumers organization events are delivered to (empty: delivery disabled).
     pub event_consumers: Vec<EventConsumer>,
-    /// `Some` iff provisioning or event delivery is enabled.
+    /// `CF_NOTIFICATIONS_BASE_URL`: the Notification Service (I1); `None`: no
+    /// notification is published.
+    pub notifications_base_url: Option<String>,
+    /// `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=true` (gap audit G19; default off).
+    pub lifecycle_notifications: bool,
+    /// `Some` iff provisioning, event delivery or notification publication is enabled.
     pub signing: Option<SigningSettings>,
+    /// `Some` iff `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED=true` (ADR 0068 A4).
+    pub exports: Option<ExportSettings>,
 }
 
 impl fmt::Debug for OrganizationsConfig {
@@ -123,6 +153,8 @@ impl fmt::Debug for OrganizationsConfig {
             .field("worker_interval", &self.worker_interval)
             .field("runtime_environment", &self.runtime_environment)
             .field("provisioning_enabled", &self.provisioning.is_some())
+            .field("service_bindings_enabled", &self.service_bindings_enabled)
+            .field("app_installs_enabled", &self.app_installs_enabled)
             .field(
                 "event_destinations",
                 &self
@@ -131,6 +163,12 @@ impl fmt::Debug for OrganizationsConfig {
                     .map(|c| c.destination.as_str())
                     .collect::<Vec<_>>(),
             )
+            .field(
+                "notification_publications",
+                &self.notifications_base_url.is_some(),
+            )
+            .field("lifecycle_notifications", &self.lifecycle_notifications)
+            .field("export_delivery", &self.exports.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -230,6 +268,33 @@ impl OrganizationsConfig {
                 ))
             }
         };
+        let service_bindings_enabled =
+            match get("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED").as_deref() {
+                None | Some("false") => false,
+                Some("true") if enabled => true,
+                Some("true") => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED",
+                        "requires ORGANIZATIONS_PROVISIONING_ENABLED=true",
+                    ))
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED",
+                        "must be `true` or `false`",
+                    ))
+                }
+            };
+        let app_installs_enabled = match get("ORGANIZATIONS_APP_INSTALLS_ENABLED").as_deref() {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(_) => {
+                return Err(invalid(
+                    "ORGANIZATIONS_APP_INSTALLS_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
         let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
         let mut event_consumers: Vec<EventConsumer> = Vec::new();
         for name in get("ORGANIZATIONS_EVENT_DESTINATIONS")
@@ -259,7 +324,48 @@ impl OrganizationsConfig {
                 base_url: required(url_var)?,
             });
         }
-        let signing = if enabled || !event_consumers.is_empty() {
+        let notifications_base_url = get("CF_NOTIFICATIONS_BASE_URL");
+        let lifecycle_notifications =
+            match get("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED").as_deref() {
+                None | Some("false") => false,
+                Some("true") => true,
+                Some(_) => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED",
+                        "must be `true` or `false`",
+                    ))
+                }
+            };
+        let exports = match get("ORGANIZATIONS_EXPORT_DELIVERY_ENABLED").as_deref() {
+            None | Some("false") => None,
+            Some("true") => {
+                if notifications_base_url.is_none() {
+                    return Err(invalid(
+                        "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                        "requires CF_NOTIFICATIONS_BASE_URL",
+                    ));
+                }
+                let sealing_key = required("CF_NOTIFICATIONS_SEALING_KEY")?;
+                cf_notification_client::SealingKey::parse(&sealing_key).map_err(|_| {
+                    invalid(
+                        "CF_NOTIFICATIONS_SEALING_KEY",
+                        "must be <kid>:<base64url public key>",
+                    )
+                })?;
+                Some(ExportSettings {
+                    sealing_key,
+                    keys_file: PathBuf::from(required("ORGANIZATIONS_EXPORT_KEYS_FILE")?),
+                })
+            }
+            Some(_) => {
+                return Err(invalid(
+                    "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
+        let signing = if enabled || !event_consumers.is_empty() || notifications_base_url.is_some()
+        {
             let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
                 .map_err(|_| invalid("CF_SERVICE_AUTH_KEY_ID", "is not a valid key id"))?;
             let token_ttl = match get("CF_SERVICE_TOKEN_TTL_SECONDS") {
@@ -309,9 +415,80 @@ impl OrganizationsConfig {
             runtime_environment,
             trust_bundle_file,
             provisioning,
+            service_bindings_enabled,
+            app_installs_enabled,
             event_consumers,
+            notifications_base_url,
+            lifecycle_notifications,
             signing,
+            exports,
         })
+    }
+
+    /// Owner-delivered exports (`None` while `ORGANIZATIONS_EXPORT_DELIVERY_ENABLED` is
+    /// off). Loads the key file and refuses (fail closed) while the Notification Service
+    /// catalogue lacks the notice type: a link that cannot be sent must never be issued.
+    pub fn export_delivery(&self) -> Result<Option<Arc<ExportDelivery>>, ConfigError> {
+        let Some(s) = &self.exports else {
+            return Ok(None);
+        };
+        let vault = ExportVault::from_file(&s.keys_file)
+            .map_err(|reason| invalid("ORGANIZATIONS_EXPORT_KEYS_FILE", reason))?;
+        let sealing = cf_notification_client::SealingKey::parse(&s.sealing_key).map_err(|_| {
+            invalid(
+                "CF_NOTIFICATIONS_SEALING_KEY",
+                "must be <kid>:<base64url public key>",
+            )
+        })?;
+        let notices = NotificationExportNotices::new(sealing);
+        notices.available().map_err(|_| {
+            invalid(
+                "ORGANIZATIONS_EXPORT_DELIVERY_ENABLED",
+                "needs the Notification Service catalogue type organizations.organization.export_ready, which this build does not carry yet",
+            )
+        })?;
+        Ok(Some(Arc::new(ExportDelivery {
+            vault,
+            notices: Arc::new(notices),
+        })))
+    }
+
+    fn signer(
+        &self,
+        s: &SigningSettings,
+        clock: SharedClock,
+    ) -> Result<Arc<ServiceTokenSigner>, ConfigError> {
+        let key = ServiceSigningKey::from_pkcs8_pem_file(s.key_id.clone(), &s.private_key_file)
+            .map_err(|e| invalid("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", e.to_string()))?;
+        Ok(Arc::new(ServiceTokenSigner::new(
+            organizations_service_id(),
+            self.runtime_environment,
+            key,
+            s.token_ttl,
+            clock,
+        )))
+    }
+
+    /// The Notification Service I1 publisher (`None` without `CF_NOTIFICATIONS_BASE_URL`:
+    /// nothing is published). Signs with the outbound service-auth key; loads it and
+    /// validates the target URL; fails closed.
+    pub fn notification_sink(
+        &self,
+        clock: SharedClock,
+    ) -> Result<Option<Arc<dyn NotificationEventSink>>, ConfigError> {
+        let (Some(url), Some(s)) = (&self.notifications_base_url, &self.signing) else {
+            return Ok(None);
+        };
+        let mut targets = InternalTargets::new(self.runtime_environment);
+        targets
+            .insert(ServiceId::notifications(), url)
+            .map_err(|e| invalid("CF_NOTIFICATIONS_BASE_URL", e.to_string()))?;
+        let client = InternalServiceClient::new(self.signer(s, clock)?, targets, s.http_timeout)
+            .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
+        Ok(Some(Arc::new(
+            NotificationServiceEvents::new(Arc::new(client))
+                .with_lifecycle_events(self.lifecycle_notifications),
+        )))
     }
 
     /// The event dispatcher: signed delivery to every configured consumer, or the
@@ -388,7 +565,9 @@ impl OrganizationsConfig {
             .map_err(|e| invalid("CF_PLATFORM_ACCESS_BASE_URL", e.to_string()))?;
         let client = InternalServiceClient::new(signer, targets, s.http_timeout)
             .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
-        Ok(Some(Arc::new(HttpPlatformScopes::new(Arc::new(client)))))
+        Ok(Some(Arc::new(
+            HttpPlatformScopes::new(Arc::new(client)).with_bindings(self.service_bindings_enabled),
+        )))
     }
 
     pub fn database_url(&self) -> &str {
@@ -487,6 +666,47 @@ mod tests {
     }
 
     #[test]
+    fn service_bindings_are_off_by_default_and_require_provisioning() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(!cfg.service_bindings_enabled);
+        let mut alone: Vec<_> = BASE.to_vec();
+        alone.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "true"));
+        let err = OrganizationsConfig::from_lookup(lookup(&alone)).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED"));
+        let mut on: Vec<_> = BASE.to_vec();
+        on.extend([
+            ("ORGANIZATIONS_PROVISIONING_ENABLED", "true"),
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            (
+                "CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+                "/run/secrets/organizations.pem",
+            ),
+            (
+                "CF_PLATFORM_ACCESS_BASE_URL",
+                "https://platform-access.internal:8443",
+            ),
+        ]);
+        assert!(
+            !OrganizationsConfig::from_lookup(lookup(&on))
+                .unwrap()
+                .service_bindings_enabled
+        );
+        let mut both = on.clone();
+        both.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "true"));
+        assert!(
+            OrganizationsConfig::from_lookup(lookup(&both))
+                .unwrap()
+                .service_bindings_enabled
+        );
+        let mut bad = on.clone();
+        bad.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "maybe-later"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad)).unwrap_err();
+        assert!(!err.to_string().contains("maybe-later"));
+    }
+
+    #[test]
     fn event_delivery_is_off_by_default_and_needs_a_known_consumer_url_and_key() {
         let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
         assert!(cfg.event_consumers.is_empty() && cfg.signing.is_none());
@@ -531,6 +751,70 @@ mod tests {
             let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
             assert!(!err.to_string().contains("unknown-consumer"), "{value}");
         }
+    }
+
+    #[test]
+    fn notification_publication_is_off_by_default_and_signs_with_the_outbound_key() {
+        let clock = || -> SharedClock { Arc::new(cf_service_auth::SystemClock) };
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(cfg.notifications_base_url.is_none() && cfg.signing.is_none());
+        assert!(cfg.notification_sink(clock()).unwrap().is_none());
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push((
+            "CF_NOTIFICATIONS_BASE_URL",
+            "https://notifications.internal:8443",
+        ));
+        // The outbound signing key is required.
+        assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
+        let pem = std::env::temp_dir().join(format!("org-notif-{}.pem", uuid::Uuid::new_v4()));
+        let key = ServiceSigningKey::generate(KeyId::parse("organizations-staging-1").unwrap());
+        std::fs::write(&pem, key.to_pkcs8_pem().as_bytes()).unwrap();
+        let pem_path = pem.to_string_lossy().to_string();
+        on.extend([
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", pem_path.as_str()),
+        ]);
+        let cfg = OrganizationsConfig::from_lookup(lookup(&on)).unwrap();
+        // Publication alone enables neither provisioning nor event delivery.
+        assert!(cfg.provisioning.is_none() && cfg.event_consumers.is_empty());
+        assert!(!cfg.event_dispatcher(clock()).unwrap().enabled());
+        assert!(cfg.notification_sink(clock()).unwrap().is_some());
+        assert!(format!("{cfg:?}").contains("notification_publications: true"));
+        // A plain-HTTP target outside local / test is refused without echo.
+        let mut bad: Vec<_> = on
+            .iter()
+            .filter(|(k, _)| *k != "CF_NOTIFICATIONS_BASE_URL")
+            .copied()
+            .collect();
+        bad.push(("CF_NOTIFICATIONS_BASE_URL", "http://plain-notif-host:80"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad))
+            .unwrap()
+            .notification_sink(clock())
+            .err()
+            .expect("refused");
+        assert!(err.to_string().contains("CF_NOTIFICATIONS_BASE_URL"));
+        assert!(!err.to_string().contains("plain-notif-host"));
+        std::fs::remove_file(&pem).ok();
+    }
+
+    #[test]
+    fn lifecycle_notifications_are_off_by_default() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(!cfg.lifecycle_notifications);
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push(("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED", "true"));
+        assert!(
+            OrganizationsConfig::from_lookup(lookup(&on))
+                .unwrap()
+                .lifecycle_notifications
+        );
+        let mut bad: Vec<_> = BASE.to_vec();
+        bad.push(("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED", "soon-xyz"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad)).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED"));
+        assert!(!err.to_string().contains("soon-xyz"));
     }
 
     #[test]

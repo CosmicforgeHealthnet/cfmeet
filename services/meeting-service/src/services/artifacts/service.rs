@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use utoipa::ToSchema;
 
-use crate::domain::{AdmissionState, IdentityType, Role};
+use crate::domain::{AdmissionState, IdentityType, RecordOrigin, Role};
 use uuid::Uuid;
 
 use super::{
@@ -37,7 +37,8 @@ use crate::{
     models::{conference_participants, conference_sessions, meeting_artifacts, meeting_polls},
     services::{
         actor::ActorContext,
-        meeting_core::{lock_conference, Core},
+        admin_operations::{self, BridgeCommand},
+        meeting_core::{find_conference, find_space, lock_conference, Core},
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
         meeting_permissions::Permission,
         ops_metrics::{inc, OPS_METRICS as OM},
@@ -373,6 +374,97 @@ impl ArtifactService {
         let _ = self.delete_now(artifact_id).await;
         let a = self.scoped(conference_id, artifact_id).await?;
         Ok(ArtifactView::of(&a))
+    }
+
+    /// ADR 0068 `meetings.recording.delete` / `meetings.transcript.delete`: an HQ staff
+    /// member deletes one recording or transcript through the admin bridge (R4, approved by
+    /// a second person). The manual-deletion path at HQ's expected version: the meeting
+    /// profile's recording policy still applies (`PROFILE_POLICY_DENIED`), a capture in
+    /// progress is refused, an artefact already deleted or being deleted is refused
+    /// (`ARTIFACT_DELETED`). The request (reason `OPERATOR`, version + 1) is audited as the
+    /// operator and recorded in the same transaction (`meeting_admin_operations`,
+    /// `DELETE_REQUESTED`); the storage delete then runs exactly as for a host (DELETED only
+    /// once the object's absence is confirmed, retried otherwise).
+    pub async fn operator_delete(
+        &self,
+        cmd: &BridgeCommand,
+        conference_id: Uuid,
+        artifact_id: Uuid,
+        kind: ArtifactType,
+    ) -> ApiResult<meeting_artifacts::Model> {
+        let conference = find_conference(&self.core.db, conference_id).await?;
+        if conference.origin == RecordOrigin::Legacy {
+            return Err(not_found_artifact());
+        }
+        let current = self.scoped(conference_id, artifact_id).await?;
+        if type_of(&current) != Some(kind) {
+            return Err(not_found_artifact());
+        }
+        if kind == ArtifactType::Recording {
+            let space = find_space(&self.core.db, conference.meeting_space_id).await?;
+            let profile =
+                MeetingProfileResolver::load(&self.core.db, &space, Some(&conference)).await?;
+            if !profile.policy.recording.manual_delete_allowed {
+                inc(&OM.profile_policy_denials);
+                return Err(ApiError::domain(
+                    ErrorCode::ProfilePolicyDenied,
+                    "Manual deletion of recordings is disabled by policy",
+                ));
+            }
+        }
+        let txn = self.core.db.begin().await?;
+        admin_operations::claim(&txn, cmd).await?;
+        lock_conference(&txn, conference_id).await?;
+        let a = lock_artifact(&txn, conference_id, artifact_id).await?;
+        admin_operations::check_version(cmd, a.version as i64)?;
+        let status = status_of(&a);
+        if status == ArtifactStatus::Deleted || a.delete_requested_at.is_some() {
+            return Err(ApiError::domain(
+                ErrorCode::ArtifactDeleted,
+                "The artifact is already deleted or being deleted",
+            ));
+        }
+        if status.is_active_capture() {
+            return Err(ApiError::domain(
+                ErrorCode::RecordingStateConflict,
+                "Stop the recording before deleting it",
+            ));
+        }
+        let now = Utc::now();
+        let mut am: meeting_artifacts::ActiveModel = a.clone().into();
+        am.delete_requested_at = Set(Some(now));
+        am.delete_reason = Set(Some("OPERATOR".into()));
+        am.next_attempt_at = Set(Some(now));
+        am.version = Set(a.version + 1);
+        am.updated_at = Set(now);
+        let updated = am.update(&txn).await?;
+        audit(
+            &txn,
+            &crate::services::meeting_space::operator_actor(cmd),
+            AuditRecord {
+                meeting_space_id: a.meeting_space_id,
+                conference_id: Some(conference_id),
+                action: action::ARTIFACT_DELETE_REQUEST,
+                target_type: Some("ARTIFACT"),
+                target_ref: Some(a.id.to_string()),
+                metadata: json!({ "artifactType": a.artifact_type, "reason": "OPERATOR" }),
+            },
+        )
+        .await?;
+        admin_operations::record(
+            &txn,
+            cmd,
+            admin_operations::subject::ARTIFACT,
+            artifact_id,
+            "DELETE_REQUESTED",
+            Some(updated.version as i64),
+        )
+        .await?;
+        txn.commit().await?;
+        if let Err(e) = self.delete_now(artifact_id).await {
+            tracing::warn!(%artifact_id, "artifact deletion deferred to the retention worker: {e}");
+        }
+        Ok(updated)
     }
 
     /// Delete one due artefact (manual request or retention reached). DELETED is
@@ -949,19 +1041,20 @@ impl ArtifactService {
 
     /// Generate an attendance report, poll report or chat export (server-side data
     /// only; anonymous polls stay anonymous; private chat is never exported).
-    pub async fn generate_report(
+    /// The export permission and the meeting policy for one report type.
+    async fn export_ctx(
         &self,
         ctx: &ActorContext,
         conference_id: Uuid,
-        req: &GenerateReportRequest,
-    ) -> ApiResult<ArtifactView> {
+        artifact_type: ArtifactType,
+    ) -> ApiResult<ArtifactCtx> {
         let c = ArtifactCtx::load(&self.core, ctx, conference_id).await?;
         c.require(
             Permission::ArtifactExport,
             "You are not allowed to export meeting data",
         )?;
         let exports = &c.profile.policy.exports;
-        let allowed = match req.artifact_type {
+        let allowed = match artifact_type {
             ArtifactType::AttendanceReport => exports.attendance_report_allowed,
             ArtifactType::PollReport => exports.poll_report_allowed,
             ArtifactType::ChatExport => exports.chat_export_allowed,
@@ -977,6 +1070,57 @@ impl ArtifactService {
             return Err(ApiError::domain(
                 ErrorCode::ProfilePolicyDenied,
                 "This export is disabled by the meeting policy",
+            ));
+        }
+        Ok(c)
+    }
+
+    /// Gap audit M13: the same report, returned directly instead of stored (needs no
+    /// artefact storage). Same permission, policy and privacy rules; audited.
+    pub async fn export_inline(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        artifact_type: ArtifactType,
+    ) -> ApiResult<Value> {
+        let c = self.export_ctx(ctx, conference_id, artifact_type).await?;
+        let (body, _) = match artifact_type {
+            ArtifactType::AttendanceReport => self.attendance(&c.conference).await?,
+            ArtifactType::PollReport => self.poll_report(&c.conference).await?,
+            _ => self.chat_export(&c.conference).await?,
+        };
+        audit(
+            &self.core.db,
+            &c.audit,
+            AuditRecord {
+                meeting_space_id: c.space.id,
+                conference_id: Some(conference_id),
+                action: action::ARTIFACT_GENERATE,
+                target_type: Some("EXPORT"),
+                target_ref: Some(artifact_type.as_str().to_string()),
+                metadata: json!({ "artifactType": artifact_type.as_str(), "delivery": "INLINE" }),
+            },
+        )
+        .await?;
+        Ok(body)
+    }
+
+    pub async fn generate_report(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        req: &GenerateReportRequest,
+    ) -> ApiResult<ArtifactView> {
+        let c = self
+            .export_ctx(ctx, conference_id, req.artifact_type)
+            .await?;
+        // Gap audit M13: without an artefact bucket the report cannot be stored; say so
+        // plainly and point to the inline export, which needs no storage.
+        if !self.core.artifacts.storage.is_configured() {
+            return Err(ApiError::domain(
+                ErrorCode::ArtifactStorageNotConfigured,
+                "Stored reports need artifact storage, which this deployment has not configured; \
+                 download the report with GET /api/v2/conferences/{id}/exports/{artifactType} instead",
             ));
         }
         let (body, metadata) = match req.artifact_type {

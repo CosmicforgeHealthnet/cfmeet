@@ -53,7 +53,6 @@ fn status(r: Resp, expected: u16, operation: &str) -> anyhow::Result<Value> {
 struct Account {
     id: Uuid,
     email: String,
-    password: String,
     session: String,
     refresh: String,
     principal: Uuid,
@@ -64,30 +63,7 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
         "communications-{}@acceptance.invalid",
         Uuid::new_v4().simple()
     );
-    let password = format!("P9!{}", Uuid::new_v4().simple());
-    let username = format!("member{}", &Uuid::new_v4().simple().to_string()[..10]);
-    let r=request(s,"meeting-service",None,None,Method::POST,"/api/v1/auth/register",Some(json!({"email":email,"username":username,"password":password,"confirm_password":password}))).await?;
-    if !(200..300).contains(&r.status) {
-        bail!(
-            "registered account setup failed: {} {:?}",
-            r.status,
-            r.code()
-        );
-    }
-    let login = status(
-        request(
-            s,
-            "meeting-service",
-            None,
-            None,
-            Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":email,"password":password})),
-        )
-        .await?,
-        200,
-        "account login",
-    )?;
+    let login = otp_sign_in(s, &email).await?;
     let session = login["access_token"]
         .as_str()
         .context("access token")?
@@ -101,6 +77,10 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
             .decode(session.split('.').nth(1).context("JWT claims")?)?,
     )?;
     let id = Uuid::parse_str(claims["sub"].as_str().context("JWT subject")?)?;
+    // Multi-device policy: the first device of a new account is declared right after
+    // signing in and becomes its trusted (bootstrap) web device, which personal E2EE
+    // enrollment requires.
+    declare_web_device(s, &session, claims["sid"].as_str().context("session id")?).await?;
     let profile = status(
         request(
             s,
@@ -127,7 +107,6 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
     Ok(Account {
         id,
         email,
-        password,
         session,
         refresh,
         principal,
@@ -193,6 +172,50 @@ async fn connected(s: &PersonalStack, a: &Account, b: &Account) -> anyhow::Resul
         "connection acceptance",
     )?;
     Ok(())
+}
+
+/// Declare the sign-in's browser device with a fresh Ed25519 key (proof purpose DECLARE,
+/// context = session id). Returns the device's view.
+async fn declare_web_device(s: &PersonalStack, session: &str, sid: &str) -> anyhow::Result<Value> {
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::RngCore;
+    use sha2::Digest;
+    let thumbprint = |k: &[u8]| hex::encode(sha2::Sha256::digest(k));
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let mut seed = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut seed);
+    let key = SigningKey::from_bytes(&seed);
+    let public = key.verifying_key().to_bytes();
+    let mut nonce = [0u8; 18];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let nonce = b64.encode(nonce);
+    let issued_at = chrono::Utc::now().timestamp();
+    let statement = format!(
+        "cfmeet-account-device-proof:v1\nDECLARE\n{}\n{sid}\n{issued_at}\n{nonce}",
+        thumbprint(&public)
+    );
+    let signature = b64.encode(key.sign(statement.as_bytes()).to_bytes());
+    let body = status(
+        request(
+            s,
+            "meeting-service",
+            Some(session),
+            None,
+            Method::POST,
+            "/api/v2/me/devices/current",
+            Some(json!({
+                "installationId": format!("cert-{}", Uuid::new_v4().simple()),
+                "deviceClass": "WEB", "platform": "WEB",
+                "publicKey": b64.encode(public),
+                "proof": {"issuedAt": issued_at, "nonce": nonce, "signature": signature},
+            })),
+        )
+        .await?,
+        200,
+        "declare the account's first device",
+    )?;
+    assert_eq!(body["device"]["trust"], "TRUSTED");
+    Ok(body)
 }
 
 async fn native_message_request(
@@ -672,7 +695,9 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     let (mut a, b) = tokio::try_join!(account(s), account(s))?;
     assert_ne!(a.principal, b.principal);
     assert_ne!(a.public_id, b.public_id);
-    let swagger = status(
+    // ADR 0061: the Communications Hub is first-party only, so its Swagger family is no
+    // longer served publicly (the Meeting Service swagger test pins the same 404).
+    status(
         request(
             s,
             "meeting-service",
@@ -683,23 +708,9 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
             None,
         )
         .await?,
-        200,
-        "public Swagger family",
+        404,
+        "Communications Swagger family is not public",
     )?;
-    assert_eq!(
-        swagger["paths"]
-            .as_object()
-            .unwrap()
-            .values()
-            .map(|v| v.as_object().unwrap().len())
-            .sum::<usize>(),
-        73
-    );
-    assert!(swagger["paths"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .all(|p| p.starts_with("/api/v2/communications/")));
     assert_eq!(
         request(
             s,
@@ -906,6 +917,14 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .code(),
         Some("DELIVERY_REFUSED")
     );
+    // Contacts audit K5: unblocking restores a contact that was connected before the block,
+    // unless someone removed it meanwhile. A removes the contact while blocked, so the
+    // unblock leaves the relationship ended.
+    status(
+        hub(s, &a, Method::DELETE, &format!("/contacts/{contact}"), None).await?,
+        200,
+        "contact removed while blocked",
+    )?;
     status(
         hub(
             s,
@@ -1029,20 +1048,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         "old native session cannot reactivate after suspension"
     );
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let login = status(
-        request(
-            s,
-            "meeting-service",
-            None,
-            None,
-            Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":a.email,"password":a.password})),
-        )
-        .await?,
-        200,
-        "fresh authentication after suspension",
-    )?;
+    let login = otp_sign_in(s, &a.email).await?;
     a.session = login["access_token"]
         .as_str()
         .context("new access token")?
@@ -1148,7 +1154,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     assert!(row.try_get::<bool>("", "revoked")?);
     db.close().await?;
     // Keep the fixture login values private even on assertion failure.
-    assert!(!a.email.is_empty() && !a.password.is_empty());
+    assert!(!a.email.is_empty());
     println!("PERSONAL_COMMUNICATIONS_REAL_E2E: identity_without_phone, principal_stability, public_swagger, private_internal_api, truthful_security_readiness, invitations, accepted_connections, direct_conversation_reuse, message_send_policy, voice_call_policy, video_call_policy, separate_aliases, common_groups, blocking, revocation, rotation, invitation_invalidation, tenant_isolation, truthful_delivery_status, delivery_status_owner_outage, fail_closed_outage, independent_meetings, durable_logout: PASS");
     Ok(())
 }
@@ -1165,21 +1171,50 @@ fn claims(token: &str) -> anyhow::Result<Value> {
             .decode(token.split('.').nth(1).context("JWT claims")?)?,
     )?)
 }
-async fn login(s: &PersonalStack, email: &str, password: &str) -> anyhow::Result<String> {
-    let login = status(
+/// Passwordless sign-in through the public API: request a code, replace the issued code
+/// with a controlled one in the shared Redis (codes are stored only as salted hashes) and
+/// verify it. The first verification of a new address creates the account.
+async fn otp_sign_in(s: &PersonalStack, email: &str) -> anyhow::Result<Value> {
+    let r = request(
+        s,
+        "meeting-service",
+        None,
+        None,
+        Method::POST,
+        "/api/v1/auth/otp/request",
+        Some(json!({ "email": email })),
+    )
+    .await?;
+    if !(200..300).contains(&r.status) {
+        bail!("sign-in code request failed: {} {:?}", r.status, r.code());
+    }
+    let redis = std::env::var("TEST_REDIS_URL").context("TEST_REDIS_URL required")?;
+    let mut code = None;
+    for _ in 0..100 {
+        code = cfmeet_certification::redis::controlled_otp(&redis, "otp:signin", email).await?;
+        if code.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let code = code.context("no sign-in code stored")?;
+    status(
         request(
             s,
             "meeting-service",
             None,
             None,
             Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":email,"password":password})),
+            "/api/v1/auth/otp/verify",
+            Some(json!({ "email": email, "code": code })),
         )
         .await?,
         200,
-        "additional sign-in",
-    )?;
+        "sign-in",
+    )
+}
+async fn login(s: &PersonalStack, email: &str) -> anyhow::Result<String> {
+    let login = otp_sign_in(s, email).await?;
     Ok(login["access_token"]
         .as_str()
         .context("access token")?
@@ -1432,7 +1467,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
 
     // ACC-008: a device is bound to the sign-in that linked it. Ending that sign-in
     // revokes the device at Calling; revoking a device ends the sign-in it was bound to.
-    let second = login(s, &a.email, &a.password).await?;
+    let second = login(s, &a.email).await?;
     let second_session = claims(&second)?["sid"]
         .as_str()
         .context("session id")?
@@ -1483,7 +1518,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
     }
     assert_eq!(ended["state"], "REVOKED", "{ended}");
     assert_eq!(ended["revocationReason"], "ACCOUNT_SESSION_ENDED");
-    let third = login(s, &a.email, &a.password).await?;
+    let third = login(s, &a.email).await?;
     let as_third = Account {
         session: third.clone(),
         ..clone_account(&a)
@@ -1553,16 +1588,10 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
     )?;
 
     // ACC-010: an account that uses Messaging through the web bridge but never opened
-    // the Hub. A password change reaches Messaging and Calling by principal, and a
+    // the Hub. Signing out everywhere reaches Messaging and Calling by principal, and a
     // suspension is mirrored onto its Platform Access principal (and back).
     let email = format!("no-hub-{}@acceptance.invalid", Uuid::new_v4().simple());
-    let password = format!("P9!{}", Uuid::new_v4().simple());
-    let username = format!("nohub{}", &Uuid::new_v4().simple().to_string()[..10]);
-    let r=request(s,"meeting-service",None,None,Method::POST,"/api/v1/auth/register",Some(json!({"email":email,"username":username,"password":password,"confirm_password":password}))).await?;
-    if !(200..300).contains(&r.status) {
-        bail!("registration failed: {} {:?}", r.status, r.code());
-    }
-    let token = login(s, &email, &password).await?;
+    let token = login(s, &email).await?;
     let user = claims(&token)?["sub"]
         .as_str()
         .context("subject")?
@@ -1595,7 +1624,6 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
         .await?
         .is_none());
     hub_db.close().await?;
-    let new_password = format!("Q8!{}", Uuid::new_v4().simple());
     status(
         request(
             s,
@@ -1603,12 +1631,12 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
             Some(&token),
             None,
             Method::POST,
-            "/api/v1/auth/change-password",
-            Some(json!({"current_password":password,"new_password":new_password,"confirm_password":new_password})),
+            "/api/v2/me/sessions/revoke-all",
+            Some(json!({})),
         )
         .await?,
         200,
-        "password change",
+        "sign out everywhere",
     )?;
     eventually(
         &s.owner_urls["messaging"],
@@ -1646,7 +1674,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
         .await?;
     }
     db.close().await?;
-    assert!(!a.email.is_empty() && !a.password.is_empty() && !b.email.is_empty());
+    assert!(!a.email.is_empty() && !b.email.is_empty());
     println!("SECTION_14_REAL_E2E: managed_capability, conversation_context, hub_call_launch, timeline_cards, instant_meeting, meeting_share, membership_inbox, session_ends_devices, device_ends_session, reference_never_relayed, revocation_without_profile_messaging, revocation_without_profile_calling, principal_status_mirror: PASS");
     Ok(())
 }
@@ -1654,10 +1682,193 @@ fn clone_account(a: &Account) -> Account {
     Account {
         id: a.id,
         email: a.email.clone(),
-        password: a.password.clone(),
         session: a.session.clone(),
         refresh: a.refresh.clone(),
         principal: a.principal,
         public_id: a.public_id.clone(),
     }
+}
+
+/// Personal 1:1 calls name the other party: the client's names lookup
+/// (`POST /api/v2/messaging/principals/names`) names connected Hub contacts with the name
+/// the Hub contact list shows, through the real Meeting Service → Communications path.
+#[tokio::test]
+async fn principal_names_include_connected_personal_contacts_across_real_services(
+) -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(contact_names_journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
+    let (a, b, c) = (account(s).await?, account(s).await?, account(s).await?);
+    let names = |who: &Account, ids: Vec<Uuid>| {
+        let token = who.session.clone();
+        let s = &*s;
+        async move {
+            let v = status(
+                request(
+                    s,
+                    "meeting-service",
+                    Some(&token),
+                    None,
+                    Method::POST,
+                    "/api/v2/messaging/principals/names",
+                    Some(json!({"principalIds": ids})),
+                )
+                .await?,
+                200,
+                "principal names",
+            )?;
+            let mut out: Vec<(Uuid, String, Option<String>)> = v["principals"]
+                .as_array()
+                .context("principals")?
+                .iter()
+                .map(|p| {
+                    (
+                        Uuid::parse_str(p["principalId"].as_str().unwrap_or_default())
+                            .unwrap_or_default(),
+                        p["displayName"].as_str().unwrap_or_default().to_owned(),
+                        p.get("alias").and_then(Value::as_str).map(str::to_owned),
+                    )
+                })
+                .collect();
+            out.sort();
+            anyhow::Ok(out)
+        }
+    };
+    // Not connected yet: only the caller itself is named.
+    let before = names(&a, vec![a.principal, b.principal, c.principal]).await?;
+    assert_eq!(
+        before.iter().map(|n| n.0).collect::<Vec<_>>(),
+        vec![a.principal]
+    );
+
+    connected(s, &a, &b).await?;
+    let contacts = status(
+        hub(s, &a, Method::GET, "/contacts", None).await?,
+        200,
+        "contacts",
+    )?;
+    let row = contacts["data"]
+        .as_array()
+        .context("contacts")?
+        .iter()
+        .find(|x| x["cfMeetId"] == json!(b.public_id))
+        .context("b in a's contacts")?
+        .clone();
+    // A CONNECTED contact carries the other person's calling principal (so clients can
+    // tell which contacts are already in a call); the same pairing principal-names below
+    // already discloses, and only for connected contacts.
+    assert_eq!(
+        row["principalId"],
+        json!(b.principal),
+        "a connected contact names its calling principal"
+    );
+    let shown = row["displayName"]
+        .as_str()
+        .context("contact display name")?
+        .to_owned();
+    assert!(!shown.is_empty());
+
+    // Connected: b is named for a (and a for b) with the Hub contact-list name; c is not.
+    let got = names(&a, vec![b.principal, c.principal]).await?;
+    assert_eq!(got, vec![(b.principal, shown.clone(), None)]);
+    let back = names(&b, vec![a.principal]).await?;
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].0, a.principal);
+
+    // The caller's private alias travels with the name.
+    let patched = status(
+        hub(
+            s,
+            &a,
+            Method::PATCH,
+            &format!("/contacts/{}", row["contactId"].as_str().context("id")?),
+            Some(json!({"expectedVersion": row["version"], "alias": "Tennis partner"})),
+        )
+        .await?,
+        200,
+        "contact alias",
+    )?;
+    assert_eq!(patched["alias"], json!("Tennis partner"));
+    assert_eq!(
+        names(&a, vec![b.principal]).await?,
+        vec![(b.principal, shown.clone(), Some("Tennis partner".into()))]
+    );
+
+    // A block (either direction) removes the name again; c still learns nobody's name.
+    status(
+        hub(
+            s,
+            &b,
+            Method::PUT,
+            &format!("/profiles/{}/block", a.public_id),
+            Some(json!({})),
+        )
+        .await?,
+        200,
+        "contact block",
+    )?;
+    assert!(names(&a, vec![b.principal]).await?.is_empty());
+    assert!(names(&c, vec![a.principal, b.principal]).await?.is_empty());
+    Ok(())
+}
+
+/// The production multi-device E2EE acceptance client (`cfmeet-e2ee-acceptance`, run by
+/// `messaging-encrypted-verify` against api.cfmeet.com) passes end to end against the REAL Account,
+/// Platform Access, Communications, Calling and Messaging processes: linked devices, primary
+/// mobile replacement, Hub and Messaging fan-out, MLS removal, future-only history.
+#[tokio::test]
+async fn production_e2ee_acceptance_client_passes_against_real_services() -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(e2ee_client_journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(r) => r,
+        Err(p) => std::panic::resume_unwind(p),
+    }
+}
+
+async fn e2ee_client_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
+    // Fixed-code test accounts of the personal stack: the acceptance binary signs every
+    // device in separately, and the first sign-in creates each account.
+    let accounts: Vec<Value> = cfmeet_certification::personal_stack::E2EE_TEST_ACCOUNTS
+        .iter()
+        .map(|(email, code)| json!({ "email": email, "code": code }))
+        .collect();
+    let file = s.write("e2ee-accounts.json", &serde_json::to_string(&accounts)?)?;
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_cfmeet-e2ee-acceptance"))
+        .env("CFMEET_BASE_URL", &s.urls["meeting-service"])
+        .env("CFMEET_E2EE_ACCOUNTS", &file)
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .output()
+        .await?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    eprintln!("{}", String::from_utf8_lossy(&out.stderr));
+    let line = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("E2EE_ACCEPTANCE_REPORT "))
+        .context("acceptance report")?;
+    let report: Value = serde_json::from_str(line)?;
+    println!("EVIDENCE e2ee-acceptance-client TEST {report}");
+    if report["verdict"] != "PASS" || !out.status.success() {
+        bail!("acceptance client failed: {}", report["failure"]);
+    }
+    assert!(report["checks"].as_object().is_some_and(|c| c.len() >= 14));
+    Ok(())
 }

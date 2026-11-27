@@ -1847,6 +1847,65 @@ async fn console_members_manage_environment_webhooks_by_role() {
         .await;
     conforms(&format!("{WH}ConsoleWebhook"), &got.json);
     assert_eq!(got.json["health"]["consecutiveFailures"], 1);
+    // DF1: a test event — only for members who manage webhooks; signed and delivered
+    // exactly like a real one, marked "test": true; at most 5 per webhook per minute.
+    let test_path = format!("{base}/{id}/test");
+    let r = c
+        .req(As::User(&analyst), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.json["error"]["code"], "PERMISSION_DENIED");
+    let r = c
+        .req(As::User(&developer), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    conforms(&format!("{WH}WebhookDelivery"), &r.json);
+    assert_eq!(r.json["eventType"], "webhook.test");
+    assert_eq!(r.json["webhookId"], id.as_str());
+    let test_delivery = r.json["deliveryId"].as_str().unwrap().to_string();
+    let test_event = r.json["eventId"].as_str().unwrap().to_string();
+    rx.script(&[]);
+    w.service.deliver_due_once(100).await.unwrap();
+    let sent: Vec<Received> = rx
+        .seen()
+        .into_iter()
+        .filter(|r| header(r, signing::HEADER_EVENT_ID) == test_event)
+        .collect();
+    assert_eq!(sent.len(), 1, "one test request");
+    let body: Value = serde_json::from_slice(&sent[0].body).unwrap();
+    assert_eq!(body["type"], "webhook.test");
+    assert_eq!(body["test"], true);
+    assert_eq!(body["data"]["test"], true);
+    assert_eq!(header(&sent[0], signing::HEADER_DELIVERY_ID), test_delivery);
+    signing::verify(
+        secret.as_bytes(),
+        &header(&sent[0], signing::HEADER_SIGNATURE),
+        &header(&sent[0], signing::HEADER_TIMESTAMP),
+        &test_delivery,
+        &sent[0].body,
+        chrono::Utc::now().timestamp() + w.offset.load(std::sync::atomic::Ordering::SeqCst),
+        signing::DEFAULT_TOLERANCE_SECONDS,
+    )
+    .expect("the test event is signed like a real delivery");
+    for _ in 0..4 {
+        let r = c
+            .req(As::User(&developer), Method::POST, &test_path, None)
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    }
+    let r = c
+        .req(As::User(&developer), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.json);
+    assert_eq!(r.json["error"]["code"], "RATE_LIMITED");
+    let r = c
+        .req(
+            As::User(&developer),
+            Method::POST,
+            &format!("{base}/{}/test", Uuid::new_v4()),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
     // Rotation and deletion by the owner.
     let rot = c
         .req(
@@ -2015,4 +2074,90 @@ fn the_event_contract_matches_the_catalog_and_keeps_callings_catalog() {
             "{def}"
         );
     }
+}
+
+/// ADR 0068 A4: HQ retries a dead-lettered delivery through the admin bridge: a NEW
+/// delivery of the same event whose id is the command's key, answered and recorded once.
+#[tokio::test]
+async fn hq_retries_a_dead_lettered_delivery_once() {
+    let Some((c, w, scope, d)) = world(settings()).await else {
+        return;
+    };
+    let rx = Receiver::start().await;
+    let (_sub, _) = subscribe(&c, &d, &rx.url, &["call.requested"]).await;
+    rx.script(&[400]);
+    publish(&c, &w.producers.calling, &call_requested(scope)).await;
+    w.service.deliver_due_once(100).await.unwrap();
+    let failed = one(
+        &c,
+        "SELECT id::text FROM devplat_webhook_deliveries WHERE status = 'FAILED'",
+    )
+    .await;
+    let tenant = scope.0;
+    let path =
+        format!("/internal/v1/operator/organizations/{tenant}/webhook-deliveries/{failed}/retry");
+    let hq = ("x-cf-operator", "hq:staff-0001");
+    // R2, unversioned: the key is required, an expectedVersion refused.
+    let r = c.bridge_send(Method::POST, &path, &[hq], None).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    let key = Uuid::new_v4().to_string();
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &[hq, ("idempotency-key", &key)],
+            Some(json!({ "expectedVersion": 1 })),
+        )
+        .await;
+    assert!(r.status.is_client_error(), "{}", r.json);
+    // Another workspace's delivery: 404.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &format!(
+                "/internal/v1/operator/organizations/{}/webhook-deliveries/{failed}/retry",
+                Uuid::new_v4()
+            ),
+            &[hq, ("idempotency-key", &key)],
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.json);
+    let r = c
+        .bridge_send(Method::POST, &path, &[hq, ("idempotency-key", &key)], None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    conforms(&format!("{CTRL}AdminCommandResult"), &r.json);
+    assert_eq!(r.json["status"], "RETRIED");
+    assert!(r.json["version"].is_null());
+    assert_eq!(r.json["resource"]["deliveryId"], key);
+    assert_eq!(r.json["resource"]["retryOf"], failed);
+    assert_eq!(r.json["resource"]["state"], "PENDING");
+    let again = c
+        .bridge_send(Method::POST, &path, &[hq, ("idempotency-key", &key)], None)
+        .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.json);
+    assert_eq!(
+        c.count(&format!(
+            "SELECT count(*) FROM devplat_webhook_deliveries WHERE replay_of = '{failed}'"
+        ))
+        .await,
+        1,
+        "never applied twice"
+    );
+    let rec = c
+        .bridge(&format!("/internal/v1/operator/operations/{key}"), &[hq])
+        .await;
+    assert_eq!(rec.json["source_status"], "RETRIED");
+    assert!(rec.json["source_version"].is_null());
+    // Only dead letters are retried.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &format!("/internal/v1/operator/organizations/{tenant}/webhook-deliveries/{key}/retry"),
+            &[hq, ("idempotency-key", &Uuid::new_v4().to_string())],
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
 }

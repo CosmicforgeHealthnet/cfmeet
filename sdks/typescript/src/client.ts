@@ -5,6 +5,7 @@ import {
   BROWSER_ESCAPE_HATCH,
   authHeaders,
   isBrowserLike,
+  userTokenCache,
   validateAuth,
   type CfMeetAuth,
 } from './auth.js';
@@ -26,6 +27,8 @@ import type { DomainOperations } from './generated/models.js';
 import { OPERATIONS, type OperationSpec } from './generated/operations.js';
 import { buildPath } from './path.js';
 import { RealtimeClient } from './realtime.js';
+import { USER_TOKEN_REFRESH_CODES } from './user-token.js';
+import { UsersClient } from './users.js';
 import {
   DEFAULT_RETRY_POLICY,
   backoffDelay,
@@ -210,6 +213,11 @@ interface SendResult {
 export class CfMeetClient {
   readonly baseUrl: string;
   readonly realtime: RealtimeClient;
+  /**
+   * Partner users and user tokens (`/v1/users*`, ADR 0062): server-side, with a platform
+   * credential holding `principals.read` / `principals.write` / `user_tokens.issue`.
+   */
+  readonly users: UsersClient;
 
   declare readonly calling: DomainClient<DomainOperations['calling']>;
   declare readonly communications: DomainClient<DomainOperations['communications']>;
@@ -249,6 +257,7 @@ export class CfMeetClient {
       ? null
       : `cfmeet-platform-sdk-typescript/${SDK_VERSION}${config.userAgent ? ` ${config.userAgent.replace(/[^\x20-\x7e]/g, '')}` : ''}`;
     this.realtime = new RealtimeClient(this, this.baseUrl, this.#auth, this.#allowPlatformInBrowser);
+    this.users = new UsersClient(this);
 
     const domains: Record<string, Record<string, unknown>> = {};
     for (const spec of OPERATIONS) {
@@ -297,6 +306,7 @@ export class CfMeetClient {
     const maxRetries = spec.retry === 'NEVER' ? 0 : (options.maxRetries ?? this.#policy.maxRetries);
     const signal = options.signal;
     if (signal?.aborted) throw new CfMeetAbortError(op, signal.reason);
+    let userTokenRetried = false;
 
     for (let attempt = 1; ; attempt++) {
       const requestHeaders = { ...headers, ...(auth ? await authHeaders(auth, this.#allowPlatformInBrowser) : {}) };
@@ -330,6 +340,13 @@ export class CfMeetClient {
         };
       }
       const error = this.#apiError(response, raw, op);
+      // A refused user token (expired, revoked, ...): nothing was done; retry ONCE with a
+      // fresh token from the provider (any retry class: a 401 is a refusal).
+      if (response.status === 401 && auth?.type === 'userToken' && !userTokenRetried && USER_TOKEN_REFRESH_CODES.has(error.code)) {
+        userTokenRetried = true;
+        userTokenCache(auth).invalidate(bearerOf(requestHeaders.authorization));
+        continue;
+      }
       if (spec.retry === 'NEVER' && (response.status === 500 || response.status === 502 || response.status === 504)) {
         throw new UnknownOutcomeError({
           reason: response.status === 500 ? 'server_error' : response.status === 502 ? 'bad_gateway' : 'gateway_timeout',
@@ -529,6 +546,10 @@ export class CfMeetClient {
       headers: response.headers,
     });
   }
+}
+
+function bearerOf(header: string | undefined): string | undefined {
+  return header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
 }
 
 const GATEWAY_FORWARDED = new Set(['if-match', 'if-none-match', 'accept-language', 'range']);

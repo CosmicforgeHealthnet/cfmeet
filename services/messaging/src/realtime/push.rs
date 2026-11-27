@@ -8,13 +8,19 @@
 //!   fetches and decrypts the message itself after waking up. A database CHECK refuses
 //!   content-like payload keys.
 //! * Jobs are leased (`FOR UPDATE SKIP LOCKED`), retried with bounded backoff and expire.
+//!   The lease token is the fence: immediately before each authorization check and each
+//!   provider call the job's lease is renewed under its token, and a job whose lease was
+//!   re-claimed by another dispatcher is skipped, never sent twice (S-8). Each of those
+//!   calls is bounded by a third of the lease.
 //!   Without a configured provider they end as `NOT_CONFIGURED` — never reported as
 //!   delivered. The APNs, FCM and Web Push adapters live in
 //!   [`super::push_adapters`] (each enabled only with its credentials);
 //!   [`LocalTestPush`] is an explicitly local adapter for tests and development.
+//! * Who may be woken is decided in ONE place, [`authorize_wakeups`]: job creation takes
+//!   its candidates, dispatch rechecks its entitlement for the job's recipient, and the
+//!   Notification Service asks the same question through
+//!   `POST /internal/v1/notifications/wakeups/authorize` ([`crate::notifications`]).
 //! * A push is never proof of message delivery.
-
-use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use sea_orm::FromQueryResult;
@@ -34,27 +40,26 @@ use crate::{
 
 pub const PLATFORMS: &[&str] = &["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"];
 
-/// Outcome of one provider call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PushOutcome {
-    Sent,
-    Retryable(String),
-    /// The provider refused the handle for good (unregistered app, bad token).
-    InvalidHandle,
-    Permanent(String),
-}
+// The provider boundary (`PushOutcome`, `PushProvider`) and the local test adapter moved to
+// packages/push-transport with the adapters (Notification Service roadmap N4); re-exported
+// here under their previous paths so every caller and test is unchanged.
+pub use cf_push_transport::provider::{LocalTestPush, PushOutcome, PushProvider};
 
-#[async_trait::async_trait]
-pub trait PushProvider: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// Whether this provider can deliver to `platform` in this deployment.
-    fn supports(&self, platform: &str) -> bool;
-    /// Provider-specific checks of a handle at registration (e.g. the Web Push host
-    /// allowlist); structural checks run regardless.
-    fn validate_handle(&self, _platform: &str, _handle: &str) -> Result<(), &'static str> {
-        Ok(())
-    }
-    async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome;
+/// `GET /v1/messaging/push/configuration`: which push platforms this deployment delivers
+/// to, and the Web Push application-server key. Nothing secret, nothing per user.
+pub fn configuration(state: &crate::state::AppState) -> Value {
+    let push = &state.realtime.push;
+    serde_json::json!({
+        "platforms": {
+            "APNS": push.supports("APNS"),
+            "FCM": push.supports("FCM"),
+            "WEB_PUSH": push.supports("WEB_PUSH"),
+        },
+        "webPush": push
+            .web_push_application_server_key()
+            .map(|key| serde_json::json!({ "applicationServerKey": key })),
+        "payload": "METADATA_ONLY",
+    })
 }
 
 /// No provider configured: nothing is ever reported as sent.
@@ -72,38 +77,6 @@ impl PushProvider for UnconfiguredPush {
 
     async fn send(&self, _platform: &str, _handle: &str, _payload: &Value) -> PushOutcome {
         PushOutcome::Permanent("no push provider configured".into())
-    }
-}
-
-/// A LOCAL adapter (tests / development only; refused in staging and production by the
-/// configuration): records what would have been sent to `LOCAL_TEST` registrations.
-#[derive(Default)]
-pub struct LocalTestPush {
-    pub sent: Mutex<Vec<(String, Value)>>,
-    pub fail_next: Mutex<u32>,
-}
-
-#[async_trait::async_trait]
-impl PushProvider for LocalTestPush {
-    fn name(&self) -> &'static str {
-        "local-test"
-    }
-
-    fn supports(&self, platform: &str) -> bool {
-        platform == "LOCAL_TEST"
-    }
-
-    async fn send(&self, _platform: &str, handle: &str, payload: &Value) -> PushOutcome {
-        let mut fail = self.fail_next.lock().unwrap();
-        if *fail > 0 {
-            *fail -= 1;
-            return PushOutcome::Retryable("injected failure".into());
-        }
-        self.sent
-            .lock()
-            .unwrap()
-            .push((handle.to_string(), payload.clone()));
-        PushOutcome::Sent
     }
 }
 
@@ -169,6 +142,8 @@ pub async fn register(
         ],
     )
     .await?;
+    // N9 facade (off by default): mirror the committed registration to the service.
+    crate::push_mirror::after_change(state, device_id, Some(ctx.scope));
     Ok(json!({
         "deviceId": device_id,
         "platform": request.platform,
@@ -195,6 +170,7 @@ pub async fn unregister(
     if n == 0 {
         return Err(Error::code(ErrorCode::NotFound));
     }
+    crate::push_mirror::after_change(state, device_id, Some(ctx.scope));
     Ok(json!({ "deviceId": device_id, "enabled": false }))
 }
 
@@ -213,50 +189,307 @@ pub async fn disable_device<C: sea_orm::ConnectionTrait>(
     Ok(())
 }
 
-/// Creates the push jobs of one committed message event (idempotent).
+/// One principal [`authorize_wakeups`] entitles to a wake-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntitledRecipient {
+    pub principal_id: Uuid,
+    /// The event's message mentions this principal (`messaging_message_mentions`: the
+    /// sender's declared mention ids, for both profiles; a PRIVATE_E2EE mention's text
+    /// stays inside the ciphertext, B3).
+    pub mentions_recipient: bool,
+}
+
+/// The wake-up decision for one committed conversation event: the single place the push
+/// entitlement rules live (Notification Service X3, Document 4 §3.4). Push job creation
+/// ([`fanout_jobs`]), dispatch-time authorization (`authorized`) and the owner API
+/// `POST /internal/v1/notifications/wakeups/authorize` ([`crate::notifications`]) all
+/// read it. Ids, classes and states only: never content, ciphertext or keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WakeupAuthorization {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    /// `lifecycle_state = 'ACTIVE'`.
+    pub conversation_active: bool,
+    /// `PRIVATE_E2EE` or `MANAGED`.
+    pub security_profile: String,
+    /// The conversation's context class (`DIRECT`, `GROUP`, ...).
+    pub context_class: String,
+    /// The sender the committed event records (`sender_principal_id`).
+    pub sender: Option<Uuid>,
+    /// The event's non-secret authority references (as for delayed policy checks).
+    pub initiating_service_account_id: Option<Uuid>,
+    pub environment_kind: Option<String>,
+    /// The event's authenticated tenant classification was FIRST_PARTY (gap audit S1;
+    /// `false` for events recorded before the field existed).
+    pub first_party: bool,
+    /// Push job candidates: ACTIVE members other than the sender (empty when the event
+    /// wakes nobody). Jobs are created for these at commit; delivery is gated by
+    /// `entitled` again at dispatch, so a later departure or block still suppresses it.
+    pub candidates: Vec<Uuid>,
+    /// The principals entitled to a wake-up now: candidates whose history window covers
+    /// the event, in an ACTIVE conversation, with a recorded sender and, for DIRECT, no
+    /// block between sender and recipient. Ordered by principal id.
+    pub entitled: Vec<EntitledRecipient>,
+}
+
+impl WakeupAuthorization {
+    pub fn entitles(&self, principal: Uuid) -> bool {
+        self.entitled.iter().any(|e| e.principal_id == principal)
+    }
+}
+
+/// Whether a committed event wakes recipients at all: a created APPLICATION message not
+/// marked `notify: false` (mirrored, migrated and imported messages).
+pub fn wakes(event_type: &str, payload: &Value) -> bool {
+    event_type == "messaging.message.created"
+        && payload.get("message_kind").and_then(Value::as_str) == Some("APPLICATION")
+        && payload.get("notify").and_then(Value::as_bool) != Some(false)
+}
+
+#[derive(FromQueryResult)]
+struct WakeupEventRow {
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    security_profile: String,
+    context_class: String,
+    lifecycle_state: String,
+    event_type: Option<String>,
+    payload: Option<Value>,
+}
+
+#[derive(FromQueryResult)]
+struct CandidateRow {
+    principal_id: Uuid,
+    in_window: bool,
+}
+
+#[derive(FromQueryResult)]
+struct MentionRow {
+    principal_id: Uuid,
+}
+
+/// The wake-up decision of the event at `(conversation_id, event_sequence)` (the
+/// conversation event cursor: `eventSequence` of the push payload). `None`: no such
+/// conversation, or no such event in it. `only` restricts the answer to those principals
+/// (dispatch-time recheck). Read-only.
+pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    event_sequence: i64,
+    only: Option<&[Uuid]>,
+) -> Result<Option<WakeupAuthorization>> {
+    let Some(row) = db::one::<WakeupEventRow, _>(
+        db,
+        "SELECT c.tenant_id, c.application_id, c.environment_id, c.security_profile, c.context_class, \
+                c.lifecycle_state, e.event_type, e.payload \
+           FROM messaging_conversations c \
+           LEFT JOIN messaging_outbox_events e ON e.conversation_id = c.id AND e.conversation_event_sequence = $2 \
+          WHERE c.id = $1",
+        vec![conversation_id.into(), event_sequence.into()],
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let (Some(event_type), Some(payload)) = (row.event_type, row.payload) else {
+        return Ok(None);
+    };
+    let uuid_of = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|s| Uuid::parse_str(s).ok())
+    };
+    let sender = uuid_of("sender_principal_id");
+    let mut decision = WakeupAuthorization {
+        tenant_id: row.tenant_id,
+        application_id: row.application_id,
+        environment_id: row.environment_id,
+        conversation_active: row.lifecycle_state == "ACTIVE",
+        security_profile: row.security_profile,
+        context_class: row.context_class,
+        sender,
+        initiating_service_account_id: uuid_of("initiating_service_account_id"),
+        environment_kind: payload
+            .get("environment_kind")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        first_party: payload.get("first_party").and_then(Value::as_bool) == Some(true),
+        candidates: Vec::new(),
+        entitled: Vec::new(),
+    };
+    if !wakes(&event_type, &payload) || only.is_some_and(<[Uuid]>::is_empty) {
+        return Ok(Some(decision));
+    }
+    let mut values = vec![conversation_id.into(), event_sequence.into(), sender.into()];
+    let restriction = match only {
+        Some(principals) => {
+            values.push(principals.to_vec().into());
+            " AND m.principal_id = ANY($4)"
+        }
+        None => "",
+    };
+    let candidates: Vec<CandidateRow> = db::all(
+        db,
+        &format!(
+            "SELECT m.principal_id, ($2 >= m.visible_from_event) AS in_window \
+               FROM messaging_conversation_members m \
+              WHERE m.conversation_id = $1 AND m.state = 'ACTIVE' AND m.principal_id IS DISTINCT FROM $3{restriction} \
+              ORDER BY m.principal_id"
+        ),
+        values,
+    )
+    .await?;
+    decision.candidates = candidates.iter().map(|c| c.principal_id).collect();
+    let Some(sender) = sender.filter(|_| decision.conversation_active) else {
+        return Ok(Some(decision));
+    };
+    let mentioned: Vec<Uuid> = match uuid_of("message_id") {
+        Some(message) => db::all::<MentionRow, _>(
+            db,
+            "SELECT principal_id FROM messaging_message_mentions WHERE message_id = $1",
+            vec![message.into()],
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.principal_id)
+        .collect(),
+        None => Vec::new(),
+    };
+    for candidate in candidates.into_iter().filter(|c| c.in_window) {
+        if decision.context_class == "DIRECT"
+            && crate::safety::blocks::blocked_between(
+                db,
+                decision.environment_id,
+                sender,
+                candidate.principal_id,
+            )
+            .await?
+        {
+            continue;
+        }
+        decision.entitled.push(EntitledRecipient {
+            principal_id: candidate.principal_id,
+            mentions_recipient: mentioned.contains(&candidate.principal_id),
+        });
+    }
+    Ok(Some(decision))
+}
+
+/// The legacy push job insert of one event (idempotent per event and device).
+const INSERT_JOBS: &str = "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
+       next_attempt_at, expires_at, created_at) \
+     SELECT gen_random_uuid(), $1, $2, m.environment_id, r.device_id, r.id, \
+            jsonb_build_object('v', 1, 'type', 'message', 'conversationId', $2::text, 'eventSequence', $3::bigint, \
+                               'sequence', $4::bigint), $5, $6, $5 \
+       FROM messaging_conversation_members m \
+       JOIN messaging_push_registrations r ON r.environment_id = m.environment_id AND r.principal_id = m.principal_id AND r.enabled \
+       JOIN messaging_devices d ON d.id = r.device_id AND d.status = 'ACTIVE' \
+      WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id = ANY($7) \
+     ON CONFLICT (event_id, device_id) DO NOTHING";
+
+/// Creates the push jobs of one committed message event (idempotent): one per enabled
+/// registration of an ACTIVE device of each [`WakeupAuthorization::candidates`]
+/// principal. Delivery is authorized again at dispatch.
+///
+/// Routing fence (Document 4 §9.3; [`crate::notification_fence`]): the mode of
+/// `MESSAGE_WAKEUPS` is read first. `LEGACY_ONLY` (or no fence): the jobs are written
+/// exactly as before, without a decision. Otherwise ONE transaction records the event's
+/// routing decision (key [`fence::push_key`], sticky) and writes what it routes to:
+/// * `OLD` — the push jobs; in `SHADOW` a newly made decision also enqueues one shadow
+///   publication ([`crate::notification_publications`]) the service never delivers;
+/// * `NEW` (`FENCED_NEW`, inside the canary) — no push jobs, one publication.
 pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
+    use crate::notification_fence::{self as fence, Mode, Route};
+    use sea_orm::TransactionTrait;
+
     let (Some(conversation), Some(cursor)) =
         (event.conversation_id, event.conversation_event_sequence)
     else {
         return Ok(0);
     };
-    if event.payload.get("notify").and_then(Value::as_bool) == Some(false) {
+    let Some(decision) = authorize_wakeups(&state.db, conversation, cursor, None).await? else {
+        return Ok(0);
+    };
+    if decision.candidates.is_empty() {
         return Ok(0);
     }
-    let sender = event
-        .payload
-        .get("sender_principal_id")
-        .and_then(Value::as_str)
-        .and_then(|s| Uuid::parse_str(s).ok());
     let sequence = event
         .payload
         .get("sequence")
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let now = state.now();
-    Ok(db::exec(
-        &state.db,
-        "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
-           next_attempt_at, expires_at, created_at) \
-         SELECT gen_random_uuid(), $1, $2, m.environment_id, r.device_id, r.id, \
-                jsonb_build_object('v', 1, 'type', 'message', 'conversationId', $2::text, 'eventSequence', $3::bigint, \
-                                   'sequence', $4::bigint), $5, $6, $5 \
-           FROM messaging_conversation_members m \
-           JOIN messaging_push_registrations r ON r.environment_id = m.environment_id AND r.principal_id = m.principal_id AND r.enabled \
-           JOIN messaging_devices d ON d.id = r.device_id AND d.status = 'ACTIVE' \
-          WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id IS DISTINCT FROM $7 \
-         ON CONFLICT (event_id, device_id) DO NOTHING",
-        vec![
-            event.id.into(),
-            conversation.into(),
-            cursor.into(),
-            sequence.into(),
-            now.into(),
-            (now + chrono::Duration::hours(24)).into(),
-            sender.into(),
-        ],
+    let expires_at = now + chrono::Duration::hours(24);
+    let new_capable =
+        decision.candidates.len() <= crate::notification_publications::NEW_ROUTE_MAX_CANDIDATES;
+    let organization = crate::notifications::organization_scope(state, &decision);
+    let values = vec![
+        event.id.into(),
+        conversation.into(),
+        cursor.into(),
+        sequence.into(),
+        now.into(),
+        expires_at.into(),
+        decision.candidates.into(),
+    ];
+    // Gap audit S1: an organization conversation's members have no push registration in
+    // the organization's scope (their devices register once, in the personal scope), so
+    // the legacy path cannot reach them. With the switch on, its wake-ups are routed `NEW`
+    // in every fence mode (one publication, no legacy jobs: never both). Without the fence
+    // history (no decision can be recorded) they keep the legacy path.
+    match fence::current_mode(&state.db, fence::MESSAGE_WAKEUPS).await? {
+        None => return Ok(db::exec(&state.db, INSERT_JOBS, values).await?),
+        Some(Mode::LegacyOnly) if !organization => {
+            return Ok(db::exec(&state.db, INSERT_JOBS, values).await?)
+        }
+        Some(_) => {}
+    }
+    let txn = state.db.begin().await?;
+    let route = fence::route_message_with(
+        &txn,
+        &fence::push_key(event.id),
+        fence::MESSAGE_WAKEUPS,
+        expires_at,
+        new_capable,
+        organization,
     )
-    .await?)
+    .await?;
+    let jobs = match route.route {
+        Route::Old => {
+            let jobs = db::exec(&txn, INSERT_JOBS, values).await?;
+            if route.created && route.mode == Some(Mode::Shadow) {
+                crate::notification_publications::enqueue(
+                    &txn,
+                    event,
+                    conversation,
+                    cursor,
+                    &route,
+                    true,
+                    now,
+                )
+                .await?;
+            }
+            jobs
+        }
+        Route::New => {
+            crate::notification_publications::enqueue(
+                &txn,
+                event,
+                conversation,
+                cursor,
+                &route,
+                false,
+                now,
+            )
+            .await?;
+            0
+        }
+    };
+    txn.commit().await?;
+    Ok(jobs)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +501,32 @@ pub struct PushReport {
     pub disabled: usize,
     pub failed: usize,
     pub expired: usize,
+    /// Claimed jobs skipped because their lease lapsed and another dispatcher re-claimed
+    /// them (that dispatcher sends them).
+    pub lease_lost: usize,
+}
+
+/// How long a dispatcher holds a claimed job. Renewed under the lease token before each
+/// external call of the job, so a slow provider earlier in a batch cannot let a later
+/// job's lease lapse into another replica's claim while this one still sends it.
+pub const LEASE: chrono::Duration = chrono::Duration::seconds(60);
+
+/// Upper bound of one authorization check or one provider call: a third of [`LEASE`], so
+/// the lease renewed just before the call always outlives it. (The adapters' own HTTP
+/// timeouts are shorter; this only bounds a call that hangs.)
+const CALL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Extends the lease of a job this dispatcher still holds. `false`: the lease token no
+/// longer matches (the lease lapsed and another dispatcher re-claimed the job, or the job
+/// is no longer pending) — the caller must not send it.
+async fn renew_lease(state: &AppState, job: Uuid, token: Uuid) -> Result<bool> {
+    let renewed = db::exec(
+        &state.db,
+        "UPDATE messaging_push_jobs SET lease_expires_at = $3 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
+        vec![job.into(), token.into(), (state.now() + LEASE).into()],
+    )
+    .await?;
+    Ok(renewed == 1)
 }
 
 #[derive(FromQueryResult)]
@@ -281,7 +540,7 @@ struct Job {
     enabled: bool,
     device_status: String,
     recipient_principal_id: Uuid,
-    member_active: bool,
+    event_sequence: Option<i64>,
     tenant_id: Uuid,
     application_id: Uuid,
     environment_id: Uuid,
@@ -294,26 +553,20 @@ struct Job {
 /// never a push registration or consumer request. Legacy jobs without authority refs
 /// are suppressed in the governed personal scope, rather than guessed.
 async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
-    if !job.member_active {
-        return Ok(false);
-    }
-    let sender = job.event_payload["sender_principal_id"]
-        .as_str()
-        .and_then(|s| Uuid::parse_str(s).ok());
-    let Some(sender) = sender else {
+    // The shared wake-up decision (ACTIVE member, history window, conversation ACTIVE,
+    // a recorded sender, DIRECT block check), rechecked now for this recipient.
+    let Some(sequence) = job.event_sequence else {
         return Ok(false);
     };
-    if job.context_class == "DIRECT"
-        && crate::safety::blocks::blocked_between(
-            &state.db,
-            job.environment_id,
-            sender,
-            job.recipient_principal_id,
-        )
-        .await?
-    {
+    let recipient = [job.recipient_principal_id];
+    let decision =
+        authorize_wakeups(&state.db, job.conversation_id, sequence, Some(&recipient)).await?;
+    let Some(sender) = decision
+        .filter(|d| d.entitles(job.recipient_principal_id))
+        .and_then(|d| d.sender)
+    else {
         return Ok(false);
-    }
+    };
     let Some(client) = state.communications.as_ref() else {
         return Ok(true);
     };
@@ -349,6 +602,23 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
     } else {
         cf_communications_policy::Action::GroupNotification
     };
+    // Gap audit S10 / B3: a mentioned recipient passes a "mentions only" preference
+    // (mentions are the sender's declared ids, never inferred from content).
+    let mentioned = match job.event_payload["message_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(message) => {
+            db::scalar_i64(
+                &state.db,
+                "SELECT count(*) FROM messaging_message_mentions WHERE message_id = $1 AND principal_id = $2",
+                vec![message.into(), job.recipient_principal_id.into()],
+            )
+            .await?
+                > 0
+        }
+        None => false,
+    };
     match client
         .check(
             scope,
@@ -359,6 +629,7 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
                 credential_issued_at: None,
                 credential_principal_id: None,
                 conversation_id: Some(job.conversation_id),
+                mentioned: mentioned.then_some(true),
             },
         )
         .await
@@ -391,11 +662,8 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
            (SELECT application_id FROM messaging_outbox_events e WHERE e.id=j.event_id) AS application_id, \
            (SELECT payload FROM messaging_outbox_events e WHERE e.id=j.event_id) AS event_payload, \
            (SELECT context_class FROM messaging_conversations c WHERE c.id=j.conversation_id) AS context_class, \
-           EXISTS(SELECT 1 FROM messaging_conversation_members m JOIN messaging_devices d ON d.principal_id=m.principal_id AND d.environment_id=m.environment_id \
-             JOIN messaging_outbox_events e ON e.id=j.event_id JOIN messaging_conversations c ON c.id=m.conversation_id \
-             WHERE m.conversation_id=j.conversation_id AND d.id=j.device_id AND m.state='ACTIVE' \
-             AND c.lifecycle_state='ACTIVE' AND e.conversation_event_sequence>=m.visible_from_event) AS member_active",
-        vec![now.into(), batch.into(), token.into(), (now + chrono::Duration::seconds(60)).into()],
+           (SELECT conversation_event_sequence FROM messaging_outbox_events e WHERE e.id=j.event_id) AS event_sequence",
+        vec![now.into(), batch.into(), token.into(), (now + LEASE).into()],
     )
     .await?;
     let mut report = PushReport {
@@ -417,13 +685,31 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
             report.not_configured += 1;
             ("NOT_CONFIGURED", None, None)
         } else {
-            let outcome = match authorized(state, &job).await {
+            if !renew_lease(state, job.id, token).await? {
+                lease_lost(&mut report);
+                continue;
+            }
+            let verdict = tokio::time::timeout(CALL_DEADLINE, authorized(state, &job))
+                .await
+                .unwrap_or_else(|_| Err(Error::code(ErrorCode::ServiceUnavailable)));
+            let outcome = match verdict {
                 Ok(true) => {
-                    state
-                        .realtime
-                        .push
-                        .send(&job.platform, &job.push_handle, &job.payload)
+                    // The fence: the send happens only while this dispatcher provably
+                    // holds the job, for at least the whole (bounded) call.
+                    if !renew_lease(state, job.id, token).await? {
+                        lease_lost(&mut report);
+                        continue;
+                    }
+                    let send =
+                        state
+                            .realtime
+                            .push
+                            .send(&job.platform, &job.push_handle, &job.payload);
+                    tokio::time::timeout(CALL_DEADLINE, send)
                         .await
+                        .unwrap_or_else(|_| {
+                            PushOutcome::Retryable("provider call timed out".into())
+                        })
                 }
                 Ok(false) => {
                     report.disabled += 1;
@@ -488,6 +774,34 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
         );
     }
     Ok(report)
+}
+
+/// How long a push job in a final state (`SENT`, `FAILED`, `EXPIRED`, `DISABLED`,
+/// `NOT_CONFIGURED`) is kept after `completed_at` (delivery diagnostics, the owner's push
+/// status view) before [`purge_completed`] removes it. Pending jobs are never purged.
+pub const JOB_RETENTION: chrono::Duration = chrono::Duration::days(30);
+
+/// Most jobs one [`purge_completed`] pass removes.
+pub const PURGE_BATCH: i64 = 5_000;
+
+/// One bounded retention pass: deletes at most `batch` final-state jobs completed more
+/// than [`JOB_RETENTION`] ago, oldest first. Idempotent and safe on several instances.
+/// Run hourly by the maintenance worker; deliberately without a new index (no migration,
+/// so the previous image still passes readiness after a rollback; the table is small until
+/// push moves to the Notification Service in N9). Returns the number of jobs deleted.
+pub async fn purge_completed(state: &AppState, batch: i64) -> Result<u64> {
+    let cutoff = state.now() - JOB_RETENTION;
+    Ok(db::exec(
+        &state.db,
+        "DELETE FROM messaging_push_jobs WHERE id IN (SELECT id FROM messaging_push_jobs WHERE status <> 'PENDING' AND completed_at < $1 ORDER BY completed_at LIMIT $2)",
+        vec![cutoff.into(), batch.into()],
+    )
+    .await?)
+}
+
+fn lease_lost(report: &mut PushReport) {
+    report.lease_lost += 1;
+    crate::metrics::inc("messaging_push_lease_lost_total", &[]);
 }
 
 fn status_label(s: &str) -> &'static str {

@@ -1,0 +1,2281 @@
+{
+  "policy": "cfmeet-admin-bridge.access-policy-ceiling.v1",
+  "contract_version": "2.0.0",
+  "rule": "The runtime access policy is signed by CF Meet (Ed25519) and pinned by revision; every grant it makes must be inside this ceiling, or the bridge refuses to load it. A permission is effective only when the staff assertion lists it AND one of the asserted roles is granted it with the request's purpose. A role is never inferred from list order.",
+  "roles": {
+    "cfmeet.viewer": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.health.read": [
+          "metrics-read",
+          "ops-incident"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.support": {
+      "grants": {
+        "accounts.devices.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.mfa.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.security-history.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.revoke-all": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.test-accounts.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.user.email.change": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.user.status.change": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.users.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "communications.audit.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.holds.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.metrics.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.profiles.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.reports.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.chat-migration.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.critical-lane.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-delivery.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live-health.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meetings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.participants.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.spaces.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinar-registrations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinars.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "notifications.deliveries.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.failed-deliveries.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.providers.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.routing.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.suppressions.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "organizations.audit.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.bindings.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.global-audit.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.members.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organizations.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.policies.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.teams.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.environments.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.incidents.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.invitations.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.members.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.projects.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.push-keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.service-accounts.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.usage.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.users.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.webhook-deliveries.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.webhooks.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.websites.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspace-activity.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspaces.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.trust_safety": {
+      "grants": {
+        "accounts.device.revoke": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.devices.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce-all": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.mfa.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.security-history.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.revoke-all": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.test-accounts.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.user.status.change": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.users.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "apps.app.lift-suspension": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.app.suspend": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.apps.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.installs.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.versions.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "calling.abuse-report.resolve": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.abuse-reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.block.release": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.blocks.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.calls.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.enterprise-features.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.incidents.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.limits.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.recording.delete": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.retention-hold.place": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.retention-hold.release": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.retention-holds.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.routing.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.spend-limits.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.voicemail.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.webhook-keys.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "communications.audit.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.holds.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.metrics.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.profile.restore": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.profile.suspend": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.profiles.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.report.review": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "communications.reports.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.chat-migration.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.critical-lane.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-delivery.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live-health.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting.end": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meetings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.participants.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.recording.delete": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.report.review": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.space.archive": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.space.transfer": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.spaces.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.transcript.delete": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinar-registrations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinars.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "messaging.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.conversation.restrict": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.conversations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.deletion-requests.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.environment-policy.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.export.request": [
+          "abuse-review",
+          "privacy-request"
+        ],
+        "messaging.exports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.failed-messages.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.hold.place": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.hold.release": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.holds.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.incidents.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.key-transparency.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.member.mute": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.member.remove": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.members.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.message.remove": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.policy.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.report.dismiss": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.switches.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.verification.reviewer": {
+      "grants": {
+        "apps.apps.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.installs.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.versions.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "verification.app-review.approve": [
+          "verification-review"
+        ],
+        "verification.app-review.publish": [
+          "verification-review"
+        ],
+        "verification.app-review.reject": [
+          "verification-review"
+        ],
+        "verification.case-history.read": [
+          "verification-review"
+        ],
+        "verification.case.claim": [
+          "verification-review"
+        ],
+        "verification.cases.read": [
+          "verification-review"
+        ],
+        "verification.number-kyc.decide": [
+          "verification-review"
+        ],
+        "verification.number-kyc.read": [
+          "verification-review"
+        ],
+        "verification.organization.decide": [
+          "verification-review"
+        ],
+        "verification.partner-go-live.approve": [
+          "verification-review"
+        ],
+        "verification.partner-go-live.reject": [
+          "verification-review"
+        ],
+        "verification.partner-go-live.suspend": [
+          "verification-review"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.partner_ops": {
+      "grants": {
+        "apps.app.lift-suspension": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.app.suspend": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.apps.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.installs.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "apps.versions.read": [
+          "abuse-review",
+          "verification-review"
+        ],
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.app-grants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.applications.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.audit.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.environments.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.oauth-apps.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.partner-users.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.records.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.scope-grants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.service-accounts.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.tenants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.audit.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.binding.change": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.bindings.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.events.replay": [
+          "ops-incident"
+        ],
+        "organizations.global-audit.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.member.change": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.members.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organization.archive": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organization.create": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organization.export": [
+          "privacy-request",
+          "support-review"
+        ],
+        "organizations.organization.reactivate": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organization.suspend": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.organizations.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.ownership.recover": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.policies.change": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.policies.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.provisioning.retry": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.team.change": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "organizations.teams.read": [
+          "privacy-request",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.environments.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.incident.record": [
+          "ops-incident"
+        ],
+        "partners.incidents.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.invitations.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.key.revoke": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.members.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.projects.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.push-key.disable": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.push-keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.service-account.suspend": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.service-accounts.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.support-tier.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.usage.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.usage.reprocess": [
+          "billing-review",
+          "ops-incident"
+        ],
+        "partners.user.sign-out": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.users.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.webhook-deliveries.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.webhook-delivery.retry": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.webhooks.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.website.remove": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.websites.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspace-activity.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspace.register-first-party": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspace.state.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "partners.workspaces.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.finance": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "finance.estimated-charges.read": [
+          "billing-review"
+        ],
+        "finance.plan-spread.read": [
+          "billing-review"
+        ],
+        "finance.usage.read": [
+          "billing-review"
+        ],
+        "pricing.activations.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.charges.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.freezes.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.overrides.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plan-assignments.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plans.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.price-books.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.versions.read": [
+          "billing-review",
+          "pricing-change"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.pricing.editor": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "pricing.activations.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.charges.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.freezes.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.overrides.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plan-assignments.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plan.assign": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plans.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.price-books.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.draft": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.edit": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.submit": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.versions.read": [
+          "billing-review",
+          "pricing-change"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.pricing.approver": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "pricing.activations.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.charges.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.freezes.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.market.freeze": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.market.unfreeze": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.override.change": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.overrides.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plan-assignments.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.plans.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.price-book.rollback": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.price-books.read": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.activate": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.approve": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.reject": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.version.schedule": [
+          "billing-review",
+          "pricing-change"
+        ],
+        "pricing.versions.read": [
+          "billing-review",
+          "pricing-change"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.platform_ops": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.health.read": [
+          "metrics-read",
+          "ops-incident"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "calling.abuse-reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.blocks.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.calls.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.enterprise-features.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.enterprise-features.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.incident.record": [
+          "ops-incident"
+        ],
+        "calling.incidents.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.limits.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.limits.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.retention-holds.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.routing.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.routing.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.spend-limits.change": [
+          "billing-review",
+          "ops-incident"
+        ],
+        "calling.spend-limits.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.voicemail.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.webhook-key.reseal": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.webhook-keys.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "calling.webhook-keys.reseal": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "communications.backfill.run": [
+          "ops-incident"
+        ],
+        "communications.events.replay": [
+          "ops-incident"
+        ],
+        "hq.projections.read": [
+          "event-sync",
+          "ops-incident"
+        ],
+        "meetings.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.chat-migration.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.chat-migration.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.critical-lane.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.critical-lane.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-deliveries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.email-delivery.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live-health.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.live.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting-transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meeting.end": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.meetings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.participants.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.recording.delete": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.recordings.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.space.archive": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.space.transfer": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.spaces.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.transcript.delete": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.transcripts.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinar-registrations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "meetings.webinars.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "messaging.audit.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.conversations.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.deletion-requests.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.environment-policy.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.exports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.failed-message.retry": [
+          "ops-incident"
+        ],
+        "messaging.failed-messages.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.holds.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.incident.record": [
+          "ops-incident"
+        ],
+        "messaging.incidents.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.key-transparency.checkpoint": [
+          "ops-incident"
+        ],
+        "messaging.key-transparency.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.members.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.policy.change": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.policy.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.reports.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "messaging.switch.change": [
+          "ops-incident"
+        ],
+        "messaging.switches.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request"
+        ],
+        "notifications.deliveries.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.delivery.retry": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.failed-deliveries.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.providers.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.reroute.cancel": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.routing.change": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.routing.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.suppression.remove": [
+          "ops-incident",
+          "support-review"
+        ],
+        "notifications.suppressions.read": [
+          "ops-incident",
+          "support-review"
+        ],
+        "operations.activations.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.health.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.incident.resolve": [
+          "ops-incident"
+        ],
+        "operations.incidents.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.releases.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.switch.change": [
+          "ops-incident"
+        ],
+        "operations.switches.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "organizations.events.replay": [
+          "ops-incident"
+        ],
+        "telecom.calls.read": [
+          "ops-incident"
+        ],
+        "telecom.numbers.read": [
+          "ops-incident"
+        ],
+        "telecom.privacy-relay.read": [
+          "ops-incident"
+        ],
+        "telecom.sms.read": [
+          "ops-incident"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.security_admin": {
+      "grants": {
+        "accounts.device.revoke": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.devices.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.enforce-all": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.duplicates.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.mfa.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.mfa.reset": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.security-history.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.sessions.revoke-all": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.test-accounts.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.user.delete": [
+          "privacy-request"
+        ],
+        "accounts.user.export": [
+          "privacy-request"
+        ],
+        "accounts.user.role.change": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.user.status.change": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "accounts.users.read": [
+          "abuse-review",
+          "privacy-request",
+          "support-review"
+        ],
+        "audit.entries.read": [
+          "abuse-review",
+          "ops-incident",
+          "privacy-request",
+          "support-review"
+        ],
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.health.read": [
+          "metrics-read",
+          "ops-incident"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.app-grant.revoke": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.app-grants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.applications.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.audit.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.environments.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.key.issue": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.key.resume": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.key.revoke": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.key.rotate": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.key.suspend": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.keys.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.oauth-apps.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.partner-users.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.privileged-scope-grant.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.record.register": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.record.remove": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.record.status.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.records.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.scope-grant.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.scope-grants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.service-accounts.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.status.change": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "identity.tenants.read": [
+          "ops-incident",
+          "support-review",
+          "verification-review"
+        ],
+        "messaging.deletion-request.create": [
+          "privacy-request"
+        ],
+        "messaging.export.request": [
+          "abuse-review",
+          "privacy-request"
+        ],
+        "privacy.request.complete-service": [
+          "privacy-request"
+        ],
+        "privacy.request.register": [
+          "privacy-request"
+        ],
+        "privacy.requests.read": [
+          "privacy-request"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.release_manager": {
+      "grants": {
+        "bridge.capabilities.read": [
+          "admin-ui-capabilities"
+        ],
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "bridge.health.read": [
+          "metrics-read",
+          "ops-incident"
+        ],
+        "bridge.operations.read": [
+          "abuse-review",
+          "billing-review",
+          "ops-incident",
+          "pricing-change",
+          "privacy-request",
+          "release-request",
+          "support-review",
+          "verification-review"
+        ],
+        "operations.activation.request": [
+          "release-request"
+        ],
+        "operations.activations.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.health.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.incidents.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.releases.read": [
+          "ops-incident",
+          "release-request"
+        ],
+        "operations.switches.read": [
+          "ops-incident",
+          "release-request"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    },
+    "cfmeet.source_sync": {
+      "grants": {
+        "bridge.datasets.read": [
+          "metrics-read"
+        ],
+        "hq.events.ack": [
+          "event-sync"
+        ],
+        "hq.events.read": [
+          "event-sync"
+        ],
+        "hq.projections.read": [
+          "event-sync"
+        ]
+      },
+      "scopes": {
+        "market": "as enrolled for HQ (GLOBAL or listed countries)",
+        "organization": [
+          "cfmeet"
+        ],
+        "zone": [
+          "production",
+          "sandbox"
+        ],
+        "tenant": "as enrolled for HQ"
+      }
+    }
+  }
+}

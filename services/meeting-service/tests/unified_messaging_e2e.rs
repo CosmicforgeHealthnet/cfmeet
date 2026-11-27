@@ -592,7 +592,7 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     let app = meeting_app(&world).await;
     let um = um(&app);
     let ops = app.admin("ops").await;
-    let (owner, cid, guests) = collab::meeting(&app, collab::public(), 2).await;
+    let (mut owner, cid, guests) = collab::meeting(&app, collab::public(), 2).await;
     let host = collab::owner_joined(&app, cid, &owner).await;
     let (g0, g1) = (&guests[0], &guests[1]);
     let base = collab::base(cid);
@@ -849,6 +849,8 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     );
 
     // ---- Scenario 2: native identity — CF Meet login → principal → device → client token.
+    // Multi-device policy: the native E2EE device is enrolled from a trusted account device.
+    app.trust_device(&mut owner).await;
     let bridge = "/api/v2/messaging";
     let (s, ch) = app
         .post(
@@ -920,7 +922,8 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
         )
         .await;
     assert!(s.is_client_error(), "{v}");
-    // Logout ends every Messaging session of the account; the login is then refused.
+    // Logout ends the Messaging sessions of this sign-in (gap audit A11: bound to the
+    // account session, not account-wide); the login is then refused.
     const ACTIVE: &str = "SELECT count(*) FROM messaging_client_sessions WHERE status = 'ACTIVE'";
     assert_eq!(world.m_scalar(ACTIVE).await, 1);
     let (s, v) = app
@@ -933,9 +936,17 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
         "logout revoked the Messaging session"
     );
     assert_eq!(
-        app.scalar("SELECT count(*) FROM communication_session_revocations WHERE status = 'DONE'")
+        world
+            .m_scalar("SELECT count(*) FROM messaging_client_sessions WHERE revoked_reason = 'ACCOUNT_SESSION_ENDED'")
             .await,
-        1
+        1,
+        "ended through the sign-in binding"
+    );
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM communication_session_revocations")
+            .await,
+        0,
+        "a session-bound logout queues no account-wide Messaging revocation"
     );
     let (s, _) = app
         .post(
@@ -1451,8 +1462,8 @@ async fn breakout_and_private_chat_migrate_to_unified_messaging_across_real_serv
 /// The journey itself is `apps/web/tests/messaging-e2e.browser.mjs`; this test starts the
 /// services on the ports the web build was made for, seeds two colleagues (and a third
 /// person outside their organization), runs the journey, and then checks Messaging's own
-/// database: the conversation exists, its messages are MLS ciphertext, and the phrase the
-/// browsers exchanged appears nowhere on the server.
+/// database: chats are server-stored (MANAGED) with their text sealed at rest, the file is
+/// stored, and signing in registered no encryption device.
 ///
 /// Requires `WEB_MESSAGING_E2E_APP` (apps/web, built with NEXT_PUBLIC_API_URL
 /// http://127.0.0.1:18080/api/v1, NEXT_PUBLIC_MESSAGING_URL http://127.0.0.1:18090 and
@@ -1571,28 +1582,25 @@ async fn web_messaging_client_in_chromium_across_real_services() {
             .unwrap()
         }
     };
-    // The browser signs in the way the web app does (ACC-019): a real password login with
-    // the account authority, whose refresh token the app keeps in its httpOnly session
-    // cookie. Each browser context makes its own login, so every context holds its own
-    // single-use refresh token (ADR 0057).
-    let password = "Web-e2e-journey-Passw0rd!";
-    let hash = backend::services::auth::hash_password(password).unwrap();
-    for id in [alice.id, bob.id, mallory.id] {
-        app.db
-            .conn
-            .execute(Statement::from_sql_and_values(
-                sea_orm::DbBackend::Postgres,
-                "UPDATE users SET password_hash = $1 WHERE id = $2",
-                vec![hash.clone().into(), id.into()],
-            ))
-            .await
-            .unwrap();
-    }
+    // The browser signs in the way the web app does (ACC-019): a passwordless sign-in
+    // (`POST /api/v1/auth/otp/verify`) with the account authority, whose refresh token the
+    // app keeps in its httpOnly session cookie. Each browser context makes its own sign-in,
+    // so every context holds its own single-use refresh token (ADR 0057). The journey users
+    // are fixed-code test accounts (AUTH_TEST_ACCOUNTS), so every context can sign in
+    // without reading a mailbox.
+    let codes = ["111111", "222222", "333333"];
+    let accounts = [&alice.email, &bob.email, &mallory.email]
+        .iter()
+        .zip(codes)
+        .map(|(email, code)| format!("{email}:{code}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let users = json!({
-        "alice": { "id": alice.id, "email": alice.email, "password": password, "name": name(alice.id).await },
-        "bob": { "id": bob.id, "email": bob.email, "password": password, "name": name(bob.id).await },
-        "mallory": { "id": mallory.id, "email": mallory.email, "password": password, "name": name(mallory.id).await },
+        "alice": { "id": alice.id, "email": alice.email, "code": codes[0], "name": name(alice.id).await },
+        "bob": { "id": bob.id, "email": bob.email, "code": codes[1], "name": name(bob.id).await },
+        "mallory": { "id": mallory.id, "email": mallory.email, "code": codes[2], "name": name(mallory.id).await },
     });
+    let app = app.with_auth_env(&[("APP_ENV", "test"), ("AUTH_TEST_ACCOUNTS", &accounts)]);
     // The Meeting Service as the browser meets it: the real router behind the production
     // CORS policy, on the port the web build targets.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18080")
@@ -1633,44 +1641,36 @@ async fn web_messaging_client_in_chromium_across_real_services() {
     assert!(status.success(), "the browser journey failed");
 
     // Server-side evidence, from Messaging's OWN database (Meeting never reads it).
-    let e2ee_messages = world
+    // Chats are server-stored (MANAGED): text is sealed at rest with the managed key ring.
+    let managed_messages = world
         .m_scalar(
-            "SELECT count(*) FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
-             WHERE c.security_profile = 'PRIVATE_E2EE' AND m.mls_ciphertext IS NOT NULL",
+            "SELECT count(*) FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id              WHERE c.security_profile = 'MANAGED' AND m.managed_sealed IS NOT NULL",
         )
         .await;
     assert!(
-        e2ee_messages >= 10,
-        "encrypted messages were stored as ciphertext: {e2ee_messages}"
+        managed_messages >= 60,
+        "the journey's messages are stored sealed: {managed_messages}"
     );
     let leaks = world
         .m_scalar(&format!(
-            "SELECT count(*) FROM messaging_messages WHERE position(convert_to('{secret}', 'UTF8') in coalesce(mls_ciphertext, ''::bytea)) > 0 \
-                OR position(convert_to('{secret}', 'UTF8') in coalesce(managed_sealed, ''::bytea)) > 0"
+            "SELECT count(*) FROM messaging_messages WHERE position(convert_to('{secret}', 'UTF8') in coalesce(managed_sealed, ''::bytea)) > 0"
         ))
         .await;
-    assert_eq!(
-        leaks, 0,
-        "the exchanged phrase never reached the server in the clear"
-    );
-    let e2ee_attachments = world
+    assert_eq!(leaks, 0, "message text is never stored unsealed");
+    let attachments = world
         .m_scalar(
-            "SELECT count(*) FROM messaging_attachments WHERE security_profile = 'PRIVATE_E2EE' AND state = 'READY' \
-               AND media_type = 'application/octet-stream' AND safe_file_name IS NULL AND crypto_format IS NOT NULL",
+            "SELECT count(*) FROM messaging_attachments WHERE security_profile = 'MANAGED' AND state = 'READY'",
         )
         .await;
-    assert!(
-        e2ee_attachments >= 1,
-        "the attachment is stored as nameless ciphertext"
-    );
+    assert!(attachments >= 1, "the file is stored and ready");
     let devices = world
-        .m_scalar("SELECT count(*) FROM messaging_devices WHERE status = 'REVOKED'")
+        .m_scalar("SELECT count(*) FROM messaging_devices")
         .await;
-    assert!(
-        devices >= 2,
-        "the removed device and the signed-out browser's device are revoked server-side"
+    assert_eq!(
+        devices, 0,
+        "signing in is enough: no encryption device was registered"
     );
     println!(
-        "EVIDENCE web-messaging-server e2ee_messages={e2ee_messages} plaintext_hits={leaks} e2ee_attachments={e2ee_attachments} revoked_devices={devices}"
+        "EVIDENCE web-messaging-server managed_messages={managed_messages} unsealed_hits={leaks} attachments={attachments} devices={devices}"
     );
 }

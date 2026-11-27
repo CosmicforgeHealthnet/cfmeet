@@ -8,6 +8,7 @@ on:
       - "services/messaging/**"
       - "services/meeting-service/**"
       - "packages/communications-policy/**"
+      - "packages/notification-client/**"
       - "packages/service-auth/**"
       - "packages/migration-guard/**"
       - "scripts/migrations/assert_destructive_guard.sh"
@@ -138,4 +139,4 @@ jobs:
             cargo build --manifest-path "services/$service/Cargo.toml" --workspace --bins --locked
           done
       - name: Real backend journey with isolated owner databases and signed service authentication
-        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture
+        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture --test-threads=2

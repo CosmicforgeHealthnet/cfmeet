@@ -1,12 +1,15 @@
 "use client";
 
+import OrganizationTeams from "./OrganizationTeams";
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { storageStore } from "@/store";
 import { useBusinessOrganization, useOrganizationProvisioning } from "@/hooks/v2/useBusinessOrganizations";
 import {
+  ORG_CAPABILITIES,
+  orgCan,
   legalVerificationLabel,
   organizationSections,
   provisioningLabel,
@@ -14,18 +17,22 @@ import {
   type OrganizationSections,
 } from "@/lib/organizations/organization-core";
 import type { BusinessOrganization } from "@/types/generated/meeting-service";
-import { Detail, OrgError, Section, formatDateTime } from "./shared";
+import { Detail, OrgError, OrgMark, Section, formatDateTime } from "./shared";
+
+const nice = (v?: string | null) => (v ? v.charAt(0) + v.slice(1).toLowerCase().replaceAll("_", " ") : "—");
 import OrganizationMembers from "./OrganizationMembers";
 import OrganizationInvitations from "./OrganizationInvitations";
 import OrganizationSettings from "./OrganizationSettings";
+import OrganizationModeration, { canModerate } from "./OrganizationModeration";
 import OrganizationAudit from "./OrganizationAudit";
 import { ORGANIZATION_CALLING_CAPABILITY, OrganizationCallingPanel } from "@/components/calling/OrganizationCallingAdmin";
 
-type Tab = "overview" | "members" | "invitations" | "settings" | "audit" | "calling";
+type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "audit" | "calling" | "moderation";
 
 const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) => boolean }> = [
   { id: "overview", label: "Overview", visible: (s) => s.overview },
   { id: "members", label: "Members", visible: (s) => s.overview },
+  { id: "teams", label: "Teams", visible: (s) => s.overview },
   { id: "invitations", label: "Invitations", visible: (s) => s.invitations },
   { id: "settings", label: "Settings", visible: (s) => s.settings || s.lifecycle || s.ownership },
   { id: "audit", label: "Audit log", visible: (s) => s.audit },
@@ -41,10 +48,10 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
   const org = useBusinessOrganization(organizationId);
   const [tab, setTab] = useState<Tab>("overview");
 
-  if (org.isLoading) return <p role="status" className="p-6">Loading organization…</p>;
+  if (org.isLoading) return <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6 lg:px-8 lg:py-8" aria-busy="true"><div className="h-20 animate-pulse rounded-2xl bg-muted" /><div className="h-64 animate-pulse rounded-2xl bg-muted" /></div>;
   if (org.isError || !org.data) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 p-6">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <BackLink />
         <OrgError error={org.error} retry={() => void org.refetch()} />
       </div>
@@ -55,26 +62,30 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
   const sections = organizationSections(data);
   // Enterprise calling administration (Section 12 relay): only with calling.enterprise.manage.
   const callingAdmin = data.viewer?.status === "ACTIVE" && Array.isArray(data.viewer.capabilities) && data.viewer.capabilities.includes(ORGANIZATION_CALLING_CAPABILITY);
-  const tabs = [...TABS.filter((t) => t.visible(sections)), ...(callingAdmin ? [{ id: "calling" as Tab, label: "Calling", visible: () => true }] : [])];
+  const tabs = [...TABS.filter((t) => t.visible(sections) || (t.id === "settings" && orgCan(data, ORG_CAPABILITIES.policiesManage))), ...(callingAdmin ? [{ id: "calling" as Tab, label: "Calling", visible: () => true }] : []), ...(canModerate(data) ? [{ id: "moderation" as Tab, label: "Moderation", visible: () => true }] : [])];
   const active = tabs.some((t) => t.id === tab) ? tab : "overview";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <BackLink />
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">{data.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          {data.slug} · {data.lifecycleStatus}
-          {data.viewer ? ` · Your role: ${data.viewer.role}` : ""}
-        </p>
-        {data.lifecycleStatus === "SUSPENDED" && (
-          <p role="status" className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-            This organization is suspended: organization meetings, invitations and colleague lists are paused.
+      <header className="mt-3 flex items-center gap-4">
+        <OrgMark name={data.name} size="size-14" className="text-lg" />
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-bold tracking-tight sm:text-3xl">{data.name}</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+            {data.viewer ? <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">You&apos;re {nice(data.viewer.role).toLowerCase()}</span> : null}
+            {data.lifecycleStatus !== "ACTIVE" ? <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">{nice(data.lifecycleStatus)}</span> : null}
+            {typeof data.memberCount === "number" ? <span>{data.memberCount} {data.memberCount === 1 ? "member" : "members"}</span> : null}
           </p>
-        )}
+        </div>
       </header>
+      {data.lifecycleStatus === "SUSPENDED" && (
+        <p role="status" className="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          This organization is suspended. Its meetings, invitations and colleague lists are paused.
+        </p>
+      )}
 
-      <nav className="flex overflow-x-auto border-b border-border" aria-label="Organization sections">
+      <nav className="no-scrollbar mt-6 flex overflow-x-auto border-b border-border" aria-label="Organization sections">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -82,8 +93,8 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
             onClick={() => setTab(t.id)}
             aria-current={active === t.id ? "page" : undefined}
             className={cn(
-              "whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium",
-              active === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground",
+              "-mb-px h-11 whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors sm:px-4",
+              active === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {t.label}
@@ -91,20 +102,24 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
         ))}
       </nav>
 
+      <div className="mt-6">
       {active === "overview" && <Overview org={data} />}
       {active === "members" && <OrganizationMembers org={data} />}
+      {active === "teams" && <OrganizationTeams org={data} />}
       {active === "invitations" && <OrganizationInvitations org={data} />}
       {active === "settings" && <OrganizationSettings org={data} />}
       {active === "audit" && <OrganizationAudit organizationId={data.id} />}
+      {active === "moderation" && <OrganizationModeration org={data} />}
       {active === "calling" && <OrganizationCallingPanel organizationId={data.id} name={data.name} embedded />}
+      </div>
     </div>
   );
 }
 
 function BackLink() {
   return (
-    <Link href="/dashboard/organizations" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-      <ArrowLeft className="h-4 w-4" /> Organizations
+    <Link href="/dashboard/organizations" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+      <ChevronLeft className="size-4" /> Organizations
     </Link>
   );
 }
@@ -120,63 +135,57 @@ function Overview({ org }: { org: BusinessOrganization }) {
       : `Account ${shortId(org.createdBy)}`
     : "—";
 
+  const location = [profile.city, profile.countryCode].filter(Boolean).join(", ");
+  const hasLegal = !!legal && !!(legal.registeredName || legal.registrationNumber || legal.incorporatedOn);
+  const settingUp = !!provisioning.data && !["READY", "NOT_REQUIRED"].includes(provisioning.data.provisioningState);
+
   return (
-    <div className="space-y-4">
-      <Section title="About">
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <Detail label="Description">{profile.description || "—"}</Detail>
-          <Detail label="Industry">{profile.industry || "—"}</Detail>
-          <Detail label="Organization type">{profile.organizationType || "—"}</Detail>
-          <Detail label="Public contact email">{profile.publicContactEmail || "—"}</Detail>
-          <Detail label="Members">{typeof org.memberCount === "number" ? org.memberCount : "—"}</Detail>
-          <Detail label="Status">{org.lifecycleStatus}</Detail>
-        </dl>
-      </Section>
-
-      <Section title="Location">
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <Detail label="City">{profile.city || "—"}</Detail>
-          <Detail label="Country">{profile.countryCode || "—"}</Detail>
-          <Detail label="Operating address">{profile.operatingAddress || "—"}</Detail>
-        </dl>
-      </Section>
-
-      <Section title="Legal registration" description={legalVerificationLabel(legal?.verification)}>
-        {legal && (legal.registeredName || legal.registrationNumber || legal.incorporatedOn) ? (
-          <dl className="grid gap-4 sm:grid-cols-2">
-            <Detail label="Registered name">{legal.registeredName || "—"}</Detail>
-            <Detail label="Registration number">{legal.registrationNumber || "—"}</Detail>
-            <Detail label="Incorporated on">{legal.incorporatedOn || "—"}</Detail>
-            <Detail label="Verification">{legalVerificationLabel(legal.verification)}</Detail>
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="space-y-6">
+        <Section title="About">
+          {profile.description ? <p className="text-sm leading-relaxed text-foreground">{profile.description}</p> : <p className="text-sm text-muted-foreground">No description yet.</p>}
+          <dl className="grid gap-5 sm:grid-cols-2">
+            <Detail label="Industry">{profile.industry || "—"}</Detail>
+            <Detail label="Type">{profile.organizationType || "—"}</Detail>
+            <Detail label="Contact email">{profile.publicContactEmail || "—"}</Detail>
+            <Detail label="Location">{location || "—"}</Detail>
+            {profile.operatingAddress ? <div className="sm:col-span-2"><Detail label="Address">{profile.operatingAddress}</Detail></div> : null}
           </dl>
-        ) : (
-          <p className="text-sm text-muted-foreground">No legal registration details were provided.</p>
-        )}
-      </Section>
-
-      <Section title="Record">
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <Detail label="Created">{formatDateTime(org.createdAt)}</Detail>
-          <Detail label="Created by">{createdBy}</Detail>
-          <Detail label="Created through">{org.creationSource}</Detail>
-          <Detail label="Last updated">{formatDateTime(org.updatedAt)}</Detail>
-          {org.archivedAt && <Detail label="Archived">{formatDateTime(org.archivedAt)}</Detail>}
-        </dl>
-      </Section>
-
-      <Section title="Setup" description="Technical provisioning of this organization's services.">
-        {provisioning.isLoading && <p role="status" className="text-sm">Checking setup…</p>}
-        {provisioning.isError && <OrgError error={provisioning.error} retry={() => void provisioning.refetch()} />}
-        {provisioning.data && (
-          <dl className="grid gap-4 sm:grid-cols-2">
-            <Detail label="State">{provisioningLabel(provisioning.data.provisioningState)}</Detail>
-            {provisioning.data.step && <Detail label="Current step">{provisioning.data.step}</Detail>}
-            {provisioning.data.lastErrorClass && <Detail label="Last failure">{provisioning.data.lastErrorClass}</Detail>}
-            {provisioning.data.nextAttemptAt && <Detail label="Next attempt">{formatDateTime(provisioning.data.nextAttemptAt)}</Detail>}
-            <Detail label="Updated">{formatDateTime(provisioning.data.updatedAt)}</Detail>
+        </Section>
+        {hasLegal ? (
+          <Section title="Legal registration" description={legalVerificationLabel(legal?.verification)}>
+            <dl className="grid gap-5 sm:grid-cols-2">
+              <Detail label="Registered name">{legal?.registeredName || "—"}</Detail>
+              <Detail label="Registration number">{legal?.registrationNumber || "—"}</Detail>
+              <Detail label="Incorporated">{legal?.incorporatedOn || "—"}</Detail>
+            </dl>
+          </Section>
+        ) : null}
+      </div>
+      <div className="space-y-6">
+        {settingUp || provisioning.isError ? (
+          <Section title="Setting up" description="We're preparing this organization's services.">
+            {provisioning.isError && <OrgError error={provisioning.error} retry={() => void provisioning.refetch()} />}
+            {provisioning.data && (
+              <dl className="grid gap-4">
+                <Detail label="Status">{provisioningLabel(provisioning.data.provisioningState)}</Detail>
+                {provisioning.data.step && <Detail label="Step">{provisioning.data.step}</Detail>}
+                {provisioning.data.lastErrorClass && <Detail label="Last problem">{provisioning.data.lastErrorClass}</Detail>}
+                {provisioning.data.nextAttemptAt && <Detail label="Next try">{formatDateTime(provisioning.data.nextAttemptAt)}</Detail>}
+              </dl>
+            )}
+          </Section>
+        ) : null}
+        <Section title="Details">
+          <dl className="grid gap-4">
+            <Detail label="Created">{formatDateTime(org.createdAt)}</Detail>
+            <Detail label="Created by">{createdBy}</Detail>
+            <Detail label="Last updated">{formatDateTime(org.updatedAt)}</Detail>
+            {org.archivedAt && <Detail label="Archived">{formatDateTime(org.archivedAt)}</Detail>}
+            {!hasLegal ? <Detail label="Legal registration">Not provided</Detail> : null}
           </dl>
-        )}
-      </Section>
+        </Section>
+      </div>
     </div>
   );
 }

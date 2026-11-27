@@ -53,30 +53,30 @@ export function describeError(error: unknown): ErrorView {
   const e = (error ?? {}) as ErrorLike;
   const requestId = e.requestId ?? null;
   if (e.kind === "unavailable") {
-    return { title: "Developer Platform not available in this environment", detail: e.message ?? "", requestId: null, action: "none" };
+    return { title: "The developer console isn't on here", detail: e.message ?? "", requestId: null, action: "none" };
   }
   if (e.kind === "network") {
     return {
-      title: "Developer Platform unreachable",
-      detail: "The API Gateway did not answer. It may not be deployed or reachable from this environment yet.",
+      title: "Can't reach the developer platform",
+      detail: "We couldn't connect to it. Check your internet connection and try again. If it keeps happening, the service may be down or not set up for this site yet.",
       requestId: null,
       action: "retry",
     };
   }
   if (e.code === "SESSION_UNAVAILABLE") {
-    return { title: "Sign-in service unavailable", detail: "Your CF Meet session could not be checked. Try again.", requestId: null, action: "retry" };
+    return { title: "We couldn't check your sign-in", detail: "Something went wrong confirming who you are. Try again in a moment.", requestId: null, action: "retry" };
   }
   if (e.code === "MACHINE_CREDENTIAL_REFUSED") {
-    return { title: "Machine credential refused", detail: e.message ?? "", requestId: null, action: "none" };
+    return { title: "This key can't be used here", detail: e.message ?? "", requestId: null, action: "none" };
   }
   const code = e.code ?? "";
   // Specific contract codes first: several are not on the status their family suggests
   // (INVITATION_INVALID is 404, INVITATION_EMAIL_MISMATCH / PRODUCTION_ACCESS_REQUIRED are
   // 403, OPERATOR_REQUIRED / CONFLICTING_REPLAY are 400, CAPABILITY_UNAVAILABLE is 503).
-  if (STATE_CODES[code]) return { title: "Workspace state", detail: STATE_CODES[code], requestId, action: "none" };
+  if (STATE_CODES[code]) return { title: "Your workspace can't do this right now", detail: STATE_CODES[code], requestId, action: "none" };
   if (CONFLICT_CODES[code]) {
     return {
-      title: e.status === 409 ? "Conflict" : e.status === 422 ? "Not allowed by policy" : "Not possible",
+      title: e.status === 409 ? "That clashes with something that already exists" : e.status === 422 ? "Your workspace rules don't allow this" : "That isn't possible",
       detail: CONFLICT_CODES[code],
       requestId,
       action: code === "VERSION_CONFLICT" ? "reload" : "none",
@@ -84,20 +84,20 @@ export function describeError(error: unknown): ErrorView {
   }
   switch (e.status) {
     case 401:
-      return { title: "Sign in again", detail: "Your CF Meet session has expired or is not valid for the Developer Platform.", requestId, action: "signin" };
+      return { title: "Please sign in again", detail: "Your session has ended. Sign in and you'll come straight back.", requestId, action: "signin" };
     case 403:
       return {
-        title: "Not allowed",
-        detail: "Your developer workspace role does not allow this action. Roles are checked on every request.",
+        title: "You don't have permission for this",
+        detail: "Your role in this workspace doesn't include it. Ask a workspace owner if you need it.",
         requestId,
         action: "none",
       };
     case 404:
-      return { title: "Not found", detail: "It does not exist or is not part of this developer workspace.", requestId, action: "reload" };
+      return { title: "We couldn't find that", detail: "It may have been deleted, or it belongs to another workspace.", requestId, action: "reload" };
     case 409:
     case 422:
       return {
-        title: e.status === 409 ? "Conflict" : "Not allowed by policy",
+        title: e.status === 409 ? "That clashes with something that already exists" : "Your workspace rules don't allow this",
         detail: e.message ?? "",
         requestId,
         action: "none",
@@ -105,28 +105,28 @@ export function describeError(error: unknown): ErrorView {
     case 429: {
       const wait = e.retryAfterSeconds;
       return {
-        title: "Too many requests",
-        detail: wait != null ? `Rate limited by the API Gateway. Try again in ${wait} s.` : "Rate limited by the API Gateway. Try again shortly.",
+        title: "Slow down a little",
+        detail: wait != null ? `Too many requests in a short time. Try again in ${wait} seconds.` : "Too many requests in a short time. Try again shortly.",
         requestId,
         action: "retry",
       };
     }
     case 400:
-      return { title: "Invalid request", detail: e.message ?? "Check the values and try again.", requestId, action: "none" };
+      return { title: "Something in the form isn't right", detail: e.message ?? "Check what you entered and try again.", requestId, action: "none" };
     case 502:
     case 503:
     case 504:
       return {
-        title: "Temporarily unavailable",
+        title: "The service is busy right now",
         detail:
           code === "SERVICE_UNAVAILABLE"
-            ? "A required service (for example the sign-in session bridge or Platform Access) is unavailable. Try again later."
+            ? "Part of the platform is temporarily down. Try again in a few minutes."
             : e.message ?? "Try again later.",
         requestId,
         action: "retry",
       };
     default:
-      return { title: "Request failed", detail: e.message ?? "Unexpected error.", requestId, action: "retry" };
+      return { title: "Something went wrong", detail: e.message ?? "An unexpected error happened. Try again.", requestId, action: "retry" };
   }
 }
 

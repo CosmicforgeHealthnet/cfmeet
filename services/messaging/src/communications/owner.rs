@@ -268,6 +268,77 @@ pub async fn conversation_access(
     Ok(Json(v))
 }
 
+/// At most this many saved-message references per batched access check (MS-1b).
+pub const MESSAGE_ACCESS_BATCH: usize = 50;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageRef {
+    conversation_id: Uuid,
+    message_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessagesAccessRequest {
+    principal_id: Uuid,
+    items: Vec<MessageRef>,
+}
+
+/// MS-1b (contacts audit K9): the access view of many messages at once for the Hub's
+/// saved-messages list, one entry per reference in request order: `member` (an ACTIVE
+/// member of the conversation right now) and, for members, the message `state` exactly
+/// as MS-1 reports it. Each conversation is loaded once. Metadata only, as MS-1.
+pub async fn conversation_messages_access(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Json(p): Json<MessagesAccessRequest>,
+) -> Reply {
+    let ctx = own_for(
+        &s,
+        &caller,
+        InternalPermission::MessagingCommunicationsRead,
+        p.principal_id,
+    )
+    .await?;
+    if p.items.len() > MESSAGE_ACCESS_BATCH {
+        return Err(Error::validation("at most 50 items"));
+    }
+    let mut conversations = std::collections::HashMap::new();
+    let mut items = Vec::with_capacity(p.items.len());
+    for item in &p.items {
+        if let std::collections::hash_map::Entry::Vacant(slot) =
+            conversations.entry(item.conversation_id)
+        {
+            let loaded =
+                match crate::conversations::service::load(&s.db, &ctx, item.conversation_id, false)
+                    .await?
+                {
+                    None => None,
+                    Some(c) => {
+                        match access::membership(&s.db, c.id, p.principal_id, false).await? {
+                            Some(m) if m.is_active() => Some((c, m)),
+                            _ => None,
+                        }
+                    }
+                };
+            slot.insert(loaded);
+        }
+        let entry = match &conversations[&item.conversation_id] {
+            None => {
+                json!({"conversationId": item.conversation_id, "messageId": item.message_id, "member": false})
+            }
+            Some((c, m)) => {
+                let message = message_view(&s.db, c, m, p.principal_id, item.message_id).await?;
+                json!({"conversationId": item.conversation_id, "messageId": item.message_id, "member": true,
+                    "state": message["state"], "sequence": message["sequence"]})
+            }
+        };
+        items.push(entry);
+    }
+    Ok(Json(json!({"schemaVersion": 1, "items": items})))
+}
+
 // ---------------------------------------------------------------------------------------
 // MS-2 conversation attachments
 // ---------------------------------------------------------------------------------------
@@ -296,8 +367,53 @@ struct AttachmentMeta {
     security_profile: String,
     kind: String,
     media_type: String,
+    safe_file_name: Option<String>,
+    thumbnail_ready: bool,
     created_at: DateTime<Utc>,
     uploader_principal_id: Uuid,
+}
+
+/// M3: the presentation metadata the server legitimately holds for one listed
+/// attachment. MANAGED: the sanitized file name (`content::sanitize_file_name`, stored
+/// at intent time), the declared media type and kind, and a server-made thumbnail when
+/// one is READY. PRIVATE_E2EE: none of these — name, media type and thumbnails travel
+/// only inside the MLS-encrypted attachment descriptor, so they are null (never
+/// fabricated) and the listing says the client must decrypt.
+///
+/// Retrieval is never a URL: `download` / `thumbnail` name the normal, access-checked
+/// grant operations (`v1/...`, relative to the Messaging client API — the CF Meet apps
+/// call them through the Meeting relay `/api/v2/messaging/relay/v1/...`), which re-check
+/// membership, the history window, message and attachment state on every call and
+/// return a short-lived signed read. Nothing stored or listed here grants access.
+fn attachment_listing(conversation_id: Uuid, a: &AttachmentMeta) -> Value {
+    let managed = a.security_profile == "MANAGED";
+    let base = format!("v1/conversations/{conversation_id}/attachments/{}", a.id);
+    let ready = a.state == "READY";
+    json!({
+        "attachmentId": a.id,
+        "messageId": a.message_id,
+        "messageSequence": a.message_sequence,
+        "state": a.state,
+        "sizeBytes": a.size_bytes,
+        "mediaClass": media_class(&a.security_profile, &a.kind, &a.media_type),
+        "createdAt": rfc3339(a.created_at),
+        "uploaderPrincipalId": a.uploader_principal_id,
+        "securityProfile": a.security_profile,
+        "kind": if managed { Some(a.kind.as_str()) } else { None },
+        "fileName": if managed { a.safe_file_name.as_deref() } else { None },
+        "mediaType": if managed { Some(a.media_type.as_str()) } else { None },
+        "metadataLocation": if managed { "SERVER" } else { "ENCRYPTED_DESCRIPTOR" },
+        "download": if ready {
+            json!({ "method": "POST", "path": format!("{base}/download-grants") })
+        } else {
+            Value::Null
+        },
+        "thumbnail": if ready && managed && a.thumbnail_ready {
+            json!({ "method": "POST", "path": format!("{base}/thumbnail-grants"), "mediaType": "image/png" })
+        } else {
+            Value::Null
+        },
+    })
 }
 
 pub async fn conversation_attachments(
@@ -333,7 +449,9 @@ pub async fn conversation_attachments(
         &s.db,
         "SELECT a.id, a.message_id, m.sequence AS message_sequence, a.state, \
                 COALESCE(a.verified_size, a.declared_size) AS size_bytes, a.security_profile, a.kind, \
-                a.media_type, a.created_at, a.uploader_principal_id \
+                a.media_type, a.safe_file_name, a.created_at, a.uploader_principal_id, \
+                EXISTS (SELECT 1 FROM messaging_attachment_derivatives d WHERE d.attachment_id = a.id \
+                          AND d.kind = 'THUMBNAIL' AND d.status = 'READY') AS thumbnail_ready \
            FROM messaging_attachments a \
            JOIN messaging_messages m ON m.id = a.message_id AND m.conversation_id = a.conversation_id \
           WHERE a.conversation_id = $1 AND a.tenant_id = $2 AND a.application_id = $3 AND a.environment_id = $4 \
@@ -365,16 +483,7 @@ pub async fn conversation_attachments(
     };
     Ok(Json(json!({
         "schemaVersion": 1,
-        "data": page.iter().map(|a| json!({
-            "attachmentId": a.id,
-            "messageId": a.message_id,
-            "messageSequence": a.message_sequence,
-            "state": a.state,
-            "sizeBytes": a.size_bytes,
-            "mediaClass": media_class(&a.security_profile, &a.kind, &a.media_type),
-            "createdAt": rfc3339(a.created_at),
-            "uploaderPrincipalId": a.uploader_principal_id,
-        })).collect::<Vec<_>>(),
+        "data": page.iter().map(|a| attachment_listing(c.id, a)).collect::<Vec<_>>(),
         "nextCursor": next,
     })))
 }

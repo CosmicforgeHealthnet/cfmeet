@@ -1,121 +1,88 @@
 # CF Meet platform overview
 
-**CF Meet, CosmicForge Tech Limited**
+**CF Meet, CosmicForge Tech Limited** · updated 2026-11-18 ([ADR 0061](../decisions/0061-cf-meet-platform-partner-embedding.md))
 
-CF Meet is growing from a video-meeting application into CosmicForge's unified communications platform. This document distinguishes what exists today from the planned platform boundaries.
+CF Meet is two things built on one set of services:
 
-> **Components with working code:** `apps/web` (Next.js web client),
-> `services/meeting-service` (Rust/Axum Meeting & Conference Platform service),
-> `services/calling` (Rust/Axum Calling service — platform trust foundation, the canonical Call aggregate, application RTC calling, routing, public-network calls through Telephony, enterprise calling, webhooks, usage and limits),
-> `services/privacy-relay` (Communication Contexts, Privacy Relay Sessions, Contact Vault, temporary relay numbers) and
-> `services/telephony` (public-network execution and the CF-owned SIP / media edge in `infra/telephony`).
-> Part III status and its external blockers (real lawful carrier certification pending):
-> [`part-l-final-closure-register.md`](part-l-final-closure-register.md).
-> Every other service/app boundary below is planned until implementation begins.
+1. **The CF Meet apps** (web, mobile): CosmicForge's own meetings, messaging and calling product
+   for signed-in CF Meet accounts.
+2. **The CF Meet Platform**: the same meetings, messaging and calling, offered to other companies
+   (partners) to put inside **their** products, through one API and SDKs.
 
-## Four platform layers
+## Names
+
+| Name | What it is | Where |
+|---|---|---|
+| **CF Meet Platform** | The partner offering: CF Meet meetings, messaging and calling in a partner's product | API Gateway + Platform Access + product services + SDKs |
+| **Developer Console** | The control plane where a partner manages its workspace, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access | `services/developer-platform` |
+| **Workspace** | A partner's account in the Developer Console. Paths and fields still say *organization* (`/v1/organizations`, `organizationId`). Not CF Meet business Organizations | Developer Console, EXTERNAL Platform Access tenant |
+| **API Gateway** | The single front door for partner backends, `https://api.cfmeet.com/v1` | `services/api-gateway` |
+| **Platform Access** | The only identity, credential and scope authority (tenants, applications, environments, service accounts, keys, principals) | `services/platform-access` |
+| **Principal** | An end user inside a partner's product (or CF Meet's own app user, `NATIVE_CF_USER`) | Platform Access |
+
+## How a partner connects
 
 ```text
-APPLICATION SURFACES
-  apps/web ✅
-  apps/mobile ◻  apps/admin ◻  apps/developer-portal ◻
-
-PLATFORM SERVICES
-  services/meeting-service ✅
-  services/calling ✅
-  services/privacy-relay ✅
-  services/messaging ◻
-  services/telephony ✅  (real lawful carrier interconnect pending)
-  services/numbering ◻
-  developer infrastructure ◻
-
-SHARED CONTRACTS
-  packages/contracts ✅  packages/service-auth ✅  packages/webhooks ✅  packages/object-storage ✅
-
-INFRASTRUCTURE
-  PostgreSQL ✅  Redis ✅  LiveKit ✅  SIP / media edge (Asterisk) ✅
-  lawful carrier interconnect ◻ (external)  per-service metrics / incidents ✅
+Partner backend ──API key (scoped)──► API Gateway  api.cfmeet.com/v1
+                                        │  default deny · key + scope check · quotas · usage
+                                        │  60 s signed context (the key is never forwarded)
+                                        ▼
+                  Messaging · Calling · Meetings · Developer Console
+                                        ▲
+Partner end-user device ──short-lived, bound credential──► direct realtime / media / signaling ingress
+  (messaging session-device token, meeting participant grant, calling signaling credential;
+   minted by the partner backend, never the API key)
 ```
 
-✅ implemented today   ◐ boundary established   ◻ planned
+CF Meet's own apps do not use the gateway: they call the services on their direct `/api/v2`
+ingress with the CF Meet account session ([first-party direct-ingress decision](first-party-direct-ingress-decision.md)).
 
-## Application surfaces
+## Services
 
-| Surface | Path | Status |
+| Service | Path | Responsibility |
 |---|---|---|
-| CF Meet web app | `apps/web` | **Current.** Auth, dashboard, scheduling, pre-join, LiveKit room, waiting room, participants, chat, API keys and webhooks UI |
-| Mobile apps | `apps/mobile` | Planned |
-| Admin console | `apps/admin` | Planned |
-| Developer portal | `apps/developer-portal` | Planned |
+| Meeting Service | `services/meeting-service` | CF Meet accounts and sign-in (email + code), meetings and conferences, LiveKit media tokens, meeting chat; first-party relays to Organizations, Notifications and Messaging |
+| Messaging | `services/messaging` | Conversations, messages (MANAGED and E2EE), realtime, attachments, search, moderation |
+| Calling | `services/calling` | App-to-app voice / video calls, signaling, enterprise calling, the public-network side of calls |
+| Communications | `services/communications` | The CF Meet app's Communications Hub (contacts, CF Meet ID, timeline); first-party only |
+| Organizations | `services/organizations` | CF Meet's first-party business organizations |
+| Notifications | `services/notifications` | Email, push and in-app notifications |
+| Platform Access | `services/platform-access` | Identity, credential and scope authority |
+| Developer Console | `services/developer-platform` | Partner control plane (see Names) |
+| API Gateway | `services/api-gateway` | Partner ingress (see Names) |
+| Privacy Relay | `services/privacy-relay` | Communication contexts, protected contacts, relay numbers |
+| Telephony | `services/telephony` | Public-network call execution, CF-owned SIP / media edge |
+| Numbering · SMS Gateway | `services/numbering`, `services/sms-gateway` | Numbers and SMS |
+| Security scan gateway | `services/security-scan-gateway` | Attachment scanning |
 
-## Platform services
+Each service owns its own database; no service reads another's tables. Shared code lives in
+`packages/` (contracts, service authentication, webhooks, usage facts, messaging crypto, …).
 
-| Service | Path | Status / responsibility |
-|---|---|---|
-| Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
-| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, call API; application calling (Part C §20–§25, ADRs [0007](../decisions/0007-calling-media-provider-boundary.md), [0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md), [0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md)): endpoints, signaling, multi-device ringing, single-winner arbitration, app voice / video / group calls over Calling's own media provider boundary, call control and transfer; Part D §26–§30: the public Privacy Relay ingress, PRIVACY_RELAY_V1 protected calls and transfers (fail closed) and the active-call enforcement endpoint; Part E: the Routing Engine and Calling's side of public-network calls executed by Telephony; Parts F–J: enterprise calling, platform API / webhooks / usage / limits, security, reliability and persistence closure ([`part-f-certification.md`](part-f-certification.md) … [`part-k-production-acceptance.md`](part-k-production-acceptance.md)). |
-| Privacy Relay communications | `services/privacy-relay` | **Active.** Part D §26–§30 ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)): generic Communication Contexts (participants, channels, directions, validity, policy; reassignment and revocation without replacement), Privacy Relay Sessions that can only narrow their context, recorded communication authorization for Calling's protected calls, gap-free audit + outbox, durable active-call enforcement. Own database; internal API only (customers reach it through Calling), except the Contact Vault routes, which take a Calling-minted Contact Vault access token. §31–§36 ([ADR 0011](../decisions/0011-contact-vault-cryptography-and-resolution.md), [ADR 0012](../decisions/0012-temporary-relay-number-assignment-and-cooldown.md)): encrypted protected contacts with scoped keyed equality, trusted verification, Contact Resolution Grants and Telephony-only resolution, a temporary relay-number pool with cooldown and inbound mapping, privacy-safe call evidence (composed by Calling). |
-| Unified messaging | `services/messaging` | Planned |
-| SIP/PSTN telephony | `services/telephony` | **Active.** Part E §39–§51 ([ADR 0014](../decisions/0014-telephony-service-core.md)–[ADR 0017](../decisions/0017-provider-failover.md)): provider-independent leg execution, durable idempotent commands with a transmit fence and UNKNOWN outcome, provider abstraction (SIP-trunk and deterministic adapters), authenticated provider events, reconciliation, failover; the CF-owned SIP / media edge (Asterisk + ARI, `infra/telephony/`). Real lawful carrier certification is pending an external interconnect ([ADR 0016](../decisions/0016-first-telecom-interconnect.md)). |
-| Digital Communications Numbers | `services/numbering` | Planned |
-| Webhook delivery / workers | future service if extracted | Planned only when operationally justified |
-| Communications intelligence | future | Transcription, translation and assistance |
+## What a partner can do today
 
-The meeting service currently contains some cross-cutting functionality inherited from the original RTC backend—such as auth, users, admin, API keys, webhook registration and email workers. Those capabilities stay inside the meeting service for Phase 2 unless a later ADR establishes a real extraction boundary.
+| Capability | Status |
+|---|---|
+| Sign up, create projects, environments, service accounts, API keys, webhooks (SANDBOX / TEST) | Available |
+| Server-to-server messaging on MANAGED conversations | Available |
+| In-app (WebRTC) calling | Available |
+| Create its own end users (principals) | Phase 1 of ADR 0061 |
+| Live chat on its users' devices (MANAGED session devices) | Phase 2 |
+| Meetings with an API key, participant grants, recordings | Phase 3 |
+| Production access | Phase 4 (owner names the reviewers) |
+| Usage for messages and calling | Phase 5 |
+| Published SDKs and quickstarts | Phase 6 (SDKs are generated, unpublished) |
+| Numbers, SMS, Privacy Relay, public-network calls | Off by owner decision |
 
-The service is named by its **primary domain responsibility**, not `core-api`, so developers do not mistake it for the permanent backend of calling, messaging, telephony, numbering or Privacy Relay.
+## Contracts
 
-## Phase 2 architecture
-
-Phase 2 — Meeting & Conference Platform — uses:
-
-```text
-apps/web
-   │ HTTP/realtime control APIs
-   ▼
-services/meeting-service
-   ├── PostgreSQL
-   ├── Redis
-   └── LiveKit control/token integration
-          │
-          ▼
-     LiveKit media plane
-```
-
-Shared contracts belong in `packages/contracts`; media infrastructure/configuration belongs in `infra/livekit`; Phase 2 specifications and closure evidence belong in `docs/phases/phase-02/`.
-
-## Shared contracts
-
-`packages/contracts` is the home for contracts shared across services/apps or exposed externally: API contracts, event schemas, webhook schemas, permission identifiers, shared enums and SDK generation inputs.
-
-Today, the meeting HTTP API authority is the utoipa/OpenAPI definition generated by `services/meeting-service`. The web application still contains hand-written TypeScript mirrors; replacing those with generated contracts is tracked as platform technical debt.
+`packages/contracts` holds every API, event and webhook contract. The gateway route table
+(`infra/api-gateway/route-manifest.json`), the public API documents
+(`packages/contracts/bundled/public/`) and the SDK sources (`sdks/`) are generated from those
+contracts plus the explicit allow-list `infra/api-gateway/public-routes.json`
+(`scripts/contracts/public_api.py`, `sdks/generate.py`; CI checks they are current).
 
 ## Infrastructure
 
-| Component | Status | Where |
-|---|---|---|
-| PostgreSQL / SeaORM | Current | meeting-service database/migrations |
-| Redis | Current | meeting-service runtime dependencies |
-| LiveKit | Current | meeting media plane; config in `infra/livekit/` |
-| Local orchestration | Current | root `docker-compose.yml`, `infra/docker/` |
-| Web deployment | Current | Vercel, root `apps/web` |
-| Meeting-service deployment | Current | Docker context `services/meeting-service/` |
-| Calling / Privacy Relay / Telephony deployment | Current (staging) | one image each, own database and roles; backup / restore per service (`infra/deployment/`) |
-| SIP / media edge | Current (staging) | Asterisk + ARI configuration and certification in `infra/telephony/` |
-| Lawful carrier interconnect | Pending (external) | provisioned as a Telephony `SIP_TRUNK` provider once a carrier is onboarded (ADR 0016) |
-| Observability | Current, per service | bounded metrics listeners, durable incidents, correlation ids (ADR 0031); a cross-platform observability stack is future work |
-
-## Current request flow
-
-```text
-Browser (apps/web)
-      │ HTTPS /api/v1
-      ▼
-services/meeting-service ──► PostgreSQL
-      │              └─────► Redis
-      │ signs/enforces LiveKit access
-      ▼
-LiveKit media plane
-```
-
-The web app and meeting service are independently buildable/deployable and communicate over published APIs rather than source imports.
+PostgreSQL, Redis and LiveKit; the SIP / media edge in `infra/telephony`; production deployment
+and acceptance tooling in `infra/calling/production` (coordinated release, activations,
+certification); per-service metrics and incidents.

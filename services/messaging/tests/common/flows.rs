@@ -200,6 +200,104 @@ impl Harness {
         creator.group = Some(group);
     }
 
+    /// Another ACTIVE device of an existing principal (multi-device accounts), with
+    /// `packages` published KeyPackages.
+    pub async fn device_of(&self, c: &Customer, principal: Uuid, packages: usize) -> Member {
+        let device = self.active_device(c, principal).await;
+        if packages > 0 {
+            let kps: Vec<Vec<u8>> = (0..packages)
+                .map(|_| device.key_package().unwrap())
+                .collect();
+            let r = self.publish(c, principal, device.device_id(), &kps).await;
+            assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        }
+        Member {
+            principal,
+            device,
+            group: None,
+            cursor: 0,
+        }
+    }
+
+    /// `by` adds every device of `targets` (several may share a principal) through one
+    /// claim + commit; each target joins from its own Welcome. Every member device in
+    /// `others` processes the commit. Returns the commit's sequence.
+    pub async fn add_member_devices(
+        &self,
+        c: &Customer,
+        conversation: &Value,
+        by: &mut Member,
+        targets: &mut [&mut Member],
+        others: &mut [&mut Member],
+    ) -> i64 {
+        let cid = conversation["conversationId"].as_str().unwrap();
+        let mut principals: Vec<Uuid> = targets.iter().map(|m| m.principal).collect();
+        principals.sort();
+        principals.dedup();
+        let claim = self
+            .post(
+                c,
+                Some(by.principal),
+                &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+                json!({ "principalIds": principals }),
+            )
+            .await;
+        assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+        let mut packages = vec![];
+        let mut welcomed = vec![];
+        for t in targets.iter() {
+            let k = claim.json["keyPackages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|k| k["deviceId"] == json!(t.device_id()))
+                .unwrap_or_else(|| panic!("a KeyPackage for {}: {}", t.device_id(), claim.text))
+                .clone();
+            packages.push(unb64(&k["keyPackage"]));
+            welcomed.push(t.device_id());
+        }
+        let group = by.group.as_mut().unwrap();
+        let out = by.device.add_devices(group, &packages).unwrap();
+        let r = self
+            .commit(
+                c,
+                cid,
+                by,
+                &out.commit,
+                out.epoch,
+                out.welcome.as_deref(),
+                &welcomed,
+                &[],
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let seq = r.json["sequence"].as_i64().unwrap();
+        by.cursor = seq;
+        for m in others.iter_mut() {
+            self.receive(c, conversation, m).await;
+        }
+        for t in targets.iter_mut() {
+            let w = self
+                .get(
+                    c,
+                    Some(t.principal),
+                    &format!("/v1/messaging/devices/{}/welcomes", t.device_id()),
+                )
+                .await;
+            assert_eq!(w.status, StatusCode::OK, "{}", w.text);
+            let welcome = w.json["welcomes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["conversationId"] == conversation["conversationId"])
+                .expect("a welcome for the conversation")
+                .clone();
+            t.group = Some(t.device.join(&unb64(&welcome["welcome"])).unwrap());
+            t.cursor = seq;
+        }
+        seq
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn commit(
         &self,

@@ -226,7 +226,8 @@ impl World {
         let caller = a
             .device(&a.w.initiator, &format!("c-{}", Uuid::new_v4().simple()))
             .await;
-        a.device(&a.w.recipient, &format!("r-{}", Uuid::new_v4().simple()))
+        let callee = a
+            .device(&a.w.recipient, &format!("r-{}", Uuid::new_v4().simple()))
             .await;
         let r = a
             .create_call(
@@ -238,7 +239,12 @@ impl World {
             )
             .await;
         assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-        r.json["call"]["callId"].as_str().unwrap().parse().unwrap()
+        // The callee's device receives the offer: it (and the Call) ring (C1).
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        let offer = a.invitation_for(call, callee.endpoint).await.unwrap();
+        let ack = a.acknowledge_for(call, offer, &callee).await;
+        assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+        call
     }
 }
 
@@ -1890,4 +1896,105 @@ mod developer_platform {
             .iter()
             .any(|e| e["event_id"].as_str() == Some(dead.as_str())));
     }
+}
+
+/// C11: upgrading to video, screen sharing and adding a participant to a live Call reach
+/// subscribers as `call.kind_changed`, `call.screen_share_started` /
+/// `call.screen_share_stopped` and `call.participant_added`, with ids and codes only.
+#[tokio::test]
+async fn live_call_collaboration_events_become_webhooks() {
+    let Some(w) = World::new(dev_settings()).await else {
+        return;
+    };
+    let rx = Receiver::start().await;
+    let types = [
+        "call.kind_changed",
+        "call.screen_share_started",
+        "call.screen_share_stopped",
+        "call.participant_added",
+    ];
+    let (_sub, secret) = w.subscribe(&rx.url, &types).await;
+    let a = &w.e.a;
+    let (call, caller, _callee) = a.connected_call("VOICE").await;
+    // Everything up to now (the recipient added at creation) is delivered first.
+    w.publish().await;
+    w.deliver().await;
+    let created = rx.seen().len();
+    let alice = a.participant_of(call, caller.principal).await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/upgrade"),
+            json!({ "kind": "VIDEO", "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for path in ["screen-share", "screen-share/stop"] {
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/{path}"),
+                json!({ "participantId": alice }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text);
+    }
+    let carol = a.principal("webhook-carol").await;
+    a.device(&carol, "webhook-carol").await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/participants"),
+            json!({ "invitingParticipantId": alice, "targetPrincipalIds": [carol.id()],
+                    "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let carol_participant = r.json["participants"][0]["participantId"].clone();
+    w.publish().await;
+    w.deliver().await;
+    let seen = rx.seen();
+    let mut bodies = Vec::new();
+    for r in &seen {
+        let ts = header(r, signing::HEADER_TIMESTAMP);
+        signing::verify(
+            secret.as_bytes(),
+            &header(r, signing::HEADER_SIGNATURE),
+            &ts,
+            &header(r, signing::HEADER_DELIVERY_ID),
+            &r.body,
+            ts.parse().unwrap(),
+            300,
+        )
+        .unwrap();
+        let body: Value = serde_json::from_slice(&r.body).unwrap();
+        common::contracts::check(
+            "platform/webhooks/v1.schema.json#/$defs/WebhookEvent",
+            &body,
+        );
+        assert_eq!(body["data"]["callId"], call.to_string());
+        bodies.push(body);
+    }
+    // Creation: the recipient was added (the initiator is part of the request itself).
+    assert_eq!(created, 1, "{bodies:?}");
+    assert!(bodies[..created]
+        .iter()
+        .all(|b| b["type"] == "call.participant_added"));
+    let later: Vec<&Value> = bodies[created..].iter().collect();
+    let of =
+        |t: &str| -> Vec<&Value> { later.iter().copied().filter(|b| b["type"] == t).collect() };
+    let upgraded = of("call.kind_changed");
+    assert_eq!(upgraded.len(), 1, "{later:?}");
+    assert_eq!(upgraded[0]["data"]["fromKind"], "VOICE");
+    assert_eq!(upgraded[0]["data"]["toKind"], "VIDEO");
+    let started = of("call.screen_share_started");
+    assert_eq!(started.len(), 1, "{later:?}");
+    assert_eq!(started[0]["data"]["participantId"], alice.to_string());
+    let stopped = of("call.screen_share_stopped");
+    assert_eq!(stopped.len(), 1, "{later:?}");
+    assert_eq!(stopped[0]["data"]["stopReason"], "STOPPED");
+    let added = of("call.participant_added");
+    assert_eq!(added.len(), 1, "{later:?}");
+    assert_eq!(added[0]["data"]["participantId"], carol_participant);
+    assert_eq!(added[0]["data"]["role"], "RECIPIENT");
+    assert_eq!(later.len(), 4, "{later:?}");
 }

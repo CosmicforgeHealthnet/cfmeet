@@ -7,7 +7,6 @@ mod common;
 use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use common::*;
-use developer_platform_migration::MigratorTrait;
 use serde_json::json;
 
 struct Files {
@@ -156,7 +155,7 @@ async fn the_server_refuses_pending_migrations_and_serves_probes_once_migrated()
     let out = command(SERVER, &env, &[]).output().await.unwrap();
     assert!(!out.status.success(), "pending migrations refuse startup");
     assert!(String::from_utf8_lossy(&out.stderr).contains("pending"));
-    developer_platform_migration::Migrator::up(&db.conn, None)
+    developer_platform_migration::up_all(&db.conn)
         .await
         .unwrap();
     let mut child = command(SERVER, &env, &[]).spawn().unwrap();

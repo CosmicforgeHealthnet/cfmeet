@@ -13,9 +13,9 @@ use serde_json::Value;
 
 use super::{
     snapshots::{
-        camel_object, ApplicationScopeSnapshot, ApplicationSnapshot, CredentialScopeSnapshot,
-        CredentialSnapshot, EnvironmentSnapshot, PrincipalSnapshot, ServiceAccountSnapshot,
-        TenantSnapshot,
+        camel_object, AppGrantSnapshot, ApplicationScopeSnapshot, ApplicationSnapshot,
+        CredentialScopeSnapshot, CredentialSnapshot, EnvironmentSnapshot, PrincipalSnapshot,
+        ServiceAccountSnapshot, TenantSnapshot,
     },
     PlatformError, PlatformResult,
 };
@@ -34,6 +34,7 @@ text_enum!(
         Credential = "CREDENTIAL",
         CredentialScope = "CREDENTIAL_SCOPE",
         Principal = "PRINCIPAL",
+        AppGrant = "APP_GRANT",
     }
 );
 
@@ -100,6 +101,7 @@ fn typed_snapshot(kind: EntityKind, row: Value) -> PlatformResult<Value> {
         EntityKind::Credential => check::<CredentialSnapshot>(v),
         EntityKind::CredentialScope => check::<CredentialScopeSnapshot>(v),
         EntityKind::Principal => check::<PrincipalSnapshot>(v),
+        EntityKind::AppGrant => check::<AppGrantSnapshot>(v),
     }
 }
 

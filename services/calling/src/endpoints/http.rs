@@ -52,7 +52,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EndpointView {
+pub(crate) struct EndpointView {
     endpoint_id: Uuid,
     principal_id: Uuid,
     endpoint_key: String,

@@ -2,6 +2,7 @@
 //!
 //! HTTP handlers for meeting lifecycle management with LiveKit integration.
 
+use crate::validation::ValidateRequest;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -67,9 +68,7 @@ pub async fn create_instant_meeting(
     Extension(claims): Extension<Claims>,
     Json(payload): Json<crate::dto::InstantMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<crate::dto::InstantMeetingApiResponse>)> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -321,9 +320,7 @@ pub async fn create_meeting(
     Json(payload): Json<CreateMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<ApiResponse<MeetingResponse>>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -507,9 +504,7 @@ pub async fn update_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<MeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -692,6 +687,8 @@ pub async fn delete_meeting(
         ));
     }
 
+    // Gap audit M9: the v2 view of the meeting goes first.
+    state.meeting.compat.retire_legacy(id).await;
     // Delete meeting
     Meetings::delete_by_id(id).exec(&state.db).await?;
 
@@ -730,9 +727,7 @@ pub async fn join_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting
@@ -1047,6 +1042,8 @@ async fn join_meeting_internal(
         }))),
     };
     session_log.insert(&state.db).await?;
+    // Gap audit M9: the v2 view follows the join (start, participants).
+    state.meeting.compat.mirror_legacy_write(meeting.id).await;
 
     // Generate LiveKit join token
     // Room name is the meeting identifier (human-friendly code)
@@ -1137,6 +1134,7 @@ pub async fn end_meeting(
 
     let now = now_utc();
 
+    let room_name = meeting.meeting_identifier.clone();
     // Update meeting status to ended
     let mut meeting_update: meetings::ActiveModel = meeting.into();
     meeting_update.status = Set(MeetingStatus::Ended);
@@ -1176,6 +1174,14 @@ pub async fn end_meeting(
         }))),
     };
     session_log.insert(&state.db).await?;
+    // Gap audit M7: the media room ends with the meeting (participants are disconnected).
+    crate::services::legacy_media::terminate(
+        state.meeting.core.rtc.as_ref(),
+        id,
+        &room_name,
+        "LEGACY_MEETING_ENDED",
+    )
+    .await;
     // Section 16 (MTG-017): refresh the v2 mirror (default mode; best effort).
     state.meeting.compat.mirror_legacy_write(id).await;
 
@@ -1214,9 +1220,7 @@ pub async fn join_meeting_by_identifier(
     Path(meeting_identifier): Path<String>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting by identifier
@@ -1240,6 +1244,9 @@ pub async fn join_meeting_by_identifier(
 // ============================================================================
 
 use crate::dto::{PublicMeetingInfoApiResponse, PublicMeetingInfoResponse};
+
+/// The title the unauthenticated public lookup shows for a private meeting.
+pub const PRIVATE_MEETING_TITLE: &str = "Private meeting";
 
 /// Get public meeting info by meeting identifier
 ///
@@ -1273,12 +1280,23 @@ pub async fn get_public_meeting_info(
             ))
         })?;
 
+    // Gap audit M16: this route is unauthenticated, so a private meeting discloses only
+    // what its join page needs (the start for a countdown, the status and the join link),
+    // never its title or end, like the v2 summary view.
     let response = PublicMeetingInfoResponse {
         meeting_identifier: meeting.meeting_identifier.clone(),
-        title: meeting.title,
+        title: if meeting.is_private {
+            PRIVATE_MEETING_TITLE.to_string()
+        } else {
+            meeting.title
+        },
         is_private: meeting.is_private,
         start_time: format_utc(meeting.start_time),
-        end_time: format_utc_opt(meeting.end_time),
+        end_time: if meeting.is_private {
+            None
+        } else {
+            format_utc_opt(meeting.end_time)
+        },
         status: format_status(&meeting.status),
         join_url: state.join_url(&meeting.meeting_identifier),
     };
@@ -1366,9 +1384,7 @@ pub async fn api_create_meeting(
     Json(payload): Json<ApiCreateMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<ApiResponse<MeetingResponse>>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = api_claims.user_id;
 
@@ -1487,9 +1503,7 @@ pub async fn api_join_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<ApiJoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     // Find meeting
     let meeting = Meetings::find_by_id(id)

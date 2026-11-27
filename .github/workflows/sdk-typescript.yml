@@ -68,6 +68,13 @@ jobs:
       - name: examples typecheck (server with Node types, browser without)
         run: npm run typecheck:examples
 
+      # ADR 0062 / B7: the React Native package re-exports this SDK (file:../typescript).
+      - name: React Native package typecheck
+        working-directory: sdks/react-native
+        run: |
+          npm ci
+          npm run typecheck
+
       # Unit tests (mock HTTP / RFC 6455 servers), the shared webhook signature vectors and
       # the messaging crypto adapter over the committed browser artifact. The real-stack
       # suite prints SKIPPED unless CFMEET_STACK_ENV is set.

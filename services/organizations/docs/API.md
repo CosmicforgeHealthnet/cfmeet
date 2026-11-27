@@ -13,8 +13,13 @@ The API is the frozen internal contract
 | `organization.read` | Meeting Service, Calling, Messaging, Communications | detail / snapshot, members, user organizations, provisioning, resolve, evaluate, audit (actor) |
 | `organization.write` | Meeting Service | every mutation for an acting user |
 | `organization.act-for-user` (sensitive) | Meeting Service | `X-CF-Acting-User`, `X-CF-Acting-User-Verified-Email` |
-| `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade) | admin listing / create / lifecycle |
+| `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade), admin bridge | admin listing / create / lifecycle |
+| `organization.operator-read` (sensitive) | admin bridge (`cfmeet.admin-bridge`, ADR 0068) only | operator reads `GET /internal/v1/operator/organizations/{id}`, `…/members`, `…/teams`, `…/policies`, `GET /internal/v1/operator/audit-events`; each also needs `X-CF-Operator: hq:<staff>` |
 | `organization.migrate` (sensitive) | operator console, Meeting Service | import, reconciliation |
+
+Operator attribution (`X-CF-Operator`, `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`)
+is accepted only from `cfmeet.admin-bridge`; from any other caller, or malformed, every route answers
+403 `ACTOR_NOT_ALLOWED`.
 
 Outbound (Section 7, only when provisioning is enabled): `platform-identity.provision-first-party`
 (receiver `cfmeet.platform-access`, grantable to `cfmeet.organizations` only) for
@@ -31,6 +36,12 @@ an operator created inside the organization's own triple for Enterprise Calling;
 `scopes/resolve` answers them as `serviceBindings.calling` (`null` when none). Organizations
 never stores a credential value and never verifies the ids — Platform Access re-verifies the
 credential against the triple on every forwarded request.
+
+ADR 0058 Amendment A2 (1.5.0): with `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` the provisioning
+saga creates, verifies and records the Calling and Messaging bindings itself
+(`source: AUTOMATIC`; `verifiedAt`, `credentialExpiresAt`) and the organization is READY only
+once both are verified; `POST …/service-bindings/{calling|messaging}/rotate`
+(`organization.administer`) rotates an automatic binding's credential.
 
 The registry in `packages/service-auth/src/permissions.rs` refuses any trust bundle that
 grants these elsewhere.

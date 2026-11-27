@@ -32,7 +32,7 @@ const apiV2 = axios.create({
  * session alone authorizes them).
  */
 const ACCOUNT_OPERATION =
-  /^\/(meeting-spaces(?:\/|$)|instant-meetings(?:\/|$)|resolve\/|organizations(?:\/|$)|organization-invitations(?:\/|$)|me(?:\/|$)|admin\/organizations(?:\/|$))/;
+  /^\/(meeting-spaces(?:\/|$)|instant-meetings(?:\/|$)|resolve\/|organizations(?:\/|$)|organization-invitations(?:\/|$)|me(?:\/|$)|admin\/organizations(?:\/|$)|messaging\/export-deliveries$|messaging\/exports\/|registrations\/cancel$)/;
 
 // Participant token for conference-scoped guest requests.
 apiV2.interceptors.request.use(

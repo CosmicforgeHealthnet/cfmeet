@@ -265,3 +265,146 @@ pub async fn suspend(
 pub async fn phone_deferred() -> Error {
     Error::DependencyNotConfigured
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListReports {
+    /// OPEN (default), DISMISSED, ACTIONED or ALL.
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+/// Gap audit S4: the operator queue of profile reports in the delegated scope, oldest
+/// first: reason, both parties' public CF Meet IDs, how many reports the target has and
+/// the review, if any. Reports carry no free text.
+pub async fn list_reports(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ListReports>,
+) -> Result<Json<Value>> {
+    let status = input.status.as_deref().unwrap_or("OPEN");
+    if !matches!(status, "OPEN" | "DISMISSED" | "ACTIONED" | "ALL") {
+        return Err(Error::Validation);
+    }
+    let limit = input.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return Err(Error::Validation);
+    }
+    let scope = auth::delegated(&ctx)?;
+    auth::validate_scope(&s, &scope).await?;
+    let sc = Scope::of(&scope);
+    let mut values = crate::store::scoped(sc);
+    values.push(status.into());
+    values.push(limit.into());
+    let items: Vec<Value> = crate::store::rows(&s.store.db,
+        "SELECT jsonb_build_object('reportId',r.id,'reason',r.reason,'createdAt',r.created_at, \
+           'reporterProfileId',r.reporter_profile_id,'targetProfileId',r.target_profile_id, \
+           'targetReportCount',(SELECT count(*) FROM communication_profile_reports x WHERE x.target_profile_id=r.target_profile_id), \
+           'review',CASE WHEN v.report_id IS NULL THEN NULL ELSE jsonb_build_object('decision',v.decision,'reason',v.reason,'held',v.held,'reviewedAt',v.reviewed_at) END) doc \
+         FROM communication_profile_reports r JOIN communication_profiles t ON t.id=r.target_profile_id \
+         LEFT JOIN communication_profile_report_reviews v ON v.report_id=r.id \
+         WHERE t.tenant_id=$1 AND t.application_id=$2 AND t.environment_id=$3 \
+           AND ($4='ALL' OR ($4='OPEN' AND v.report_id IS NULL) OR v.decision=$4) \
+         ORDER BY r.created_at, r.id LIMIT $5",
+        values).await?;
+    let mut out = Vec::with_capacity(items.len());
+    for mut item in items {
+        for (field, key) in [
+            ("reporterProfileId", "reporterCfMeetId"),
+            ("targetProfileId", "targetCfMeetId"),
+        ] {
+            if let Some(id) = item[field].as_str().and_then(|v| Uuid::parse_str(v).ok()) {
+                item[key] = json!(s.store.current_public_id(&s.store.db, id).await?);
+            }
+            if let Some(map) = item.as_object_mut() {
+                map.remove(field);
+            }
+        }
+        out.push(item);
+    }
+    Ok(Json(json!({"schemaVersion":1,"data":out})))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewReport {
+    report_id: Uuid,
+    /// DISMISSED or ACTIONED.
+    decision: String,
+    /// NO_VIOLATION (dismissals), ABUSE, SECURITY, LEGAL or OTHER.
+    reason: String,
+    /// ACTIONED only: also place an operator hold on the reported profile.
+    #[serde(default)]
+    hold_target: bool,
+}
+/// Gap audit S4: records the operator's decision on one report (once; a second review is
+/// a version conflict) and, for ACTIONED with holdTarget, applies the operator hold on the
+/// reported profile in the same transaction. Audited.
+pub async fn review_report(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ReviewReport>,
+) -> Result<Json<Value>> {
+    if !crate::operator_commands::valid_review(&input.decision, &input.reason, input.hold_target) {
+        return Err(Error::Validation);
+    }
+    let scope = auth::delegated(&ctx)?;
+    auth::validate_scope(&s, &scope).await?;
+    let sc = Scope::of(&scope);
+    let mut values = crate::store::scoped(sc);
+    values.push(input.report_id.into());
+    let report: Value = one(&s.store.db,
+        "SELECT jsonb_build_object('target',r.target_profile_id) doc FROM communication_profile_reports r \
+         JOIN communication_profiles t ON t.id=r.target_profile_id \
+         WHERE t.tenant_id=$1 AND t.application_id=$2 AND t.environment_id=$3 AND r.id=$4",
+        values).await?.ok_or(Error::NotFound)?;
+    let target = report["target"]
+        .as_str()
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(Error::Unavailable)?;
+    let txn = s.store.begin().await?;
+    let reviewer = ctx.authenticated_service().as_str().to_owned();
+    let inserted = crate::store::execute(&txn,
+        "INSERT INTO communication_profile_report_reviews(report_id,decision,reason,held,reviewed_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+        vec![input.report_id.into(), input.decision.clone().into(), input.reason.clone().into(), input.hold_target.into(), reviewer.clone().into()]).await?;
+    if inserted == 0 {
+        return Err(Error::Version);
+    }
+    // ADR 0068 A7: the reviewed report (version 2) to the admin bridge (when configured).
+    crate::admin_events::enqueue_report(&s, &txn, input.report_id, Some(&input.decision), 2)
+        .await?;
+    if input.hold_target {
+        let hold_reason = if input.reason == "SECURITY" || input.reason == "LEGAL" {
+            input.reason.clone()
+        } else if input.reason == "ABUSE" {
+            "ABUSE".into()
+        } else {
+            "OTHER".into()
+        };
+        let row:Value=one(&txn,"INSERT INTO communication_operator_holds AS h (profile_id,reason,active) VALUES($1,$2,true) ON CONFLICT(profile_id) DO UPDATE SET reason=EXCLUDED.reason,active=true,version=h.version+1,updated_at=now() RETURNING to_jsonb(h) doc",
+            vec![target.into(), hold_reason.into()]).await?.ok_or(Error::Unavailable)?;
+        s.store
+            .change(
+                &txn,
+                target,
+                "PROFILE",
+                Some(target),
+                row["version"].as_i64(),
+            )
+            .await?;
+    }
+    s.store
+        .audit_system(
+            &txn,
+            sc,
+            "PROFILE_REPORT_REVIEWED",
+            Some(target),
+            json!({"reportId":input.report_id,"decision":input.decision,"reason":input.reason,"held":input.hold_target,"operator":reviewer}),
+        )
+        .await?;
+    txn.commit().await?;
+    Ok(Json(
+        json!({"schemaVersion":1,"reportId":input.report_id,"decision":input.decision,"held":input.hold_target}),
+    ))
+}

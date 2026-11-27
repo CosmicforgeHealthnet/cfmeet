@@ -29,7 +29,7 @@ export default function ConnectInvite({ token }: { token: string }) {
       <div className="w-full max-w-md space-y-4 rounded-2xl bg-background p-8 shadow-lg">
         <h1 className="text-xl font-bold">Connect on CF Meet</h1>
         {!valid ? <p role="alert" className="text-sm text-destructive">This invite link is not valid.</p> : null}
-        {valid && resolve.isPending ? <p className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</p> : null}
+        {valid && resolve.isPending ? <div role="status" className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</div> : null}
         {unauthenticated ? (
           <p className="text-sm">Sign in to connect. <Link className="text-primary underline" href="/login">Sign in</Link>, then open this link again.</p>
         ) : resolve.error ? (
@@ -45,11 +45,11 @@ export default function ConnectInvite({ token }: { token: string }) {
               <p className="text-sm">You are already connected. <Link className="text-primary underline" href="/dashboard/contacts">Open contacts</Link></p>
             ) : (
               <Button data-testid="invite-request" disabled={request.isPending || request.isSuccess || profile.permittedActions?.requestConnection === false} onClick={() => request.mutate(profile.cfMeetId)}>
-                <UserPlus className="h-4 w-4" /> {request.isSuccess ? "Request sent" : "Send contact request"}
+                <UserPlus className="h-4 w-4" /> {request.isSuccess ? (request.data?.state === "ACCEPTED" ? "Added to contacts" : "Request sent") : "Send contact request"}
               </Button>
             )}
             {request.error ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(request.error)}</p> : null}
-            {request.isSuccess ? <p className="text-sm text-muted-foreground">They will see your request in their Contacts. <Link className="text-primary underline" href="/dashboard/contacts">Go to contacts</Link></p> : null}
+            {request.isSuccess ? <p className="text-sm text-muted-foreground">{request.data?.state === "ACCEPTED" ? "You can chat and call them now." : "They will see your request in their Contacts."} <Link className="text-primary underline" href="/dashboard/contacts">Go to contacts</Link></p> : null}
           </div>
         ) : null}
       </div>

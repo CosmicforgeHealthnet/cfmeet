@@ -33,6 +33,10 @@ path = "src/bin/messaging-reconcile-references.rs"
 
 [dependencies]
 cf-communications-policy = { path = "../../packages/communications-policy" }
+# Notification Service producer client (roadmap N7): builds and validates the
+# cfmeet.notifications.event envelopes of Messaging's publications. Never the `open`
+# feature (producers seal, never open).
+cf-notification-client = { path = "../../packages/notification-client" }
 messaging-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
@@ -78,7 +82,11 @@ zeroize = "1.8"
 # Seals MANAGED message text at rest (XChaCha20-Poly1305; RustCrypto, already in the
 # OpenMLS provider graph). Never used for PRIVATE_E2EE content.
 chacha20poly1305 = "0.10"
-# Push adapters (src/realtime/push_adapters.rs), all already in the dependency graph:
+# Push adapters: APNs / FCM / Web Push moved to packages/push-transport (Notification
+# Service roadmap N4); src/realtime/push_adapters.rs re-exports them unchanged.
+cf-push-transport = { path = "../../packages/push-transport" }
+# Former push-adapter dependencies, kept because tests/push_adapters.rs (unchanged by N4)
+# verifies the adapters' signatures and encryption against local fakes with them:
 # ES256 provider / VAPID tokens and Web Push (RFC 8291) ECDH with RustCrypto; RS256 FCM
 # service-account assertions and the RFC 8188 AES-128-GCM content encoding with ring
 # (constant-time; never the `rsa` crate).
@@ -89,7 +97,7 @@ hmac = "0.12"
 ring = "0.17"
 # MANAGED image thumbnails (src/attachments/derivatives.rs): PNG and JPEG decoders and the
 # PNG encoder only, decoding bounded by explicit limits. Never used for PRIVATE_E2EE.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 
 [dev-dependencies]

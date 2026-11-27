@@ -43,6 +43,8 @@ pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
             HeaderName::from_static("x-request-id"),
             HeaderName::from_static("x-client-kind"),
             HeaderName::from_static("idempotency-key"),
+            // ADR 0068 A7: the single-use token of an emailed data-export link.
+            HeaderName::from_static("x-cf-data-export-token"),
         ])
         .expose_headers([
             HeaderName::from_static("x-request-id"),
@@ -53,10 +55,15 @@ pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
 }
 
 fn legacy_writes(router: Router<AppState>, state: &AppState) -> Router<AppState> {
-    router.layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        legacy_write_guard,
-    ))
+    router
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            legacy_write_guard,
+        ))
+        // Gap audit M15: every legacy meeting / participant answer says it is deprecated.
+        .layer(axum::middleware::from_fn(
+            crate::middleware::deprecation::legacy_meetings,
+        ))
 }
 
 pub fn create_routes(state: AppState) -> Router {
@@ -64,7 +71,6 @@ pub fn create_routes(state: AppState) -> Router {
         .route("/", get(handlers::root::get_app_info))
         .route("/health", get(handlers::root::health_check))
         .nest("/api/v1/auth", auth::auth_routes())
-        .nest("/api/v1/auth", auth::auth_protected_routes(state.clone()))
         // Legacy meeting surfaces: writes retire behind FEATURE_LEGACY_MEETING_WRITE_DISABLED.
         .nest(
             "/api/v1/meetings",
@@ -104,6 +110,20 @@ pub fn create_routes(state: AppState) -> Router {
         .route(
             "/internal/operations/email/developer-access-decision",
             axum::routing::post(handlers::email::developer_access_decision),
+        )
+        // Notification Service N12: the CRITICAL lane's legacy fallback (drill, state,
+        // operator reroute). Internal token; the public host refuses /internal/operations/.
+        .route(
+            "/internal/operations/email/fallback-drill",
+            axum::routing::post(handlers::email::fallback_drill),
+        )
+        .route(
+            "/internal/operations/notifications/critical",
+            get(handlers::email::critical_lane_status),
+        )
+        .route(
+            "/internal/operations/notifications/critical/reroute",
+            axum::routing::post(handlers::email::critical_reroute),
         )
         // Internal provider routes (signature / internal-token protected; Part E).
         .route(

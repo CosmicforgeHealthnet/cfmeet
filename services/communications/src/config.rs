@@ -1,3 +1,18 @@
+//! Communications Hub runtime configuration (environment variables).
+//!
+//! | Variable | Required | Meaning |
+//! |---|---|---|
+//! | `CF_RUNTIME_ENVIRONMENT` | yes | runtime environment of the service-token signer and trust bundle |
+//! | `CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | yes | the Hub's signing identity (`cfmeet.communications`) for every outbound internal call |
+//! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the Hub's inbound trust bundle |
+//! | `CF_PLATFORM_ACCESS_BASE_URL`, `CF_MEETING_SERVICE_BASE_URL` | yes | Platform Access and the Account (Meeting Service) |
+//! | `CF_CALLING_BASE_URL`, `CF_MESSAGING_BASE_URL` | no | Calling and Messaging owners; unset: their features answer `DEPENDENCY_NOT_CONFIGURED` |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service's I1 (`notifications-event.publish`, audience `cfmeet.notifications`; roadmap N7). Set: contact-request notifications are written to `communication_notification_publications` and relayed ([`crate::notification_publications`]). Unset: nothing is written or sent (the Hub behaves exactly as before) |
+//! | `CF_ADMIN_BRIDGE_BASE_URL` | no | the HQ admin bridge's private event listener (`POST /internal/v1/hq-bridge/events`, audience `cfmeet.admin-bridge`, `hq-bridge-events.publish`; ADR 0068 A7). Set: `abuse.report.changed.v1` events of profile reports are written to `communication_admin_bridge_events` and relayed ([`crate::admin_events`]). Unset: nothing is written or sent |
+//! | `COMMUNICATIONS_INVITE_DIGEST_KEY_FILE` | yes | 32-byte hex invitation digest key |
+//! | `CFMEET_PUBLIC_APP_URL` | yes | public application URL (invitations) |
+//! | `DATABASE_URL` | yes | the Hub's own PostgreSQL |
+//! | `COMMUNICATIONS_BIND_ADDRESS` | no | listener (default `0.0.0.0:8080`) |
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
     KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner,
@@ -7,6 +22,8 @@ use secrecy::{ExposeSecret, SecretString};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub struct Config {
+    pub synchronous_policy_events: bool,
+    pub send_policy_generation: Option<uuid::Uuid>,
     pub bind: std::net::SocketAddr,
     pub database_url: SecretString,
     pub public_app_url: String,
@@ -15,6 +32,17 @@ pub struct Config {
     pub client: Arc<InternalServiceClient>,
     pub calling_configured: bool,
     pub messaging_configured: bool,
+    /// `CF_NOTIFICATIONS_BASE_URL` is set: contact-request notifications are published (N7)
+    /// and the preference facade (N10) can reach the Notification Service. Optional: without
+    /// it nothing is published and the facade answers 503 DEPENDENCY_NOT_CONFIGURED while the
+    /// switch is SERVICE (never a local write).
+    pub notifications_configured: bool,
+    /// Contact-request publications (N7) are written and relayed: in production exactly when
+    /// `notifications_configured` (the same `CF_NOTIFICATIONS_BASE_URL`).
+    pub notifications_publications: bool,
+    /// `CF_ADMIN_BRIDGE_BASE_URL` is set: profile report events are written and relayed to
+    /// the admin bridge (ADR 0068 A7). Unset (the default): nothing is stored or sent.
+    pub admin_bridge_events: bool,
 }
 fn required(k: &str) -> Result<String, String> {
     std::env::var(k)
@@ -60,6 +88,16 @@ impl Config {
             ),
             ("CF_CALLING_BASE_URL", ServiceId::calling(), false),
             ("CF_MESSAGING_BASE_URL", ServiceId::messaging(), false),
+            // Roadmap N7 / N10: the Notification Service (I1 publications, the preference
+            // facade); unset, nothing is published and the facade is unavailable.
+            (
+                "CF_NOTIFICATIONS_BASE_URL",
+                ServiceId::notifications(),
+                false,
+            ),
+            // ADR 0068 A7: the admin bridge's private event listener; unset, no owner
+            // events are stored or published.
+            ("CF_ADMIN_BRIDGE_BASE_URL", ServiceId::admin_bridge(), false),
         ] {
             match std::env::var(key).ok().filter(|v| !v.is_empty()) {
                 Some(url) => targets
@@ -71,6 +109,8 @@ impl Config {
         }
         let calling_configured = targets.contains(&ServiceId::calling());
         let messaging_configured = targets.contains(&ServiceId::messaging());
+        let notifications_configured = targets.contains(&ServiceId::notifications());
+        let admin_bridge_events = targets.contains(&ServiceId::admin_bridge());
         let client = Arc::new(
             InternalServiceClient::new(signer, targets, Duration::from_secs(5))
                 .map_err(|_| "invalid internal client")?,
@@ -102,7 +142,30 @@ impl Config {
         if !database_url.expose_secret().starts_with("postgres") {
             return Err("PostgreSQL is required".into());
         }
+        let synchronous_policy_events =
+            match std::env::var("COMMUNICATIONS_SYNCHRONOUS_POLICY_EVENTS_ENABLED")
+                .ok()
+                .as_deref()
+            {
+                None | Some("false") => false,
+                Some("true") if messaging_configured => true,
+                _ => {
+                    return Err(
+                        "Synchronous policy events require Messaging and a boolean flag".into(),
+                    )
+                }
+            };
+        let send_policy_generation = std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION")
+            .ok()
+            .map(|v| uuid::Uuid::parse_str(&v))
+            .transpose()
+            .map_err(|_| "invalid send policy generation")?;
+        if synchronous_policy_events && send_policy_generation.is_none() {
+            return Err("Synchronous policy events require a generation".into());
+        }
         Ok(Self {
+            send_policy_generation,
+            synchronous_policy_events,
             bind: std::env::var("COMMUNICATIONS_BIND_ADDRESS")
                 .unwrap_or_else(|_| "0.0.0.0:8080".into())
                 .parse()
@@ -114,6 +177,9 @@ impl Config {
             client,
             calling_configured,
             messaging_configured,
+            notifications_configured,
+            notifications_publications: notifications_configured,
+            admin_bridge_events,
         })
     }
 }

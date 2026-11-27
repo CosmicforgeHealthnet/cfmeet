@@ -19,7 +19,7 @@
 //! Every mutable operation must be classified in [`CLASSIFIED`]; the test FAILS when the
 //! contract gains a mutable operation that is not classified (or a classified one
 //! disappears). Operations that cannot be reached in the test world would be listed in
-//! [`UNREACHABLE`] with a reason (currently none: every operation is reached).
+//! [`UNREACHABLE`] with a reason (only the default-off ADR 0062 device exchange).
 //!
 //! Further: targeted success and version / state / idempotency conflict (409) checks for
 //! a representative set of operations, and the combined scope × ownership rule (owning
@@ -74,6 +74,7 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /internal/v1/telephony/inbound-calls", Probe::Body),
     ("POST /internal/v1/telephony/dcn-inbound-calls", Probe::Body),
     ("POST /v1/calls", Probe::Body),
+    ("POST /v1/calls/{call_id}/acknowledge", Probe::Body),
     ("POST /v1/calls/{call_id}/accept", Probe::Body),
     ("POST /v1/calls/{call_id}/decline", Probe::Body),
     ("POST /v1/calls/{call_id}/cancel", Probe::Body),
@@ -81,6 +82,37 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/calls/{call_id}/hold", Probe::Body),
     ("POST /v1/calls/{call_id}/resume", Probe::Body),
     ("POST /v1/calls/{call_id}/transfer", Probe::Body),
+    ("POST /v1/calls/{call_id}/consultations", Probe::Body),
+    (
+        "POST /v1/calls/{call_id}/consultations/{consultation_id}/complete",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/consultations/{consultation_id}/cancel",
+        Probe::Body,
+    ),
+    ("POST /v1/calls/{call_id}/upgrade", Probe::Body),
+    ("POST /v1/calls/{call_id}/screen-share", Probe::Body),
+    ("POST /v1/calls/{call_id}/screen-share/stop", Probe::Body),
+    ("POST /v1/calls/{call_id}/participants", Probe::Body),
+    ("POST /v1/calls/{call_id}/host", Probe::Body),
+    ("DELETE /v1/calls/{call_id}/history", Probe::Query),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/remove",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/mute",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/rejoin",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples",
+        Probe::Body,
+    ),
     (
         "POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials",
         Probe::Body,
@@ -95,6 +127,10 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         Probe::HiddenPath,
     ),
     ("POST /v1/calling/signaling-credentials", Probe::Body),
+    (
+        "POST /v1/calling/invitations/{invitation_id}/acknowledge",
+        Probe::Body,
+    ),
     (
         "POST /v1/calling/invitations/{invitation_id}/accept",
         Probe::Body,
@@ -254,6 +290,26 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ),
     ("POST /internal/v1/platform/events", Probe::Body),
     (
+        "POST /internal/v1/abuse-reports/{abuse_report_id}/resolve",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/endpoints",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/endpoints/revoke",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/signaling-credentials",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/extension-status",
+        Probe::Body,
+    ),
+    (
         "POST /internal/v1/webhook-migration/rollback/subscriptions",
         Probe::Body,
     ),
@@ -261,13 +317,60 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         "POST /internal/v1/webhook-migration/rollback/deliveries",
         Probe::Body,
     ),
+    ("POST /internal/v1/account-privacy/erasure", Probe::Body),
+    ("POST /internal/v1/account-privacy/export", Probe::Body),
     ("POST /v1/blocks", Probe::Body),
     ("DELETE /v1/blocks/{block_id}", Probe::HiddenPath),
     ("POST /v1/calls/{call_id}/abuse-reports", Probe::Body),
+    ("POST /v1/calling/user-sessions", Probe::Body),
+    // ADR 0068 A4: the admin bridge's operator commands (calling.administer).
+    (
+        "POST /internal/v1/operator/abuse-reports/{abuse_report_id}/resolve",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/blocks/{block_rule_id}/release",
+        Probe::Body,
+    ),
+    ("POST /internal/v1/operator/limits", Probe::Body),
+    (
+        "POST /internal/v1/operator/routing-policies/{environment_id}",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/enterprise-policies/{environment_id}/capabilities",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/spend-policies/{environment_id}",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/recordings/{recording_id}/delete",
+        Probe::Body,
+    ),
+    ("POST /internal/v1/operator/retention-holds", Probe::Body),
+    (
+        "POST /internal/v1/operator/retention-holds/{hold_id}/release",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/incidents/{incident_id}/resolve",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/operator/webhook-keys/reseal",
+        Probe::Body,
+    ),
 ];
 
-/// Operations that cannot be reached in the test world, with the reason (none today).
-const UNREACHABLE: &[(&str, &str)] = &[];
+/// Operations that cannot be reached in the test world, with the reason.
+const UNREACHABLE: &[(&str, &str)] = &[(
+    "POST /v1/calling/user-sessions",
+    "ADR 0062 device exchange behind the default-off CALLING_USER_TOKEN_EXCHANGE_ENABLED \
+     (not mounted in this deployment); its refusals (no / foreign / revoked token, missing \
+     grant, FIRST_PARTY, malformed body) without effect are certified by user_sessions.rs",
+)];
 
 /// Tables that legitimately change on a refused request, and why.
 const BOOKKEEPING: &[(&str, &str)] = &[(
@@ -301,6 +404,8 @@ enum Auth {
     Service,
     Signaling,
     ProviderSignature,
+    /// A CF Meet user token (ADR 0062; only operations listed in [`UNREACHABLE`]).
+    UserToken,
 }
 
 #[derive(Debug, Clone)]
@@ -340,6 +445,7 @@ fn mutable_operations() -> Vec<Operation> {
                 "cfServiceAuth" => Auth::Service,
                 "signalingCredential" => Auth::Signaling,
                 "mediaProviderSignature" => Auth::ProviderSignature,
+                "userToken" => Auth::UserToken,
                 other => panic!("{method} {path}: unclassified security scheme {other}"),
             };
             out.push(Operation {
@@ -598,6 +704,48 @@ async fn provision() -> Option<Provisioned> {
     )
     .await;
     ids.insert("block_id", id_of(&block, "blockId"));
+    // The admin bridge's operator commands address the same rule, the environment, and a
+    // hold / incident id (refused before any lookup in the matrix).
+    ids.insert("block_rule_id", id_of(&block, "blockId"));
+    ids.insert("environment_id", a.w.consumer.env(a.w.kind).id.as_uuid());
+    ids.insert("hold_id", Uuid::new_v4());
+    ids.insert("incident_id", Uuid::new_v4());
+    // An abuse report (operator review, C21) on a connected call.
+    let (reported, _, _) = a.connected_call("VOICE").await;
+    let report = send(
+        Method::POST,
+        &format!("/v1/calls/{reported}/abuse-reports"),
+        json!({ "principalId": a.w.initiator.id(), "category": "SPAM" }),
+    )
+    .await;
+    ids.insert("abuse_report_id", id_of(&report, "abuseReportId"));
+    // An attended-transfer consultation (C14) on that call, cancelled again (the call
+    // resumes).
+    let consulted = a.principal("matrix-consulted").await;
+    a.device(&consulted, "matrix-consulted").await;
+    let callee_main = a.device(&a.w.recipient, "callee-main").await;
+    let recipient = a
+        .participant_of(reported, a.w.recipient.id().as_uuid())
+        .await;
+    let (_, version) = a.state(reported).await;
+    let r = a
+        .post_with(
+            &format!("/v1/calls/{reported}/consultations"),
+            json!({ "transferringParticipantId": recipient, "targetPrincipalId": consulted.id(),
+                    "initiatorEndpointId": callee_main.endpoint, "expectedVersion": version }),
+            &[("idempotency-key", "matrix-consultation")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let consultation = id_of(&r.json["consultation"], "consultationId");
+    let r = a
+        .post(
+            &format!("/v1/calls/{reported}/consultations/{consultation}/cancel"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    ids.insert("consultation_id", consultation);
     // Last (its ring window is fresh): a ringing application call — invitation,
     // sessions, endpoints, signaling credentials.
     let (call, caller_device, callee_device) = a.ringing_call("VOICE").await;
@@ -613,6 +761,10 @@ async fn provision() -> Option<Provisioned> {
         a.session_on(call, caller_device.endpoint).await.unwrap(),
     );
     ids.insert("endpoint_id", callee_device.endpoint);
+    ids.insert(
+        "participant_id",
+        a.participant_of(call, callee_device.principal).await,
+    );
     let caller_signaling = a.signaling_token(&caller_device).await;
     let callee_signaling = a.signaling_token(&callee_device).await;
     Some(Provisioned {
@@ -685,6 +837,39 @@ impl Provisioned {
             .iter()
             .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
             .collect();
+        let refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.as_str()))
+            .collect();
+        self.h()
+            .request_with(method, path, None, Some(body), &refs)
+            .await
+    }
+}
+
+impl Provisioned {
+    /// The admin bridge (ADR 0068) relaying a two-person command of a named HQ operator.
+    async fn as_bridge(&self, method: Method, path: &str, body: Value) -> TestResponse {
+        let signed = self
+            .h()
+            .peers
+            .admin_bridge
+            .sign(&OutboundServiceRequest::new_operation(ServiceId::calling()))
+            .unwrap();
+        let mut headers: Vec<(String, String)> = signed
+            .headers()
+            .iter()
+            .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
+            .collect();
+        for (n, v) in [
+            ("x-cf-operator", "hq:matrix-operator".to_string()),
+            ("x-cf-approver", "hq:matrix-approver".to_string()),
+            ("x-cf-approval-ref", "apr_matrix".to_string()),
+            ("x-cf-intent-digest", "a".repeat(64)),
+            ("idempotency-key", Uuid::new_v4().to_string()),
+        ] {
+            headers.push((n.to_string(), v));
+        }
         let refs: Vec<(&str, &str)> = headers
             .iter()
             .map(|(n, v)| (n.as_str(), v.as_str()))
@@ -817,6 +1002,7 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
         };
         let probe_body = json!({});
         match op.auth {
+            Auth::UserToken => unreachable!("{}: user-token operations are UNREACHABLE", op.key),
             Auth::Platform => {
                 // 1. No credential.
                 let r = p
@@ -929,7 +1115,10 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                 };
                 // (a well-formed body: the resource alone decides)
                 let (_, version) = a.state(p.ids["call_id"]).await;
-                let body = if op.template.contains("invitation") {
+                // (acknowledge takes no version: receipt is not a versioned command)
+                let body = if op.template.contains("invitation")
+                    && !op.template.ends_with("/acknowledge")
+                {
                     json!({ "expectedVersion": version })
                 } else {
                     json!({})
@@ -996,6 +1185,11 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     )
                     .await
             }
+            (Auth::Service, _) if op.requires[0] == "calling.administer" => {
+                // The admin bridge with a named, approved operator and a key: the body
+                // alone is wrong.
+                p.as_bridge(op.method.clone(), &path, bad.clone()).await
+            }
             (Auth::Service, _) => {
                 let peers = p.h().peers.clone();
                 let permission = op.requires[0].as_str();
@@ -1003,6 +1197,12 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     peers.telephony.clone()
                 } else if permission.starts_with("webhook-migration.") {
                     peers.developer_platform.clone()
+                } else if permission == "calling-abuse-reports.review" {
+                    peers.operator_console.clone()
+                } else if permission.starts_with("calling-organization-member.")
+                    || permission == "calling-account.privacy"
+                {
+                    peers.meeting_service.clone()
                 } else {
                     peers.privacy_relay.clone()
                 };
@@ -1019,6 +1219,7 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     .request(op.method.clone(), &path, Some(own), Some(bad.clone()))
                     .await
             }
+            (Auth::UserToken, _) => unreachable!("{}", op.key),
             (Auth::ProviderSignature, _) => {
                 let signature = common::fake_media::sign_raw(bad.to_string().as_bytes());
                 p.h()

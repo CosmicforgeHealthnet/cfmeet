@@ -14,7 +14,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::{authorize, middleware::Caller, page_limit, parse, respond};
+use super::{
+    admin_bridge::{self, command, BridgeCommand, Outcome, Risk, Subject},
+    authorize,
+    middleware::Caller,
+    page_limit, parse, respond,
+};
 use crate::{
     db,
     domain::{effective_capabilities_with_policy, Capability, LifecycleStatus, Role},
@@ -379,6 +384,41 @@ pub enum Transition {
     Archive,
 }
 
+impl Transition {
+    /// The admin bridge command name.
+    pub const fn command(self) -> &'static str {
+        match self {
+            Transition::Suspend => command::SUSPEND,
+            Transition::Reactivate => command::REACTIVATE,
+            Transition::Archive => command::ARCHIVE,
+        }
+    }
+}
+
+/// The admin bridge's answer for an organization: its lifecycle status and version.
+pub fn organization_outcome(org: &OrgRow) -> Outcome {
+    Outcome::new(
+        org.lifecycle_status.clone(),
+        Some(org.version),
+        json!({
+            "organizationId": org.id,
+            "lifecycleStatus": org.lifecycle_status,
+            "lifecycleReason": org.lifecycle_reason,
+            "provisioningState": org.provisioning_state,
+            "version": org.version,
+            "createdAt": store::rfc3339(org.created_at),
+            "updatedAt": store::rfc3339(org.updated_at),
+            "archivedAt": org.archived_at.map(store::rfc3339),
+        }),
+    )
+}
+
+async fn existing_org<C: ConnectionTrait>(c: &C, id: Uuid, lock: bool) -> Result<OrgRow, ApiError> {
+    store::org(c, id, lock)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LifecycleBody {
@@ -499,13 +539,17 @@ async fn apply_transition(
 async fn lifecycle(
     state: AppState,
     caller: Caller,
+    headers: HeaderMap,
     id: Uuid,
     body: Bytes,
     transition: Transition,
 ) -> ApiResult<Response> {
     let (req, _): (LifecycleBody, Value) = parse(&body)?;
     if caller.acting_user.is_none() && caller.has(InternalPermission::OrganizationAdminister) {
-        // Operator enforcement (no acting user: operator tooling).
+        // Operator enforcement (no acting user: operator tooling, or the admin bridge).
+        if let Some(b) = BridgeCommand::of(&caller, &headers, Risk::R3)? {
+            return bridge_lifecycle(&state, &caller, &b, id, req, transition).await;
+        }
         let txn = state.db.begin().await?;
         let org = store::org(&txn, id, true)
             .await?
@@ -546,31 +590,83 @@ async fn lifecycle(
     Ok(respond(StatusCode::OK, doc))
 }
 
+/// The admin bridge's lifecycle command (R3): at `expectedVersion`, recorded with the
+/// change; a repeated key answers the current state.
+async fn bridge_lifecycle(
+    state: &AppState,
+    caller: &Caller,
+    b: &BridgeCommand,
+    id: Uuid,
+    req: LifecycleBody,
+    transition: Transition,
+) -> ApiResult<Response> {
+    let expected = admin_bridge::expected_version(req.expected_version, 1)?;
+    let name = transition.command();
+    let txn = state.db.begin().await?;
+    if admin_bridge::replayed(&txn, b, name, Subject::Organization, Some(id))
+        .await?
+        .is_some()
+    {
+        let org = existing_org(&txn, id, false).await?;
+        txn.commit().await?;
+        return Ok(organization_outcome(&org).response());
+    }
+    let org = existing_org(&txn, id, true).await?;
+    admin_bridge::check_version(org.version, expected)?;
+    let updated = apply_transition(
+        &txn,
+        &caller.as_operator(),
+        &org,
+        transition,
+        true,
+        Some(expected),
+    )
+    .await?;
+    let outcome = organization_outcome(&updated);
+    let now = db::now(&txn).await?;
+    admin_bridge::record(
+        &txn,
+        b,
+        name,
+        Subject::Organization,
+        id,
+        Some(id),
+        &outcome,
+        now,
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(outcome.response())
+}
+
 pub async fn suspend(
     State(state): State<AppState>,
     caller: Caller,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
     body: Bytes,
 ) -> ApiResult<Response> {
-    lifecycle(state, caller, id, body, Transition::Suspend).await
+    lifecycle(state, caller, headers, id, body, Transition::Suspend).await
 }
 
 pub async fn reactivate(
     State(state): State<AppState>,
     caller: Caller,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
     body: Bytes,
 ) -> ApiResult<Response> {
-    lifecycle(state, caller, id, body, Transition::Reactivate).await
+    lifecycle(state, caller, headers, id, body, Transition::Reactivate).await
 }
 
 pub async fn archive(
     State(state): State<AppState>,
     caller: Caller,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
     body: Bytes,
 ) -> ApiResult<Response> {
-    lifecycle(state, caller, id, body, Transition::Archive).await
+    lifecycle(state, caller, headers, id, body, Transition::Archive).await
 }
 
 // ---------------------------------------------------------------------------------------
@@ -683,10 +779,31 @@ pub async fn provisioning(
 pub async fn provisioning_retry(
     State(state): State<AppState>,
     caller: Caller,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
+    body: Bytes,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
+    let bridge = BridgeCommand::of(&caller, &headers, Risk::R2)?;
     let txn = state.db.begin().await?;
+    if let Some(b) = &bridge {
+        // The admin bridge sends an empty object (the workflow has no version HQ holds).
+        let _: (BridgeRetryBody, Value) = parse(&body)?;
+        if admin_bridge::replayed(
+            &txn,
+            b,
+            command::PROVISIONING_RETRY,
+            Subject::Provisioning,
+            Some(id),
+        )
+        .await?
+        .is_some()
+        {
+            let org = existing_org(&txn, id, false).await?;
+            txn.commit().await?;
+            return Ok(provisioning_outcome(&org).response());
+        }
+    }
     let org = store::org(&txn, id, true)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
@@ -710,9 +827,44 @@ pub async fn provisioning_retry(
     let org = store::org(&txn, id, false)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if let Some(b) = &bridge {
+        let outcome = provisioning_outcome(&org);
+        admin_bridge::record(
+            &txn,
+            b,
+            command::PROVISIONING_RETRY,
+            Subject::Provisioning,
+            id,
+            Some(id),
+            &outcome,
+            now,
+        )
+        .await?;
+        txn.commit().await?;
+        return Ok(outcome.response());
+    }
     let doc = provisioning::provisioning_json(&txn, &org, state.provisioning_enabled).await?;
     txn.commit().await?;
     Ok(respond(StatusCode::OK, doc))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BridgeRetryBody {}
+
+/// The admin bridge's answer for a provisioning retry: the organization's provisioning
+/// state (unversioned).
+fn provisioning_outcome(org: &OrgRow) -> Outcome {
+    Outcome::new(
+        org.provisioning_state.clone(),
+        None,
+        json!({
+            "organizationId": org.id,
+            "provisioningState": org.provisioning_state,
+            "lifecycleStatus": org.lifecycle_status,
+            "updatedAt": store::rfc3339(org.updated_at),
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------------------
@@ -728,6 +880,9 @@ pub struct AdminListQuery {
     pub limit: Option<i64>,
     #[serde(default)]
     pub status: Option<String>,
+    /// Gap audit G10: case-insensitive substring of the name or the slug (1-100 chars).
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 /// `GET /internal/v1/admin/organizations` — operator listing (id order, keyset cursor).
@@ -742,12 +897,32 @@ pub async fn admin_list(
         LifecycleStatus::parse(s)
             .ok_or_else(|| ApiError::validation("status must be ACTIVE, SUSPENDED or ARCHIVED"))?;
     }
+    let search = match q.q.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(t) if t.chars().count() > 100 => {
+            return Err(ApiError::validation("q must be at most 100 characters"))
+        }
+        // LIKE metacharacters are matched literally.
+        Some(t) => Some(format!(
+            "%{}%",
+            t.to_lowercase()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        )),
+    };
     let rows: Vec<OrgRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {ORG_COLUMNS} FROM organizations WHERE ($1::uuid IS NULL OR id > $1) AND ($2::text IS NULL OR lifecycle_status = $2) ORDER BY id LIMIT $3"
+            "SELECT {ORG_COLUMNS} FROM organizations WHERE ($1::uuid IS NULL OR id > $1) AND ($2::text IS NULL OR lifecycle_status = $2) \
+             AND ($4::text IS NULL OR lower(name) LIKE $4 OR lower(slug) LIKE $4) ORDER BY id LIMIT $3"
         ),
-        vec![q.cursor.into(), q.status.clone().into(), (limit + 1).into()],
+        vec![
+            q.cursor.into(),
+            q.status.clone().into(),
+            (limit + 1).into(),
+            search.into(),
+        ],
     )
     .await?;
     let more = rows.len() as i64 > limit;
@@ -780,6 +955,9 @@ pub async fn admin_create(
     let name = validation::name(&req.name)?;
     let slug = validation::slug(&req.slug)?;
     let profile = profile_of(req.profile)?;
+    if let Some(b) = BridgeCommand::of(&caller, &headers, Risk::R2)? {
+        return bridge_create(&state, &caller, &b, name, slug, profile, req.owner_user_id).await;
+    }
     let actor = caller
         .acting_user
         .map(|u| u.to_string())
@@ -817,6 +995,56 @@ pub async fn admin_create(
     }
     txn.commit().await?;
     Ok(respond(StatusCode::CREATED, doc))
+}
+
+/// The admin bridge's operator create (R2): the new organization is the record's subject;
+/// a repeated key answers the organization it created.
+async fn bridge_create(
+    state: &AppState,
+    caller: &Caller,
+    b: &BridgeCommand,
+    name: String,
+    slug: String,
+    profile: ProfileValues,
+    owner: Option<Uuid>,
+) -> ApiResult<Response> {
+    let txn = state.db.begin().await?;
+    if let Some(r) =
+        admin_bridge::replayed(&txn, b, command::CREATE, Subject::Organization, None).await?
+    {
+        let org = existing_org(&txn, r.subject_id, false).await?;
+        txn.commit().await?;
+        return Ok(organization_outcome(&org).response());
+    }
+    let now = db::now(&txn).await?;
+    let (org, _) = create_organization(
+        &txn,
+        &caller.as_operator(),
+        now,
+        NewOrganization {
+            name,
+            slug,
+            profile,
+            creation_source: "PLATFORM_ADMIN",
+            created_by: None,
+            owner: owner.map(|u| (u, "OPERATOR")),
+        },
+    )
+    .await?;
+    let outcome = organization_outcome(&org);
+    admin_bridge::record(
+        &txn,
+        b,
+        command::CREATE,
+        Subject::Organization,
+        org.id,
+        Some(org.id),
+        &outcome,
+        now,
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(outcome.response())
 }
 
 #[derive(Debug, Deserialize)]

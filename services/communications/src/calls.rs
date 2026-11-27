@@ -91,7 +91,9 @@ impl State {
             .call(
                 "/internal/v1/communications/calls",
                 &json!({"idempotencyKey":input.client_request_id.to_string(),"initiatorPrincipalId":p.principal_id,
-                    "initiatorEndpointId":input.endpoint_id,"targetPrincipalIds":targets,"kind":input.kind}),
+                    "initiatorEndpointId":input.endpoint_id,"targetPrincipalIds":targets,"kind":input.kind,
+                    // Shown to the callee on the incoming call (Calling keeps it only if valid).
+                    "initiatorDisplayName":p.display_name}),
             )
             .await?;
         let call = uuid_field(&created, "callId")?;
@@ -209,6 +211,7 @@ impl State {
                     credential_issued_at: None,
                     credential_principal_id: None,
                     conversation_id: None,
+                    mentioned: None,
                 },
             )
             .await?;
@@ -225,6 +228,90 @@ impl State {
             Some(contact),
         )
         .await
+    }
+
+    /// Add connected personal contacts to a running call the caller takes part in. Each
+    /// contact is resolved here (the client never sees a principal id): it must be CONNECTED
+    /// and pass the same personal policy as a contact call; Calling then re-checks policy,
+    /// blocks and the group limit, and rings them. Body: `targetContactIds` (1-16,
+    /// distinct), `invitingParticipantId` (the caller's own participant), `expectedVersion`,
+    /// `clientRequestId` (idempotency).
+    pub async fn add_contacts_to_call(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        call: Uuid,
+        body: Value,
+    ) -> Result<Value> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct AddContacts {
+            target_contact_ids: Vec<Uuid>,
+            inviting_participant_id: Uuid,
+            expected_version: i64,
+            client_request_id: Uuid,
+        }
+        let input: AddContacts = serde_json::from_value(body).map_err(|_| Error::Validation)?;
+        if p.activation_state != Activation::Active {
+            return Err(Error::NotActivated);
+        }
+        let distinct: std::collections::HashSet<_> = input.target_contact_ids.iter().collect();
+        if input.target_contact_ids.is_empty()
+            || input.target_contact_ids.len() > 16
+            || distinct.len() != input.target_contact_ids.len()
+        {
+            return Err(Error::Validation);
+        }
+        let mut targets = Vec::with_capacity(input.target_contact_ids.len());
+        for contact in &input.target_contact_ids {
+            let (_, pair, other) = self.contact(p, *contact).await?;
+            if pair.state != "CONNECTED" || other.principal_id == p.principal_id {
+                return Err(Error::ActionNotAllowed);
+            }
+            let decision = self
+                .check_policy(
+                    scope,
+                    &PolicyCheck {
+                        action: Action::DirectCall,
+                        actor_principal_id: p.principal_id,
+                        target_principal_id: other.principal_id,
+                        credential_issued_at: None,
+                        credential_principal_id: None,
+                        conversation_id: None,
+                        mentioned: None,
+                    },
+                )
+                .await?;
+            if !decision.allowed {
+                return Err(Error::ActionNotAllowed);
+            }
+            targets.push(other.principal_id);
+        }
+        self.limit_attempt(p, "call.add_contacts", LAUNCH_LIMIT_PER_HOUR)
+            .await?;
+        let added = self
+            .calling(scope)?
+            .call(
+                "/internal/v1/communications/calls/participants",
+                &json!({"idempotencyKey":input.client_request_id.to_string(),"actingPrincipalId":p.principal_id,
+                    "callId":call,"invitingParticipantId":input.inviting_participant_id,
+                    "targetPrincipalIds":targets,"expectedVersion":input.expected_version}),
+            )
+            .await?;
+        let txn = self.store.begin().await?;
+        self.store
+            .audit(
+                &txn,
+                p,
+                "CALL_CONTACTS_ADDED",
+                Some(call),
+                json!({"contacts":input.target_contact_ids.len()}),
+            )
+            .await?;
+        txn.commit().await?;
+        // Consumer-safe answer: the call summary and the added contacts, never principals.
+        Ok(json!({"schemaVersion":1,"callId":call,"call":added["call"],
+            "addedContactIds":input.target_contact_ids,"replayed":added["replayed"]==true}))
     }
 
     /// U09: voice/video from a DIRECT or GROUP conversation the caller belongs to.

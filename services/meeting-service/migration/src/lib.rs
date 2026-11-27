@@ -35,6 +35,45 @@ mod m20261108_000002_meeting_notifications;
 mod m20261109_000001_account_hardening;
 mod m20261110_000001_organization_integration;
 mod m20261112_000001_email_delivery_and_presence;
+mod m20261115_000001_account_devices;
+mod m20261116_000001_notification_fence;
+mod m20261117_000001_account_passwordless;
+mod m20261117_000001_notification_publications;
+mod m20261118_000001_case_insensitive_identity;
+mod m20261118_000001_critical_lane;
+mod m20261118_000002_account_mfa;
+mod m20261118_000003_account_avatars;
+mod m20261118_000004_email_calendar_invite;
+mod m20261118_000005_chat_message_edits;
+mod m20261118_000006_account_notices;
+mod m20261118_000006_team_channel_sync;
+mod m20261118_000007_platform_user_participants;
+mod m20261119_000001_account_privacy_jobs;
+mod m20261119_000001_calendar_feeds;
+mod m20261121_000001_account_phones;
+
+/// Independent, additive phone-account history: old images ignore it after rollback.
+pub struct AccountPhoneMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountPhoneMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261121_000001_account_phones::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_account_phone_migrations").into_iden()
+    }
+}
+
+pub async fn account_phone_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, DbErr> {
+    Ok(pending_migrations::<AccountPhoneMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+mod m20261120_000001_admin_operations;
+mod m20261121_000001_account_data_exports;
+mod m20261121_000002_admin_account_suspension;
 
 pub mod phase2_backfill;
 
@@ -186,6 +225,10 @@ where
             AccountHardeningMigrator::migration_table_name().to_string(),
             pending_migrations::<AccountHardeningMigrator, _>(db).await?,
         ),
+        (
+            GapClosureMigrator::migration_table_name().to_string(),
+            pending_migrations::<GapClosureMigrator, _>(db).await?,
+        ),
     ])
 }
 
@@ -254,7 +297,11 @@ pub struct AccountSecurityMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for AccountSecurityMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261106_000001_account_security::Migration)]
+        vec![
+            Box::new(m20261106_000001_account_security::Migration),
+            Box::new(m20261115_000001_account_devices::Migration),
+            Box::new(m20261117_000001_account_passwordless::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("account_security_migrations").into_iden()
@@ -395,6 +442,182 @@ pub async fn lifecycle_delivery_ready<C: sea_orm_migration::sea_orm::ConnectionT
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<LifecycleDeliveryMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Notification Service roadmap N7: routing fence protocol v1 (blueprint Document 4 §9) —
+/// routing state, route decisions, the CRITICAL outbox and the legacy-table guard triggers
+/// (inert in `LEGACY_ONLY`). A SEPARATE additive history so the previously deployed image
+/// still starts after it is applied (rollback safety); the image does not require it at
+/// startup and reports `routingProtocol` only once it is applied. Second migration (N7 /
+/// N11): Meeting's publications of its STANDARD categories to the Notification Service.
+/// Third migration (N12): the Account CRITICAL lane on `account_notification_outbox`.
+/// Fourth (N12 follow-up): the CRITICAL category `ACCOUNT_NOTICES` and its ledger mapping.
+pub struct NotificationFenceMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationFenceMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261116_000001_notification_fence::Migration),
+            // N7 / N11: Meeting's publications of its STANDARD categories to the
+            // Notification Service (+ the RECIPIENT_LIMIT / UNPUBLISHABLE reasons).
+            Box::new(m20261117_000001_notification_publications::Migration),
+            // N12: the Account CRITICAL lane (shadow copies, I1 answers, settlement and the
+            // DEAD state of account_notification_outbox).
+            Box::new(m20261118_000001_critical_lane::Migration),
+            // N12 follow-up (owner decision A): the CRITICAL category ACCOUNT_NOTICES
+            // (welcome, new sign-in, email-in-use and email-changed notices).
+            Box::new(m20261118_000006_account_notices::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("notification_fence_migrations").into_iden()
+    }
+}
+
+/// The notification-fence history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<NotificationFenceMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Backend gap-audit history (case-insensitive identity, authenticator MFA, avatars,
+/// calendar invites, chat edits). SEPARATE and additive: every earlier history fails closed on unknown
+/// versions, so the previous image keeps starting after a rollback.
+pub struct GapClosureMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for GapClosureMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261118_000001_case_insensitive_identity::Migration),
+            Box::new(m20261118_000002_account_mfa::Migration),
+            Box::new(m20261118_000003_account_avatars::Migration),
+            Box::new(m20261118_000004_email_calendar_invite::Migration),
+            Box::new(m20261118_000005_chat_message_edits::Migration),
+            Box::new(m20261118_000006_team_channel_sync::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_gap_closure_migrations").into_iden()
+    }
+}
+
+/// The gap-closure history satisfies the DATA-011 target rule (applied ⊇ known, unknown
+/// versions fail closed).
+pub async fn gap_closure_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<GapClosureMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0062 (CF Meet Platform "Build"): partner users joining meetings with their CF Meet
+/// user token (`meeting_platform_participants`) and partner meeting chat links. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup only while `MEETING_PLATFORM_USER_JOIN_ENABLED` or
+/// `MEETING_PLATFORM_CHAT_ENABLED` is on.
+pub struct PlatformBuildMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for PlatformBuildMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261118_000007_platform_user_participants::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_platform_build_migrations").into_iden()
+    }
+}
+
+/// The platform-build history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn platform_build_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<PlatformBuildMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Server audit closure (audit MF2): private, revocable calendar feed tokens. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Not required at startup: only the calendar-feed endpoints use it (they answer
+/// FEATURE_DISABLED until `meeting-audit-migration up` has run).
+pub struct MeetingAuditMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MeetingAuditMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_calendar_feeds::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_audit_closure_migrations").into_iden()
+    }
+}
+
+/// The audit-closure history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn meeting_audit_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<MeetingAuditMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// S2: the durable erasure jobs of a deleted account (`account_privacy_jobs`). A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup by the image that queues the jobs.
+pub struct AccountPrivacyMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountPrivacyMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_account_privacy_jobs::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_account_privacy_migrations").into_iden()
+    }
+}
+
+/// The account-privacy history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AccountPrivacyMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0068, phases A4–A7: the admin bridge's operations ledger (`meeting_admin_operations`),
+/// the account administration version (`users.account_version`), the owner-delivered
+/// personal-data exports (`account_data_exports`, A7) and the `suspended` account status
+/// the bridge may set (A4), in their own
+/// additive history so the previous image still starts after a rollback.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261120_000001_admin_operations::Migration),
+            Box::new(m20261121_000001_account_data_exports::Migration),
+            Box::new(m20261121_000002_admin_account_suspension::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_admin_operations_migrations").into_iden()
+    }
+}
+
+pub async fn admin_operations_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AdminOperationsMigrator, _>(db)
         .await?
         .is_empty())
 }

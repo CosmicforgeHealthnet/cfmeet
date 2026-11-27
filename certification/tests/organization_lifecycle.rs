@@ -1409,43 +1409,11 @@ async fn organizations_cutover_shadow_and_rollback_rehearsal() {
     ))
     .await
     .unwrap();
-    let password = "Cert-Admin-Pw9!-rehearsal";
-    // A known password through the real recovery flow (the reset code the mailer reads).
-    let r = send(
-        &stack,
-        Method::POST,
-        format!("{meeting_url}/api/v1/auth/forgot-password"),
-        None,
-        vec![],
-        Some(json!({ "email": admin_email })),
-    )
-    .await;
-    assert!((200..300).contains(&r.status), "{}", r.text);
-    let code = cfmeet_certification::redis::get(
-        &redis,
-        &format!("otp:reset:{}", admin_email.to_lowercase()),
-    )
-    .await
-    .unwrap()
-    .expect("reset code");
-    let r = send(&stack, Method::POST, format!("{meeting_url}/api/v1/auth/reset-password"), None, vec![],
-        Some(json!({ "email": admin_email, "token": code, "new_password": password, "confirm_password": password }))).await;
-    status(&r, 200, "set the administrator's password");
-    let login = send(
-        &stack,
-        Method::POST,
-        format!("{meeting_url}/api/v1/auth/login"),
-        None,
-        vec![],
-        Some(json!({ "email": admin_email, "password": password })),
-    )
-    .await;
-    status(&login, 200, "administrator signs in");
-    let admin = User {
-        id: admin.id,
-        email: admin_email.clone(),
-        session: login.body["access_token"].as_str().unwrap().to_string(),
-    };
+    // A fresh passwordless sign-in (the code the mailer would send, controlled in Redis)
+    // so the session carries the role.
+    let admin = register_user(&meeting_url, &redis, &stack.http, &admin_email)
+        .await
+        .unwrap();
 
     // ---- Legacy data, written by the Meeting Service (the only writer before cutover).
     let slug = format!("legacy-{}", tag());

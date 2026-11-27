@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useBlocks, useCreateBlock, useDeleteBlock } from "@/hooks/calling";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import type { BlockReason } from "@/types/calling";
+import { NiceSelect } from "@/components/ui/nice-select";
 
 interface BlockingPanelProps {
   className?: string;
@@ -77,18 +78,8 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-6 space-y-4 rounded-xl border border-border bg-muted/30 p-4">
-          <div className="space-y-2">
-            <Label htmlFor="blocked-target-kind">Caller type</Label>
-            <select
-              id="blocked-target-kind"
-              value={targetKind}
-              onChange={(e) => setTargetKind(e.target.value as typeof targetKind)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="PRINCIPAL">CF Meet principal</option>
-              <option value="CONTACT_REFERENCE">Protected contact reference</option>
-            </select>
-          </div>
+          <NiceSelect label="Caller type" value={targetKind} onChange={setTargetKind}
+            options={[{ value: "PRINCIPAL", label: "CF Meet principal" }, { value: "CONTACT_REFERENCE", label: "Protected contact reference" }]} />
           <div className="space-y-2">
             <Label htmlFor="blocked-target">Caller ID</Label>
             <Input
@@ -102,20 +93,8 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
               Use the principal ID or opaque protected-contact reference ID. Phone numbers are not accepted.
             </p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="block-reason">Reason</Label>
-            <select
-              id="block-reason"
-              value={reasonCode}
-              onChange={(e) => setReasonCode(e.target.value as BlockReason)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="UNWANTED">Unwanted</option>
-              <option value="HARASSMENT">Harassment</option>
-              <option value="SPAM">Spam</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
+          <NiceSelect<BlockReason> label="Reason" value={reasonCode} onChange={setReasonCode}
+            options={[{ value: "UNWANTED", label: "Unwanted" }, { value: "HARASSMENT", label: "Harassment" }, { value: "SPAM", label: "Spam" }, { value: "OTHER", label: "Other" }]} />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
               Cancel

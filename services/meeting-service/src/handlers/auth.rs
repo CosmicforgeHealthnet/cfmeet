@@ -1,7 +1,7 @@
-use axum::{extract::State, http::HeaderMap, http::StatusCode, Json};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use crate::validation::ValidateRequest;
+use axum::{extract::State, http::HeaderMap, Json};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
     dto::*,
@@ -10,17 +10,16 @@ use crate::{
     services::account_security::{
         self as security, ActorKind, AuthMethod, Outcome, RevokeReason, SecurityEvent,
     },
-    services::auth::{
-        generate_verification_code, hash_password, verify_password, Claims, TokenKind,
-    },
-    services::otp::OtpType,
+    services::auth::{Claims, TokenKind},
+    services::ops_metrics::{inc, OPS_METRICS as OM},
+    services::otp::{generate_code, generate_link_token, OtpCheck, OtpType},
     state::AppState,
     utils::now_utc,
 };
 
 /// Per-client-address limit, active only when the trusted proxy header is configured
 /// (`AUTH_CLIENT_IP_HEADER`); per-account limits apply regardless (ACC-015).
-async fn limit_by_client(
+pub(crate) async fn limit_by_client(
     state: &AppState,
     headers: &HeaderMap,
     action: &str,
@@ -41,6 +40,33 @@ async fn limit_by_client(
     Ok(())
 }
 
+/// A phone proof never verifies email and never bypasses the account's second factor.
+pub(crate) async fn phone_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: uuid::Uuid,
+) -> ApiResult<OtpVerifyResponse> {
+    let user = Users::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired phone verification".into()))?;
+    if user.status != users::UserStatus::Active || blocked(state, &user).await? {
+        return Err(ApiError::BadRequest(
+            "Invalid or expired phone verification".into(),
+        ));
+    }
+    if crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: "PHONE".into(),
+            created: false,
+            test_account: false,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    finish_sign_in(state, headers, user, false, "PHONE", false).await
+}
+
 /// ACC-022: one rendering of the account status for every v1 sign-in response
 /// (`ACCOUNT_STATUS_FORMAT`, see `AuthPolicy::status_format`).
 fn status_string(state: &AppState, user: &users::Model) -> String {
@@ -51,324 +77,586 @@ fn status_string(state: &AppState, user: &users::Model) -> String {
         .to_owned()
 }
 
-/// Uniform answer for the account-recovery endpoints, whether or not an account exists
-/// (ACC-014).
-const RECOVERY_ACCEPTED: &str =
-    "If an account matches, an email with further instructions has been sent.";
+/// Uniform answer of `POST /api/v1/auth/otp/request`, whether or not an account exists,
+/// is disabled, or is over its send limit (ACC-014).
+const CODE_SENT: &str =
+    "If this address can receive email, a sign-in code is on its way. It expires in 10 minutes.";
 
-/// Register a new user
-///
-/// Creates an email-and-password account with the `user` role and `pending_verification` status,
-/// then emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are
-/// returned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.
-/// Email addresses are case-insensitive and stored lowercased. Returns 409 if the email or
-/// username is already in use.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/register",
-    tag = "Authentication",
-    request_body = RegisterRequest,
-    responses(
-        (status = 201, description = "User registered successfully", body = RegisterResponse),
-        (status = 400, description = "Validation error"),
-        (status = 409, description = "User already exists"),
-        (status = 429, description = "Too many requests"),
-    )
-)]
-pub async fn register(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<RegisterRequest>,
-) -> ApiResult<(StatusCode, Json<RegisterResponse>)> {
-    // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "register", 10, 60 * 60).await?;
-    let email = security::normalize_email(&payload.email);
+/// Uniform answer to a wrong, expired, used or replaced code or link.
+const INVALID_CODE: &str = "Invalid or expired code";
 
-    // Check if user already exists (case-insensitive, DATA-002)
-    if security::find_user_by_email(&state.db, &email)
-        .await?
-        .is_some()
-    {
-        return Err(ApiError::Conflict(
-            "A user with this email already exists".to_string(),
-        ));
-    }
-
-    // Check if username is already taken
-    let existing_username = Users::find()
-        .filter(users::Column::Username.eq(&payload.username))
-        .one(&state.db)
-        .await?;
-
-    if existing_username.is_some() {
-        return Err(ApiError::Conflict(
-            "Username has already been used".to_string(),
-        ));
-    }
-
-    // Hash password
-    let password_hash = hash_password(&payload.password)?;
-
-    // Generate verification token
-    let verification_code = generate_verification_code();
-
-    // Create user (OTP codes are stored in Redis, not in DB)
-    let user = users::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        username: Set(payload.username),
-        email: Set(email),
-        password_hash: Set(Some(password_hash)),
-        auth_type: Set(users::AuthType::Local),
-        role: Set(users::UserRole::User),
-        status: Set(users::UserStatus::PendingVerification),
-        created_at: Set(now_utc()),
-        updated_at: Set(now_utc()),
-        last_login: Set(None),
-        ..Default::default()
-    };
-
-    let user = user.insert(&state.db).await?;
-
-    // Store verification code in Redis with TTL
-    state
-        .otp_service
-        .store_code(&user.email, &verification_code, OtpType::Verification)
-        .await?;
-
-    // Queue verification email
-    match state
-        .email_service
-        .send_verification_email(&user.email, &user.username, &verification_code)
-        .await
-    {
-        Ok(job_id) => {
-            tracing::info!(user_id = %user.id, job_id = %job_id, "verification email queued");
+/// Whether sign-in is refused: suspended accounts and deactivated ones, except an account
+/// its owner deactivated within the reactivation window (gap audit A16).
+async fn blocked(state: &AppState, user: &users::Model) -> ApiResult<bool> {
+    Ok(match user.status {
+        users::UserStatus::Suspended => true,
+        users::UserStatus::Inactive => {
+            !security::self_reactivation_allowed(&state.db, user.id).await?
         }
-        Err(e) => {
-            tracing::error!(user_id = %user.id, "failed to queue verification email: {e}");
-            // Don't fail registration if email queueing fails - user can request resend
-        }
-    }
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("ACCOUNT_REGISTERED", Outcome::Success).by_user(user.id),
-    )
-    .await;
-
-    let response = RegisterResponse {
-        user_id: user.id,
-        email: user.email.clone(),
-        role: format!("{:?}", user.role).to_lowercase(),
-        status: status_string(&state, &user),
-    };
-
-    Ok((StatusCode::CREATED, Json(response)))
+        _ => false,
+    })
 }
 
-/// Verify email with token
-///
-/// Activates a newly registered account using the 6-digit code emailed at registration. Public
-/// endpoint. The code is single-use; repeated wrong codes for the same email are rate-limited
-/// (429). Returns 400 if the code is wrong or expired; the answer does not reveal whether an
-/// account exists or is already verified.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/verify-email",
-    tag = "Authentication",
-    request_body = VerifyEmailRequest,
-    responses(
-        (status = 200, description = "Email verified successfully", body = MessageResponse),
-        (status = 400, description = "Invalid or expired code"),
-        (status = 429, description = "Too many attempts"),
-    )
-)]
-pub async fn verify_email(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<VerifyEmailRequest>,
-) -> ApiResult<Json<MessageResponse>> {
-    // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "verify-email", 30, 15 * 60).await?;
-    let invalid = || ApiError::BadRequest("Invalid or expired verification code".to_string());
-
-    let user = security::find_user_by_email(&state.db, &payload.email)
-        .await?
-        .ok_or_else(invalid)?;
-    if user.status != users::UserStatus::PendingVerification {
-        return Err(invalid());
+/// Gap audit A16: once every factor is proven, an account its owner deactivated is active
+/// again. The status trigger advances the Hub, Messaging and Calling authority; every
+/// credential from before the deactivation stays void.
+async fn reactivate_if_deactivated(
+    state: &AppState,
+    user: users::Model,
+    via: &str,
+) -> ApiResult<users::Model> {
+    if user.status != users::UserStatus::Inactive {
+        return Ok(user);
     }
-
-    // Verify token from Redis (includes rate limiting and auto-deletion on success)
-    let is_valid = state
-        .otp_service
-        .verify_code(&user.email, &payload.token, OtpType::Verification)
-        .await?;
-
-    if !is_valid {
-        return Err(invalid());
-    }
-
-    // Update user status
-    let user_id = user.id;
-    let mut user: users::ActiveModel = user.into();
-    user.status = Set(users::UserStatus::Active);
-    user.updated_at = Set(now_utc());
-    // Blueprint Section 9 (DATA-016): the proof is recorded, independent of `status`.
-    user.email_verified_at = Set(Some(chrono::Utc::now()));
-
-    user.update(&state.db).await?;
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("EMAIL_VERIFIED", Outcome::Success).by_user(user_id),
-    )
-    .await;
-
-    Ok(Json(MessageResponse {
-        message: "Email verified successfully".to_string(),
-    }))
-}
-
-/// Login user
-///
-/// Authenticates with email and password and returns an access token (valid 15 minutes), a refresh
-/// token (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account
-/// session that lasts at most 30 days and can be listed and revoked from
-/// `/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so
-/// check `user.status` and route to verification if needed (unless the deployment enforces
-/// verification at sign-in: then such an account gets `403 EMAIL_VERIFICATION_REQUIRED` after a
-/// correct password); deactivated accounts get 403. More than
-/// 5 attempts per email within 15 minutes returns 429; a successful login resets the count.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/login",
-    tag = "Authentication",
-    request_body = LoginRequest,
-    responses(
-        (status = 200, description = "Login successful", body = LoginResponse),
-        (status = 401, description = "Invalid credentials"),
-        (status = 403, description = "Email verification required or account inactive"),
-        (status = 429, description = "Too many login attempts"),
-    )
-)]
-pub async fn login(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<LoginRequest>,
-) -> ApiResult<Json<LoginResponse>> {
-    // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "login", 30, 15 * 60).await?;
-    let email = security::normalize_email(&payload.email);
-
-    // Check rate limit before processing login
-    state.rate_limiter.check_login_rate(&email).await?;
-
-    // Unknown accounts, Google-only accounts and wrong passwords take the same time and
-    // get the same answer (ACC-014).
-    let user = security::find_user_by_email(&state.db, &email).await?;
-    let hash = user.as_ref().and_then(|u| u.password_hash.clone());
-    let is_valid = match hash.as_deref() {
-        Some(hash) => verify_password(&payload.password, hash)?,
-        None => {
-            let _ = verify_password(&payload.password, security::timing_equalizer_hash());
-            false
-        }
-    };
-    let user = match user {
-        Some(user) if is_valid => user,
-        known => {
-            if let Some(known) = known {
-                security::record_event_best_effort(
-                    &state.db,
-                    SecurityEvent::new("LOGIN", Outcome::Failure)
-                        .user(known.id)
-                        .actor(ActorKind::Anonymous, None)
-                        .detail(serde_json::json!({ "method": "PASSWORD" })),
-                )
-                .await;
-            }
-            return Err(ApiError::Unauthorized(
-                "Invalid email or password".to_string(),
-            ));
-        }
-    };
-
-    // Only block inactive users, allow pending verification users to login
-    // Frontend will handle redirect to verify page based on status
-    if matches!(
-        user.status,
-        users::UserStatus::Inactive | users::UserStatus::Suspended
-    ) {
+    if !security::self_reactivation_allowed(&state.db, user.id).await? {
         return Err(ApiError::Forbidden(
             "Account has been deactivated".to_string(),
         ));
     }
+    let mut active: users::ActiveModel = user.into();
+    active.status = Set(users::UserStatus::Active);
+    active.updated_at = Set(now_utc());
+    let user = active.update(&state.db).await?;
+    security::record_event_best_effort(
+        &state.db,
+        SecurityEvent::new("ACCOUNT_REACTIVATED", Outcome::Success)
+            .by_user(user.id)
+            .detail(serde_json::json!({ "method": via })),
+    )
+    .await;
+    security::notify_security(
+        state,
+        user.id,
+        crate::services::email::SecurityNotice::Reactivated,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+    Ok(user)
+}
 
-    // ACC-016 (owner decision, off by default): optionally refuse pending accounts at
-    // sign-in. Checked only after a correct password, so it reveals nothing to others.
-    if state.require_email_verification
-        && user.status == users::UserStatus::PendingVerification
-        && state.auth_policy.login_requires_verified_email(
-            user.created_at.and_utc(),
-            chrono::Utc::now(),
-        )
+/// Request a sign-in code
+///
+/// Passwordless sign-in and sign-up in one flow. Emails a 6-digit code (valid 10 minutes) and a
+/// one-click sign-in link to the address; finish with `POST /api/v1/auth/otp/verify` (code) or
+/// `POST /api/v1/auth/otp/verify-link` (link). If no account exists yet, the first successful
+/// verification creates it. Public endpoint. The answer is identical whether or not an account
+/// exists (no email is sent to deactivated accounts or past the limit of 5 codes per address per
+/// 15 minutes). A new request replaces the previous code and link. The email states when and from
+/// which browser the code was requested.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/otp/request",
+    tag = "Authentication",
+    request_body = OtpRequest,
+    responses(
+        (status = 200, description = "Request accepted (same answer for every address)", body = MessageResponse),
+        (status = 400, description = "Validation error"),
+        (status = 429, description = "Too many requests from this network"),
+    )
+)]
+pub async fn request_otp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<OtpRequest>,
+) -> ApiResult<Json<MessageResponse>> {
+    payload.validate_request()?;
+    limit_by_client(&state, &headers, "otp-request", 20, 15 * 60).await?;
+    inc(&OM.auth_otp_requested);
+    let accepted = || {
+        Json(MessageResponse {
+            message: CODE_SENT.to_string(),
+        })
+    };
+    let email = security::normalize_email(&payload.email);
+
+    // Fixed-code review / acceptance accounts never receive email.
+    if state.auth_policy.test_accounts.is_test_account(&email) {
+        return Ok(accepted());
+    }
+    if let Some(user) = security::find_user_by_email(&state.db, &email).await? {
+        if blocked(&state, &user).await? {
+            return Ok(accepted());
+        }
+    }
+    // Per-address send limit; exceeding it is silent so the answer stays uniform.
+    if state
+        .otp_service
+        .check_send_rate(&email, OtpType::SignIn)
+        .await
+        .is_err()
     {
+        return Ok(accepted());
+    }
+
+    let code = generate_code();
+    let link_token = generate_link_token();
+    state
+        .otp_service
+        .store_challenge(&email, &code, Some(&link_token), OtpType::SignIn)
+        .await?;
+    let details = crate::services::passwordless::request_details(&state.auth_policy, &headers);
+    match state
+        .email_service
+        .send_sign_in_code(&email, &code, Some(&link_token), &details)
+        .await
+    {
+        Ok(_) => inc(&OM.auth_otp_sent),
+        // A malformed or undeliverable address: nothing to send, same answer.
+        Err(e) => tracing::warn!("sign-in code not queued: {e}"),
+    }
+    Ok(accepted())
+}
+
+/// Verify a sign-in code
+///
+/// Finishes a passwordless sign-in with the 6-digit code from `POST /api/v1/auth/otp/request`.
+/// Returns an access token (valid 15 minutes), a refresh token (valid 7 days, rotated on every
+/// refresh), basic user info and `is_new_account` (true when this sign-in created the account,
+/// with an automatically generated username the user can change later). Each sign-in opens an
+/// account session (at most 30 days) listed under `/api/v2/me/sessions`. Public endpoint.
+///
+/// The code is single-use and consumes the matching link too. A wrong, expired, used or replaced
+/// code gets the same 400 answer whether or not an account exists. After 5 checks within 15
+/// minutes the pending code is destroyed and the answer is 429 (requesting a new code does not
+/// reset this). A correct code for a deactivated account gets 403. A correct code also verifies
+/// the address of an account still pending verification. A sign-in from a device not seen on
+/// the account in the last 90 days triggers a security alert email.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/otp/verify",
+    tag = "Authentication",
+    request_body = OtpVerifyRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 400, description = "Invalid or expired code"),
+        (status = 403, description = "Account has been deactivated"),
+        (status = 429, description = "Too many attempts"),
+    )
+)]
+pub async fn verify_otp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<OtpVerifyRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    payload.validate_request()?;
+    limit_by_client(&state, &headers, "otp-verify", 30, 15 * 60).await?;
+    let email = security::normalize_email(&payload.email);
+
+    let test_account = match state.auth_policy.test_accounts.check(&email, &payload.code) {
+        Some(true) => true,
+        Some(false) => {
+            inc(&OM.auth_otp_wrong);
+            return Err(ApiError::BadRequest(INVALID_CODE.to_string()));
+        }
+        None => {
+            let outcome = state
+                .otp_service
+                .check(&email, &payload.code, OtpType::SignIn)
+                .await;
+            settle_check(&state, &email, "CODE", outcome)?;
+            false
+        }
+    };
+    complete_sign_in(&state, &headers, &email, "CODE", test_account)
+        .await
+        .map(Json)
+}
+
+/// Verify a sign-in link
+///
+/// Finishes a passwordless sign-in with the one-click link from the same email as the code. The
+/// link opens the web app (`/auth/magic?email=…&token=…`), which POSTs both values here; the link
+/// itself never signs in on a GET, so email scanners that open links cannot use it up. Same
+/// answers, limits and response as `POST /api/v1/auth/otp/verify`; the link and the code are one
+/// challenge, so using either consumes both.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/otp/verify-link",
+    tag = "Authentication",
+    request_body = OtpVerifyLinkRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 400, description = "Invalid or expired link"),
+        (status = 403, description = "Account has been deactivated"),
+        (status = 429, description = "Too many attempts"),
+    )
+)]
+pub async fn verify_otp_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<OtpVerifyLinkRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    payload.validate_request()?;
+    limit_by_client(&state, &headers, "otp-verify-link", 30, 15 * 60).await?;
+    let email = security::normalize_email(&payload.email);
+    let outcome = state
+        .otp_service
+        .check_link(&email, &payload.token, OtpType::SignIn)
+        .await;
+    settle_check(&state, &email, "LINK", outcome)?;
+    inc(&OM.auth_magic_link_verified);
+    complete_sign_in(&state, &headers, &email, "LINK", false)
+        .await
+        .map(Json)
+}
+
+/// Finish a sign-in with the second factor
+///
+/// Gap audit A1: when an account has an authenticator app, `POST /api/v1/auth/otp/verify` (and
+/// `/otp/verify-link`) answer `401 MFA_REQUIRED` with a one-time `mfaTicket` (valid 5 minutes)
+/// instead of tokens. Send it here with the 6-digit code from the authenticator app, or one of
+/// the account's recovery codes; the answer is then exactly that of a completed sign-in. A wrong
+/// code gets 400; after 5 attempts the ticket is destroyed (429: sign in again).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/mfa/verify",
+    tag = "Authentication",
+    request_body = MfaVerifyRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 400, description = "Invalid or expired code or ticket"),
+        (status = 429, description = "Too many attempts"),
+    )
+)]
+pub async fn verify_mfa(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<MfaVerifyRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "mfa-verify", 30, 15 * 60).await?;
+    let pending = crate::services::mfa::redeem(&state, &payload.mfa_ticket, &payload.code).await?;
+    let user = Users::find_by_id(pending.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired code".into()))?;
+    if blocked(&state, &user).await? {
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
+    }
+    let via: &'static str = match pending.via.as_str() {
+        "LINK" => "LINK",
+        "GOOGLE" => "GOOGLE",
+        "PHONE" => "PHONE",
+        _ => "CODE",
+    };
+    finish_sign_in(
+        &state,
+        &headers,
+        user,
+        pending.created,
+        via,
+        pending.test_account,
+    )
+    .await
+    .map(Json)
+}
+
+/// Gap audit A1: the second factor of a parked sign-in.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MfaVerifyRequest {
+    /// The `mfaTicket` of the `401 MFA_REQUIRED` answer.
+    pub mfa_ticket: String,
+    /// A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`).
+    pub code: String,
+}
+
+/// Map a code/link check to the uniform answers (and count it). Gap audit A24: a wrong
+/// code and a lock-out are audited for an existing account, off the request path so the
+/// answer's timing never depends on whether the account exists.
+fn settle_check(
+    state: &AppState,
+    email: &str,
+    via: &'static str,
+    outcome: ApiResult<OtpCheck>,
+) -> ApiResult<()> {
+    let audit = |outcome: Outcome, reason: &'static str| {
+        let db = state.db.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            if let Ok(Some(user)) = security::find_user_by_email(&db, &email).await {
+                security::record_event_best_effort(
+                    &db,
+                    SecurityEvent::new("SIGN_IN_CODE", outcome)
+                        .user(user.id)
+                        .actor(ActorKind::Anonymous, None)
+                        .detail(serde_json::json!({ "via": via, "reason": reason })),
+                )
+                .await;
+            }
+        });
+    };
+    match outcome {
+        Ok(OtpCheck::Valid) => Ok(()),
+        Ok(OtpCheck::Missing) => {
+            inc(&OM.auth_otp_expired);
+            Err(ApiError::BadRequest(INVALID_CODE.to_string()))
+        }
+        Ok(OtpCheck::Wrong) => {
+            inc(&OM.auth_otp_wrong);
+            audit(Outcome::Failure, "WRONG_CODE");
+            Err(ApiError::BadRequest(INVALID_CODE.to_string()))
+        }
+        Err(e @ ApiError::TooManyRequests(_)) => {
+            inc(&OM.auth_otp_locked);
+            audit(Outcome::Denied, "TOO_MANY_ATTEMPTS");
+            Err(e)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The address was proven (code, link or fixed test code): find or create the account,
+/// open a session and send the security emails that apply.
+async fn complete_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    email: &str,
+    via: &'static str,
+    test_account: bool,
+) -> ApiResult<OtpVerifyResponse> {
+    let (mut user, created) = find_or_create_account(state, email).await?;
+
+    if blocked(state, &user).await? {
         security::record_event_best_effort(
             &state.db,
             SecurityEvent::new("LOGIN", Outcome::Denied)
                 .user(user.id)
                 .actor(ActorKind::Anonymous, None)
-                .detail(serde_json::json!({ "method": "PASSWORD", "reason": "EMAIL_VERIFICATION_REQUIRED" })),
+                .detail(serde_json::json!({ "method": "EMAIL_OTP", "reason": "ACCOUNT_DISABLED" })),
         )
         .await;
-        return Err(security::email_verification_required());
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
     }
 
-    // Clear rate limit on successful login
-    state.rate_limiter.clear_login_rate(&email).await?;
+    // The code proved the address: a pending account becomes active and verified.
+    if user.status == users::UserStatus::PendingVerification {
+        let mut active: users::ActiveModel = user.into();
+        active.status = Set(users::UserStatus::Active);
+        active.email_verified_at = Set(Some(chrono::Utc::now()));
+        active.updated_at = Set(now_utc());
+        user = active.update(&state.db).await?;
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("EMAIL_VERIFIED", Outcome::Success).by_user(user.id),
+        )
+        .await;
+    } else if user.email_verified_at.is_none() {
+        crate::services::account_profile::mark_email_verified(&state.db, user.id).await?;
+    }
 
-    let issued = security::start_session(
-        &state,
-        &user,
-        AuthMethod::Password,
-        None,
-        security::client_label(&headers),
-    )
-    .await?;
+    // Gap audit A1: an account with an authenticator finishes with the second factor.
+    if !test_account && crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: via.to_string(),
+            created,
+            test_account,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    finish_sign_in(state, headers, user, created, via, test_account).await
+}
 
-    // Update last login
+/// The sign-in after every proof (address, and second factor when enabled): session,
+/// audit and the security emails that apply.
+async fn finish_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: users::Model,
+    created: bool,
+    via: &str,
+    test_account: bool,
+) -> ApiResult<OtpVerifyResponse> {
+    let user = reactivate_if_deactivated(state, user, via).await?;
+    let label = security::client_label(headers);
+    let method = if via == "PHONE" {
+        AuthMethod::PhoneOtp
+    } else {
+        AuthMethod::EmailOtp
+    };
+    let issued = security::start_session(state, &user, method, None, label.clone()).await?;
     let mut user_active: users::ActiveModel = user.clone().into();
     user_active.last_login = Set(Some(now_utc()));
-    user_active.update(&state.db).await?;
+    let user = user_active.update(&state.db).await?;
+
+    let mut detail = serde_json::json!({ "method": if via == "PHONE" { "PHONE_OTP" } else { "EMAIL_OTP" }, "via": via });
+    if test_account {
+        detail["test_account"] = serde_json::Value::Bool(true);
+        inc(&OM.auth_test_account_sign_in);
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("LOGIN", Outcome::Success)
             .by_user(user.id)
             .session(issued.session_id)
-            .detail(serde_json::json!({ "method": "PASSWORD" })),
+            .detail(detail),
     )
     .await;
+    inc(&OM.auth_otp_verified);
 
-    let response = LoginResponse {
+    if created {
+        if !test_account {
+            if let Err(e) = state
+                .email_service
+                .send_welcome_email(&user.email, &user.username, user.id)
+                .await
+            {
+                tracing::warn!(user_id = %user.id, "welcome email not queued: {e}");
+            }
+        }
+    } else if !test_account
+        && !crate::services::passwordless::is_known_device(
+            &state.db,
+            user.id,
+            issued.session_id,
+            label.as_deref(),
+        )
+        .await?
+    {
+        let details = crate::services::passwordless::request_details(&state.auth_policy, headers);
+        match state
+            .email_service
+            .send_new_sign_in_alert(
+                &user.email,
+                &user.username,
+                user.id,
+                issued.session_id,
+                &details,
+            )
+            .await
+        {
+            Ok(_) => inc(&OM.auth_new_sign_in_alerts),
+            Err(e) => tracing::warn!(user_id = %user.id, "new sign-in alert not queued: {e}"),
+        }
+    }
+
+    Ok(OtpVerifyResponse {
         access_token: issued.access_token,
         refresh_token: issued.refresh_token,
         user: UserInfo {
             id: user.id,
             username: user.username.clone(),
             role: security::role_claim(&user),
-            status: status_string(&state, &user),
+            status: status_string(state, &user),
         },
-    };
+        is_new_account: created,
+    })
+}
 
-    Ok(Json(response))
+/// A random public username (`user_` + 10 lower-case letters/digits). Never derived from
+/// the email address, which usernames would otherwise reveal; the owner can change it.
+fn random_username() -> String {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    let suffix: String = (0..10)
+        .map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char)
+        .collect();
+    format!("user_{suffix}")
+}
+
+/// The account for a proven address, created on first sign-in. Serialized per address
+/// (advisory lock) so two simultaneous first sign-ins create one account.
+async fn find_or_create_account(state: &AppState, email: &str) -> ApiResult<(users::Model, bool)> {
+    if let Some(user) = security::find_user_by_email(&state.db, email).await? {
+        return Ok((user, false));
+    }
+    let txn = state.db.begin().await?;
+    txn.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [format!("account-email:{email}").into()],
+    ))
+    .await?;
+    if let Some(user) = security::find_user_by_email(&txn, email).await? {
+        txn.commit().await?;
+        return Ok((user, false));
+    }
+    // Several legacy rows differing only by case cannot be told apart: never add another.
+    let ambiguous = Users::find()
+        .filter(
+            sea_orm::sea_query::Expr::expr(sea_orm::sea_query::Func::lower(
+                sea_orm::sea_query::Expr::col(users::Column::Email),
+            ))
+            .eq(email),
+        )
+        .one(&txn)
+        .await?;
+    if ambiguous.is_some() {
+        return Err(ApiError::Conflict(
+            "This address matches several accounts; contact support".to_string(),
+        ));
+    }
+    let mut username = random_username();
+    for _ in 0..4 {
+        let taken = security::username_taken(&txn, &username, None).await?;
+        if !taken {
+            break;
+        }
+        username = random_username();
+    }
+    let user = users::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        username: Set(username),
+        email: Set(email.to_string()),
+        password_hash: Set(None),
+        auth_type: Set(users::AuthType::Local),
+        role: Set(users::UserRole::User),
+        status: Set(users::UserStatus::Active),
+        created_at: Set(now_utc()),
+        updated_at: Set(now_utc()),
+        last_login: Set(None),
+        // The code proved the address.
+        email_verified_at: Set(Some(chrono::Utc::now())),
+        ..Default::default()
+    }
+    .insert(&txn)
+    .await?;
+    txn.commit().await?;
+    security::record_event_best_effort(
+        &state.db,
+        SecurityEvent::new("ACCOUNT_REGISTERED", Outcome::Success)
+            .by_user(user.id)
+            .detail(serde_json::json!({ "method": "EMAIL_OTP" })),
+    )
+    .await;
+    inc(&OM.auth_account_created);
+    Ok((user, true))
+}
+
+/// Undo an email change
+///
+/// Restores the previous email address of an account with the single-use token from the "your
+/// email address was changed" notice (valid 7 days), and signs out every session and linked device
+/// of the account. The owner then signs in with the previous address. Public endpoint (the token is
+/// the proof); the web app's `/auth/email-change/undo` page POSTs it. Returns 409 if the previous
+/// address has since been taken by another account (support then helps).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/email-change/revert",
+    tag = "Authentication",
+    request_body = EmailChangeRevertRequest,
+    responses(
+        (status = 200, description = "Change undone; every session ended", body = MessageResponse),
+        (status = 400, description = "Invalid, used or expired link"),
+        (status = 409, description = "The previous address belongs to another account"),
+        (status = 429, description = "Too many requests"),
+    )
+)]
+pub async fn revert_email_change(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<EmailChangeRevertRequest>,
+) -> ApiResult<Json<MessageResponse>> {
+    payload.validate_request()?;
+    limit_by_client(&state, &headers, "email-change-revert", 20, 15 * 60).await?;
+    crate::services::email_change::revert(&state, &payload.token).await?;
+    Ok(Json(MessageResponse {
+        message: "The email change was undone. Sign in with your previous address.".to_string(),
+    }))
 }
 
 /// Refresh access token
@@ -393,9 +681,7 @@ pub async fn refresh_token(
     Json(payload): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<RefreshTokenResponse>> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let invalid = || ApiError::Unauthorized("Invalid refresh token".to_string());
 
     // Verify refresh token (ACC-001: an access token never refreshes)
@@ -447,10 +733,13 @@ pub async fn refresh_token(
     ) {
         return Err(ApiError::Unauthorized("Account is unavailable".into()));
     }
-    security::authorize_user_token(&state, &claims, user.id, TokenKind::Refresh).await?;
+    // A new mobile awaiting its primary-mobile replacement may keep its (restricted)
+    // sign-in alive; every other endpoint still refuses it.
+    security::authorize_user_token_allow_pending(&state, &claims, user.id, TokenKind::Refresh)
+        .await?;
 
     let (access_token, refresh_token) = if claims.session_id().is_some() {
-        security::rotate_session(&state, &claims, &user).await?
+        security::rotate_session(&state, &claims, &user, payload.device_proof.as_ref()).await?
     } else {
         upgrade_legacy_refresh(&state, &claims, &payload.refresh_token, &user).await?
     };
@@ -643,391 +932,21 @@ pub async fn logout(
     }
 
     // Part V H §104: logging out of CF Meet also ends the account's Messaging client
-    // sessions (durable job; a Messaging outage never blocks the logout).
-    if let (Some(um), Ok(user_id)) = (
-        state.meeting.core.unified.as_ref(),
-        Uuid::parse_str(&claims.sub),
-    ) {
-        um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+    // sessions (durable job; a Messaging outage never blocks the logout). Gap audit A11:
+    // a sign-in with a session id ends only its own Messaging sessions (done above through
+    // `session_ended`); only a legacy token, whose logout already ends every credential,
+    // ends every Messaging client session of the account.
+    if claims.session_id().is_none() {
+        if let (Some(um), Ok(user_id)) = (
+            state.meeting.core.unified.as_ref(),
+            Uuid::parse_str(&claims.sub),
+        ) {
+            um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+        }
     }
 
     Ok(Json(MessageResponse {
         message: "Logged out successfully".to_string(),
-    }))
-}
-
-/// Resend verification email
-///
-/// Sends a new 6-digit verification code to an account that is still pending verification,
-/// replacing the previous code. Public endpoint. The answer is the same whether or not such an
-/// account exists; at most 5 codes per email are sent within 15 minutes.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/resend-verification",
-    tag = "Authentication",
-    request_body = ResendVerificationRequest,
-    responses(
-        (status = 200, description = "Request accepted", body = MessageResponse),
-        (status = 400, description = "Validation error"),
-        (status = 429, description = "Too many requests"),
-    )
-)]
-pub async fn resend_verification_email(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<ResendVerificationRequest>,
-) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "resend-verification", 20, 15 * 60).await?;
-    let accepted = || {
-        Json(MessageResponse {
-            message: RECOVERY_ACCEPTED.to_string(),
-        })
-    };
-
-    let Some(user) = security::find_user_by_email(&state.db, &payload.email).await? else {
-        return Ok(accepted());
-    };
-    if user.status != users::UserStatus::PendingVerification {
-        return Ok(accepted());
-    }
-
-    // Per-account send limit; exceeding it is silent so the answer stays uniform.
-    if state
-        .otp_service
-        .check_send_rate(&user.email, OtpType::Verification)
-        .await
-        .is_err()
-    {
-        return Ok(accepted());
-    }
-
-    // Generate new verification code
-    let verification_code = generate_verification_code();
-
-    // Store in Redis with TTL
-    state
-        .otp_service
-        .store_code(&user.email, &verification_code, OtpType::Verification)
-        .await?;
-
-    // Send email
-    if let Err(e) = state
-        .email_service
-        .send_verification_email(&user.email, &user.username, &verification_code)
-        .await
-    {
-        tracing::error!(user_id = %user.id, "failed to resend verification email: {e}");
-    }
-
-    Ok(accepted())
-}
-
-/// Request password reset
-///
-/// Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an
-/// email-and-password account. Public endpoint. The answer is the same whether or not such an
-/// account exists (no email is sent for unknown or Google sign-in accounts); at most 5 codes per
-/// email are sent within 15 minutes. Finish with `POST /api/v1/auth/reset-password`.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/forgot-password",
-    tag = "Authentication",
-    request_body = ForgotPasswordRequest,
-    responses(
-        (status = 200, description = "Request accepted", body = MessageResponse),
-        (status = 400, description = "Validation error"),
-        (status = 429, description = "Too many requests"),
-    )
-)]
-pub async fn forgot_password(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<ForgotPasswordRequest>,
-) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "forgot-password", 20, 15 * 60).await?;
-    let accepted = || {
-        Json(MessageResponse {
-            message: RECOVERY_ACCEPTED.to_string(),
-        })
-    };
-
-    let Some(user) = security::find_user_by_email(&state.db, &payload.email).await? else {
-        return Ok(accepted());
-    };
-
-    // Only local accounts have a password to reset; others get the same answer.
-    if user.auth_type != users::AuthType::Local
-        || matches!(
-            user.status,
-            users::UserStatus::Inactive | users::UserStatus::Suspended
-        )
-    {
-        return Ok(accepted());
-    }
-
-    if state
-        .otp_service
-        .check_send_rate(&user.email, OtpType::PasswordReset)
-        .await
-        .is_err()
-    {
-        return Ok(accepted());
-    }
-
-    // Generate 6-digit reset code
-    let reset_code = generate_verification_code();
-
-    // Store in Redis with TTL (1 hour)
-    state
-        .otp_service
-        .store_code(&user.email, &reset_code, OtpType::PasswordReset)
-        .await?;
-
-    // Queue reset email
-    match state
-        .email_service
-        .send_password_reset_email(&user.email, &user.username, &reset_code)
-        .await
-    {
-        Ok(job_id) => {
-            tracing::info!(user_id = %user.id, job_id = %job_id, "password reset email queued");
-        }
-        Err(e) => {
-            tracing::error!(user_id = %user.id, "failed to queue password reset email: {e}");
-        }
-    }
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("PASSWORD_RESET_REQUESTED", Outcome::Success)
-            .user(user.id)
-            .actor(ActorKind::Anonymous, None),
-    )
-    .await;
-
-    Ok(accepted())
-}
-
-/// Reset password with token
-///
-/// Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public
-/// endpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is
-/// single-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the
-/// account out of every session.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/reset-password",
-    tag = "Authentication",
-    request_body = ResetPasswordRequest,
-    responses(
-        (status = 200, description = "Password reset successfully", body = MessageResponse),
-        (status = 400, description = "Invalid or expired token"),
-        (status = 429, description = "Too many attempts"),
-    )
-)]
-pub async fn reset_password(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<ResetPasswordRequest>,
-) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "reset-password", 30, 15 * 60).await?;
-    let invalid = || ApiError::BadRequest("Invalid or expired reset code".to_string());
-
-    let user = security::find_user_by_email(&state.db, &payload.email)
-        .await?
-        .ok_or_else(invalid)?;
-    if user.auth_type != users::AuthType::Local {
-        return Err(invalid());
-    }
-
-    // Verify token from Redis (includes rate limiting and auto-deletion on success)
-    let is_valid = state
-        .otp_service
-        .verify_code(&user.email, &payload.token, OtpType::PasswordReset)
-        .await?;
-
-    if !is_valid {
-        return Err(invalid());
-    }
-
-    // Update password. The account-security trigger advances the revocation epoch and
-    // closes every session in the same transaction.
-    let password_hash = hash_password(&payload.new_password)?;
-    let user_id = user.id;
-
-    let (notice_email, notice_name) = (user.email.clone(), user.username.clone());
-    let mut user: users::ActiveModel = user.into();
-    user.password_hash = Set(Some(password_hash));
-    user.updated_at = Set(now_utc());
-
-    user.update(&state.db).await?;
-    // Security notice (unified email delivery); never blocks the reset.
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "reset")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password reset notice not queued: {e}");
-    }
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("PASSWORD_RESET", Outcome::Success)
-            .user(user_id)
-            .actor(ActorKind::Anonymous, None),
-    )
-    .await;
-    crate::services::communications::credentials_ended(&state, user_id, "PASSWORD_CHANGED").await;
-
-    Ok(Json(MessageResponse {
-        message: "Password reset successfully".to_string(),
-    }))
-}
-
-/// Verify password reset token
-///
-/// Checks whether a password reset is pending for the given email, for example before showing the
-/// reset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted
-/// code must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does
-/// that). Returns 400 if no reset is pending, including when the email is unknown.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/verify-reset-token",
-    tag = "Authentication",
-    request_body = VerifyResetTokenRequest,
-    responses(
-        (status = 200, description = "Token is valid", body = VerifyResetTokenResponse),
-        (status = 400, description = "No pending reset"),
-    )
-)]
-pub async fn verify_reset_token(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<VerifyResetTokenRequest>,
-) -> ApiResult<Json<VerifyResetTokenResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-    limit_by_client(&state, &headers, "verify-reset-token", 30, 15 * 60).await?;
-    let none = || ApiError::BadRequest("No password reset request found".to_string());
-
-    let user = security::find_user_by_email(&state.db, &payload.email)
-        .await?
-        .ok_or_else(none)?;
-
-    // Check if reset code exists in Redis (without consuming it)
-    let has_code = state
-        .otp_service
-        .has_code(&user.email, OtpType::PasswordReset)
-        .await?;
-
-    if !has_code {
-        return Err(none());
-    }
-
-    // Note: We don't verify the actual code here to avoid consuming verification attempts
-    // The actual verification happens in reset_password endpoint
-
-    Ok(Json(VerifyResetTokenResponse {
-        message: "Reset code exists. Please enter the code to reset your password.".to_string(),
-        valid: true,
-    }))
-}
-
-/// Change password for authenticated user
-///
-/// Changes the signed-in user's password after checking `current_password`. Requires a bearer
-/// access token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400
-/// if the current password is wrong or the account uses Google sign-in. A change signs the account
-/// out of every session, including the current one; sign in again with the new password.
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/change-password",
-    tag = "Authentication",
-    security(
-        ("bearer_auth" = [])
-    ),
-    request_body = ChangePasswordRequest,
-    responses(
-        (status = 200, description = "Password changed successfully", body = MessageResponse),
-        (status = 400, description = "Invalid current password or validation error"),
-        (status = 401, description = "Unauthorized"),
-    )
-)]
-pub async fn change_password(
-    State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::services::auth::Claims>,
-    Json(payload): Json<ChangePasswordRequest>,
-) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-
-    // Get current user
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
-
-    let user = Users::find_by_id(user_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
-
-    // Check if user uses local auth (not OAuth)
-    if user.auth_type != users::AuthType::Local {
-        return Err(ApiError::BadRequest(
-            "Password change is not available for OAuth accounts".to_string(),
-        ));
-    }
-
-    // Verify current password
-    let password_hash = user
-        .password_hash
-        .as_ref()
-        .ok_or_else(|| ApiError::BadRequest("No password set for this account".to_string()))?;
-
-    let is_valid = verify_password(&payload.current_password, password_hash)?;
-    if !is_valid {
-        security::record_event_best_effort(
-            &state.db,
-            SecurityEvent::new("PASSWORD_CHANGE", Outcome::Failure).by_user(user_id),
-        )
-        .await;
-        return Err(ApiError::BadRequest(
-            "Current password is incorrect".to_string(),
-        ));
-    }
-
-    // Hash new password and update (the trigger ends every session and token).
-    let new_password_hash = hash_password(&payload.new_password)?;
-
-    let (notice_email, notice_name) = (user.email.clone(), user.username.clone());
-    let mut user_active: users::ActiveModel = user.into();
-    user_active.password_hash = Set(Some(new_password_hash));
-    user_active.updated_at = Set(now_utc());
-    user_active.update(&state.db).await?;
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "changed")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password change notice not queued: {e}");
-    }
-    security::record_event_best_effort(
-        &state.db,
-        SecurityEvent::new("PASSWORD_CHANGED", Outcome::Success).by_user(user_id),
-    )
-    .await;
-    crate::services::communications::credentials_ended(&state, user_id, "PASSWORD_CHANGED").await;
-
-    Ok(Json(MessageResponse {
-        message: "Password changed successfully".to_string(),
     }))
 }
 
@@ -1192,6 +1111,18 @@ pub async fn oauth_google_callback(
     let (user, issued) =
         match oauth_google_callback_inner(&state, &headers, code, state_value, binding).await {
             Ok(done) => done,
+            Err(ApiError::MfaRequired { ticket }) => {
+                // Gap audit A1: the web app finishes with POST /api/v1/auth/mfa/verify.
+                return with_cookie(
+                    Redirect::to(&format!(
+                        "{}/google/callback?mfa_ticket={}",
+                        frontend_url,
+                        urlencoding::encode(&ticket)
+                    ))
+                    .into_response(),
+                    &clear,
+                );
+            }
             Err(e) => {
                 let reason = match &e {
                     ApiError::Forbidden(_) => "account_disabled",
@@ -1253,7 +1184,7 @@ pub async fn oauth_google_callback(
 ///
 /// Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.
 /// The code from the callback redirect is valid once, for 60 seconds. Returns the same body as
-/// `POST /api/v1/auth/login`. Public endpoint.
+/// `POST /api/v1/auth/otp/verify` (without `is_new_account`). Public endpoint.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/oauth/google/exchange",
@@ -1269,9 +1200,7 @@ pub async fn oauth_google_exchange(
     headers: HeaderMap,
     Json(payload): Json<GoogleExchangeRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "oauth-exchange", 60, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired exchange code".to_string());
     let raw = state
@@ -1407,11 +1336,7 @@ async fn unique_username(state: &AppState, name: &str, email: &str) -> ApiResult
         } else {
             format!("{base}_{}", rand::thread_rng().gen_range(1000..1_000_000))
         };
-        let taken = Users::find()
-            .filter(users::Column::Username.eq(&candidate))
-            .one(&state.db)
-            .await?
-            .is_some();
+        let taken = security::username_taken(&state.db, &candidate, None).await?;
         if !taken {
             return Ok(candidate);
         }
@@ -1452,7 +1377,11 @@ async fn oauth_google_callback_inner(
 
     // Exchange code for tokens
     let token_response = reqwest::Client::new()
-        .post("https://oauth2.googleapis.com/token")
+        .post(
+            // Overridable for tests and private deployments (gap audit A14).
+            std::env::var("GOOGLE_TOKEN_URL")
+                .unwrap_or_else(|_| "https://oauth2.googleapis.com/token".into()),
+        )
         .form(&[
             ("code", code),
             ("client_id", state.google_client_id.as_str()),
@@ -1494,8 +1423,85 @@ async fn oauth_google_callback_inner(
         chrono::Utc::now().timestamp(),
     )
     .map_err(|reason| ApiError::Unauthorized(format!("ID token rejected: {reason}")))?;
+    google_session(state, headers, &identity).await
+}
 
-    let (user, event) = resolve_google_account(state, &identity).await?;
+/// Sign in with Google on a native app
+///
+/// Gap audit A4: for the mobile apps. Send the Google ID token the platform SDK returned (and the
+/// nonce it was requested with, when one was used). The token's signature is verified against
+/// Google's published keys and every claim is checked (issuer, audience = the web client or a
+/// configured native client, expiry, verified email). The answer is that of any sign-in; an
+/// account with two-step sign-in gets `401 MFA_REQUIRED` with an `mfaTicket` instead.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oauth/google/native",
+    tag = "Authentication",
+    request_body = GoogleNativeRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 401, description = "ID token rejected, or MFA_REQUIRED"),
+        (status = 403, description = "Account has been deactivated"),
+        (status = 409, description = "The address belongs to an account linked to another Google identity"),
+        (status = 503, description = "Google's keys are unreachable"),
+    )
+)]
+pub async fn oauth_google_native(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<GoogleNativeRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "oauth-native", 60, 15 * 60).await?;
+    let identity = crate::services::google_native::verify(
+        &payload.id_token,
+        &state.google_client_id,
+        payload.nonce.as_deref(),
+    )
+    .await?;
+    let (user, issued) = google_session(&state, &headers, &identity).await?;
+    Ok(Json(OtpVerifyResponse {
+        access_token: issued.access_token,
+        refresh_token: issued.refresh_token,
+        user: UserInfo {
+            id: user.id,
+            username: user.username.clone(),
+            role: security::role_claim(&user),
+            status: status_string(&state, &user),
+        },
+        is_new_account: false,
+    }))
+}
+
+/// Gap audit A4: a native Google ID token.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GoogleNativeRequest {
+    /// The ID token returned by the Google Sign-In SDK.
+    pub id_token: String,
+    /// The nonce the token was requested with, if any.
+    #[serde(default)]
+    pub nonce: Option<String>,
+}
+
+/// The sign-in of a verified Google identity (web callback and native ID token): account
+/// resolution, the second factor when enabled, the session and its audit.
+async fn google_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    identity: &GoogleIdentity,
+) -> ApiResult<(users::Model, security::IssuedSession)> {
+    let (user, event) = resolve_google_account(state, identity).await?;
+    // Gap audit A1: Google proves the address, not the second factor.
+    if crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: "GOOGLE".into(),
+            created: false,
+            test_account: false,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    let user = reactivate_if_deactivated(state, user, "GOOGLE").await?;
     let issued = security::start_session(
         state,
         &user,
@@ -1514,6 +1520,16 @@ async fn oauth_google_callback_inner(
             .session(issued.session_id),
     )
     .await;
+    // Gap audit A13: linking Google to an existing account is a new way in.
+    if matches!(event, "GOOGLE_LINKED" | "GOOGLE_CLAIMED_UNVERIFIED_ACCOUNT") {
+        security::notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::GoogleLinked,
+            &issued.session_id.to_string(),
+        )
+        .await;
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("LOGIN", Outcome::Success)
@@ -1538,18 +1554,12 @@ pub async fn resolve_google_account(
     state: &AppState,
     identity: &GoogleIdentity,
 ) -> ApiResult<(users::Model, &'static str)> {
-    let disabled = |u: &users::Model| {
-        matches!(
-            u.status,
-            users::UserStatus::Inactive | users::UserStatus::Suspended
-        )
-    };
     if let Some(user_id) = security::user_for_google_subject(&state.db, &identity.subject).await? {
         let user = Users::find_by_id(user_id)
             .one(&state.db)
             .await?
             .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))?;
-        if disabled(&user) {
+        if blocked(state, &user).await? {
             return Err(ApiError::Forbidden("Account has been deactivated".into()));
         }
         return Ok((user, "GOOGLE_SIGN_IN"));
@@ -1557,7 +1567,7 @@ pub async fn resolve_google_account(
 
     match security::find_user_by_email(&state.db, &identity.email).await? {
         Some(user) => {
-            if disabled(&user) {
+            if blocked(state, &user).await? {
                 return Err(ApiError::Forbidden("Account has been deactivated".into()));
             }
             if security::google_subject_for_user(&state.db, user.id)

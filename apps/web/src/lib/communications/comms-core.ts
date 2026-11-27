@@ -7,17 +7,21 @@
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CF_MEET_ID = /^CF-[A-Z2-7]{26}$/;
+const CF_MEET_ID = /^CF-[A-HJ-NP-Z2-9]{6}$/;
 
 export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
 
-/** A CF Meet ID as typed by a person: trimmed, upper-cased, `CF-` + 26 base32 characters. */
+/**
+ * A CF Meet ID as typed by a person: trimmed, upper-cased, spaces removed, the `CF` prefix and
+ * hyphen optional — `CF-` + 6 characters without look-alikes (no I, O, 0 or 1).
+ */
 export function normalizeCfMeetId(input: string): string | null {
   const v = input.trim().toUpperCase().replace(/\s+/g, "");
-  const withPrefix = v.startsWith("CF-") ? v : `CF-${v}`;
-  return CF_MEET_ID.test(withPrefix) ? withPrefix : null;
+  const body = v.startsWith("CF-") ? v.slice(3) : v.startsWith("CF") && v.length === 8 ? v.slice(2) : v;
+  const id = `CF-${body}`;
+  return CF_MEET_ID.test(id) ? id : null;
 }
 
 // ------------------------------------------------------------------ navigation hooks
@@ -29,7 +33,7 @@ export type CallKind = "VOICE" | "VIDEO";
  * client, which owns call launch (`POST /contacts/{id}/calls` or
  * `POST /conversations/{id}/calls`), ringing and media. This module never launches a call.
  */
-export function callHref(target: { contactId: string } | { conversationId: string }, kind: CallKind = "VOICE"): string {
+export function callHref(target: { contactId: string } | { conversationId: string }, kind: CallKind = "VOICE", name?: string | null): string {
   const params = new URLSearchParams();
   if ("contactId" in target) {
     if (!isUuid(target.contactId)) throw new Error("Invalid contact id");
@@ -39,6 +43,7 @@ export function callHref(target: { contactId: string } | { conversationId: strin
     params.set("conversationId", target.conversationId);
   }
   params.set("kind", kind);
+  if (name?.trim()) params.set("name", name.trim().slice(0, 80));
   return `/calling?${params.toString()}`;
 }
 
@@ -182,6 +187,43 @@ export function communicationsAreas(
     realtime: realtime === "SESSION_DEVICE" || realtime === "POLLING" ? realtime : "NONE",
     reason: active ? null : (capabilities.activationState ?? "UNKNOWN"),
   };
+}
+
+/** The Hub's `messaging.attachments` capability (contract 1.4.0). */
+export type AttachmentCapability = {
+  enabled: boolean;
+  reason: string;
+  maxBytes: number;
+  maxPerMessage: number;
+  allowedKinds: string[];
+  contexts: { DIRECT: boolean; GROUP: boolean };
+};
+
+export type AttachmentAvailability = { enabled: boolean; maxBytes: number | null; reason: string };
+
+/**
+ * Whether the chat attach control is offered in a personal conversation, from Messaging's
+ * effective attachment policy relayed by the Hub. Explicitly off (policy, storage, kill
+ * switch, inactive account, or the conversation's context) disables the control. While the
+ * capability is unknown (loading, or a Hub without the field) the control stays as it was:
+ * Messaging validates every upload and its refusal is shown.
+ */
+export function attachmentAvailability(
+  capabilities: { messaging?: { attachments?: AttachmentCapability } } | null | undefined,
+  contextClass: string,
+): AttachmentAvailability {
+  const a = capabilities?.messaging?.attachments;
+  if (!a) return { enabled: true, maxBytes: null, reason: "UNKNOWN" };
+  const context = contextClass === "DIRECT" || contextClass === "GROUP" ? a.contexts?.[contextClass] === true : a.enabled;
+  const enabled = a.enabled === true && context;
+  return { enabled, maxBytes: enabled && a.maxBytes > 0 ? a.maxBytes : null, reason: enabled ? "AVAILABLE" : a.enabled ? "CONTEXT_DISABLED" : a.reason };
+}
+
+/** A file the server would refuse for its size, said before uploading (null: send it). */
+export function attachmentSizeRefusal(size: number, availability: AttachmentAvailability): string | null {
+  if (availability.maxBytes === null || size <= availability.maxBytes) return null;
+  const mb = availability.maxBytes / (1024 * 1024);
+  return `Files can be up to ${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
 }
 
 // ------------------------------------------------------------------ workspace awareness

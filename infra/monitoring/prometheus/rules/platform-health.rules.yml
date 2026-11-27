@@ -1,0 +1,123 @@
+# Health-probe and heartbeat alerts for the services that export no Prometheus metrics
+# (backend gap audit P3 / P4).
+#
+# API Gateway, Developer Platform, Organizations and Communications have no scrapeable
+# metrics endpoint (Communications' metrics route requires a signed service token), so
+# they are watched through their own readiness routes by the blackbox exporter
+# (infra/monitoring/blackbox/blackbox.yml, module http_ready). The production scrape job
+# is `health-probes`; every target carries a `service` label
+# (infra/calling/production/monitoring_stack.py). probe_success is the blackbox
+# exporter's own series.
+#
+# The Developer Platform worker has no listener at all. It records a heartbeat row per
+# pass in devplat_worker_heartbeats (services/developer-platform/src/worker.rs
+# heartbeat_once, default pass interval 5 s); the SQL exporter
+# (infra/monitoring/sql-exporter/developer-platform-worker.collector.yml) reads its age
+# through a read-only database role. Scrape job: `developer-platform-heartbeat`.
+
+groups:
+  - name: platform-health.alerts
+    rules:
+      - alert: ApiGatewayUnavailable
+        expr: |
+          max by (service) (probe_success{job="health-probes", service="api-gateway"}) == 0
+        for: 3m
+        labels:
+          severity: critical
+          approval: documented
+          service: api-gateway
+        annotations:
+          summary: "API Gateway readiness probe failing"
+          description: "GET /ready on cfmeet-api-gateway has failed for 3 minutes (process down, unreachable or not ready). Developer Platform API traffic through the gateway is failing."
+          runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+      - alert: DeveloperPlatformUnavailable
+        expr: |
+          max by (service) (probe_success{job="health-probes", service="developer-platform"}) == 0
+        for: 3m
+        labels:
+          severity: critical
+          approval: documented
+          service: developer-platform
+        annotations:
+          summary: "Developer Platform readiness probe failing"
+          description: "GET /ready on cfmeet-developer-platform has failed for 3 minutes (database unavailable, migrations pending or process down)."
+          runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+      - alert: OrganizationsUnavailable
+        expr: |
+          max by (service) (probe_success{job="health-probes", service="organizations"}) == 0
+        for: 3m
+        labels:
+          severity: critical
+          approval: documented
+          service: organizations
+        annotations:
+          summary: "Organizations readiness probe failing"
+          description: "GET /ready on cfmeet-organizations has failed for 3 minutes (database unavailable, migrations pending or process down)."
+          runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+      - alert: CommunicationsUnavailable
+        expr: |
+          max by (service) (probe_success{job="health-probes", service="communications"}) == 0
+        for: 3m
+        labels:
+          severity: critical
+          approval: documented
+          service: communications
+        annotations:
+          summary: "Communications readiness probe failing"
+          description: "GET /ready on cfmeet-communications has failed for 3 minutes (database unavailable, migrations pending or process down)."
+          runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+      - alert: ServiceHealthProbeFailing
+        expr: |
+          max by (service) (probe_success{job="health-probes", service!~"api-gateway|developer-platform|organizations|communications"}) == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: "{{ $labels.service }}"
+        annotations:
+          summary: "A CF Meet service readiness probe is failing"
+          description: "The health or readiness route of {{ $labels.service }} has failed for 5 minutes. Services with metrics also raise their own scrape alert."
+          runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+      - alert: HealthProbesUnavailable
+        expr: |
+          absent(up{job="health-probes"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: monitoring
+        annotations:
+          summary: "No health probe result"
+          description: "The blackbox exporter (cfmeet-blackbox) does not answer, so every probe alert above is silent."
+          runbook_url: "docs/operations/monitoring-alerts.md#production-monitoring-stack"
+
+      - alert: DeveloperPlatformWorkerHeartbeatStale
+        expr: |
+          max(cfmeet_devplat_worker_heartbeat_age_seconds) > 300
+        for: 2m
+        labels:
+          severity: critical
+          approval: documented
+          service: developer-platform
+        annotations:
+          summary: "Developer Platform worker heartbeat is stale"
+          description: "No production worker has recorded a heartbeat for more than 5 minutes (the pass interval is 5 s). Invitation expiry, credential sweeps, reference reconciliation and webhook delivery have stopped."
+          runbook_url: "docs/operations/monitoring-alerts.md#developer-platform-worker-heartbeat"
+
+      - alert: DeveloperPlatformWorkerHeartbeatUnreadable
+        expr: |
+          absent(cfmeet_devplat_worker_heartbeat_age_seconds)
+        for: 10m
+        labels:
+          severity: warning
+          approval: documented
+          service: developer-platform
+        annotations:
+          summary: "Developer Platform worker heartbeat cannot be read"
+          description: "The heartbeat exporter (cfmeet-heartbeat-exporter) is down or its read-only query fails, so DeveloperPlatformWorkerHeartbeatStale cannot fire."
+          runbook_url: "docs/operations/monitoring-alerts.md#developer-platform-worker-heartbeat"

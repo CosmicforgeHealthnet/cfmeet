@@ -1,0 +1,69 @@
+{
+  "description": "One owner event on the HQ feed: the authenticated producer, the event type (one of verification.case.changed.v1, abuse.report.changed.v1, partner.workspace.changed.v1, app.review.changed.v1, incident.changed.v1, pricing.version.changed.v1, from the producers in event-adapters.v1.json), the subject by kind and opaque id, its state and version (strictly increasing per producer and subject), when it happened at the owner and when the bridge appended it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sequence",
+    "event_id",
+    "type",
+    "producer",
+    "subject",
+    "state",
+    "version",
+    "occurred_at",
+    "appended_at"
+  ],
+  "properties": {
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*\\.v[0-9]{1,3}$",
+      "maxLength": 96
+    },
+    "producer": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,47}$"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      }
+    },
+    "state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "appended_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

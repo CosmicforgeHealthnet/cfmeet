@@ -208,6 +208,11 @@ pub struct Peers {
     pub operator: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the Meeting Service.
     pub rogue_meeting: Arc<ServiceTokenSigner>,
+    /// The Notification Service: `organization-invitations.read` only (X5).
+    pub notifications: Arc<ServiceTokenSigner>,
+    /// The HQ admin bridge (ADR 0068): `organization.operator-read` (reads) and
+    /// `organization.administer` (commands).
+    pub bridge: Arc<ServiceTokenSigner>,
 }
 
 pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
@@ -215,6 +220,8 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
     let meeting = key("meeting-test-1");
     let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
+    let notifications = key("notifications-test-1");
+    let bridge = key("admin-bridge-test-1");
     let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
         json!({
             "issuer": id,
@@ -232,10 +239,17 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(cf_service_auth::services::MEETING_SERVICE, &meeting, &[
                 "organization.read", "organization.write", "organization.act-for-user",
                 "organization.administer", "organization.migrate",
+                "organization-apps.evaluate",
             ]),
             issuer(cf_service_auth::services::MESSAGING, &messaging, &["organization.read"]),
             issuer(cf_service_auth::services::OPERATOR_CONSOLE, &operator, &[
                 "organization.administer", "organization.migrate",
+            ]),
+            issuer(cf_service_auth::services::NOTIFICATIONS, &notifications, &[
+                "organization-invitations.read",
+            ]),
+            issuer(cf_service_auth::services::ADMIN_BRIDGE, &bridge, &[
+                "organization.operator-read", "organization.administer",
             ]),
         ],
     })
@@ -249,6 +263,8 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             messaging: signer(ServiceId::messaging(), messaging),
             operator: signer(ServiceId::operator_console(), operator),
             rogue_meeting: signer(ServiceId::meeting_service(), key("meeting-test-1")),
+            notifications: signer(ServiceId::notifications(), notifications),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
     )
 }
@@ -319,6 +335,31 @@ impl<'a> Call<'a> {
         self
     }
 
+    /// Any extra request header (e.g. the admin bridge's `X-CF-Operator`).
+    pub fn header(mut self, name: &'static str, value: &str) -> Self {
+        self.headers
+            .insert(name, HeaderValue::from_str(value).unwrap());
+        self
+    }
+
+    /// The admin bridge reading for HQ staff member `staff` (`X-CF-Operator: hq:<staff>`).
+    pub fn operator(self, staff: &str) -> Self {
+        let value = format!("hq:{staff}");
+        self.header("x-cf-operator", &value)
+    }
+
+    /// The second person of an HQ two-person approval (`X-CF-Approver: hq:<approver>`,
+    /// approval reference and intent digest).
+    pub fn approved(self, approver: &str) -> Self {
+        let value = format!("hq:{approver}");
+        self.header("x-cf-approver", &value)
+            .header("x-cf-approval-ref", "apr-0001")
+            .header(
+                "x-cf-intent-digest",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+    }
+
     pub fn idem(mut self, key: &str) -> Self {
         self.headers
             .insert("idempotency-key", HeaderValue::from_str(key).unwrap());
@@ -361,6 +402,62 @@ impl Harness {
         let db = TestDb::new().await?;
         let (verifier, peers) = verifier_and_peers();
         let state = AppState::new(db.conn.clone(), verifier);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness whose HTTP state reports these outbox consumer destinations.
+    pub async fn with_event_destinations(destinations: Vec<String>) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_event_destinations(destinations);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness with ADR 0064 app installs on or off (`ORGANIZATIONS_APP_INSTALLS_ENABLED`).
+    pub async fn with_app_installs(enabled: bool) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_app_installs(enabled);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness whose HTTP state carries a Platform Access port (operator binding
+    /// rotation, ADR 0058 A2).
+    pub async fn with_platform(
+        platform: std::sync::Arc<dyn organizations::provisioning::PlatformScopes>,
+    ) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier)
+            .with_provisioning(true)
+            .with_platform(Some(platform));
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness with owner-delivered exports configured (ADR 0068 A4): the at-rest keys
+    /// and the given notice builder.
+    pub async fn with_exports(
+        exports: Option<Arc<organizations::exports::ExportDelivery>>,
+    ) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_exports(exports);
         Some(Self {
             router: http::app(state),
             db,

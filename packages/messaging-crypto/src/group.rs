@@ -13,7 +13,7 @@ use openmls::prelude::{
     tls_codec::{Deserialize as _, Serialize as _},
     BasicCredential, GroupId, KeyPackage, KeyPackageIn, LeafNodeIndex, MlsGroup,
     MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn,
-    ProcessedMessageContent, ProtocolMessage, StagedWelcome,
+    ProcessedMessageContent, ProtocolMessage, Sender, StagedWelcome,
 };
 use uuid::Uuid;
 
@@ -32,6 +32,10 @@ pub enum GroupError {
     Refused,
     #[error("no such member device")]
     UnknownMember,
+    /// An external commit (RFC 9420 §12.4.3.2) whose joining device the caller has not
+    /// (yet) verified as a registered device of a member: nothing was merged.
+    #[error("the joining device is not verified")]
+    JoinerNotAllowed(Uuid),
 }
 
 /// The device's state of one MLS group.
@@ -56,6 +60,44 @@ pub enum Processed {
     CommitMerged { epoch: u64 },
     /// A proposal was received (stored by OpenMLS for a later commit).
     Proposal,
+    /// A verified external commit (a device joined by itself, RFC 9420 §12.4.3.2) was
+    /// merged. The caller's joiner policy accepted `device_id` with `signature_key`.
+    ExternalJoin {
+        epoch: u64,
+        device_id: Uuid,
+        signature_key: Vec<u8>,
+    },
+}
+
+/// The joining device of a staged external commit, after the checks the application must
+/// make (RFC 9420 §12.4.3.2; OpenMLS leaves them to the application): the joiner's leaf
+/// carries a CF Meet device credential, no pre-shared key is injected and a Remove
+/// proposal may only remove a leaf of the SAME device (a resync). An external commit can
+/// therefore never evict another device.
+fn external_joiner(
+    group: &MlsGroup,
+    staged: &openmls::prelude::StagedCommit,
+) -> Result<(Uuid, Vec<u8>), GroupError> {
+    let leaf = staged.update_path_leaf_node().ok_or(GroupError::Refused)?;
+    let credential =
+        BasicCredential::try_from(leaf.credential().clone()).map_err(|_| GroupError::Refused)?;
+    let device = binding::parse_device_credential_identity(credential.identity())
+        .ok_or(GroupError::Refused)?;
+    if staged.psk_proposals().next().is_some() || staged.add_proposals().next().is_some() {
+        return Err(GroupError::Refused);
+    }
+    for remove in staged.remove_proposals() {
+        let removed = group
+            .member_at(remove.remove_proposal().removed())
+            .ok_or(GroupError::Refused)?;
+        let same = BasicCredential::try_from(removed.credential)
+            .ok()
+            .and_then(|c| binding::parse_device_credential_identity(c.identity()));
+        if same != Some(device) {
+            return Err(GroupError::Refused);
+        }
+    }
+    Ok((device, leaf.signature_key().as_slice().to_vec()))
 }
 
 /// A Commit and, when devices were added, the Welcome for them.
@@ -258,6 +300,70 @@ impl Device {
         Ok(ClientGroup { group })
     }
 
+    /// The group's current GroupInfo (RFC 9420 §12.4.3), signed by this device, with the
+    /// ratchet tree and the `external_pub` extension: what another device of a member needs
+    /// to join by an external commit. It holds PUBLIC material only (tree public keys,
+    /// credentials, the group context and the external HPKE public key).
+    pub fn export_group_info(&self, group: &ClientGroup) -> Result<Vec<u8>, GroupError> {
+        group
+            .group
+            .export_group_info(self.provider().crypto(), self.signer(), true)
+            .map_err(|_| GroupError::Refused)?
+            .tls_serialize_detached()
+            .map_err(|_| GroupError::Refused)
+    }
+
+    /// Joins a group by itself from its GroupInfo (an external commit, RFC 9420
+    /// §12.4.3.2): no other member has to be online. Returns the group, already at the new
+    /// epoch, and the commit to submit (created in the GroupInfo's epoch). If the Delivery
+    /// Service refuses it (another commit won the epoch), discard the returned group and
+    /// try again from the newer GroupInfo. Members accept the commit only for a device
+    /// their joiner policy verified ([`Device::process_with_joiners`]).
+    pub fn join_by_external_commit(
+        &self,
+        group_info: &[u8],
+    ) -> Result<(ClientGroup, CommitOutput), GroupError> {
+        let message =
+            MlsMessageIn::tls_deserialize_exact(group_info).map_err(|_| GroupError::Malformed)?;
+        let MlsMessageBodyIn::GroupInfo(info) = message.extract() else {
+            return Err(GroupError::Malformed);
+        };
+        if info.ciphersuite() != MANDATORY_CIPHERSUITE {
+            return Err(GroupError::Refused);
+        }
+        let epoch = info.epoch().as_u64();
+        let config = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+        let (group, bundle) = MlsGroup::external_commit_builder()
+            .with_config(config)
+            .build_group(self.provider(), info, self.credential())
+            .map_err(|_| GroupError::Refused)?
+            .load_psks(self.provider().storage())
+            .map_err(|_| GroupError::Refused)?
+            .build(
+                self.provider().rand(),
+                self.provider().crypto(),
+                self.signer(),
+                |_| true,
+            )
+            .map_err(|_| GroupError::Refused)?
+            .finalize(self.provider())
+            .map_err(|_| GroupError::Refused)?;
+        let commit = bundle
+            .commit()
+            .tls_serialize_detached()
+            .map_err(|_| GroupError::Refused)?;
+        Ok((
+            ClientGroup { group },
+            CommitOutput {
+                commit,
+                welcome: None,
+                epoch,
+            },
+        ))
+    }
+
     /// Encrypts `plaintext` as an application message authenticated with `aad` (the
     /// CF Meet AAD of [`binding::application_message_aad`]).
     pub fn encrypt(
@@ -279,11 +385,27 @@ impl Device {
     }
 
     /// Processes one message relayed by the Delivery Service: decrypts an application
-    /// message or verifies and merges a commit.
+    /// message or verifies and merges a commit. An external commit passes the protocol
+    /// checks of [`external_joiner`] and is merged; callers that can verify the joining
+    /// device against the device directory use [`Device::process_with_joiners`].
     pub fn process(
         &self,
         group: &mut ClientGroup,
         encoded: &[u8],
+    ) -> Result<Processed, GroupError> {
+        self.process_with_joiners(group, encoded, |_: Uuid, _: &[u8]| true)
+    }
+
+    /// [`Device::process`] with a joiner policy: an external commit is merged only when
+    /// `joiner_allowed(device_id, signature_key)` accepts its joining device (a registered,
+    /// ACTIVE device of a principal that is a member, with exactly that key). Otherwise
+    /// nothing is merged and [`GroupError::JoinerNotAllowed`] names the device, so the
+    /// caller can verify it and process the commit again.
+    pub fn process_with_joiners(
+        &self,
+        group: &mut ClientGroup,
+        encoded: &[u8],
+        joiner_allowed: impl Fn(Uuid, &[u8]) -> bool,
     ) -> Result<Processed, GroupError> {
         let message =
             MlsMessageIn::tls_deserialize_exact(encoded).map_err(|_| GroupError::Malformed)?;
@@ -295,6 +417,7 @@ impl Device {
             .process_message(self.provider(), protocol)
             .map_err(|_| GroupError::Refused)?;
         let aad = processed.aad().to_vec();
+        let external = matches!(processed.sender(), Sender::NewMemberCommit);
         if matches!(
             processed.content(),
             ProcessedMessageContent::ApplicationMessage(_)
@@ -318,6 +441,21 @@ impl Device {
                 aad,
                 plaintext: app.into_bytes(),
             }),
+            ProcessedMessageContent::StagedCommitMessage(staged) if external => {
+                let (device_id, signature_key) = external_joiner(&group.group, &staged)?;
+                if !joiner_allowed(device_id, &signature_key) {
+                    return Err(GroupError::JoinerNotAllowed(device_id));
+                }
+                group
+                    .group
+                    .merge_staged_commit(self.provider(), *staged)
+                    .map_err(|_| GroupError::Refused)?;
+                Ok(Processed::ExternalJoin {
+                    epoch: group.epoch(),
+                    device_id,
+                    signature_key,
+                })
+            }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
                 group
                     .group

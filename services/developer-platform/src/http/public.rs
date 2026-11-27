@@ -120,6 +120,14 @@ pub fn routes() -> Router<AppState> {
             axum::routing::put(service_account_limits),
         )
         .route(
+            "/environments/:environment_id/credential-deliveries",
+            get(list_credential_deliveries),
+        )
+        .route(
+            "/environments/:environment_id/credential-deliveries/:delivery_ref/reveal",
+            post(reveal_credential_delivery),
+        )
+        .route(
             "/environments/:environment_id/credentials/:credential_id",
             get(get_credential),
         )
@@ -217,6 +225,55 @@ pub fn routes() -> Router<AppState> {
             "/environments/:environment_id/service-accounts/:service_account_id/resume",
             post(resume_service_account),
         )
+}
+
+/// ADR 0062 / 0063 routes, registered only while their flag is on (off: exactly today's
+/// 404 / 405 answers). Each handler checks its flag again.
+pub fn build_routes(build: crate::config::BuildFeatures) -> Router<AppState> {
+    let mut r = Router::new();
+    if build.users_api {
+        r = r
+            .route("/users", get(list_users).post(create_user))
+            .route("/users/tokens", post(upsert_user_token))
+            .route(
+                "/users/:user_id",
+                get(get_user).patch(update_user).delete(delete_user),
+            )
+            .route(
+                "/users/:user_id/revoke-sessions",
+                post(revoke_user_sessions),
+            )
+            .route("/users/:user_id/tokens", post(issue_user_token))
+            .route("/environments/:environment_id/users", get(console_users));
+    }
+    if build.allowed_origins {
+        r = r.route(
+            "/environments/:environment_id/allowed-origins",
+            get(get_allowed_origins).put(put_allowed_origins),
+        );
+    }
+    if build.test_tokens {
+        r = r.route(
+            "/environments/:environment_id/test-user-tokens",
+            post(issue_test_user_token),
+        );
+    }
+    if build.push_credentials {
+        r = r
+            .route(
+                "/environments/:environment_id/push-credentials",
+                get(list_push_credentials).post(create_push_credential),
+            )
+            .route(
+                "/environments/:environment_id/push-credentials/:credential_ref",
+                axum::routing::delete(delete_push_credential),
+            )
+            .route(
+                "/environments/:environment_id/push-credentials/:credential_ref/verify",
+                post(verify_push_credential),
+            );
+    }
+    r
 }
 
 /// Authenticates the gateway hop and resolves the caller (human or machine).
@@ -922,6 +979,27 @@ async fn create_credential(
     Ok(no_store(reply(out)))
 }
 
+/// ADR 0068 A4: owner-delivered keys waiting for their one reveal.
+async fn list_credential_deliveries(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(env): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        control::credentials::list_deliveries(&s, &c, env).await?,
+    ))
+}
+
+/// ADR 0068 A4: the ONE reveal (no-store; never wrapped in an idempotent replay).
+async fn reveal_credential_delivery(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((env, delivery)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Response> {
+    let out = control::credentials::reveal_delivery(&s, &c, env, delivery).await?;
+    Ok(no_store(Json(out).into_response()))
+}
+
 async fn list_credentials(
     State(s): State<AppState>,
     c: Caller,
@@ -1176,6 +1254,236 @@ async fn compat_limits(
 ) -> ApiResult<Json<Value>> {
     let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
     Ok(Json(crate::ledger::views::compat_limits(&s, &c, q).await?))
+}
+
+// ---------------------------------------------------------------------------------------
+// ADR 0062 / 0063 — partner users, user tokens, allowed websites, push credentials
+// ---------------------------------------------------------------------------------------
+
+/// The idempotency scope of a Users API mutation: the acting service account and the
+/// credential's environment.
+fn users_scope(c: &Caller, op: &str) -> String {
+    let env = match &c.principal {
+        Principal::Machine(m) => m.context.environment_id.to_string(),
+        Principal::Human(_) => "console".into(),
+    };
+    format!("{}:{env}:{op}", c.actor_ref())
+}
+
+fn parse<T: serde::de::DeserializeOwned>(body: &Value) -> ApiResult<T> {
+    serde_json::from_value(body.clone()).map_err(|_| ApiError(ErrorCode::ValidationError))
+}
+
+async fn list_users(
+    State(s): State<AppState>,
+    c: Caller,
+    q: Result<Query<control::users::ListUsersQuery>, axum::extract::rejection::QueryRejection>,
+) -> ApiResult<Json<Value>> {
+    let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    Ok(Json(control::users::list(&s, &c, q).await?))
+}
+
+async fn create_user(
+    State(s): State<AppState>,
+    c: Caller,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let parsed: control::users::CreateUser = parse(&body)?;
+    let scope = users_scope(&c, "users.create");
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        idempotency::keep,
+        || control::users::create(&s, &c, parsed),
+    )
+    .await?;
+    Ok(reply(out))
+}
+
+async fn get_user(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::users::get(&s, &c, id).await?))
+}
+
+async fn update_user(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::users::update(&s, &c, id, &body).await?))
+}
+
+async fn delete_user(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
+    control::users::delete(&s, &c, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn revoke_user_sessions(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::users::revoke_sessions(&s, &c, id).await?))
+}
+
+async fn issue_user_token(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let parsed: control::users::IssueToken = parse(&body)?;
+    let scope = users_scope(&c, &format!("{id}:user_tokens.issue"));
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    // A replay returns the token's metadata and NEVER the token again.
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        control::users::redact_token,
+        || control::users::issue_token(&s, &c, id, parsed),
+    )
+    .await?;
+    Ok(no_store(reply(out)))
+}
+
+async fn upsert_user_token(
+    State(s): State<AppState>,
+    c: Caller,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let parsed: control::users::UpsertToken = parse(&body)?;
+    let scope = users_scope(&c, "user_tokens.upsert");
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        control::users::redact_token,
+        || control::users::upsert_token(&s, &c, parsed),
+    )
+    .await?;
+    Ok(no_store(reply(out)))
+}
+
+async fn console_users(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    q: Result<Query<control::users::ConsoleUsersQuery>, axum::extract::rejection::QueryRejection>,
+) -> ApiResult<Json<Value>> {
+    let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    Ok(Json(control::users::console_list(&s, &c, id, q).await?))
+}
+
+async fn issue_test_user_token(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let parsed: control::users::UpsertToken = parse(&body)?;
+    let scope = format!("{}:{id}:user_tokens.test", c.actor_ref());
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        control::users::redact_token,
+        || control::users::console_test_token(&s, &c, id, parsed),
+    )
+    .await?;
+    Ok(no_store(reply(out)))
+}
+
+async fn get_allowed_origins(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::allowed_origins::get(&s, &c, id).await?))
+}
+
+async fn put_allowed_origins(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    Json(body): Json<control::allowed_origins::PutAllowedOrigins>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::allowed_origins::put(&s, &c, id, body).await?))
+}
+
+async fn list_push_credentials(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(control::push_credentials::list(&s, &c, id).await?))
+}
+
+async fn create_push_credential(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let scope = format!("{}:{id}:push_credentials.create", c.actor_ref());
+    // Only a digest of the request (which holds the secret) is kept for the replay check;
+    // the stored response is metadata only.
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        idempotency::keep,
+        || control::push_credentials::create(&s, &c, id, &body),
+    )
+    .await?;
+    Ok(no_store(reply(out)))
+}
+
+async fn delete_push_credential(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((id, credential_ref)): Path<(Uuid, Uuid)>,
+) -> ApiResult<StatusCode> {
+    control::push_credentials::delete(&s, &c, id, credential_ref).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn verify_push_credential(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((id, credential_ref)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        control::push_credentials::verify(&s, &c, id, credential_ref).await?,
+    ))
 }
 
 use sea_orm::ConnectionTrait;

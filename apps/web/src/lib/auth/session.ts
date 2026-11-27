@@ -6,6 +6,7 @@
 import Cookies from "js-cookie";
 import { createSessionManager, type SessionLocks } from "./session-core";
 import { HINT_COOKIE, readCookie } from "./session-cookies";
+import { accountDevice } from "./account-device";
 
 /** Pre-Section 17 cookie names (JS-readable); read once to migrate, then removed. */
 const LEGACY_ACCESS = "access_token";
@@ -16,6 +17,8 @@ const browser = () => typeof window !== "undefined" && typeof document !== "unde
 
 export const accountSession = createSessionManager({
   fetchImpl: (url, init) => fetch(url, init),
+  // A device-bound sign-in refreshes only with a proof of this browser's device key.
+  refreshProof: () => (browser() ? accountDevice.refreshProof() : Promise.resolve(null)),
   readHint: () => (browser() ? readCookie(document.cookie, HINT_COOKIE) : null),
   locks: () => {
     if (!browser() || !("locks" in navigator) || !navigator.locks) return null;

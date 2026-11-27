@@ -1,0 +1,112 @@
+{
+  "description": "One holder's limit override.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "override_id",
+    "holder_kind",
+    "holder_id",
+    "override_state",
+    "limits",
+    "reason_code",
+    "changed_by",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "override_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "holder_kind": {
+      "enum": [
+        "USER",
+        "ORGANIZATION"
+      ]
+    },
+    "holder_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "override_state": {
+      "enum": [
+        "ACTIVE",
+        "REVOKED"
+      ]
+    },
+    "limits": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Plan limits (an override sets a subset; an absent limit is null).",
+      "additionalProperties": false,
+      "required": [
+        "meeting_minutes",
+        "participants",
+        "recording",
+        "storage_bytes",
+        "attachment_bytes",
+        "webinars"
+      ],
+      "properties": {
+        "meeting_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "participants": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recording": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "storage_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "attachment_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "webinars": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "changed_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+      "description": "The HQ staff member (hq:<sub>)."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    }
+  }
+}

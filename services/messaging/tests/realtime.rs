@@ -6,6 +6,8 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+
 use std::time::Duration;
 
 use axum::http::StatusCode;
@@ -720,6 +722,13 @@ async fn push_payloads_are_metadata_only_and_revoked_devices_get_none() {
         )
         .await;
     assert_eq!(r.json["pushDeliveryConfigured"], true, "{}", r.text);
+    // No Web Push adapter here: the configuration says so and publishes no key.
+    let cfg = h
+        .get(&c, Some(bob.principal), "/v1/messaging/push/configuration")
+        .await;
+    assert_eq!(cfg.status, StatusCode::OK, "{}", cfg.text);
+    assert_eq!(cfg.json["platforms"]["WEB_PUSH"], false, "{}", cfg.text);
+    assert_eq!(cfg.json["webPush"], Value::Null, "{}", cfg.text);
     let r2 = h
         .put(
             &c,
@@ -772,6 +781,257 @@ async fn push_payloads_are_metadata_only_and_revoked_devices_get_none() {
         "the database refuses content in push payloads"
     );
     let _ = conv;
+}
+
+/// A slow push provider: every call takes 40 s of the harness's (manual) clock, so two
+/// calls outlast the 60 s claim lease. During its second call it lets a SECOND dispatcher
+/// (another replica) run a full pass and waits for it to finish. Records every send.
+#[derive(Default)]
+struct SlowPush {
+    clock: std::sync::OnceLock<messaging::domain::ManualClock>,
+    calls: std::sync::Mutex<usize>,
+    sent: std::sync::Mutex<Vec<Value>>,
+    second_dispatcher: tokio::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
+}
+
+#[async_trait::async_trait]
+impl messaging::realtime::push::PushProvider for SlowPush {
+    fn name(&self) -> &'static str {
+        "slow-test"
+    }
+
+    fn supports(&self, platform: &str) -> bool {
+        platform == "LOCAL_TEST"
+    }
+
+    async fn send(
+        &self,
+        _platform: &str,
+        _handle: &str,
+        payload: &Value,
+    ) -> messaging::realtime::push::PushOutcome {
+        let call = {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            *calls
+        };
+        self.sent.lock().unwrap().push(payload.clone());
+        self.clock
+            .get()
+            .unwrap()
+            .advance(chrono::Duration::seconds(40));
+        if call == 2 {
+            if let Some((go, done)) = self.second_dispatcher.lock().await.take() {
+                go.send(()).unwrap();
+                done.await.unwrap();
+            }
+        }
+        messaging::realtime::push::PushOutcome::Sent
+    }
+}
+
+/// S-8 (roadmap N0-4): a dispatcher claims a batch under a 60 s lease and calls a slow
+/// provider job by job. When the lease of a job further down the batch lapses, a second
+/// dispatcher re-claims it and sends it; the first one must then skip it (the lease token
+/// is the fence) — every job is sent exactly once.
+#[tokio::test]
+async fn a_slow_provider_never_causes_duplicate_pushes_across_dispatchers() {
+    let provider = std::sync::Arc::new(SlowPush::default());
+    let Some(rt) = Rt::with_push(test_settings(), provider.clone()).await else {
+        return;
+    };
+    let h = &rt.h;
+    provider.clock.set(h.clock.clone()).ok().unwrap();
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let bob_device = h.active_device(&c, bob).await.device_id();
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!("/v1/messaging/devices/{bob_device}/push-registration"),
+            json!({ "platform": "LOCAL_TEST", "handle": "local-test-handle-slow" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let mut messages = Vec::new();
+    for text in ["one", "two", "three"] {
+        let m = h.send_managed(&c, &conv, alice, text).await;
+        assert_eq!(m.status, StatusCode::CREATED, "{}", m.text);
+        messages.push(m.json["messageId"].as_str().unwrap().to_string());
+    }
+    for m in &messages {
+        assert_eq!(push_jobs_of_message(h, m).await, 1);
+    }
+
+    let (go_tx, go_rx) = tokio::sync::oneshot::channel();
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    *provider.second_dispatcher.lock().await = Some((go_tx, done_rx));
+    let state = h.state.clone();
+    let second = tokio::spawn(async move {
+        go_rx.await.unwrap();
+        let report = messaging::realtime::push::dispatch_due(&state, 100, 3)
+            .await
+            .unwrap();
+        done_tx.send(()).unwrap();
+        report
+    });
+    let first = messaging::realtime::push::dispatch_due(&h.state, 100, 3)
+        .await
+        .unwrap();
+    let second = second.await.unwrap();
+    assert_eq!(first.claimed, 3, "{first:?}");
+    // The second replica re-claimed exactly the job whose lease had lapsed.
+    assert_eq!((second.claimed, second.sent), (1, 1), "{second:?}");
+    assert_eq!((first.sent, first.lease_lost), (2, 1), "{first:?}");
+
+    let sent = provider.sent.lock().unwrap().clone();
+    let distinct: BTreeSet<String> = sent.iter().map(Value::to_string).collect();
+    assert_eq!(sent.len(), 3, "{sent:?}");
+    assert_eq!(distinct.len(), 3, "no push was sent twice: {sent:?}");
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_push_jobs WHERE status = 'SENT' AND attempts = 1")
+            .await,
+        3
+    );
+}
+
+/// Waits until the outbox published the `messaging.message.created` event of `message`
+/// (push fan-out runs before publication), then returns the push jobs it created.
+async fn push_jobs_of_message(h: &Harness, message: &str) -> i64 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let event = format!(
+        "SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.message.created' \
+           AND payload->>'message_id' = '{message}' AND published_at IS NOT NULL"
+    );
+    while h.scalar(&event).await == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the message event was never published"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    h.scalar(&format!(
+        "SELECT count(*) FROM messaging_push_jobs j JOIN messaging_outbox_events e ON e.id = j.event_id \
+          WHERE e.payload->>'message_id' = '{message}'"
+    ))
+    .await
+}
+
+/// S-4 (roadmap N0-5): `notify: false` is honoured only for mirrored / migrated writes of a
+/// delegated first-party backend (`messaging-application.delegate`). An end-user client
+/// token or a customer credential sending it still creates the recipients' push jobs;
+/// the field stays accepted.
+#[tokio::test]
+async fn notify_false_is_honoured_only_for_delegated_callers() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}/messages");
+    let bob_device = h.active_device(&c, bob).await.device_id();
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!("/v1/messaging/devices/{bob_device}/push-registration"),
+            json!({ "platform": "LOCAL_TEST", "handle": "local-test-handle-notify" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let alice_device = Member {
+        principal: alice,
+        device: h.active_device(&c, alice).await,
+        group: None,
+        cursor: 0,
+    };
+    let silent =
+        |text: &str| json!({ "clientMessageId": Uuid::new_v4(), "text": text, "notify": false });
+
+    // 1. An end-user device with its client token.
+    let token = rt.token(&c, &alice_device).await;
+    let by_client = h
+        .send(
+            axum::http::Method::POST,
+            None,
+            None,
+            &path,
+            Some(silent("from a client token")),
+            &[("authorization", &format!("CF-Client-Token {token}"))],
+        )
+        .await;
+    assert_eq!(by_client.status, StatusCode::CREATED, "{}", by_client.text);
+    let id = by_client.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(
+        push_jobs_of_message(h, &id).await,
+        1,
+        "a client token cannot suppress the recipient's push"
+    );
+
+    // 2. A customer backend credential on /v1 (no delegated mirror).
+    let by_customer = h
+        .post(&c, Some(alice), &path, silent("from a customer credential"))
+        .await;
+    assert_eq!(
+        by_customer.status,
+        StatusCode::CREATED,
+        "{}",
+        by_customer.text
+    );
+    let id = by_customer.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(push_jobs_of_message(h, &id).await, 1);
+
+    // 3. The delegated mirror (first-party backend through a peer service): honoured.
+    let alice_s = alice.to_string();
+    let by_delegate = h
+        .call_internal(
+            &peers().meeting,
+            axum::http::Method::POST,
+            &format!("/internal/v1/delegated{path}"),
+            Some(silent("a mirrored write")),
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", alice_s.as_str())],
+        )
+        .await;
+    assert_eq!(
+        by_delegate.status,
+        StatusCode::CREATED,
+        "{}",
+        by_delegate.text
+    );
+    let id = by_delegate.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(
+        push_jobs_of_message(h, &id).await,
+        0,
+        "a delegated mirrored write keeps notify:false"
+    );
+    // ...and without the flag the delegated path still notifies.
+    let loud = h
+        .call_internal(
+            &peers().meeting,
+            axum::http::Method::POST,
+            &format!("/internal/v1/delegated{path}"),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "a normal write" })),
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", alice_s.as_str())],
+        )
+        .await;
+    assert_eq!(loud.status, StatusCode::CREATED, "{}", loud.text);
+    let id = loud.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(push_jobs_of_message(h, &id).await, 1);
+
+    let report = messaging::realtime::push::dispatch_due(&h.state, 100, 3)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 3, "{report:?}");
 }
 
 #[tokio::test]
@@ -1596,10 +1856,20 @@ async fn inbox_signals_cover_unsubscribed_and_new_conversations_without_content(
     loop {
         let f = ws.next_of("inbox.event").await;
         if f["conversationId"] == json!(second) {
-            assert!(
-                f["eventType"].as_str().unwrap().starts_with("member."),
+            // Signals are content-free hints. Under load the outbox may publish the
+            // conversation's creation only after Alice was added, so she can see that
+            // signal first; the membership signal must still follow.
+            let keys: BTreeSet<&str> = f.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(
+                keys,
+                BTreeSet::from(["conversationId", "eventSequence", "eventType", "type"]),
                 "{f}"
             );
+            let kind = f["eventType"].as_str().unwrap();
+            if kind == "conversation.created" {
+                continue;
+            }
+            assert!(kind.starts_with("member."), "{f}");
             break;
         }
     }
@@ -1632,4 +1902,68 @@ async fn inbox_signals_cover_unsubscribed_and_new_conversations_without_content(
 
     // A principal outside every conversation hears nothing.
     other.quiet("inbox.event", Duration::from_millis(400)).await;
+}
+
+/// Gap audit A11: a client token issued by a first-party relay for one account session
+/// ends when that account session ends; the same principal's other sign-ins keep theirs.
+/// Only a first-party relay may bind a token to an account session.
+#[tokio::test]
+async fn gap_client_sessions_bound_to_an_account_session_end_only_with_it() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let alice = h.member(&c, 0).await;
+    let (laptop, phone) = (session_ref(0xa1), session_ref(0xa2));
+    for binding in [&laptop, &phone] {
+        let r = h
+            .post(
+                &c,
+                Some(alice.principal),
+                "/v1/messaging/client-tokens",
+                json!({ "deviceId": alice.device_id(), "accountSessionRef": binding }),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text);
+    }
+    let unbound = rt.token(&c, &alice).await;
+    let active = format!(
+        "SELECT count(*) FROM messaging_client_sessions WHERE principal_id = '{}' AND status = 'ACTIVE'",
+        alice.principal
+    );
+    assert_eq!(h.scalar(&active).await, 3);
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": laptop }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["revokedSessions"], 1, "{}", r.text);
+    assert_eq!(h.scalar(&active).await, 2, "only the laptop sign-in ended");
+    assert!(rt.ticket_with(&unbound).await.status.is_success());
+
+    // A third-party application cannot bind tokens to account sessions.
+    let third = h.first_party(false);
+    let bob = h.member(&third, 0).await;
+    let r = h
+        .post(
+            &third,
+            Some(bob.principal),
+            "/v1/messaging/client-tokens",
+            json!({ "deviceId": bob.device_id(), "accountSessionRef": laptop }),
+        )
+        .await;
+    assert_eq!(r.code(), "INSUFFICIENT_SCOPE", "{}", r.text);
+    // A malformed reference is refused.
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            "/v1/messaging/client-tokens",
+            json!({ "deviceId": alice.device_id(), "accountSessionRef": "nope" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 }

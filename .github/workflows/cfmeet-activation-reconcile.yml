@@ -1,0 +1,127 @@
+name: CF Meet production activation reconciliation
+
+on:
+  workflow_run:
+    workflows: ["CF Meet automatic production deploy"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only audit or approved activation
+        type: choice
+        required: true
+        default: audit
+        options: [audit, apply]
+      approved_operations:
+        description: Comma-separated safe activation operation names
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 60
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test production activation reconciler
+        run: cd infra/calling/production && python3 -m unittest -v test_activation_manager
+      - name: Authenticate to production VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 7 -H "$VPS_HOST" > "$HOME/.ssh/known_hosts"
+      - name: Check main and approvals
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          MODE: ${{ inputs.mode }}
+          MANUAL_APPROVED: ${{ inputs.approved_operations }}
+          AUTO_APPROVED: ${{ vars.CFMEET_AUTO_ACTIVATIONS }}
+          EVENT_TYPE: ${{ github.event_name }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          current=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+          test -n "$current"
+          if [[ "$EVENT_TYPE" == workflow_run ]]; then
+            if [[ "$SOURCE_SHA" != "$current" ]]; then
+              echo "SKIP_RECONCILE=true" >> "$GITHUB_ENV"
+              echo "A newer main release supersedes this run"
+              exit 0
+            fi
+            selected="$AUTO_APPROVED"
+            mode=auto
+          else
+            selected="$MANUAL_APPROVED"
+            mode="$MODE"
+          fi
+          [[ "$mode" == audit || "$mode" == apply || "$mode" == auto ]]
+          if [[ "$mode" == audit ]]; then selected=""; fi
+          if [[ "$mode" == apply && -z "$selected" ]]; then
+            echo "::error::Explicit approved operations are required"
+            exit 1
+          fi
+          [[ "$selected" =~ ^[a-z0-9,_-]*$ ]] || exit 1
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "test -f /opt/cfmeet-core/coordinated/journal.json"
+          echo "EXPECTED_SHA=$current" >> "$GITHUB_ENV"
+          echo "RECONCILE_MODE=$mode" >> "$GITHUB_ENV"
+          echo "APPROVED_OPERATIONS=$selected" >> "$GITHUB_ENV"
+      - name: Transfer and run activation manager on VPS
+        if: env.SKIP_RECONCILE != 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          current=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+          [[ "$current" == "$EXPECTED_SHA" ]] || { echo "::error::Main advanced"; exit 1; }
+          remote="/opt/cfmeet-core/activation-reconciliations/$EXPECTED_SHA/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          if [[ "$RECONCILE_MODE" != audit && -n "$APPROVED_OPERATIONS" ]]; then
+            command="apply $EXPECTED_SHA $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT $APPROVED_OPERATIONS"
+          else
+            command="audit $EXPECTED_SHA $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          fi
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "cd '$remote' && python3 -u activation_manager.py $command" | tee activation-audit.jsonl
+          python3 - <<'PY'
+          import json, os
+          records = [json.loads(s) for s in open('activation-audit.jsonl') if s.startswith('{"activationAudit":')]
+          if not records:
+              raise SystemExit('Missing activation audit result')
+          report = records[-1]['activationAudit']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write('## CF Meet VPS activation audit\n\n')
+              output.write('Deployed revision: ' + str(report['lastCompletedReleaseSha']) + '\n\n')
+              output.write('Matches main: ' + str(report['releaseMatchesMain']) + '\n\n')
+              output.write('| State | Count |\n|---|---:|\n')
+              for state, count in report['operationCounts'].items():
+                  output.write('| ' + state + ' | ' + str(count) + ' |\n')
+              output.write('\n### Ready for separate approval\n')
+              for op in report['readyForApproval']:
+                  output.write('- ' + op + '\n')
+          PY
+      - name: Upload full non-secret inventory
+        if: env.SKIP_RECONCILE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-activation-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: activation-audit.jsonl
+          retention-days: 30

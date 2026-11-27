@@ -2,7 +2,8 @@
 //!
 //! * `PRINCIPAL_ERASURE` — every message the principal sent (tombstoned `DELETED` /
 //!   `DATA_ERASURE` with its durable event, then purged), their unsent uploads, their
-//!   presence preference and shared last-seen time.
+//!   presence preference and shared last-seen time, and their devices' push
+//!   registrations (provider handles) with every push job for those devices (S-7).
 //! * `CONVERSATION_PURGE` — every message and attachment of one conversation.
 //!
 //! Legal holds win: a held message is still tombstoned (no member sees it again) but its
@@ -88,6 +89,18 @@ pub async fn create(
     request: DeletionRequest,
 ) -> Result<Value> {
     let now = state.now();
+    check(&state.db, ctx, &request).await?;
+    let id = Uuid::new_v4();
+    create_in(&state.db, ctx, id, &request, now).await?;
+    get(state, ctx, id).await
+}
+
+/// Validates a deletion request (no change).
+pub(crate) async fn check<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    request: &DeletionRequest,
+) -> Result<()> {
     match (
         request.kind.as_str(),
         request.principal_id,
@@ -95,7 +108,7 @@ pub async fn create(
     ) {
         ("PRINCIPAL_ERASURE", Some(_), None) => {}
         ("CONVERSATION_PURGE", None, Some(c)) => {
-            service::load(&state.db, ctx, c, false)
+            service::load(db, ctx, c, false)
                 .await?
                 .ok_or(Error::code(ErrorCode::NotFound))?;
         }
@@ -105,9 +118,21 @@ pub async fn create(
             ))
         }
     }
-    let id = Uuid::new_v4();
+    Ok(())
+}
+
+/// Registers a [`check`]ed request (PENDING; the leased worker executes it, legal holds
+/// win) and its audit entry, on `txn`. Also used by the admin bridge
+/// ([`crate::operator_commands`]).
+pub(crate) async fn create_in<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    request: &DeletionRequest,
+    now: DateTime<Utc>,
+) -> Result<()> {
     db::exec(
-        &state.db,
+        txn,
         "INSERT INTO messaging_deletion_requests (id, tenant_id, application_id, environment_id, kind, principal_id, conversation_id, \
            requested_by_credential_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         vec![
@@ -124,7 +149,7 @@ pub async fn create(
     )
     .await?;
     audit::record(
-        &state.db,
+        txn,
         AuditEntry {
             ctx,
             principal_id: None,
@@ -137,7 +162,7 @@ pub async fn create(
         now,
     )
     .await?;
-    get(state, ctx, id).await
+    Ok(())
 }
 
 pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Value> {
@@ -262,8 +287,37 @@ async fn process(state: &AppState, d: &DeletionRow) -> Result<Counts> {
         ] {
             db::exec(&state.db, sql, vec![d.environment_id.into(), p.into()]).await?;
         }
+        if db::scalar_i64(&state.db, "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename='messaging_send_block_projection'", vec![]).await? > 0 {
+            db::exec(&state.db, "DELETE FROM messaging_send_block_projection WHERE environment_id=$1 AND (actor_principal_id=$2 OR target_principal_id=$2)", vec![d.environment_id.into(),p.into()]).await?;
+        }
+        erase_push(state, d.environment_id, p).await?;
     }
     Ok(counts)
+}
+
+/// S-7: the principal's push registrations (provider handles) and every push job for
+/// their devices, in one transaction. The registrations are locked first, so a push
+/// fan-out committing a new job for one of them waits and then fails its foreign key
+/// (and is retried, finding no registration) instead of failing this erasure. Device
+/// records themselves stay (MLS protocol state, like handshake records).
+async fn erase_push(state: &AppState, environment_id: Uuid, principal_id: Uuid) -> Result<()> {
+    state
+        .db
+        .transaction::<_, (), Error>(move |txn| {
+            Box::pin(async move {
+                let args = || vec![environment_id.into(), principal_id.into()];
+                for sql in [
+                    "SELECT 1 FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2 FOR UPDATE",
+                    "DELETE FROM messaging_push_jobs WHERE registration_id IN                        (SELECT id FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2)                        OR device_id IN (SELECT id FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2)",
+                    "DELETE FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2",
+                ] {
+                    db::exec(txn, sql, args()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .map_err(Error::from)
 }
 
 /// Runs at most `batch` pending requests (leased).

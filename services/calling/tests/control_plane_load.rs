@@ -52,6 +52,25 @@ fn scale() -> usize {
         .unwrap_or(1)
 }
 
+/// C9 caps call creation per principal at 60 a minute by default, so every scenario here
+/// that places a burst of Calls as ONE principal gives that principal a configured
+/// creation rate, as a deployment does for an automated dialer (a configured principal
+/// rate replaces the default; `quota_levels.rs` certifies both). The window is still
+/// counted on every creation, so its cost stays inside the measurement.
+async fn allow_dialer_burst(a: &AppWorld, principal: calling::domain::PrincipalId) {
+    a.h()
+        .platform
+        .set_principal_limits(
+            principal,
+            calling::platform::limits::LimitValues {
+                requests_per_minute: Some(100_000),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
 fn created(r: &TestResponse) -> bool {
     r.status == StatusCode::CREATED
 }
@@ -80,6 +99,7 @@ async fn call_creation_and_authorization_throughput() {
     };
     privacy.allow(a.w.initiator.id().as_uuid());
     privacy.allow(a.w.recipient.id().as_uuid());
+    allow_dialer_burst(&a, a.w.initiator.id()).await;
     let caller = a.device(&a.w.initiator, "load-caller").await;
     a.device(&a.w.recipient, "load-callee").await;
     let session = Uuid::new_v4();
@@ -134,10 +154,10 @@ async fn call_creation_and_authorization_throughput() {
     assert_eq!(report.error_rate, 0.0);
     assert!(report.max_db_connections <= POOL);
     // Invariants: one Call per request, each authorized exactly once by Privacy Relay
-    // with its decision recorded, every Call ringing.
+    // with its decision recorded, every Call offered (DIALING until a device acknowledges).
     assert!(responses
         .iter()
-        .all(|r| r.json["call"]["state"] == "RINGING"));
+        .all(|r| r.json["call"]["state"] == "DIALING"));
     let total = (n + n2) as i64;
     assert_eq!(
         scalar_i64(a.h().conn(), "SELECT count(*) FROM calls").await,
@@ -162,6 +182,7 @@ async fn concurrent_multi_device_ringing_fanout() {
     let Some(a) = AppWorld::new().await else {
         return;
     };
+    allow_dialer_burst(&a, a.w.initiator.id()).await;
     let caller = a.device(&a.w.initiator, "fanout-caller").await;
     let mut targets = Vec::new();
     for i in 0..3 {
@@ -199,7 +220,7 @@ async fn concurrent_multi_device_ringing_fanout() {
                 a.h().conn(),
                 &format!(
                     "SELECT count(DISTINCT endpoint_id) FROM call_invitations \
-                      WHERE call_id = '{call}' AND status = 'RINGING'"
+                      WHERE call_id = '{call}' AND status = 'PENDING'"
                 )
             )
             .await,
@@ -326,6 +347,7 @@ async fn outbox_backlog_drain_by_the_worker() {
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     a.device(&a.w.recipient, "backlog-callee").await;
+    allow_dialer_burst(a, a.w.initiator.id()).await;
     // Backlog: Calls created and cancelled while no publication worker runs.
     let calls = 60 * scale();
     let caller = d.caller.clone();

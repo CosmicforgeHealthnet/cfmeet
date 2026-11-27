@@ -185,6 +185,17 @@ pub struct RegistrationProfile {
     pub custom_fields: Vec<CustomRegistrationField>,
     pub token_ttl_hours: u32,
     pub token_max_uses: u32,
+    /// Gap audit M10: most active registrations accepted (per occurrence, or for the
+    /// whole series); 0 = no limit. At most 100000.
+    #[serde(default)]
+    pub capacity: u32,
+    /// Gap audit M10: registration closes this many minutes before the occurrence's
+    /// scheduled start (0 = open until the occurrence ends).
+    #[serde(default)]
+    pub closes_minutes_before_start: u32,
+    /// Gap audit M10: registration closes at this time, whatever the occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -293,6 +304,9 @@ impl ProfilePolicy {
                 custom_fields: vec![],
                 token_ttl_hours: 72,
                 token_max_uses: 5,
+                capacity: 0,
+                closes_minutes_before_start: 0,
+                deadline: None,
             },
             roles: RoleMappingProfile {
                 external_role_mapping: BTreeMap::new(),
@@ -816,6 +830,11 @@ pub fn validate(p: &ProfilePolicy) -> Result<(), String> {
         || !(1..=100).contains(&p.registration.token_max_uses)
     {
         return Err("registration token limits are out of range".into());
+    }
+    if p.registration.capacity > 100_000
+        || p.registration.closes_minutes_before_start > 60 * 24 * 30
+    {
+        return Err("registration capacity or closing time is out of range".into());
     }
     if p.registration.custom_fields.len() > 10 {
         return Err("at most 10 custom registration fields".into());

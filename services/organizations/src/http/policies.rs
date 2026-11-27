@@ -4,7 +4,7 @@
 use axum::{
     body::Bytes,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use cf_service_auth::InternalPermission;
@@ -13,17 +13,22 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::{authorize, middleware::Caller, parse, respond};
+use super::{
+    admin_bridge::{self, command, BridgeCommand, Outcome, Risk, Subject},
+    authorize,
+    middleware::Caller,
+    parse, respond,
+};
 use crate::{
     db,
-    domain::{Capability, Role},
+    domain::{Capability, LifecycleStatus, Role},
     error::{ApiError, ApiResult, ErrorCode},
     policy::{changed_keys, merge, PolicyDocument, OWNER_ONLY_SECTIONS},
     state::AppState,
-    store::{self, Event, OrgRow, PolicyRow},
+    store::{self, Event, OpContext, OrgRow, PolicyRow},
 };
 
-fn policy_json(org: &OrgRow, row: Option<&PolicyRow>, doc: &PolicyDocument) -> Value {
+pub(super) fn policy_json(org: &OrgRow, row: Option<&PolicyRow>, doc: &PolicyDocument) -> Value {
     json!({
         "schemaVersion": 1,
         "organizationId": org.id,
@@ -114,6 +119,13 @@ pub async fn update(
     if !req.policy.is_object() {
         return Err(ApiError::validation("policy must be an object"));
     }
+    // ADR 0064: the `apps` section exists only while app installs are enabled (off: refused
+    // exactly like any unknown section).
+    if !state.app_installs_enabled && req.policy.get("apps").is_some() {
+        return Err(ApiError::validation(
+            "the policy has a missing, unknown or mistyped field",
+        ));
+    }
     let txn = state.db.begin().await?;
     let access = authorize(&txn, id, user, Capability::PoliciesManage, true).await?;
     let row = store::policy_row(&txn, id, true).await?;
@@ -144,8 +156,27 @@ pub async fn update(
     }
     let now = db::now(&txn).await?;
     let ctx = caller.as_user();
+    let stored = store_policy(&txn, &ctx, now, id, revision, &after, &changed, Some(user)).await?;
+    let doc = policy_json(&access.org, Some(&stored), &next);
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, doc))
+}
+
+/// Stores the merged document at `revision + 1` (compare-and-swap on `revision`) with its
+/// `policy.updated` event and audit.
+#[allow(clippy::too_many_arguments)]
+async fn store_policy(
+    txn: &sea_orm::DatabaseTransaction,
+    ctx: &OpContext,
+    now: chrono::DateTime<chrono::Utc>,
+    id: Uuid,
+    revision: i64,
+    after: &Value,
+    changed: &[String],
+    updated_by: Option<Uuid>,
+) -> Result<PolicyRow, ApiError> {
     let stored: PolicyRow = db::one(
-        &txn,
+        txn,
         "INSERT INTO organization_policies (organization_id, revision, document, updated_by, created_at, updated_at) \
          VALUES ($1, $2, $3, $4, $5, $5) \
          ON CONFLICT (organization_id) DO UPDATE SET revision = EXCLUDED.revision, document = EXCLUDED.document, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at \
@@ -155,7 +186,7 @@ pub async fn update(
             id.into(),
             (revision + 1).into(),
             after.clone().into(),
-            user.into(),
+            updated_by.into(),
             now.into(),
             revision.into(),
         ],
@@ -163,8 +194,8 @@ pub async fn update(
     .await?
     .ok_or(ApiError::new(ErrorCode::VersionConflict))?;
     store::emit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
         Event {
             organization_id: id,
@@ -177,8 +208,8 @@ pub async fn update(
     )
     .await?;
     store::audit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
         Some(id),
         "policy.updated",
@@ -187,7 +218,123 @@ pub async fn update(
         json!({ "fromRevision": revision, "toRevision": stored.revision, "changedKeys": changed }),
     )
     .await?;
-    let doc = policy_json(&access.org, Some(&stored), &next);
+    Ok(stored)
+}
+
+/// The admin bridge's answer for a policy change: `UPDATED` / `UNCHANGED` and the revision.
+fn policy_outcome(
+    state: &str,
+    organization: Uuid,
+    row: Option<&PolicyRow>,
+    changed: &[String],
+) -> Outcome {
+    let revision = row.map(|r| r.revision).unwrap_or(0);
+    Outcome::new(
+        state,
+        Some(revision),
+        json!({
+            "organizationId": organization,
+            "revision": revision,
+            "changedKeys": changed,
+            "updatedAt": row.map(|r| store::rfc3339(r.updated_at)),
+        }),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdminUpdateBody {
+    /// The current policy revision (0 = never stored: the defaults).
+    pub expected_version: Option<i64>,
+    pub policy: Value,
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/policies/change` `{expectedVersion, policy}`
+/// — the admin bridge's staff change of the typed policy (R3, two people; bridge only): the
+/// same partial merge and strict validation as an owner's change, compare-and-swap on the
+/// revision (`expectedVersion`; stale: 409 `VERSION_CONFLICT`). Staff may change every
+/// section, `delegatedAdministration` included (`updatedBy` is `null`: no CF Meet user).
+/// An archived organization is refused.
+pub async fn admin_change(
+    State(state): State<AppState>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let b = BridgeCommand::required(&caller, &headers, Risk::R3)?;
+    let (req, _): (AdminUpdateBody, Value) = parse(&body)?;
+    let expected = admin_bridge::expected_version(req.expected_version, 0)?;
+    if !req.policy.is_object() {
+        return Err(ApiError::validation("policy must be an object"));
+    }
+    if !state.app_installs_enabled && req.policy.get("apps").is_some() {
+        return Err(ApiError::validation(
+            "the policy has a missing, unknown or mistyped field",
+        ));
+    }
+    let txn = state.db.begin().await?;
+    if let Some(r) = admin_bridge::replayed(
+        &txn,
+        &b,
+        command::POLICIES_CHANGE,
+        Subject::Policy,
+        Some(id),
+    )
+    .await?
+    {
+        store::org(&txn, id, false)
+            .await?
+            .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+        let row = store::policy_row(&txn, id, false).await?;
+        txn.commit().await?;
+        return Ok(policy_outcome(&r.state, id, row.as_ref(), &[]).response());
+    }
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let row = store::policy_row(&txn, id, true).await?;
+    let revision = row.as_ref().map(|r| r.revision).unwrap_or(0);
+    admin_bridge::check_version(revision, expected)?;
+    let current = store::parse_policy(row.as_ref().map(|r| &r.document))?;
+    let before = current.to_json();
+    let mut merged = before.clone();
+    merge(&mut merged, &req.policy);
+    let next = PolicyDocument::parse(&merged).map_err(ApiError::validation)?;
+    let after = next.to_json();
+    let changed = changed_keys(&before, &after);
+    let now = db::now(&txn).await?;
+    let outcome = if changed.is_empty() {
+        policy_outcome("UNCHANGED", id, row.as_ref(), &changed)
+    } else {
+        let stored = store_policy(
+            &txn,
+            &caller.as_operator(),
+            now,
+            id,
+            revision,
+            &after,
+            &changed,
+            None,
+        )
+        .await?;
+        policy_outcome("UPDATED", id, Some(&stored), &changed)
+    };
+    admin_bridge::record(
+        &txn,
+        &b,
+        command::POLICIES_CHANGE,
+        Subject::Policy,
+        id,
+        Some(id),
+        &outcome,
+        now,
+    )
+    .await?;
     txn.commit().await?;
-    Ok(respond(StatusCode::OK, doc))
+    Ok(outcome.response())
 }

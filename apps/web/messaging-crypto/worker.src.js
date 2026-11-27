@@ -113,6 +113,9 @@ async function unseal(key, aad, sealed) {
 const recordAad = (account, conv, seq) => `cfmeet-msg-record:v1:${account}:${conv}:${seq}`;
 const deviceAad = (account) => `cfmeet-msg-device:v1:${account}`;
 const pendingAad = (account, cmid) => `cfmeet-msg-pending:v1:${account}:${cmid}`;
+const draftAad = (account, conv, cmid) => `cfmeet-msg-draft:v1:${account}:${conv}:${cmid}`;
+/** Drafts live in the `pending` store under the account (wipe() erases them with it). */
+const draftKey = (account, conv, cmid) => [account, `draft:${conv}:${cmid}`];
 
 // ----------------------------------------------------------------- state
 
@@ -160,6 +163,59 @@ function aadFor(conversationId, clientMessageId, senderDeviceId) {
   return core.message_aad(s.tenantId, s.applicationId, s.environmentId, conversationId, clientMessageId, senderDeviceId);
 }
 
+// Structured payloads (F4-F7), validated on the way in AND out: only these shapes are ever
+// encrypted or shown, every string is bounded, and nothing here is fetched (a link preview
+// is built by the sender's device, the server never sees or fetches the link).
+const str = (v, max, min = 0) => (typeof v === "string" && v.length >= min && v.length <= max ? v : fail("PAYLOAD_INVALID"));
+const optStr = (v, max) => (v === undefined || v === null ? null : str(v, max));
+const CF_MEET_ID = /^[A-Za-z0-9._-]{3,40}$/;
+function linkPreview(v) {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object") fail("PAYLOAD_INVALID");
+  const url = str(v.url, 2048, 8);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail("PAYLOAD_INVALID");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") fail("PAYLOAD_INVALID");
+  const result = { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+  if (v.imageDataUrl !== undefined && v.imageDataUrl !== null) {
+    const image = str(v.imageDataUrl, 24576, 32);
+    // Inline JPEG only: never fetch a recipient's IP-revealing remote image,
+    // execute an SVG, or accept an unbounded attachment in a preview.
+    if (!/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(image)) fail("PAYLOAD_INVALID");
+    result.imageDataUrl = image;
+  }
+  return result;
+}
+function coordinate(v, limit) {
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit ? Math.round(v * 1e6) / 1e6 : fail("PAYLOAD_INVALID");
+}
+/** A structured payload (not text / file), normalized; throws PAYLOAD_INVALID otherwise. */
+function richPayload(p) {
+  switch (p?.t) {
+    case "contact":
+      if (typeof p.cfMeetId !== "string" || !CF_MEET_ID.test(p.cfMeetId)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "contact", cfMeetId: p.cfMeetId, name: str(p.name, 120, 1) };
+    case "location":
+      return { v: 1, t: "location", lat: coordinate(p.lat, 90), lng: coordinate(p.lng, 180), label: optStr(p.label, 200) };
+    case "poll": {
+      if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 12) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "poll", question: str(p.question, 300, 1), options: p.options.map((o) => str(o, 100, 1)), multiple: p.multiple === true };
+    }
+    case "vote": {
+      if (!Array.isArray(p.choices) || p.choices.length > 12) fail("PAYLOAD_INVALID");
+      const choices = [...new Set(p.choices)];
+      if (choices.length !== p.choices.length || !choices.every((c) => Number.isInteger(c) && c >= 0 && c < 12)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "vote", poll: uuid(p.poll, "PAYLOAD_INVALID"), choices };
+    }
+    default:
+      return fail("PAYLOAD_INVALID");
+  }
+}
+
 /** The CF Meet message payload inside MLS (validated before anything is shown). */
 function parsePayload(plain) {
   let p;
@@ -170,14 +226,17 @@ function parsePayload(plain) {
   }
   if (!p || typeof p !== "object" || p.v !== 1) fail("PAYLOAD_INVALID");
   if (p.t === "text" && typeof p.text === "string" && p.text.length >= 1 && p.text.length <= MAX_TEXT) {
-    return { t: "text", text: p.text };
+    const preview = linkPreview(p.preview);
+    return preview ? { t: "text", text: p.text, preview } : { t: "text", text: p.text };
   }
   if (p.t === "file" && typeof p.d === "string") {
     const descriptor = b64u.dec(p.d);
     if (!core.is_descriptor(descriptor)) fail("PAYLOAD_INVALID");
     return { t: "file", d: p.d, caption: typeof p.caption === "string" ? p.caption.slice(0, 1024) : null };
   }
-  fail("PAYLOAD_INVALID");
+  const rich = richPayload(p);
+  delete rich.v;
+  return rich;
 }
 
 /** What the page sees of a stored record (never the attachment key). */
@@ -187,6 +246,19 @@ function view(r) {
     out.payload = { t: "file", caption: r.payload.caption ?? null, attachmentId: r.attachmentId ?? null, name: r.fileName ?? null, mediaType: r.mediaType ?? null };
   }
   return out;
+}
+
+/** Deliberate plaintext export; never export the stored MLS state or file descriptor. */
+function exportRecord(conversationId, r) {
+  const visible = view(r);
+  return {
+    conversationId, sequence: r.sequence, messageId: r.messageId ?? null,
+    clientMessageId: r.clientMessageId ?? null, senderPrincipalId: r.senderPrincipalId ?? null,
+    senderDeviceId: r.senderDeviceId ?? null, createdAt: r.createdAt ?? null,
+    status: r.status, content: ["SENT", "DECRYPTED"].includes(r.status) ? visible.payload ?? null : null,
+    attachmentId: r.attachmentId ?? null, fileName: r.fileName ?? null,
+    mediaType: r.mediaType ?? null, size: r.size ?? null,
+  };
 }
 
 async function loadRecord(conversationId, sequence) {
@@ -298,13 +370,31 @@ const ops = {
       at += 4 + k.length;
     }
     const r = device.addDevices(bytes(groupId), packed);
-    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch) };
+    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   async removeDevices({ groupId, deviceIds }) {
     const device = requireDevice();
     ctx.snapshot ??= device.exportState();
     const r = device.removeDevices(bytes(groupId), deviceIds.map((d) => uuid(d)));
-    return { commit: r.commit, epoch: Number(r.epoch) };
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /** A commit with a fresh leaf for this device and no membership change (publishes a GroupInfo, attests moot removals). */
+  async updateKeys({ groupId }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.updateKeys(bytes(groupId));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /**
+   * Joins a group BY ITSELF from its GroupInfo (an MLS external commit): no other member
+   * has to be online. Like every group change it is undone (`rollback`) if the Delivery
+   * Service refuses the commit.
+   */
+  async externalJoin({ groupId, groupInfo }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.externalJoin(bytes(groupId), bytes(groupInfo));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   /** The Delivery Service accepted the change: make it durable. */
   async confirm() {
@@ -400,6 +490,8 @@ const ops = {
     if (payload?.t === "text") {
       if (typeof payload.text !== "string" || payload.text.length < 1 || payload.text.length > MAX_TEXT) fail("TEXT_INVALID");
       p = { v: 1, t: "text", text: payload.text };
+      const preview = linkPreview(payload.preview);
+      if (preview) p.preview = preview;
     } else if (payload?.t === "file") {
       const h = handles.get(payload.handle) ?? fail("UNKNOWN_ATTACHMENT");
       attachmentId = uuid(payload.attachmentId);
@@ -409,7 +501,7 @@ const ops = {
       handles.delete(payload.handle);
       h.file.free();
     } else {
-      fail("PAYLOAD_INVALID");
+      p = richPayload(payload);
     }
     const plain = enc.encode(JSON.stringify(p));
     const ciphertext = device.encrypt(bytes(groupId), aadFor(conversationId, clientMessageId, ctx.deviceId), plain);
@@ -428,19 +520,21 @@ const ops = {
    * messages decrypted under the CF Meet AAD of their envelope. Every outcome, the new
    * group state and the cursor are stored in ONE IndexedDB transaction.
    */
-  async processMessages({ conversationId, groupId, messages }) {
+  async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [] }) {
     const device = requireDevice();
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
+    const allowed = Array.isArray(allowedJoiners) ? allowedJoiners.filter((a) => typeof a === "string") : [];
+    const rejected = new Set(Array.isArray(rejectedJoiners) ? rejectedJoiners : []);
     const out = [];
     const puts = [];
     const deletes = [];
     let last = cursor;
+    let joiner = null;
     for (const m of sorted) {
       if (!Number.isSafeInteger(m.sequence) || m.sequence <= last) continue;
-      last = m.sequence;
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
       try {
@@ -452,9 +546,21 @@ const ops = {
           if (own || m.epoch < epoch) {
             record = { ...base, status: "COMMIT", epoch };
           } else {
-            const r = device.process(gid, b64u.dec(m.ciphertext), undefined);
+            // An external commit (a member's device joining by itself) is merged only for
+            // the device that sent it, verified by the page (registered, ACTIVE, of a
+            // member, with exactly its logged key).
+            const sender = typeof m.senderDeviceId === "string" ? m.senderDeviceId : "";
+            const r = device.process(gid, b64u.dec(m.ciphertext), undefined, allowed.filter((a) => a.startsWith(`${sender}:`)));
+            if (r.kind === "JOINER_UNVERIFIED") {
+              if (!rejected.has(r.joiner) && r.joiner === sender) {
+                // Stop before it: the page verifies the joiner and processes it again.
+                joiner = { deviceId: r.joiner, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId };
+                break;
+              }
+              fail("JOINER_REJECTED");
+            }
             if (r.kind !== "COMMIT") fail("UNEXPECTED_MESSAGE");
-            record = { ...base, status: "COMMIT", epoch: Number(r.epoch) };
+            record = { ...base, status: "COMMIT", epoch: Number(r.epoch), ...(r.joiner ? { joiner: r.joiner } : {}) };
           }
         } else if (m.senderDeviceId === ctx.deviceId) {
           const sealed = await req((await db()).transaction("pending").objectStore("pending").get([ctx.account, m.clientMessageId]));
@@ -468,7 +574,7 @@ const ops = {
         } else if (m.epoch < Number(device.epoch(gid))) {
           record = { ...base, status: "BEFORE_JOIN" };
         } else {
-          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)));
+          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)), []);
           if (r.kind !== "APPLICATION") fail("UNEXPECTED_MESSAGE");
           const payload = parsePayload(r.plaintext);
           r.plaintext.fill(0);
@@ -483,16 +589,45 @@ const ops = {
       } catch (e) {
         record = { ...base, status: "FAILED", error: e instanceof Error ? String(e.message).slice(0, 64) : "FAILED" };
       }
+      last = m.sequence;
       puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(record)))]);
       out.push(view(record));
     }
     ctx.meta.cursors[conversationId] = last;
     await persistDevice(puts, deletes);
-    return { cursor: last, records: out };
+    return { cursor: last, records: out, joiner };
   },
 
   async cursor({ conversationId }) {
     return ctx?.meta?.cursors?.[uuid(conversationId)] ?? 0;
+  },
+
+  /** Stored history of a conversation, newest last (at most `limit`). */
+  async exportLocalHistory({ account, after = null }) {
+    // Read-only: no device registration, key creation, MLS state export or network call.
+    uuid(account);
+    const d = await db();
+    const key = await req(d.transaction("keys").objectStore("keys").get(account));
+    if (!key) return { records: [], next: null };
+    let lower = [account, "", 0];
+    if (after) {
+      uuid(after.conversationId);
+      if (!Number.isSafeInteger(after.sequence) || after.sequence < 0) fail("BAD_CURSOR");
+      lower = [account, after.conversationId, after.sequence];
+    }
+    const range = IDBKeyRange.bound(lower, [account, "\uffff", Number.MAX_SAFE_INTEGER], !!after);
+    const store = d.transaction("records").objectStore("records");
+    const keysPromise = req(store.getAllKeys(range, 101));
+    const valuesPromise = req(store.getAll(range, 101));
+    const [keys, values] = await Promise.all([keysPromise, valuesPromise]);
+    const records = [];
+    for (let i = 0; i < Math.min(values.length, 100); i++) {
+      const [, conversationId, sequence] = keys[i];
+      const record = JSON.parse(dec.decode(await unseal(key, recordAad(account, conversationId, sequence), values[i])));
+      records.push(exportRecord(conversationId, record));
+    }
+    const last = keys[Math.min(keys.length, 100) - 1];
+    return { records, next: keys.length > 100 ? { conversationId: last[1], sequence: last[2] } : null };
   },
 
   /** Stored history of a conversation, newest last (at most `limit`). */
@@ -593,6 +728,56 @@ const ops = {
     }
     await persistDevice(puts);
     return { records: n, conversations: Object.keys(archive.conversations).length };
+  },
+
+  /**
+   * A message written while no other member of an encrypted conversation has a device yet
+   * ("pending setup"). Kept sealed at rest (never in the clear, never sent) until the
+   * conversation can encrypt it for a recipient device; then sent and dropped.
+   */
+  async holdDraft({ conversationId, clientMessageId, text, createdAt }) {
+    requireDevice();
+    uuid(conversationId);
+    uuid(clientMessageId);
+    if (typeof text !== "string" || text.length < 1 || text.length > MAX_TEXT) fail("TEXT_INVALID");
+    const value = { text, createdAt: typeof createdAt === "string" ? createdAt.slice(0, 40) : new Date().toISOString() };
+    const sealed = await seal(ctx.key, draftAad(ctx.account, conversationId, clientMessageId), enc.encode(JSON.stringify(value)));
+    const d = await db();
+    const tx = d.transaction("pending", "readwrite");
+    tx.objectStore("pending").put(sealed, draftKey(ctx.account, conversationId, clientMessageId));
+    await done(tx);
+    return true;
+  },
+
+  /** The held drafts of a conversation, oldest first. */
+  async drafts({ conversationId }) {
+    requireDevice();
+    uuid(conversationId);
+    const prefix = `draft:${conversationId}:`;
+    const d = await db();
+    const store = d.transaction("pending").objectStore("pending");
+    const range = IDBKeyRange.bound([ctx.account, prefix], [ctx.account, prefix + "\uffff"]);
+    const keys = await req(store.getAllKeys(range));
+    const values = await req(store.getAll(range));
+    const out = [];
+    for (let i = 0; i < keys.length; i++) {
+      const cmid = keys[i][1].slice(prefix.length);
+      const plain = await unseal(ctx.key, draftAad(ctx.account, conversationId, cmid), values[i]);
+      const v = JSON.parse(dec.decode(plain));
+      out.push({ clientMessageId: cmid, text: v.text, createdAt: v.createdAt });
+    }
+    return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  },
+
+  async dropDraft({ conversationId, clientMessageId }) {
+    requireDevice();
+    uuid(conversationId);
+    uuid(clientMessageId);
+    const d = await db();
+    const tx = d.transaction("pending", "readwrite");
+    tx.objectStore("pending").delete(draftKey(ctx.account, conversationId, clientMessageId));
+    await done(tx);
+    return true;
   },
 
   /** Logout / revocation: everything of the account in this browser is erased. */

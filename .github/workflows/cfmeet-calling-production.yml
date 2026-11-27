@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, livekit-webhook-inspect, livekit-webhook, livekit-webhook-rollback, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, messaging-encrypted-verify, messaging-web-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -15,14 +15,14 @@ on:
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || (startsWith(inputs.operation, 'private-tls-') && inputs.operation != 'private-tls-inspect') || (startsWith(inputs.operation, 'storage-routes') && inputs.operation != 'storage-routes-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners' || inputs.operation == 'private-tls-inspect' || inputs.operation == 'storage-routes-inspect') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
+  group: ${{ ((startsWith(inputs.operation, 'livekit-webhook') && inputs.operation != 'livekit-webhook-inspect') || (startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || (startsWith(inputs.operation, 'private-tls-') && inputs.operation != 'private-tls-inspect') || (startsWith(inputs.operation, 'storage-routes') && inputs.operation != 'storage-routes-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'livekit-webhook-inspect' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners' || inputs.operation == 'private-tls-inspect' || inputs.operation == 'storage-routes-inspect') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
   production:
     runs-on: ubuntu-24.04
     environment: production
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +43,17 @@ jobs:
       - name: Prove the storage relay survives store recreation before changing production
         if: inputs.operation == 'storage-routes'
         run: python3 infra/calling/ingress-ci/storage_relay_ci.py
+      - name: Build the multi-device E2EE acceptance client (real OpenMLS clients, static)
+        if: inputs.operation == 'messaging-encrypted-verify' || inputs.operation == 'messaging-verify'
+        run: |
+          set -euo pipefail
+          command -v musl-gcc >/dev/null || { sudo apt-get update -q; sudo apt-get install -y -q musl-tools; }
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --locked --manifest-path certification/Cargo.toml \
+            --target x86_64-unknown-linux-musl --bin cfmeet-e2ee-acceptance
+          mkdir -p infra/calling/production/bin
+          install -m 0555 certification/target/x86_64-unknown-linux-musl/release/cfmeet-e2ee-acceptance \
+            infra/calling/production/bin/cfmeet-e2ee-acceptance
       - name: Configure existing production SSH access
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -133,9 +144,31 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
           tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "python3 -u '$remote/production.py' '$OPERATION' '$IMAGE_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
+      - name: Real-website Messaging journey (www.cfmeet.com, real sign-in, Chromium)
+        if: inputs.operation == 'messaging-web-verify'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          accounts="$RUNNER_TEMP/web-journey-accounts.json"
+          umask 077
+          # The fixtures the VPS step just wrote; read once, never printed.
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            "cat '/opt/cfmeet-core/secrets/cfmeet-web-journey-$GITHUB_RUN_ID.json'" > "$accounts"
+          # Passwordless sign-in: each fixture carries a fresh session's refresh token.
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v)==3 and all(x["email"] and x["refreshToken"] for x in v)' "$accounts"
+          for p in $(python3 -c 'import json,sys; print(" ".join(x["refreshToken"] for x in json.load(open(sys.argv[1]))))' "$accounts"); do echo "::add-mask::$p"; done
+          cd apps/web
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          PROD_WEB_URL=https://www.cfmeet.com PROD_ACCOUNTS="$accounts" PROD_EVIDENCE="$GITHUB_WORKSPACE/web-journey-evidence.json" \
+            node --test --test-reporter=spec tests/messaging-production.browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: calling-production-${{ github.run_id }}
-          path: production-result.log
+          path: |
+            production-result.log
+            web-journey-evidence.json
           if-no-files-found: ignore

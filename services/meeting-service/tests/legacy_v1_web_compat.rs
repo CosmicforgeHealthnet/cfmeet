@@ -65,6 +65,8 @@ fn expired_token(sub: Uuid, role: &str) -> String {
             typ: None,
             sid: None,
             rti: None,
+            iss: None,
+            aud: None,
         },
         &EncodingKey::from_secret(b"test-jwt-secret"),
     )
@@ -508,6 +510,8 @@ fn signed_refresh(sub: Uuid, role: &str, auth_time: i64) -> String {
             typ: Some("refresh".into()),
             sid: None,
             rti: None,
+            iss: None,
+            aud: None,
         },
         &EncodingKey::from_secret(b"test-jwt-secret"),
     )

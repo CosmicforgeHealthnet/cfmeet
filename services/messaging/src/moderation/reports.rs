@@ -47,6 +47,10 @@ pub struct Disclosure {
     pub message_id: Uuid,
     /// What the reporter's own device decrypted (voluntarily disclosed).
     pub text: String,
+    /// S2: the message's franking key the reporter's device decrypted (unpadded base64url,
+    /// 32 bytes). With it the disclosure is verified against the sender's commitment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub franking_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -271,6 +275,16 @@ pub async fn create(
         now,
     )
     .await?;
+    // ADR 0068 A7: the admin bridge learns the report's state (id, state, version only).
+    crate::bridge_events::record(
+        &txn,
+        crate::bridge_events::ABUSE_REPORT_CHANGED,
+        id,
+        "OPEN",
+        1,
+        now,
+    )
+    .await?;
     txn.commit().await?;
     audit::record(
         &state.db,
@@ -400,8 +414,14 @@ pub async fn list(state: &AppState, ctx: &TrustedContext, q: ListQuery) -> Resul
     Ok(json!({ "reports": rows.iter().map(summary).collect::<Vec<_>>() }))
 }
 
-/// `GET /v1/messaging/reports/{id}` — one report with its evidence (audited).
-pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Value> {
+/// `GET /v1/messaging/reports/{id}` — one report with its evidence (audited; an
+/// organization moderator's principal is recorded as the viewer).
+pub async fn get(
+    state: &AppState,
+    ctx: &TrustedContext,
+    id: Uuid,
+    moderator: Option<Uuid>,
+) -> Result<Value> {
     let r = load(&state.db, ctx, id, false)
         .await?
         .ok_or(Error::code(ErrorCode::NotFound))?;
@@ -444,10 +464,25 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         .iter()
         .zip(managed_texts)
         .map(|(m, managed_text)| {
-            let disclosed = evidence
+            let disclosure = evidence
                 .as_ref()
-                .and_then(|e| e.disclosure.iter().find(|d| d.message_id == m.id))
-                .map(|d| d.text.clone());
+                .and_then(|e| e.disclosure.iter().find(|d| d.message_id == m.id));
+            let disclosed = disclosure.map(|d| d.text.clone());
+            // S2: a revealed franking key and plaintext either reproduce the sender's
+            // commitment (verified) or not (mismatch); without both, nothing is verifiable.
+            let franked = match (disclosure, &m.franking_commitment) {
+                (Some(d), Some(c)) => d.franking_key.as_deref().map(|k| {
+                    crate::messages::franking::verify(
+                        c,
+                        k,
+                        m.conversation_id,
+                        m.client_message_id,
+                        m.sender_principal_id,
+                        &d.text,
+                    )
+                }),
+                _ => None,
+            };
             let mut v = json!({
                 "messageId": m.id,
                 "sequence": m.sequence,
@@ -462,8 +497,14 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
                         "ciphertextSha256": m.ciphertext_sha256,
                         "acceptanceDigest": m.acceptance_digest,
                         "reporterDisclosure": disclosed,
-                        // The server cannot check a disclosure against MLS ciphertext.
-                        "verification": if disclosed.is_some() { "REPORTER_ATTESTED_UNVERIFIABLE" } else { "NO_PLAINTEXT_AVAILABLE" },
+                        "frankingCommitment": m.franking_commitment,
+                        // MLS ciphertext cannot be checked; a franking commitment can (S2).
+                        "verification": match (franked, disclosed.is_some()) {
+                            (Some(true), _) => "FRANKING_VERIFIED",
+                            (Some(false), _) => "FRANKING_MISMATCH",
+                            (None, true) => "REPORTER_ATTESTED_UNVERIFIABLE",
+                            (None, false) => "NO_PLAINTEXT_AVAILABLE",
+                        },
                     });
                 }
                 SecurityProfile::Managed => {
@@ -480,11 +521,12 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         &state.db,
         AuditEntry {
             ctx,
-            principal_id: None,
+            principal_id: moderator,
             action: "REPORT_VIEWED",
             target_kind: "REPORT",
             target_id: r.id,
-            detail: json!({ "evidence_kind": r.evidence_kind, "managed_shown": show_managed && r.security_profile == "MANAGED" }),
+            detail: json!({ "evidence_kind": r.evidence_kind, "managed_shown": show_managed && r.security_profile == "MANAGED",
+                            "organization_moderator_principal_id": moderator }),
         },
         &request_context(),
         state.now(),
@@ -497,7 +539,8 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
     Ok(v)
 }
 
-/// Marks an OPEN report resolved inside the caller's transaction.
+/// Marks an OPEN report resolved inside the caller's transaction (its version advances)
+/// and records its `abuse.report.changed.v1` event for the admin bridge.
 pub async fn resolve<C: sea_orm::ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
@@ -506,10 +549,14 @@ pub async fn resolve<C: sea_orm::ConnectionTrait>(
     resolution: &str,
     now: DateTime<Utc>,
 ) -> Result<()> {
-    let n = db::exec(
+    #[derive(sea_orm::FromQueryResult)]
+    struct V {
+        version: i64,
+    }
+    let v: Option<V> = db::one(
         db,
-        "UPDATE messaging_reports SET status = $2, resolution = $3, resolved_at = $4, resolved_by_credential_id = $5 \
-         WHERE id = $1 AND status = 'OPEN' AND environment_id = $6",
+        "UPDATE messaging_reports SET status = $2, resolution = $3, resolved_at = $4, resolved_by_credential_id = $5, \
+           version = version + 1 WHERE id = $1 AND status = 'OPEN' AND environment_id = $6 RETURNING version",
         vec![
             report.into(),
             status.into(),
@@ -520,8 +567,17 @@ pub async fn resolve<C: sea_orm::ConnectionTrait>(
         ],
     )
     .await?;
-    if n != 1 {
+    let Some(v) = v else {
         return Err(Error::reason(ErrorCode::Conflict, "REPORT_NOT_OPEN"));
-    }
+    };
+    crate::bridge_events::record(
+        db,
+        crate::bridge_events::ABUSE_REPORT_CHANGED,
+        report,
+        status,
+        v.version,
+        now,
+    )
+    .await?;
     Ok(())
 }

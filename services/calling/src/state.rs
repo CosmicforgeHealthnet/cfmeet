@@ -68,6 +68,8 @@ pub struct AppState {
     /// `CALLING_LEGACY_USAGE_AUTHORITY=retired` (Part VI §21.2): the customer usage /
     /// limit views answer 503 `CF-Usage-Migration: moved`.
     pub legacy_usage_retired: bool,
+    /// P6: platform API request accounting of DIRECT routes (None: off).
+    pub direct_usage: Option<Arc<crate::usage::direct::DirectUsageAccounting>>,
     /// `CALLING_ORGANIZATION_FORWARDING_ENABLED` (Blueprint Section 12 follow-up,
     /// CAL-007; default false): customer routes accept Meeting Service requests for a
     /// first-party organization member (`calling-request.act-for-organization`).
@@ -108,6 +110,10 @@ pub struct AppState {
     pub enterprise: Arc<EnterpriseService>,
     pub webhooks: Arc<crate::webhooks::WebhookService>,
     pub usage: Arc<crate::usage::UsageService>,
+    /// `CALLING_USER_TOKEN_EXCHANGE_ENABLED` (ADR 0062, default off → `None`): the CF Meet
+    /// user-token verifier of `POST /v1/calling/user-sessions`, which is mounted only when
+    /// this is set.
+    pub user_sessions: Option<Arc<crate::platform::user_tokens::UserTokenVerifier>>,
 }
 
 impl AppState {
@@ -198,7 +204,9 @@ impl AppState {
             enterprise,
             webhooks,
             legacy_usage_retired: false,
+            direct_usage: None,
             organization_forwarding_enabled: false,
+            user_sessions: None,
             usage: Arc::new(crate::usage::UsageService::new(
                 db.clone(),
                 clock.clone(),
@@ -207,5 +215,25 @@ impl AppState {
             clock,
             db,
         }
+    }
+}
+
+impl AppState {
+    /// Enables the user-session exchange (`CALLING_USER_TOKEN_EXCHANGE_ENABLED`) with
+    /// `verifier` (`None`: off, the route does not exist).
+    pub fn with_user_sessions(
+        mut self,
+        verifier: Option<Arc<crate::platform::user_tokens::UserTokenVerifier>>,
+    ) -> Self {
+        self.user_sessions = verifier;
+        self
+    }
+
+    /// `CALLING_PARTNER_PUSH_ENABLED` (ADR 0063, default off): ring offers of EXTERNAL
+    /// tenants' partner users also go to the push transport as Notification Service
+    /// `platform-principal` recipients (§6 N-P3).
+    pub fn with_partner_push(mut self, enabled: bool) -> Self {
+        self.app = Arc::new((*self.app).clone().with_partner_push(enabled));
+        self
     }
 }

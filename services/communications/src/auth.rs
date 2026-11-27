@@ -8,10 +8,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cf_service_auth::{
-    DelegatedPlatformContext, InternalPermission, InternalServiceContext, OutboundServiceRequest,
-    ServiceId,
+    DelegatedPlatformContext, InternalPermission, InternalServiceContext, OperatorAttribution,
+    OutboundServiceRequest, ServiceId,
 };
 use serde_json::{json, Value};
+
+/// The admin bridge's settlement record of its commands (ADR 0068 §17.6): the one path the
+/// bridge reads on every owner, outside the Hub's own prefix.
+const OPERATIONS_PREFIX: &str = "/internal/v1/operator/operations/";
 
 pub async fn middleware(
     HttpState(s): HttpState<State>,
@@ -38,14 +42,17 @@ pub async fn middleware(
     };
     let permission = match request.uri().path() {
         "/internal/v1/communications/dispatch"
-        | "/internal/v1/communications/organization-invitations/resolve" => {
+        | "/internal/v1/communications/organization-invitations/resolve"
+        | "/internal/v1/communications/contacts/names" => {
             InternalPermission::CommunicationsUserForward
         }
         "/internal/v1/communications/policy/check"
         | "/internal/v1/communications/principals/resolve" => {
             InternalPermission::CommunicationsPolicyCheck
         }
-        "/internal/v1/communications/account-events" => {
+        "/internal/v1/communications/account-events"
+        | "/internal/v1/communications/account-erasure"
+        | "/internal/v1/communications/account-export" => {
             InternalPermission::CommunicationsAccountApply
         }
         "/internal/v1/communications/block-events" => InternalPermission::CommunicationsBlockApply,
@@ -66,16 +73,47 @@ pub async fn middleware(
         "/internal/v1/communications/readiness" | "/internal/v1/communications/admin/metrics" => {
             InternalPermission::CommunicationsObservabilityRead
         }
-        "/internal/v1/communications/admin/suspend" => {
+        // Gap audit S4: the report review queue (a review may hold the target).
+        "/internal/v1/communications/admin/suspend"
+        | "/internal/v1/communications/admin/reports/list"
+        | "/internal/v1/communications/admin/reports/review" => {
             InternalPermission::CommunicationsProfileSuspend
         }
         // Blueprint Section 11: the Account's notification preference read.
         "/internal/v1/communications/notification-preferences/resolve" => {
             InternalPermission::CommunicationsPreferencesRead
         }
+        // Roadmap N10: the Notification Service's preference copy and catch-up.
+        "/internal/v1/communications/notification-preferences/export"
+        | "/internal/v1/communications/notification-preferences/changes" => {
+            InternalPermission::CommunicationsPreferencesExport
+        }
+        // Document 4 X4: the Notification Service's batch restriction check.
+        "/internal/v1/communications/restrictions/check" => {
+            InternalPermission::CommunicationsRestrictionsRead
+        }
+        // ADR 0068: the admin bridge's operator reads and commands (bridge only), and the
+        // settlement record of its commands (A4).
+        p if p.starts_with("/internal/v1/communications/operator/")
+            || p.starts_with(OPERATIONS_PREFIX) =>
+        {
+            InternalPermission::CommunicationsAdminister
+        }
         _ => return Error::NotFound.into_response(),
     };
+    // ADR 0068: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
+    // -Intent-Digest) is accepted only from the admin bridge and refused on every route
+    // from any other caller, malformed, incomplete or self-approved.
+    let attribution =
+        match OperatorAttribution::from_headers(ctx.authenticated_service(), request.headers()) {
+            Ok(a) => a,
+            Err(_) => return Error::Forbidden.into_response(),
+        };
     if ctx.require_permission(permission).is_err() {
+        // The settlement record does not exist for anyone but the bridge.
+        if request.uri().path().starts_with(OPERATIONS_PREFIX) {
+            return Error::NotFound.into_response();
+        }
         return Error::Forbidden.into_response();
     }
     // Receiver-owned replay protection survives restarts and multiple Hub instances.
@@ -92,6 +130,9 @@ pub async fn middleware(
     let route = request.uri().path().to_owned();
     let started = std::time::Instant::now();
     request.extensions_mut().insert(ctx);
+    request
+        .extensions_mut()
+        .insert(crate::operator::Operator(attribution));
     let response = next.run(request).await;
     tracing::info!(
         service = "communications",

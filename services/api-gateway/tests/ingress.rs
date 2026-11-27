@@ -9,11 +9,12 @@ use std::{sync::Arc, time::Duration};
 
 use api_gateway::{
     quota::{Limits, QuotaAuthority, QuotaEngine},
-    routing::RoutingControls,
+    routing::{AuthMode, RoutingControls},
 };
 use axum::http::{Method, StatusCode};
 use cf_service_auth::{
-    CorrelationId, OutboundServiceRequest, ServiceId, ServiceTokenSigner, SystemClock, TokenTtl,
+    services, CorrelationId, OutboundServiceRequest, ServiceId, ServiceTokenSigner, SystemClock,
+    TokenTtl,
 };
 use common::*;
 use serde_json::json;
@@ -75,8 +76,6 @@ async fn probes_docs_and_discovery_are_public_infrastructure() {
     let agg = g.get("/openapi.json", None).await;
     assert_eq!(agg.status, StatusCode::OK);
     assert_eq!(agg.json["openapi"], "3.1.0");
-    let one = g.get("/openapi/messaging.json", None).await;
-    assert!(one.json["paths"]["/v1/realtime"].is_object());
     assert_eq!(
         g.get("/openapi/telephony.json", None).await.status,
         StatusCode::NOT_FOUND
@@ -454,6 +453,81 @@ async fn platform_credential_meetings_requests_are_forwarded_with_the_signed_del
     assert_eq!(r.json["auth"], "passthrough");
     let got = g.meeting().last();
     assert!(got.issuer.is_none() && got.delegated.is_none());
+}
+
+/// The partner meetings family: `/v1/meetings/<rest>` is the Meeting Service's machine
+/// operation `/api/v2/<rest>`, PLATFORM_CREDENTIAL only. The signed hop is bound to the
+/// path the Meeting Service receives (`/api/v2/...`), which its receiver verifies.
+#[tokio::test]
+async fn partner_meetings_routes_rewrite_to_the_meeting_service_api_v2_path() {
+    let mut alias = route(
+        "meetings.platform.spaces",
+        "meetings",
+        Method::POST,
+        "/v1/meetings/test-spaces/{id}/archive",
+        services::MEETING_SERVICE,
+        &[AuthMode::PlatformCredential],
+        Some("meetings.write"),
+    );
+    alias.upstream_path = "/api/v2/test-spaces/{id}/archive".into();
+    let mut routes = test_routes();
+    routes.push(alias);
+    let g = Gateway::with(Options {
+        routes: Some(routes),
+        ..Options::default()
+    })
+    .await;
+    let c = customer(&["meetings.write"]);
+    g.authority.add(CRED, c.clone());
+    let r = g
+        .call(
+            Method::POST,
+            "/v1/meetings/test-spaces/s-1/archive?reason=x",
+            &[("authorization", &format!("Bearer {CRED}"))],
+            Some("{}"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["auth"], "service", "{}", r.json);
+    let got = g.meeting().last();
+    assert_eq!(got.path, "/api/v2/test-spaces/s-1/archive");
+    assert_eq!(got.query.as_deref(), Some("reason=x"));
+    assert_eq!(got.issuer.as_deref(), Some("cfmeet.api-gateway"));
+    let d = got.delegated.expect("delegated context");
+    assert_eq!(d.initiating_credential_id(), Some(c.credential_id));
+    assert!(!got.headers.contains_key("authorization"));
+    // PLATFORM_CREDENTIAL only: a CF Meet session or participant token is refused at the
+    // edge on the partner path (the CF Meet apps call /api/v2 directly).
+    let before = g.meeting().count();
+    for headers in [
+        vec![("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.session.sig")],
+        vec![("x-participant-token", "pt_123")],
+        vec![],
+    ] {
+        let r = g
+            .call(
+                Method::POST,
+                "/v1/meetings/test-spaces/s-1/archive",
+                &headers,
+                Some("{}"),
+            )
+            .await;
+        assert_eq!(
+            r.status,
+            StatusCode::UNAUTHORIZED,
+            "{headers:?}: {}",
+            r.json
+        );
+    }
+    assert_eq!(g.meeting().count(), before);
+    // Only the declared alias exists: no other /v1/meetings path, no reverse mapping.
+    for path in [
+        "/v1/meetings/test-spaces/s-1",
+        "/v1/meetings/test-instant-meetings",
+    ] {
+        let r = g.call(Method::POST, path, &[], Some("{}")).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 #[tokio::test]
@@ -844,4 +918,66 @@ async fn rollback_controls_disable_families_and_move_webhook_ownership() {
     );
     let r = g.get("/ready", None).await;
     assert_eq!(r.json["disabledFamilies"], json!(["meetings"]));
+}
+
+/// P11: the served OpenAPI documents carry only the operations this deployment routes
+/// (disabled families removed); the embedded static contract is unchanged.
+#[tokio::test]
+async fn served_openapi_lists_only_the_routable_operations() {
+    let mut controls = RoutingControls::default();
+    for d in ["numbering", "sms", "privacy-relay"] {
+        controls.disabled_domains.insert(d.to_string());
+    }
+    let routes = api_gateway::catalogue::definitions(&controls).unwrap();
+    let routable: std::collections::HashSet<(String, String)> = routes
+        .iter()
+        .map(|r| (r.method.as_str().to_string(), r.pattern.clone()))
+        .collect();
+    let g = Gateway::with(Options {
+        routes: Some(routes),
+        controls,
+        ..Options::default()
+    })
+    .await;
+    let agg = g.get("/openapi.json", None).await;
+    assert_eq!(agg.status, StatusCode::OK);
+    let mut served = 0;
+    for (path, item) in agg.json["paths"].as_object().unwrap() {
+        for (method, _) in item.as_object().unwrap() {
+            if ["get", "put", "post", "delete", "patch"].contains(&method.as_str()) {
+                assert!(
+                    routable.contains(&(method.to_ascii_uppercase(), path.clone())),
+                    "{method} {path} is not routable here"
+                );
+                served += 1;
+            }
+        }
+    }
+    assert!(served > 100, "{served}");
+    // Disabled families: served, but without operations and marked disabled.
+    for family in ["numbering", "sms", "privacy-relay"] {
+        let doc = g.get(&format!("/openapi/{family}.json"), None).await;
+        assert_eq!(doc.status, StatusCode::OK);
+        assert_eq!(doc.json["paths"], json!({}), "{family}");
+        assert_eq!(doc.json["info"]["x-cfmeet-family-enabled"], false);
+    }
+    assert!(agg.json["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|p| !p.starts_with("/v1/numbers") && !p.starts_with("/v1/sms")));
+    // Enabled families keep their operations (WebSocket channels with WebSockets on).
+    let messaging = g.get("/openapi/messaging.json", None).await;
+    assert_eq!(messaging.json["info"]["x-cfmeet-family-enabled"], true);
+    assert!(messaging.json["paths"]["/v1/realtime"].is_object());
+    // The static bundled contract still publishes everything.
+    let static_doc: serde_json::Value = serde_json::from_str(api_gateway::docs::AGGREGATE).unwrap();
+    assert!(
+        static_doc["paths"].as_object().unwrap().len()
+            > agg.json["paths"].as_object().unwrap().len()
+    );
+    // Public routing off: nothing is routable, nothing is published.
+    let off = api_gateway::docs::publish(&api_gateway::routing::RouteTable::deny_all());
+    let doc: serde_json::Value = serde_json::from_str(off.get("calling").unwrap()).unwrap();
+    assert_eq!(doc["paths"], json!({}));
 }

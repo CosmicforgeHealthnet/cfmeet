@@ -377,6 +377,283 @@ pub async fn update_organization(
     Ok(Json(org(&o)))
 }
 
+/// Appoint an organization owner (platform administrators).
+///
+/// Recovers an organization that lost its owner, for example because the only owner's account
+/// was deactivated: makes `userId` an ACTIVE OWNER (an existing membership is promoted, otherwise
+/// one is created). The reason is recorded in the organization's audit history. Archived
+/// organizations are refused. Requires a platform administrator bearer token and an authoritative
+/// Organizations Service.
+#[utoipa::path(
+    post, path = "/api/v2/admin/organizations/{id}/owners", tag = "Organizations (v2)", operation_id = "v2_appoint_organization_owner",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = AppointOrganizationOwnerRequest,
+    responses(
+        (status = 200, description = "The appointed OWNER membership", body = BusinessOrganizationMembership),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn appoint_organization_owner(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<AppointOrganizationOwnerRequest>,
+) -> ApiResult<Response> {
+    let authority = require_authoritative(&state)?;
+    let user = actor.require_registered()?;
+    if !user.platform_admin {
+        return Err(permission_denied("Platform administrator role required"));
+    }
+    let acting = ActingUser::of(user);
+    let reply = authority
+        .send(
+            &Call::new(
+                Method::POST,
+                format!("/internal/v1/admin/organizations/{id}/owners"),
+            )
+            .actor(&acting)
+            .body(json!({ "userId": req.user_id, "reason": req.reason }))
+            .idempotency_key(idempotency_key(&headers)?),
+        )
+        .await
+        .map_err(|_| unavailable())?;
+    if !reply.is_success() {
+        return Err(relayed_error(&reply));
+    }
+    Ok(relayed_success(reply))
+}
+
+/// Gap audit G10: one platform-administrator call to the Organizations operator API.
+async fn operator_call(
+    state: &AppState,
+    actor: &ActorContext,
+    headers: &HeaderMap,
+    method: Method,
+    path: String,
+    body: Option<Value>,
+) -> ApiResult<Response> {
+    let authority = require_authoritative(state)?;
+    let user = actor.require_registered()?;
+    if !user.platform_admin {
+        return Err(permission_denied("Platform administrator role required"));
+    }
+    let acting = ActingUser::of(user);
+    let mut call = Call::new(method.clone(), path).actor(&acting);
+    if method == Method::POST {
+        call = call
+            .body(body.unwrap_or_else(|| json!({})))
+            .idempotency_key(idempotency_key(headers)?);
+    }
+    let reply = authority.send(&call).await.map_err(|_| unavailable())?;
+    if !reply.is_success() {
+        return Err(relayed_error(&reply));
+    }
+    Ok(relayed_success(reply))
+}
+
+fn binding_service(service: &str) -> ApiResult<&'static str> {
+    match service {
+        "calling" => Ok("calling"),
+        "messaging" => Ok("messaging"),
+        _ => Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "service must be calling or messaging",
+        )),
+    }
+}
+
+/// Retry an organization's provisioning (platform administrators).
+///
+/// Gap audit G10: re-runs the provisioning of an organization whose technical scope is not
+/// READY (for example after a Platform Access outage). Archived organizations are refused.
+/// Requires a platform administrator and an authoritative Organizations Service.
+#[utoipa::path(
+    post, path = "/api/v2/admin/organizations/{id}/provisioning/retry", tag = "Organizations (v2)", operation_id = "v2_admin_retry_organization_provisioning",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "Provisioning state (Organizations contract)", body = Object),
+        (status = 202, description = "Retry accepted (Organizations contract)", body = Object),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_retry_organization_provisioning(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Response> {
+    operator_call(
+        &state,
+        &actor,
+        &headers,
+        Method::POST,
+        format!("/internal/v1/admin/organizations/{id}/provisioning/retry"),
+        None,
+    )
+    .await
+}
+
+/// Read an organization's service binding (platform administrators).
+///
+/// Gap audit G10: the Calling or Messaging binding of the organization's primary scope
+/// (ids, source, verification and credential expiry; never a secret).
+#[utoipa::path(
+    get, path = "/api/v2/admin/organizations/{id}/service-bindings/{service}", tag = "Organizations (v2)", operation_id = "v2_admin_get_organization_service_binding",
+    params(("id" = Uuid, Path, description = "Organization id"), ("service" = String, Path, description = "calling or messaging")),
+    responses(
+        (status = 200, description = "Binding (Organizations contract)", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_get_organization_service_binding(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, service)): V2Path<(Uuid, String)>,
+) -> ApiResult<Response> {
+    let service = binding_service(&service)?;
+    operator_call(
+        &state,
+        &actor,
+        &headers,
+        Method::GET,
+        format!("/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}"),
+        None,
+    )
+    .await
+}
+
+/// Rotate an organization's service-binding credential (platform administrators).
+///
+/// Gap audit G10: Platform Access issues a successor credential for the AUTOMATIC binding
+/// (the predecessor is revoked) and Organizations records it (audited).
+#[utoipa::path(
+    post, path = "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate", tag = "Organizations (v2)", operation_id = "v2_admin_rotate_organization_service_binding",
+    params(("id" = Uuid, Path, description = "Organization id"), ("service" = String, Path, description = "calling or messaging")),
+    responses(
+        (status = 200, description = "Rotated binding (Organizations contract)", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_ARCHIVED / operator binding", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations or Platform Access unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_rotate_organization_service_binding(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, service)): V2Path<(Uuid, String)>,
+) -> ApiResult<Response> {
+    let service = binding_service(&service)?;
+    operator_call(
+        &state,
+        &actor,
+        &headers,
+        Method::POST,
+        format!(
+            "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/rotate"
+        ),
+        None,
+    )
+    .await
+}
+
+/// Organization event delivery status (platform administrators).
+///
+/// Gap audit G10: pending, failing and dead-lettered organization events per consumer.
+#[utoipa::path(
+    get, path = "/api/v2/admin/organization-event-delivery", tag = "Organizations (v2)", operation_id = "v2_admin_organization_event_delivery",
+    responses(
+        (status = 200, description = "Delivery status (Organizations contract)", body = Object),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_organization_event_delivery(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    operator_call(
+        &state,
+        &actor,
+        &headers,
+        Method::GET,
+        "/internal/v1/admin/event-delivery".into(),
+        None,
+    )
+    .await
+}
+
+/// Gap audit G10: which dead-lettered organization events to replay.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReplayOrganizationEventsRequest {
+    /// One consumer's dead letters only (for example `cfmeet.meeting-service`).
+    #[serde(default)]
+    pub destination: Option<String>,
+    /// Only these events (at most 500); empty: every dead letter (of the destination).
+    #[serde(default)]
+    pub event_ids: Vec<Uuid>,
+}
+
+/// Replay dead-lettered organization events (platform administrators).
+///
+/// Gap audit G10: returns dead-lettered rows (all, one consumer's, or listed events) to
+/// PENDING with a fresh attempt budget. Audited by Organizations.
+#[utoipa::path(
+    post, path = "/api/v2/admin/organization-event-delivery/replay", tag = "Organizations (v2)", operation_id = "v2_admin_replay_organization_events",
+    request_body = ReplayOrganizationEventsRequest,
+    responses(
+        (status = 200, description = "Replayed (Organizations contract)", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_replay_organization_events(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Json(req): V2Json<ReplayOrganizationEventsRequest>,
+) -> ApiResult<Response> {
+    if req.event_ids.len() > 500 {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "at most 500 eventIds",
+        ));
+    }
+    operator_call(
+        &state,
+        &actor,
+        &headers,
+        Method::POST,
+        "/internal/v1/admin/event-delivery/replay".into(),
+        Some(json!({ "destination": req.destination, "eventIds": req.event_ids })),
+    )
+    .await
+}
+
 /// ORG-006 member-list paging: `limit` (1–200, default 50 when only `cursor` is given) and
 /// `cursor` (the previous page's `X-Next-Cursor`). `None` when neither is given: the whole
 /// list, exactly as before paging existed. Other query parameters are ignored, as before.
@@ -780,14 +1057,15 @@ pub async fn update_business_organization(
 /// Change a member's role or status.
 ///
 /// Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)
-/// of one membership. The path's member segment is the membership `id` from the member list.
+/// of one membership. The path's member segment is the member's user id (as on PUT) or the
+/// membership `id` from the member list.
 /// `expectedVersion` must be the membership's current `version`. The Organizations Service
 /// enforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST
 /// memberships, nobody raises their own role, and the last OWNER cannot be removed or demoted
 /// (LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.
 #[utoipa::path(
     patch, path = "/api/v2/organizations/{id}/members/{userId}", tag = "Organizations (v2)", operation_id = "v2_update_organization_membership",
-    params(("id" = Uuid, Path, description = "Organization id"), ("userId" = Uuid, Path, description = "Membership id (the `id` of a member list item)")),
+    params(("id" = Uuid, Path, description = "Organization id"), ("userId" = Uuid, Path, description = "The member: their user id (as on PUT) or the membership id (the `id` of a member list item)")),
     request_body = UpdateBusinessMembershipRequest,
     responses(
         (status = 200, description = "Updated membership", body = BusinessOrganizationMembership),
@@ -803,9 +1081,27 @@ pub async fn update_organization_membership(
     State(state): State<AppState>,
     actor: ActorContext,
     headers: HeaderMap,
-    V2Path((id, membership_id)): V2Path<(Uuid, Uuid)>,
+    V2Path((id, member)): V2Path<(Uuid, Uuid)>,
     body: Bytes,
 ) -> ApiResult<Response> {
+    // Gap audit G18: `{userId}` names the member on every method: a user id (as on PUT)
+    // is resolved to that member's membership id; a membership id is accepted as before.
+    let membership_id = match require_authoritative(&state) {
+        Ok(authority) => {
+            let acting = ActingUser::of(relay_actor(&actor)?);
+            match authority.members(id, Some(&acting)).await {
+                Ok(members) => members
+                    .iter()
+                    .find(|m| m.id == member)
+                    .or_else(|| members.iter().find(|m| m.user_id == member))
+                    .map(|m| m.id)
+                    .unwrap_or(member),
+                // The relay below answers with Organizations' own error.
+                Err(_) => member,
+            }
+        }
+        Err(_) => member,
+    };
     relay(
         &state,
         &actor,
@@ -1008,6 +1304,9 @@ pub async fn create_organization_invitation(
                     &inviter,
                     &to,
                     id,
+                    reply.body["id"]
+                        .as_str()
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok()),
                     reply.body["role"].as_str().unwrap_or("MEMBER"),
                     &token,
                     expires_at,
@@ -1081,9 +1380,13 @@ async fn address_invitee(
     let Some(obj) = document.and_then(Value::as_object_mut) else {
         return Ok(None);
     };
-    // The display hint is the server's (CF Meet ID invitations), never a client's.
+    // The display hint and the resolved account are the server's (CF Meet ID
+    // invitations), never a client's.
     if obj.remove("inviteeHint").is_some() {
         return Err(validation("inviteeHint is not a request field"));
+    }
+    if obj.remove("inviteeUserId").is_some() {
+        return Err(validation("inviteeUserId is not a request field"));
     }
     let (kind, identifier) = match (obj.remove("identifierType"), obj.remove("identifier")) {
         (None, None) => {
@@ -1117,14 +1420,17 @@ async fn address_invitee(
             }
             let authority = require_authoritative(state)?;
             let user = relay_actor(actor)?;
-            let acting = ActingUser::of(user);
-            let members = authority
-                .members(organization, Some(&acting))
+            // Direct membership lookups (never the whole member list: it needs
+            // `members.read` and does not scale). Organizations re-checks the role and the
+            // policy (`managersMayInvite`) when it creates the invitation.
+            let mine = authority
+                .resolve_memberships(user.user_id)
                 .await
                 .map_err(authority_error)?;
-            let may_invite = members.iter().any(|m| {
-                m.user_id == user.user_id
+            let may_invite = mine.iter().any(|m| {
+                m.organization_id == organization
                     && m.status == "ACTIVE"
+                    && m.organization_status == "ACTIVE"
                     && INVITING_ROLES.contains(&m.role.as_str())
             });
             if !may_invite {
@@ -1140,10 +1446,14 @@ async fn address_invitee(
             )
             .await?
             .ok_or_else(invitee_not_found)?;
+            let invitee_memberships = authority
+                .resolve_memberships(invitee.user_id)
+                .await
+                .map_err(authority_error)?;
             if invitee.is_self
-                || members
+                || invitee_memberships
                     .iter()
-                    .any(|m| m.user_id == invitee.user_id && m.status != "REMOVED")
+                    .any(|m| m.organization_id == organization)
             {
                 return Err(already_member());
             }
@@ -1156,6 +1466,9 @@ async fn address_invitee(
                 "inviteeHint".into(),
                 json!(format!("CF Meet ID {identifier}")),
             );
+            // The account is known: the invitee sees and answers the invitation in the
+            // product (`GET /api/v2/me/organization-invitations`), not only by email.
+            obj.insert("inviteeUserId".into(), json!(invitee.user_id));
             Ok(Some(Addressed::CfMeetId(identifier)))
         }
         _ => Err(validation("identifierType must be EMAIL or CF_MEET_ID")),
@@ -1179,13 +1492,13 @@ async fn refuse_member_email(
     else {
         return Ok(());
     };
-    let acting = ActingUser::of(user);
-    let Ok(members) = authority.members(organization, Some(&acting)).await else {
+    let _ = user;
+    let Ok(memberships) = authority.resolve_memberships(account).await else {
         return Ok(());
     };
-    if members
+    if memberships
         .iter()
-        .any(|m| m.user_id == account && m.status != "REMOVED")
+        .any(|m| m.organization_id == organization)
     {
         return Err(already_member());
     }
@@ -1201,10 +1514,12 @@ async fn refuse_member_email(
     get, path = "/api/v2/organizations/{id}/invitations", tag = "Organizations (v2)", operation_id = "v2_list_organization_invitations",
     params(
         ("id" = Uuid, Path, description = "Organization id"),
-        ("status" = Option<String>, Query, description = "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED"),
+        ("status" = Option<String>, Query, description = "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED (a PENDING invitation past its expiry counts as EXPIRED)"),
+        ("cursor" = Option<String>, Query, description = "The previous page's `nextCursor` (opaque)"),
+        ("limit" = Option<i64>, Query, description = "Page size 1–200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)"),
     ),
     responses(
-        (status = 200, description = "Invitations", body = OrganizationInvitationList),
+        (status = 200, description = "Invitations (newest first) and `nextCursor` while more remain", body = OrganizationInvitationList),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
@@ -1227,7 +1542,7 @@ pub async fn list_organization_invitations(
             headers: &headers,
             body: None,
             raw_query: query.as_deref(),
-            allowed_query: &["status"],
+            allowed_query: &["status", "cursor", "limit"],
         },
     )
     .await
@@ -1303,6 +1618,124 @@ pub async fn accept_organization_invitation(
         Relay {
             method: Method::POST,
             path: "/internal/v1/organization-invitations/accept".into(),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// My pending organization invitations.
+///
+/// Lists the PENDING, unexpired invitations addressed to the signed-in account: those sent to
+/// its CF Meet ID and those sent to its verified email address. Each item names the
+/// organization, the offered role and the expiry; answer one with
+/// `POST /api/v2/organization-invitations/{invitationId}/accept` or `.../decline`, without
+/// the emailed link. Newest first, at most 100. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/me/organization-invitations", tag = "Organizations (v2)", operation_id = "v2_my_organization_invitations",
+    responses(
+        (status = 200, description = "Pending invitations for the signed-in account", body = MyOrganizationInvitationList),
+        (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn my_organization_invitations(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: "/internal/v1/organization-invitations/mine".into(),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Accept one of my organization invitations.
+///
+/// Joins the organization with the invitation's role. The invitation must be addressed to the
+/// signed-in account (its CF Meet ID or its verified email); anyone else gets
+/// INVITATION_INVALID, exactly as for an unknown id. An invitation whose sender has since lost
+/// the right to invite is revoked (INVITATION_INVALID). An expired invitation answers
+/// INVITE_EXPIRED. Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organization-invitations/{invitationId}/accept", tag = "Organizations (v2)", operation_id = "v2_accept_my_organization_invitation",
+    params(("invitationId" = Uuid, Path, description = "Invitation id (from `GET /api/v2/me/organization-invitations`)")),
+    request_body(content = Object, content_type = "application/json", description = "Optional empty JSON object"),
+    responses(
+        (status = 200, description = "Membership created by the invitation", body = BusinessOrganizationMembership),
+        (status = 404, description = "INVITATION_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 410, description = "INVITE_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn accept_my_organization_invitation(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(invitation_id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organization-invitations/{invitation_id}/accept"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Decline one of my organization invitations.
+///
+/// Declines a PENDING invitation addressed to the signed-in account (its CF Meet ID or its
+/// verified email); anyone else gets INVITATION_INVALID. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organization-invitations/{invitationId}/decline", tag = "Organizations (v2)", operation_id = "v2_decline_my_organization_invitation",
+    params(("invitationId" = Uuid, Path, description = "Invitation id (from `GET /api/v2/me/organization-invitations`)")),
+    request_body(content = Object, content_type = "application/json", description = "Optional empty JSON object"),
+    responses(
+        (status = 200, description = "Declined invitation", body = OrganizationInvitation),
+        (status = 404, description = "INVITATION_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 410, description = "INVITE_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn decline_my_organization_invitation(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(invitation_id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organization-invitations/{invitation_id}/decline"),
             headers: &headers,
             body: Some(&body),
             raw_query: None,
@@ -1469,6 +1902,10 @@ pub async fn archive_business_organization(
         ("id" = Uuid, Path, description = "Organization id"),
         ("before" = Option<i64>, Query, description = "Return events older than this sequence number"),
         ("limit" = Option<i64>, Query, description = "1–200 (default 50)"),
+        ("action" = Option<String>, Query, description = "Only this action, e.g. `membership.updated`"),
+        ("actorUserId" = Option<Uuid>, Query, description = "Only changes made by this user"),
+        ("from" = Option<String>, Query, description = "Inclusive lower bound (RFC 3339)"),
+        ("to" = Option<String>, Query, description = "Exclusive upper bound (RFC 3339)"),
     ),
     responses(
         (status = 200, description = "Audit events, newest first", body = OrganizationAuditEventPage),
@@ -1494,7 +1931,7 @@ pub async fn list_organization_audit_events(
             headers: &headers,
             body: None,
             raw_query: query.as_deref(),
-            allowed_query: &["before", "limit"],
+            allowed_query: &["before", "limit", "action", "actorUserId", "from", "to"],
         },
     )
     .await
@@ -1576,7 +2013,7 @@ pub async fn admin_list_organizations(
             headers: &headers,
             body: None,
             raw_query: query.as_deref(),
-            allowed_query: &["cursor", "limit", "status"],
+            allowed_query: &["cursor", "limit", "status", "q"],
         },
     )
     .await
@@ -2079,6 +2516,234 @@ pub async fn update_organization_policy(
             path: format!("/internal/v1/organizations/{id}/policies"),
             headers: &headers,
             body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Meeting spaces of an organization (managers).
+///
+/// Gap audit G13: lists every meeting space of the organization, whatever its access policy or
+/// security profile (INVITE_ONLY, healthcare and high-security spaces included), newest first,
+/// `limit` (1-200, default 50) at a time; pass `nextCursor` as `after` for the next page. Archived
+/// spaces are left out unless `includeArchived=true`. Only governance fields are returned: no
+/// passcodes, invitations, participants or content. Requires `meetings.organization.manage` in
+/// the organization (Organizations authoritative mode); anyone else gets ORGANIZATION_NOT_FOUND
+/// or PERMISSION_DENIED as for other organization operations.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/meeting-spaces", tag = "Organizations (v2)", operation_id = "v2_list_organization_meeting_spaces",
+    params(("id" = Uuid, Path, description = "Organization id"), OrganizationMeetingSpacesQuery),
+    responses(
+        (status = 200, description = "Meeting spaces", body = OrganizationMeetingSpacePage),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_organization_meeting_spaces(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    super::V2Query(q): super::V2Query<OrganizationMeetingSpacesQuery>,
+) -> ApiResult<Json<OrganizationMeetingSpacePage>> {
+    Ok(Json(
+        state
+            .meeting
+            .spaces
+            .list_for_organization(&actor, id, &q)
+            .await?,
+    ))
+}
+
+fn profile_policy_view(v: serde_json::Value) -> ApiResult<OrganizationMeetingProfilePolicy> {
+    Ok(OrganizationMeetingProfilePolicy {
+        organization_id: v["organizationId"]
+            .as_str()
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or_else(|| ApiError::InternalError("missing organization".into()))?,
+        policy: v["policy"].clone(),
+    })
+}
+
+/// Organization meeting profile policy.
+///
+/// Gap audit G17: the organization layer of the meeting profile policy, which the Meeting Service
+/// applies as ceilings to every meeting space of the organization (a space can be stricter, never
+/// more permissive). Sparse; `{}` when nothing is set. Requires `organization.policies.manage`
+/// (Organizations authoritative mode) or, with the legacy directory, the organization's OWNER /
+/// ADMIN.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/meeting-profile-policy", tag = "Organizations (v2)", operation_id = "v2_get_organization_meeting_profile_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "The organization layer", body = OrganizationMeetingProfilePolicy),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_organization_meeting_profile_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Json<OrganizationMeetingProfilePolicy>> {
+    let v =
+        crate::services::organization_policy::meeting_profile::get(&state.meeting.core, &actor, id)
+            .await?;
+    Ok(Json(profile_policy_view(v)?))
+}
+
+/// Replace the organization meeting profile policy.
+///
+/// Gap audit G17: sets the organization layer (validated like a space override: unknown fields,
+/// out-of-range values and privileged role mappings are VALIDATION_ERROR; at most 16 KiB). Every
+/// value set becomes a ceiling for the organization's meeting spaces from their next resolution.
+/// `{}` removes every organization value. Same permission as reading it; the change is audited.
+#[utoipa::path(
+    put, path = "/api/v2/organizations/{id}/meeting-profile-policy", tag = "Organizations (v2)", operation_id = "v2_put_organization_meeting_profile_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = PutOrganizationMeetingProfilePolicyRequest,
+    responses(
+        (status = 200, description = "Stored", body = OrganizationMeetingProfilePolicy),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn put_organization_meeting_profile_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<PutOrganizationMeetingProfilePolicyRequest>,
+) -> ApiResult<Json<OrganizationMeetingProfilePolicy>> {
+    let v = crate::services::organization_policy::meeting_profile::put(
+        &state.meeting.core,
+        &actor,
+        id,
+        req.policy,
+    )
+    .await?;
+    Ok(Json(profile_policy_view(v)?))
+}
+
+/// ADR 0068: the single-use token of an organization export's emailed link.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrganizationExportDownloadRequest {
+    /// The `token` of the download link (from the link's fragment; never logged or stored).
+    pub token: String,
+}
+
+/// Download an owner-delivered organization export.
+///
+/// ADR 0068: the organization export CF Meet support requested, downloaded once by the OWNER
+/// whose emailed link it is (`/organizations/exports/download#org=…&export=…&token=…`), signed
+/// in. Relayed to the Organizations Service with the verified acting user; the token travels
+/// only in this body. Answers the export document (JSON attachment). 404 EXPORT_LINK_INVALID
+/// (wrong, used or foreign link, or no longer an active OWNER), 410 EXPORT_LINK_EXPIRED;
+/// FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/exports/{exportId}/download", tag = "Organizations (v2)", operation_id = "v2_download_organization_export",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("exportId" = Uuid, Path, description = "Export id"),
+    ),
+    request_body = OrganizationExportDownloadRequest,
+    responses(
+        (status = 200, description = "The organization's export document (attachment)", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "EXPORT_LINK_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 410, description = "EXPORT_LINK_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn download_organization_export(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, export_id)): V2Path<(Uuid, Uuid)>,
+    V2Json(req): V2Json<OrganizationExportDownloadRequest>,
+) -> ApiResult<Response> {
+    let token = req.token.trim();
+    if !(16..=512).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(validation("token is invalid"));
+    }
+    let authority = require_authoritative(&state)?;
+    let user = relay_actor(&actor)?;
+    let acting = ActingUser::of(user);
+    let mut call = Call::new(
+        Method::POST,
+        format!("/internal/v1/organizations/{id}/exports/{export_id}/download"),
+    )
+    .actor(&acting);
+    call.body = Some(json!({ "token": token }));
+    // No projection and no logging: the answer is the export document itself.
+    let reply = authority.send(&call).await.map_err(|_| unavailable())?;
+    if !reply.is_success() {
+        return Err(match (reply.status, reply.error_code()) {
+            (404, Some("EXPORT_LINK_INVALID")) => ApiError::domain(
+                ErrorCode::ExportLinkInvalid,
+                "This download link is invalid, already used or not yours",
+            ),
+            (410, Some("EXPORT_LINK_EXPIRED")) => ApiError::domain(
+                ErrorCode::ExportLinkExpired,
+                "This download link has expired; ask CF Meet support to request the export again",
+            ),
+            _ => relayed_error(&reply),
+        });
+    }
+    let mut response = (StatusCode::OK, Json(reply.body)).into_response();
+    let h = response.headers_mut();
+    h.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    h.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=\"cfmeet-organization-export.json\""),
+    );
+    Ok(response)
+}
+
+/// Export the organization's data.
+///
+/// Gap audit G11: everything the Organizations Service holds about the organization as one JSON
+/// document: the organization and its profile, policies, memberships and their history, teams and
+/// team memberships, invitations (never their token) and the newest 10000 audit events. People
+/// appear by user id only. Requires the OWNER (`organization.lifecycle.manage`); each export is
+/// recorded in the organization's audit history. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/export", tag = "Organizations (v2)", operation_id = "v2_export_organization",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "The organization's data", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_organization(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/export"),
+            headers: &headers,
+            body: None,
             raw_query: None,
             allowed_query: &[],
         },

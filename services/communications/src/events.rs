@@ -116,6 +116,7 @@ pub async fn account_event(
     let txn = s.store.begin().await?;
     if !inbox(&s, &txn, &source, event.event_id, &digest_body).await? {
         txn.commit().await?;
+        s.flush_scope_policy(&scope).await?;
         return Ok(Json(json!({"applied":false,"duplicate":true})));
     }
     let profile: Option<Profile> = one(&txn, &format!("{LOOKUP} FOR UPDATE"), values).await?;
@@ -123,7 +124,12 @@ pub async fn account_event(
     let mut fan_out = "NONE";
     if let Some(p) = profile {
         if p.account_version < event.source_version {
-            let next = if p.activation_state == Activation::Deactivated {
+            // Gap audit A16: a deactivated profile stays deactivated unless the account
+            // itself was reactivated (a status change to a non-suspended, non-deactivated
+            // state): it then returns to ACCOUNT_CREATED and is activated again.
+            let reactivated = event.kind == AccountEventKind::StatusChanged
+                && !matches!(event.state, Activation::Suspended | Activation::Deactivated);
+            let next = if p.activation_state == Activation::Deactivated && !reactivated {
                 "DEACTIVATED"
             } else {
                 match event.kind {
@@ -189,6 +195,7 @@ pub async fn account_event(
         fan_out = "PRINCIPAL";
     }
     txn.commit().await?;
+    s.flush_scope_policy(&scope).await?;
     Ok(Json(
         json!({"applied":applied,"duplicate":false,"fanOut":fan_out}),
     ))
@@ -242,13 +249,17 @@ pub struct BlockEvent {
     pub target_principal_id: Uuid,
     pub source_version: i64,
     pub blocked: bool,
+    /// Canonical Calling rule identity (new send-policy projection protocol).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_generation: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub application_block: bool,
 }
-/// DEPRECATED (Blueprint v1.0 Section 14, MSG-016 / DATA-006). No service produces
-/// block events: Calling and Messaging stay the authorities for their own block rules and
-/// every policy decision reads them live (`State::domain_blocks`). The route is kept,
-/// unchanged, for contract compatibility and is removed with the next major version of
-/// `cfmeet.communications.communications-internal`; rows it wrote are never read for a
-/// decision (`GET /blocks` lists only the Hub's own COMMUNICATIONS blocks).
+/// Canonical Calling rules are projected per rule and rollout generation before
+/// confirmation. The older pair-only bridge remains deprecated compatibility input;
+/// its rows never authorize a policy decision.
 pub async fn block_event(
     HttpState(s): HttpState<State>,
     Extension(ctx): Extension<InternalServiceContext>,
@@ -264,10 +275,42 @@ pub async fn block_event(
     } else {
         return Err(Error::Forbidden);
     };
-    if event.source_version < 1 || event.actor_principal_id == event.target_principal_id {
+    if event.source_version < 1
+        || (!event.application_block && event.actor_principal_id == event.target_principal_id)
+        || (event.application_block && (source != "CALLING" || event.rule_id.is_none()))
+    {
         return Err(Error::Validation);
     }
     let txn = s.store.begin().await?;
+    if let Some(rule) = event.rule_id {
+        if source != "CALLING"
+            || !s.config.synchronous_policy_events
+            || event.projection_generation != s.config.send_policy_generation
+        {
+            return Err(Error::Unavailable);
+        }
+        let fresh = inbox(
+            &s,
+            &txn,
+            source,
+            event.event_id,
+            &serde_json::to_value(&event).map_err(|_| Error::Validation)?,
+        )
+        .await?;
+        if fresh {
+            // No lazy Hub profile is required. The native owner authenticated these
+            // principal ids; the receiver stores only the rule, version and scope.
+            s.store.messaging_event(&txn, scope, "communications.domain.block.changed", rule,
+                event.source_version, json!({"ruleId":rule,
+                    "actorPrincipalId":if event.application_block {None} else {Some(event.actor_principal_id)},
+                    "targetPrincipalId":event.target_principal_id,"blocked":event.blocked,"projectionGeneration":event.projection_generation})).await?;
+        }
+        txn.commit().await?;
+        s.flush_scope_policy(&delegated).await?;
+        return Ok(Json(
+            json!({"applied":fresh,"duplicate":!fresh,"sendPolicyProjection":1}),
+        ));
+    }
     if !inbox(
         &s,
         &txn,
@@ -318,6 +361,48 @@ pub async fn backfill(
     }
     let scope = auth::delegated(&ctx)?;
     auth::validate_scope(&s, &scope).await?;
+    let page = backfill_page(&s, &scope, input.limit, input.cursor).await?;
+    let mut count = 0;
+    for account in &page.accounts {
+        let txn = s.store.begin().await?;
+        if backfill_account(
+            &s,
+            &txn,
+            Scope::of(&scope),
+            account,
+            json!({"source":"ACCOUNT"}),
+        )
+        .await?
+        {
+            count += 1;
+        }
+        txn.commit().await?;
+    }
+    Ok(Json(json!({"created":count,"nextCursor":page.next_cursor})))
+}
+
+/// One native account of the Account's backfill page.
+pub struct BackfillAccount {
+    reference: String,
+    principal: Uuid,
+    display_name: String,
+}
+
+/// One validated page of the Account's backfill.
+pub struct BackfillPage {
+    pub accounts: Vec<BackfillAccount>,
+    pub next_cursor: Value,
+}
+
+/// Asks the Account (Meeting Service) for one page of native accounts in `scope` and
+/// validates the WHOLE page before anything is written: at most `limit` accounts, each a
+/// `cfmeet-user:` reference with its principal id.
+pub async fn backfill_page(
+    s: &State,
+    scope: &DelegatedPlatformContext,
+    limit: u64,
+    cursor: Option<Uuid>,
+) -> Result<BackfillPage> {
     let req = OutboundServiceRequest::new_operation(ServiceId::meeting_service())
         .with_delegated_context(scope.clone());
     let r = s
@@ -326,7 +411,7 @@ pub async fn backfill(
         .post_json(
             &req,
             "/internal/v1/accounts/communications/backfill",
-            &json!({"limit":input.limit,"cursor":input.cursor}),
+            &json!({"limit":limit,"cursor":cursor}),
         )
         .await
         .map_err(|_| Error::Unavailable)?;
@@ -336,57 +421,67 @@ pub async fn backfill(
     let page: Value = r.json().map_err(|_| Error::Unavailable)?;
     let accounts = page["accounts"]
         .as_array()
-        .filter(|v| v.len() <= input.limit as usize)
-        .ok_or(Error::Unavailable)?;
-    let mut count = 0;
-    for account in accounts {
-        let reference = account["accountReference"]
-            .as_str()
-            .filter(|v| v.starts_with("cfmeet-user:"))
-            .ok_or(Error::Unavailable)?;
-        // Account owns the mapping. It reuses its existing principal link and ensures
-        // missing native mappings through Platform Access; the Hub never replaces it.
-        let principal = uuid_field(account, "principalId")?;
-        let txn = s.store.begin().await?;
-        let profile = Uuid::new_v4();
-        let mut values = vec![profile.into()];
-        values.extend(store::scoped(Scope::of(&scope)));
-        values.extend([
-            reference.into(),
-            principal.into(),
-            account["displayName"]
+        .filter(|v| v.len() <= limit as usize)
+        .ok_or(Error::Unavailable)?
+        .iter()
+        .map(|account| {
+            let reference = account["accountReference"]
                 .as_str()
-                .unwrap_or("CF Meet member")
-                .chars()
-                .take(160)
-                .collect::<String>()
-                .into(),
-        ]);
-        let created=execute(&txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",values).await?;
-        if created > 0 {
-            execute(
-                &txn,
-                "INSERT INTO communication_privacy(profile_id) VALUES($1)",
-                vec![profile.into()],
-            )
-            .await?;
-            s.new_public_id(&txn, profile).await?;
-            s.store
-                .audit_system(
-                    &txn,
-                    Scope::of(&scope),
-                    "PROFILE_BACKFILLED",
-                    Some(profile),
-                    json!({"source":"ACCOUNT"}),
-                )
-                .await?;
-            count += 1;
-        }
-        txn.commit().await?;
+                .filter(|v| v.starts_with("cfmeet-user:"))
+                .ok_or(Error::Unavailable)?;
+            // Account owns the mapping. It reuses its existing principal link and ensures
+            // missing native mappings through Platform Access; the Hub never replaces it.
+            let principal = uuid_field(account, "principalId")?;
+            Ok(BackfillAccount {
+                reference: reference.to_owned(),
+                principal,
+                display_name: account["displayName"]
+                    .as_str()
+                    .unwrap_or("CF Meet member")
+                    .chars()
+                    .take(160)
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(BackfillPage {
+        accounts,
+        next_cursor: page["nextCursor"].clone(),
+    })
+}
+
+/// Creates the profile of one backfilled account unless it already has one (`true` when
+/// created), audited `PROFILE_BACKFILLED` with `details`.
+pub async fn backfill_account<C: ConnectionTrait>(
+    s: &State,
+    txn: &C,
+    scope: Scope,
+    account: &BackfillAccount,
+    details: Value,
+) -> Result<bool> {
+    let profile = Uuid::new_v4();
+    let mut values = vec![profile.into()];
+    values.extend(store::scoped(scope));
+    values.extend([
+        account.reference.clone().into(),
+        account.principal.into(),
+        account.display_name.clone().into(),
+    ]);
+    let created=execute(txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",values).await?;
+    if created == 0 {
+        return Ok(false);
     }
-    Ok(Json(
-        json!({"created":count,"nextCursor":page["nextCursor"]}),
-    ))
+    execute(
+        txn,
+        "INSERT INTO communication_privacy(profile_id) VALUES($1)",
+        vec![profile.into()],
+    )
+    .await?;
+    s.new_public_id(txn, profile).await?;
+    s.store
+        .audit_system(txn, scope, "PROFILE_BACKFILLED", Some(profile), details)
+        .await?;
+    Ok(true)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -418,6 +513,31 @@ pub async fn replay(
 }
 
 impl State {
+    /// Called after the source mutation commits, including idempotent retries. A
+    /// failure leaves the mutation and its outbox durable, but never confirms it.
+    /// The bounded high-water mark excludes concurrent later changes from this ACK.
+    pub async fn flush_scope_policy(&self, scope: &DelegatedPlatformContext) -> Result<()> {
+        if !self.config.synchronous_policy_events {
+            return Ok(());
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let values = store::scoped(Scope::of(scope));
+            let jobs: Vec<Value> = rows(&self.store.db,
+                "SELECT to_jsonb(o) doc FROM communication_outbox o WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND destination='MESSAGING' AND state<>'DELIVERED' AND event_type<>'communications.timeline.changed' ORDER BY seq LIMIT 33", values.clone()).await?;
+            let overflow = jobs.len() > 32;
+            for job in jobs.into_iter().take(32) {
+                let req = OutboundServiceRequest::new_operation(ServiceId::messaging()).with_delegated_context(scope.clone());
+                let payload = json!({"schemaVersion":1,"eventId":job["event_id"],"aggregateId":job["aggregate_id"],"version":job["aggregate_version"],"type":job["event_type"],"data":job["payload"]});
+                let response = self.config.client.post_json(&req, "/internal/v1/communications/events", &payload).await.map_err(|_| Error::Unavailable)?;
+                if response.status()!=200 || response.json::<Value>().map_err(|_| Error::Unavailable)?["sendPolicyGeneration"]!=json!(self.config.send_policy_generation) { return Err(Error::Unavailable); }
+                execute(&self.store.db,"UPDATE communication_outbox SET state='DELIVERED',delivered_at=now(),lease_id=NULL,lease_until=NULL WHERE seq=$1 AND state<>'DELIVERED'",vec![job["seq"].as_i64().ok_or(Error::Unavailable)?.into()]).await?;
+            }
+            if overflow { return Err(Error::Unavailable); }
+            Ok(())
+        }).await;
+        result.map_err(|_| Error::Unavailable)?
+    }
+
     pub async fn deliver_due(&self) -> Result<usize> {
         execute(&self.store.db,"UPDATE communication_outbox SET state='DEAD',lease_id=NULL,lease_until=NULL WHERE state='INFLIGHT' AND lease_until<=now() AND attempts>=12",vec![]).await?;
         let txn = self.store.begin().await?;
@@ -445,14 +565,23 @@ impl State {
                 kind,
                 uuid_field(&scope_value, "serviceAccountId")?,
             );
-            let req = OutboundServiceRequest::new_operation(service).with_delegated_context(scope);
+            let req = OutboundServiceRequest::new_operation(service.clone())
+                .with_delegated_context(scope);
             let payload = json!({"schemaVersion":1,"eventId":job["event_id"],"aggregateId":job["aggregate_id"],"version":job["aggregate_version"],"type":job["event_type"],"data":job["payload"]});
             let ok = self
                 .config
                 .client
                 .post_json(&req, "/internal/v1/communications/events", &payload)
                 .await
-                .is_ok_and(|r| r.status() == 200);
+                .is_ok_and(|r| {
+                    r.status() == 200
+                        && (service != ServiceId::messaging()
+                            || !self.config.synchronous_policy_events
+                            || r.json::<Value>().is_ok_and(|body| {
+                                body["sendPolicyGeneration"]
+                                    == json!(self.config.send_policy_generation)
+                            }))
+                });
             let attempts = job["attempts"].as_i64().unwrap_or(12);
             if ok {
                 execute(&self.store.db,"UPDATE communication_outbox SET state='DELIVERED',delivered_at=now(),lease_id=NULL,lease_until=NULL WHERE seq=$1 AND lease_id=$2",vec![seq.into(),lease.into()]).await?;
@@ -480,6 +609,9 @@ impl State {
             "DELETE FROM communication_pending_call_cards WHERE ctid IN(SELECT ctid FROM communication_pending_call_cards WHERE created_at<now()-interval '30 days' LIMIT 1000)",
             "DELETE FROM communication_timeline_nudges WHERE ctid IN(SELECT ctid FROM communication_timeline_nudges WHERE created_at<now()-interval '30 days' LIMIT 1000)",
         ] {execute(&self.store.db,sql,vec![]).await?;}
+        // Roadmap N7: expire overdue notification publications, purge settled ones.
+        crate::notification_publications::maintain(self, 1000).await?;
+        crate::admin_events::maintain(self, 1000).await?;
         let txn = self.store.begin().await?;
         let pairs:Vec<Value>=rows(&txn,"SELECT to_jsonb(c) doc FROM communication_connections c WHERE state='REQUEST_PENDING' AND EXISTS(SELECT 1 FROM communication_contact_requests r WHERE r.connection_id=c.id AND r.state='PENDING' AND r.expires_at<=now()) ORDER BY c.id LIMIT 100 FOR UPDATE OF c SKIP LOCKED",vec![]).await?;
         for pair in pairs {

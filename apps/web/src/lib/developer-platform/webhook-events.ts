@@ -25,9 +25,16 @@ export const WEBHOOK_EVENT_TYPES: string[] = [
   "call.busy",
   "call.answered_elsewhere",
   "call.invitation_expired",
+  "call.kind_changed",
+  "call.screen_share_started",
+  "call.screen_share_stopped",
+  "call.participant_added",
   "voicemail.received",
   "voicemail.ready",
   "voicemail.deleted",
+  "recording.started",
+  "recording.stopped",
+  "recording.failed",
   "recording.ready",
   "recording.deleted",
   "relay.created",
@@ -76,6 +83,11 @@ export const WEBHOOK_EVENT_TYPES: string[] = [
   "production_access.requested",
   "production_access.approved",
   "production_access.rejected",
+  "app.installed",
+  "app.uninstalled",
+  "app.grant_revoked",
+  "bot.mentioned",
+  "bot.message_received",
 ];
 
 /** Event types grouped by family prefix (`call`, `sms`, ...), for the picker. */

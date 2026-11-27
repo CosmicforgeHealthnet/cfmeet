@@ -324,7 +324,11 @@ mod access_worker {
     #[derive(Default)]
     struct Recording {
         calls: Mutex<Vec<(Uuid, Uuid, String)>>,
+        /// Gap audit G3: (environment, principal, status) of every extension change.
+        extensions: Mutex<Vec<(Uuid, Uuid, String)>>,
         fail: Mutex<Option<PortError>>,
+        /// Fails only the Calling extension step.
+        fail_extensions: Mutex<Option<PortError>>,
     }
 
     #[async_trait]
@@ -342,6 +346,23 @@ mod access_worker {
                 .lock()
                 .unwrap()
                 .push((scope.environment_id, user_id, status.to_string()));
+            Ok(())
+        }
+
+        async fn set_extension_status(
+            &self,
+            scope: &ScopeEnvironment,
+            principal_id: Uuid,
+            status: &str,
+        ) -> Result<(), PortError> {
+            if let Some(e) = self.fail_extensions.lock().unwrap().clone() {
+                return Err(e);
+            }
+            self.extensions.lock().unwrap().push((
+                scope.environment_id,
+                principal_id,
+                status.to_string(),
+            ));
             Ok(())
         }
     }
@@ -373,6 +394,15 @@ mod access_worker {
                 .unwrap();
             Ok(())
         }
+
+        async fn set_extension_status(
+            &self,
+            _: &ScopeEnvironment,
+            _: Uuid,
+            _: &str,
+        ) -> Result<(), PortError> {
+            Ok(())
+        }
     }
 
     async fn exec(app: &TestApp, sql: String) {
@@ -399,16 +429,17 @@ mod access_worker {
         env
     }
 
-    async fn link(app: &TestApp, user: Uuid, env: Uuid) {
+    async fn link(app: &TestApp, user: Uuid, env: Uuid) -> Uuid {
+        let principal = Uuid::new_v4();
         exec(
             app,
             format!(
                 "INSERT INTO communication_principal_links (subject_kind, subject_id, environment_id, principal_id, principal_kind) \
-                 VALUES ('USER', '{user}', '{env}', '{}', 'NATIVE_CF_USER')",
-                Uuid::new_v4()
+                 VALUES ('USER', '{user}', '{env}', '{principal}', 'NATIVE_CF_USER')"
             ),
         )
         .await;
+        principal
     }
 
     async fn desire(app: &TestApp, org: Uuid, user: Uuid, desired: &str, version: i64) {
@@ -457,7 +488,8 @@ mod access_worker {
         let org_env = scope_env(&app, org).await;
         let other_env = scope_env(&app, other_org).await;
         let personal_env = Uuid::new_v4();
-        for env in [org_env, other_env, personal_env] {
+        let org_principal = link(&app, member, org_env).await;
+        for env in [other_env, personal_env] {
             link(&app, member, env).await;
         }
         desire(&app, org, member, "REMOVED", 3).await;
@@ -502,6 +534,12 @@ mod access_worker {
             vec![(org_env, member, "SUSPENDED".to_string())],
             "never the other organization's or the personal principal"
         );
+        // Gap audit G3: the member's extensions in THIS organization follow.
+        assert_eq!(r.extensions_applied, 1);
+        assert_eq!(
+            port.extensions.lock().unwrap().clone(),
+            vec![(org_env, org_principal, "SUSPENDED".to_string())]
+        );
         assert_eq!(
             row(&app, org, member).await,
             (Some("REMOVED".into()), Some(3), 0, None)
@@ -527,6 +565,10 @@ mod access_worker {
             .await
             .unwrap();
         assert_eq!(port.calls.lock().unwrap().last().unwrap().2, "ACTIVE");
+        assert_eq!(
+            port.extensions.lock().unwrap().last().unwrap().clone(),
+            (org_env, org_principal, "ACTIVE".to_string())
+        );
         assert_eq!(row(&app, org, member).await.0.as_deref(), Some("ACTIVE"));
 
         // A member without an organization-scope principal is applied without a call.
@@ -570,5 +612,52 @@ mod access_worker {
                 .pending,
             1
         );
+    }
+
+    /// Gap audit G3: a Calling refusal of the extension step (the trust bundle lacks
+    /// `calling-organization-member.offboard`) keeps the change due and reported; once
+    /// Calling accepts, it settles.
+    #[tokio::test]
+    async fn a_refused_extension_step_is_retried_and_reported() {
+        let Some(app) = TestApp::new().await else {
+            return;
+        };
+        let (org, user) = (Uuid::new_v4(), Uuid::new_v4());
+        let env = scope_env(&app, org).await;
+        let principal = link(&app, user, env).await;
+        desire(&app, org, user, "SUSPENDED", 2).await;
+        let port = Recording::default();
+        *port.fail_extensions.lock().unwrap() = Some(PortError {
+            class: "CALLING_REFUSED_INTERNAL_PERMISSION_DENIED".into(),
+            permanent: true,
+        });
+        let r = organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
+        assert_eq!((r.applied, r.failed, r.principals_updated), (0, 1, 1));
+        assert_eq!(
+            row(&app, org, user).await,
+            (
+                None,
+                None,
+                1,
+                Some("CALLING_REFUSED_INTERNAL_PERMISSION_DENIED".into())
+            )
+        );
+        *port.fail_extensions.lock().unwrap() = None;
+        exec(
+            &app,
+            "UPDATE organization_member_access SET next_attempt_at = now()".into(),
+        )
+        .await;
+        let r = organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
+        assert_eq!((r.applied, r.extensions_applied), (1, 1));
+        assert_eq!(
+            port.extensions.lock().unwrap().clone(),
+            vec![(env, principal, "SUSPENDED".to_string())]
+        );
+        assert_eq!(row(&app, org, user).await.0.as_deref(), Some("SUSPENDED"));
     }
 }

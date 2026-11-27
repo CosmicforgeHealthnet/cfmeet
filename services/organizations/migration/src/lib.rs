@@ -15,6 +15,10 @@ mod m20261106_000001_organizations_foundation;
 mod m20261107_000002_teams_policies_provisioning;
 mod m20261108_000003_scope_service_bindings;
 mod m20261110_000004_messaging_service_binding;
+mod m20261113_000005_automatic_service_bindings;
+mod m20261117_000006_notification_publications;
+mod m20261120_000007_admin_operations;
+mod m20261121_000008_organization_exports;
 
 /// Name of the table recording which Organizations migrations have been applied.
 pub const MIGRATION_TABLE: &str = "organizations_seaql_migrations";
@@ -29,6 +33,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20261107_000002_teams_policies_provisioning::Migration),
             Box::new(m20261108_000003_scope_service_bindings::Migration),
             Box::new(m20261110_000004_messaging_service_binding::Migration),
+            Box::new(m20261113_000005_automatic_service_bindings::Migration),
+            Box::new(m20261117_000006_notification_publications::Migration),
+            Box::new(m20261120_000007_admin_operations::Migration),
+            Box::new(m20261121_000008_organization_exports::Migration),
         ]
     }
 

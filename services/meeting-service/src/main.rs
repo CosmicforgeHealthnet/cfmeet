@@ -16,6 +16,15 @@ use backend::{
     },
 };
 
+/// `DATABASE_MAX_CONNECTIONS` (2-200, default 10).
+fn database_max_connections() -> u32 {
+    std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(10)
+        .clamp(2, 200)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables
@@ -31,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Connecting to database...");
     let mut db_opts = ConnectOptions::new(&app_config.database_url);
     db_opts
-        .max_connections(10)
+        // B6: `DATABASE_MAX_CONNECTIONS` (2-200, default 10) sizes the pool per deployment;
+        // production raises it only through the release operation `activate-database-pools`,
+        // which checks the database's connection budget first.
+        .max_connections(database_max_connections())
         .min_connections(2)
         .connect_timeout(std::time::Duration::from_secs(30))
         .acquire_timeout(std::time::Duration::from_secs(30))
@@ -60,8 +72,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Load email configuration (unified email delivery). A selected provider with missing or
     // malformed settings stops startup (fail closed): mail must never be silently dropped.
-    let email_config = EmailConfig::from_env()
-        .unwrap_or_else(|e| panic!("email configuration error: {e}"));
+    let email_config =
+        EmailConfig::from_env().unwrap_or_else(|e| panic!("email configuration error: {e}"));
     tracing::info!(
         "✅ Email configuration loaded (provider: {}, sender: {})",
         email_config.provider.as_str(),
@@ -107,6 +119,26 @@ async fn main() -> anyhow::Result<()> {
             state = state.with_platform(receiver);
             tracing::info!("Part VI: platform credential access to /api/v2 enabled");
         }
+        // ADR 0062: partner users join with their CF Meet user token (and partner meeting
+        // chat). Their tables live in an additive history (`platform-build-migration up`);
+        // refuse to start without it rather than failing joins.
+        if let Some(users) = config.platform_users(&db, client.clone()) {
+            if !migration::platform_build_ready(&db)
+                .await
+                .expect("Platform-build migration readiness")
+            {
+                panic!("Platform-build migration is required while MEETING_PLATFORM_USER_JOIN_ENABLED is on (platform-build-migration up)");
+            }
+            if let Some(chat) = users.chat.clone() {
+                backend::services::platform::partner_chat::spawn_partner_chat_sync(
+                    chat,
+                    config.chat_sync_interval,
+                );
+                tracing::info!("ADR 0062: partner meeting chat enabled");
+            }
+            state = state.with_platform_users(users);
+            tracing::info!("ADR 0062: partner user join (CF Meet user tokens) enabled");
+        }
         // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
         if let Some(s) = config.usage_export.clone() {
             use backend::services::platform::usage_export;
@@ -136,6 +168,31 @@ async fn main() -> anyhow::Result<()> {
             ));
             tracing::info!("Part VI: environment-scoped meeting events -> Developer Platform");
         }
+    }
+    // ADR 0064 / 0065: CF Meet Apps (MEETING_OAUTH_AUTHORIZE_ENABLED,
+    // MEETING_DELEGATED_APPS_ENABLED, MEETING_IN_MEETING_APPS_ENABLED; all off by default).
+    // Enabled but misconfigured stops startup (fail closed). No migration of their own.
+    let apps_config = backend::services::apps::AppsConfig::from_env()
+        .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+    let mut userinfo_verifier = None;
+    if let Some(config) = apps_config {
+        if config.delegated_enabled && state.platform.is_none() {
+            panic!("apps configuration error: MEETING_DELEGATED_APPS_ENABLED requires the platform credential receiver (MEETING_PLATFORM_ACCESS_ENABLED)");
+        }
+        let apps = config
+            .build(state.meeting.core.organization_authority.clone())
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        userinfo_verifier = config
+            .userinfo_verifier()
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        tracing::info!(
+            authorize = config.authorize_enabled,
+            delegated = config.delegated_enabled,
+            in_meeting = config.in_meeting_enabled,
+            organization_installs = apps.organizations.is_some(),
+            "ADR 0064 / 0065: CF Meet Apps enabled"
+        );
+        state = state.with_apps(apps);
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
@@ -174,6 +231,36 @@ async fn main() -> anyhow::Result<()> {
         .expect("Account hardening migration readiness")
     {
         panic!("Account hardening migration is required (account-hardening-migration up)");
+    }
+
+    // Backend gap audit: case-insensitive identity, authenticator MFA, avatars and calendar
+    // invites live in their own additive history (`gap-closure-migration up`).
+    if !migration::gap_closure_ready(&state.db)
+        .await
+        .expect("Gap-closure migration readiness")
+    {
+        panic!("Gap-closure migration is required (gap-closure-migration up)");
+    }
+
+    // S2: account deletion queues durable erasure jobs for Messaging, the Hub and Calling
+    // (`account-privacy-migration up`); the privacy worker delivers and retries them.
+    if !migration::account_privacy_ready(&state.db)
+        .await
+        .expect("Account-privacy migration readiness")
+    {
+        panic!("Account-privacy migration is required (account-privacy-migration up)");
+    }
+    backend::services::account_privacy::spawn(state.db.clone(), std::time::Duration::from_secs(60));
+    if !migration::account_phone_ready(&state.db)
+        .await
+        .expect("Account-phone migration readiness")
+    {
+        panic!("Account-phone migration is required (account-phone-migration up)");
+    }
+    if std::env::var("PHONE_ACCOUNTS_ENABLED").ok().as_deref() == Some("true") {
+        backend::services::account_phone::TwilioVerify::from_env().unwrap_or_else(|_| {
+            panic!("Phone accounts enabled without a valid verification provider")
+        });
     }
 
     // Blueprint Section 4: which store answers organization questions (the client
@@ -230,6 +317,24 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Gap audit A10: sign-ins past their absolute lifetime end everywhere (once a minute).
+    {
+        let sweep_state = state.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                match backend::services::account_security::sweep_expired_sessions(&sweep_state)
+                    .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("ended {n} expired account sign-in(s)"),
+                    Err(e) => tracing::warn!("expired sign-in sweep deferred: {e}"),
+                }
+            }
+        });
+    }
+
     // Unified email delivery: the durable ledger lives in its own additive history.
     if !migration::lifecycle_delivery_ready(&state.db)
         .await
@@ -269,6 +374,64 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => panic!("email provider error: {e}"),
     };
 
+    // Notification Service N7 / N11: the service's public HPKE key seals invitation tokens /
+    // addresses into published events (unset: invitation emails stay on the legacy path).
+    let sealing = backend::services::notification_publications::sealing_key_from_env()
+        .unwrap_or_else(|e| panic!("notification sealing key configuration error: {e}"));
+    // Notification Service N12: the CRITICAL lane seals codes to the same service key and
+    // each message's legacy email to the Account fallback key (CF_ACCOUNT_FALLBACK_KEY_FILE,
+    // self-tested here; unset: every CRITICAL message stays on the legacy path).
+    let critical_keys = backend::services::critical_notifications::keys_from_env(sealing.clone())
+        .unwrap_or_else(|e| panic!("CRITICAL notification lane configuration error: {e}"));
+    if critical_keys.fallback.is_some() {
+        tracing::info!("CRITICAL notification lane: Account fallback key loaded and self-tested");
+    } else {
+        tracing::info!(
+            "CF_ACCOUNT_FALLBACK_KEY_FILE is not set: CRITICAL notifications stay on the legacy email path"
+        );
+    }
+    backend::services::critical_notifications::install(critical_keys);
+    if sealing.is_some() {
+        state.notifier = std::sync::Arc::new(
+            backend::services::notifications::Notifier::new(
+                state.notifier.mail.clone(),
+                state.notifier.preferences.clone(),
+            )
+            .with_sealing(sealing),
+        );
+    }
+    // The relay of Meeting's publications (shadow copies in SHADOW, publications of NEW
+    // decisions) to I1: posts only with CF_NOTIFICATIONS_BASE_URL; the routing mode alone
+    // decides what is enqueued. Expiry and purge run in every case.
+    let publication_sink =
+        backend::services::notification_publications::NotificationServiceEvents::from_env()
+            .unwrap_or_else(|e| panic!("notification publication relay configuration error: {e}"))
+            .map(|s| {
+                std::sync::Arc::new(s)
+                    as std::sync::Arc<
+                        dyn backend::services::notification_publications::NotificationEventSink,
+                    >
+            });
+    if publication_sink.is_some() {
+        tracing::info!("Notification publications are relayed to the Notification Service");
+    } else {
+        tracing::info!(
+            "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
+        );
+    }
+    // N12 PW1: the CRITICAL lane relay (I1 posts, AUTO / FORCED failover to the legacy
+    // email path, expiry). Fails over even without CF_NOTIFICATIONS_BASE_URL.
+    tokio::spawn(backend::services::critical_notifications::run(
+        state.db.clone(),
+        publication_sink.clone(),
+        std::time::Duration::from_secs(2),
+    ));
+    tokio::spawn(backend::services::notification_publications::run(
+        state.db.clone(),
+        publication_sink,
+        std::time::Duration::from_secs(5),
+    ));
+
     // Blueprint Section 11: meeting notifications (reschedule/cancel notices, reminders).
     // Off unless NOTIFICATIONS_EMAIL_ENABLED=true; emails still need the email worker above.
     let notification_context =
@@ -288,11 +451,22 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Start meeting auto-end worker (always runs)
-    let _meeting_auto_end_worker = spawn_meeting_auto_end_worker(db.clone());
+    let _meeting_auto_end_worker = spawn_meeting_auto_end_worker(
+        db.clone(),
+        Some(state.meeting.core.rtc.clone()),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-end worker started");
 
     // Start meeting auto-start worker (always runs)
-    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(db.clone());
+    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(
+        db.clone(),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-start worker started");
 
     // Phase 2 meeting domain workers (v2 conferences only; legacy workers above keep
@@ -401,6 +575,53 @@ async fn main() -> anyhow::Result<()> {
     if bridge_router.is_some() {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
+    // ADR 0064: the internal OAuth userinfo route (meeting-oauth-userinfo.read).
+    let userinfo_router = userinfo_verifier
+        .map(|verifier| backend::services::apps::userinfo::router(state.clone(), verifier));
+
+    // Document 4 §3.1: Notification Service user relay (CF_NOTIFICATIONS_BASE_URL; unset:
+    // the /api/v2/notifications routes answer 503 and nothing is forwarded).
+    state.notifications = backend::services::notification_relay::NotificationsRelay::from_env()
+        .unwrap_or_else(|e| panic!("notification relay configuration error: {e}"));
+    if state.notifications.is_some() {
+        tracing::info!("Notification Service user relay enabled");
+    }
+
+    // Notification Service owner APIs X1 / X2 (NOTIFICATION_OWNER_API_ENABLED, Document 4
+    // §3.4). Reads only: no migration of their own.
+    let notification_owner =
+        backend::services::notification_owner::NotificationOwnerConfig::from_env()
+            .and_then(|c| c.map(|c| c.verifier()).transpose())
+            .unwrap_or_else(|e| panic!("notification owner API configuration error: {e}"));
+    let owner_router = notification_owner
+        .map(|verifier| backend::services::notification_owner::router(state.clone(), verifier));
+    if owner_router.is_some() {
+        tracing::info!("Notification Service owner APIs enabled");
+    }
+
+    // ADR 0068: the admin bridge's operator reads (ADMIN_OPERATOR_API_ENABLED, default off).
+    let admin_operator = backend::services::admin_operator::AdminOperatorConfig::from_env()
+        .and_then(|c| c.map(|c| c.verifier()).transpose())
+        .unwrap_or_else(|e| panic!("admin operator API configuration error: {e}"));
+    let operator_router = admin_operator
+        .map(|verifier| backend::services::admin_operator::router(state.clone(), verifier));
+    if operator_router.is_some() {
+        // A4–A7: the bridge's commands record themselves in `meeting_admin_operations` and
+        // lock accounts by `users.account_version` (`admin-operations-migration up`).
+        if !migration::admin_operations_ready(&state.db)
+            .await
+            .expect("Admin-operations migration readiness")
+        {
+            panic!("Admin-operations migration is required (admin-operations-migration up)");
+        }
+        tracing::info!("admin bridge operator reads and commands enabled");
+        // A7: owner-delivered exports: builds that lapsed are retried, copies past their
+        // 7-day retention (or of a deleted account) are purged.
+        let _account_export_worker = backend::services::account_export::spawn_worker(
+            state.clone(),
+            std::time::Duration::from_secs(60),
+        );
+    }
 
     // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
     // live in their own additive history (`organization-integration-migration up`).
@@ -425,10 +646,31 @@ async fn main() -> anyhow::Result<()> {
             Some(port) => {
                 backend::services::organization_access::spawn(
                     state.db.clone(),
-                    port,
+                    port.clone(),
                     std::time::Duration::from_secs(5),
                 );
                 tracing::info!("organization access worker started");
+                // Team chats follow team membership (team.* events mark them due).
+                match state
+                    .meeting
+                    .core
+                    .organization_authority
+                    .clone()
+                    .filter(|a| a.is_authoritative())
+                {
+                    Some(authority) => {
+                        backend::services::team_channels::spawn(
+                            state.db.clone(),
+                            port,
+                            authority,
+                            std::time::Duration::from_secs(5),
+                        );
+                        tracing::info!("team chat worker started");
+                    }
+                    None => tracing::info!(
+                        "team chat worker not started: Organizations is not authoritative"
+                    ),
+                }
             }
             None => tracing::warn!(
                 "organization events are enabled but the organization relay is not configured: \
@@ -438,22 +680,40 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build application with routes
-    let mut app = Router::new()
-        .merge(routes::create_routes(state))
-        .merge(swagger::swagger_router(&addr))
+    // D1: Swagger UI and the served OpenAPI documents only outside production
+    // (`API_DOCS_ENABLED`, see `swagger::docs_enabled`).
+    let docs = swagger::docs_enabled();
+    let mut app = Router::new().merge(routes::create_routes(state));
+    if docs {
+        app = app.merge(swagger::swagger_router(&addr));
+    }
+    let mut app = app
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
         app = app.merge(bridge);
     }
+    if let Some(userinfo) = userinfo_router {
+        app = app.merge(userinfo);
+    }
     if let Some(events) = events_router {
         app = app.merge(events);
+    }
+    if let Some(operator) = operator_router {
+        app = app.merge(operator);
+    }
+    if let Some(owner) = owner_router {
+        app = app.merge(owner);
     }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("🚀 Server running on http://{}", addr);
-    tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
-    tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    if docs {
+        tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
+        tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    } else {
+        tracing::info!("API documentation is not served (production; see API_DOCS_ENABLED)");
+    }
 
     axum::serve(listener, app).await?;
 

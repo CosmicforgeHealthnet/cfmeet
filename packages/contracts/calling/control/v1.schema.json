@@ -23,6 +23,21 @@
       "$ref": "#/$defs/TransferRequest"
     },
     {
+      "$ref": "#/$defs/UpgradeRequest"
+    },
+    {
+      "$ref": "#/$defs/ScreenShareRequest"
+    },
+    {
+      "$ref": "#/$defs/ScreenShareResult"
+    },
+    {
+      "$ref": "#/$defs/AddParticipantsRequest"
+    },
+    {
+      "$ref": "#/$defs/AddParticipantsResult"
+    },
+    {
       "$ref": "#/$defs/AcceptResult"
     },
     {
@@ -65,7 +80,49 @@
       "$ref": "#/$defs/RecoveredInvitationList"
     },
     {
+      "$ref": "#/$defs/AcknowledgeResult"
+    },
+    {
       "$ref": "#/$defs/ProviderCallbackAck"
+    },
+    {
+      "$ref": "#/$defs/QualitySampleRequest"
+    },
+    {
+      "$ref": "#/$defs/QualitySampleResult"
+    },
+    {
+      "$ref": "#/$defs/CallQualitySummary"
+    },
+    {
+      "$ref": "#/$defs/TransferHostRequest"
+    },
+    {
+      "$ref": "#/$defs/HostActionRequest"
+    },
+    {
+      "$ref": "#/$defs/MuteParticipantRequest"
+    },
+    {
+      "$ref": "#/$defs/HostControlResult"
+    },
+    {
+      "$ref": "#/$defs/RejoinRequest"
+    },
+    {
+      "$ref": "#/$defs/RejoinResult"
+    },
+    {
+      "$ref": "#/$defs/ConsultationRequest"
+    },
+    {
+      "$ref": "#/$defs/ConsultationResult"
+    },
+    {
+      "$ref": "#/$defs/ConsultationCompletion"
+    },
+    {
+      "$ref": "#/$defs/ConsultationCancelResult"
     }
   ],
   "$defs": {
@@ -347,7 +404,7 @@
       }
     },
     "CommandRequest": {
-      "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent).",
+      "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and, for end / hold / resume only, the acting participant (no state, reason or permission can be sent).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -358,6 +415,10 @@
           "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
           "type": "integer",
           "minimum": 1
+        },
+        "actingParticipantId": {
+          "description": "1.8.0: end / hold / resume only (cancel and session removal refuse it, 400). The participant acting for everyone. In a group Call (more than two participants, ever) only its host may end or hold / resume it for everyone (another participant: 403 CALL_NOT_AUTHORIZED; it leaves by removing its session instead). Absent: the application backend acting on its own authority (unchanged).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
     },
@@ -537,7 +598,7 @@
       }
     },
     "ControlResult": {
-      "description": "Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.",
+      "description": "Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -554,7 +615,8 @@
             "CANCEL",
             "END",
             "HOLD",
-            "RESUME"
+            "RESUME",
+            "UPGRADE"
           ]
         }
       }
@@ -921,6 +983,267 @@
         }
       }
     },
+    "ConsultationRequest": {
+      "description": "C14: body of POST /v1/calls/{call_id}/consultations (Idempotency-Key required): the participant who consults, the target (exactly one of a principal, an enterprise extension or a typed enterprise destination, resolved like a transfer target) and the participant's own endpoint the consultation Call is placed from. A CONNECTED Call is held first; an enterprise Call's policy must permit transfers (else 403).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transferringParticipantId",
+        "initiatorEndpointId",
+        "expectedVersion"
+      ],
+      "properties": {
+        "transferringParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetExtension": {
+          "description": "Part F: an enterprise extension number resolved in the credential's scope (requires enterprise.calls.use). It is followed to ONE principal: a member directly, a ring group's first eligible member, a queue's first available agent, a schedule's current route.",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionNumber"
+        },
+        "targetDestination": {
+          "description": "Part F: a typed enterprise destination (ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or SCHEDULE of the same scope; requires enterprise.calls.use), resolved like targetExtension. A PUBLIC_CONTACT is refused: 403 when the enterprise policy forbids public forwarding, 422 CAPABILITY_UNAVAILABLE otherwise (public transfer of an established call is not offered by this deployment).",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Destination"
+        },
+        "initiatorEndpointId": {
+          "description": "The transferring participant's own ACTIVE endpoint the consultation Call is placed from.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "description": "The consultation Call's kind (default VOICE).",
+          "type": "string",
+          "enum": [
+            "VOICE",
+            "VIDEO"
+          ]
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "targetPrincipalId"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetExtension"
+                ]
+              },
+              {
+                "required": [
+                  "targetDestination"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "targetExtension"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalId"
+                ]
+              },
+              {
+                "required": [
+                  "targetDestination"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "targetDestination"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalId"
+                ]
+              },
+              {
+                "required": [
+                  "targetExtension"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "Consultation": {
+      "description": "C14: an attended transfer's consultation: the original Call, the consultation Call the transferring participant placed to the target, and its state. CONSULTING (the consultation Call is going on; the original Call is held) -> COMPLETING (the canonical transfer of the original Call to the target is ringing) -> COMPLETED (the target joined the original Call, the transferring participant was retired and the consultation Call ended); a failed transfer goes back to CONSULTING; CANCELLED (the consultation Call ended, the original Call resumed when the consultation had held it). COMPLETED and CANCELLED are final.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consultationId",
+        "callId",
+        "consultationCallId",
+        "transferringParticipantId",
+        "targetPrincipalId",
+        "state",
+        "heldOriginal",
+        "transferId",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "endedAt"
+      ],
+      "properties": {
+        "consultationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "description": "The original Call.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "consultationCallId": {
+          "description": "The consultation Call (an ordinary canonical Call).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "transferringParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "CONSULTING",
+            "COMPLETING",
+            "COMPLETED",
+            "CANCELLED"
+          ]
+        },
+        "heldOriginal": {
+          "description": "The consultation put the original Call on hold (it was CONNECTED); cancelling resumes it.",
+          "type": "boolean"
+        },
+        "transferId": {
+          "description": "The latest transfer of the original Call that completes (or completed) this consultation.",
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "ConsultationResult": {
+      "description": "C14: result of POST /v1/calls/{call_id}/consultations: the consultation, the original Call (HELD) and the consultation Call as created by POST /v1/calls.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consultation",
+        "call",
+        "consultationCall"
+      ],
+      "properties": {
+        "consultation": {
+          "$ref": "#/$defs/Consultation"
+        },
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "consultationCall": {
+          "$ref": "#/$defs/CreateCallResult"
+        }
+      }
+    },
+    "ConsultationCompleteRequest": {
+      "description": "C14: body of POST /v1/calls/{call_id}/consultations/{consultation_id}/complete: the original Call's version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ConsultationCompletion": {
+      "description": "C14: result of completing a consultation: the consultation (COMPLETING), the original Call (TRANSFERRING) and its transfer to the target. A repeat after the transfer started returns the consultation and the Call without the transfer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consultation",
+        "call"
+      ],
+      "properties": {
+        "consultation": {
+          "$ref": "#/$defs/Consultation"
+        },
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "transfer": {
+          "$ref": "#/$defs/CallTransfer"
+        }
+      }
+    },
+    "ConsultationCancelResult": {
+      "description": "C14: result of cancelling a consultation: the consultation (CANCELLED), the original Call and whether it was resumed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consultation",
+        "call",
+        "resumed"
+      ],
+      "properties": {
+        "consultation": {
+          "$ref": "#/$defs/Consultation"
+        },
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "resumed": {
+          "description": "The original Call was resumed (it was held by this consultation and resuming succeeded).",
+          "type": "boolean"
+        }
+      }
+    },
     "AvailableAction": {
       "type": "object",
       "additionalProperties": false,
@@ -939,7 +1262,11 @@
             "HOLD",
             "RESUME",
             "TRANSFER",
-            "ISSUE_MEDIA_CREDENTIAL"
+            "ISSUE_MEDIA_CREDENTIAL",
+            "UPGRADE",
+            "START_SCREEN_SHARE",
+            "STOP_SCREEN_SHARE",
+            "ADD_PARTICIPANTS"
           ]
         },
         "available": {
@@ -1255,8 +1582,65 @@
         }
       }
     },
+    "AcknowledgeRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt). Referenced by the operation only (not a root alternative: it is a strict subset of InvitationCommandRequest's fields, so a malformed accept body must never validate as an acknowledgement).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "endpointId"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "AcknowledgeResult": {
+      "description": "Result of POST /v1/calling/invitations/{invitation_id}/acknowledge: the endpoint's device confirmed it received the ring offer and is alerting its user. The offer is RINGING (ringingAt is the server time of the first acknowledgement); the first acknowledged offer of a DIALING application Call moves the Call to RINGING. Repeating the acknowledgement changes nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "callId",
+        "status",
+        "ringingAt",
+        "expiresAt",
+        "callState",
+        "callVersion"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "RINGING"
+        },
+        "ringingAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "RecoveredInvitation": {
-      "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered.",
+      "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. status is PENDING until this device acknowledges receipt (POST /v1/calling/invitations/{invitation_id}/acknowledge), then RINGING. actionable is true only for a live (PENDING or RINGING), unexpired offer of a Call that can still be answered; a live offer of an ending or terminal Call is reported CANCELLED.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1271,7 +1655,8 @@
         "issuedAt",
         "expiresAt",
         "terminalReason",
-        "sessionId"
+        "sessionId",
+        "callerDisplayName"
       ],
       "properties": {
         "invitationId": {
@@ -1326,6 +1711,19 @@
               "type": "null"
             }
           ]
+        },
+        "callerDisplayName": {
+          "description": "The Call initiator's display name (shown on the incoming call), or null when the Call was created without one. 1.6.0.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "if": {
@@ -1338,7 +1736,10 @@
       "then": {
         "properties": {
           "status": {
-            "const": "RINGING"
+            "enum": [
+              "PENDING",
+              "RINGING"
+            ]
           },
           "terminalReason": {
             "type": "null"
@@ -1376,6 +1777,513 @@
       "properties": {
         "status": {
           "const": "accepted"
+        }
+      }
+    },
+    "UpgradeRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "expectedVersion"
+      ],
+      "properties": {
+        "kind": {
+          "description": "The target kind. Only VIDEO is accepted (400 for VOICE).",
+          "const": "VIDEO"
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ScreenShareRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participantId"
+      ],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ScreenShare": {
+      "description": "The Call's current presenter (C6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participantId",
+        "startedAt"
+      ],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ScreenShareResult": {
+      "description": "Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "screenShare"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "START_SCREEN_SHARE",
+            "STOP_SCREEN_SHARE"
+          ]
+        },
+        "screenShare": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ScreenShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AddParticipantsRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitingParticipantId",
+        "targetPrincipalIds",
+        "expectedVersion"
+      ],
+      "properties": {
+        "invitingParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 63,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "AddParticipantsResult": {
+      "description": "Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "invitingParticipantId",
+        "participants"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "const": "ADD_PARTICIPANTS"
+        },
+        "invitingParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "principalId",
+              "role",
+              "liveInvitationCount"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "role": {
+                "const": "RECIPIENT"
+              },
+              "liveInvitationCount": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "QualitySampleRequest": {
+      "description": "C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jitterMs",
+        "packetLossPercent",
+        "rttMs"
+      ],
+      "properties": {
+        "jitterMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Interarrival jitter in milliseconds."
+        },
+        "packetLossPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Lost packets in percent of expected packets."
+        },
+        "rttMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Round-trip time in milliseconds."
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 10,
+          "description": "Length of the observation window."
+        }
+      }
+    },
+    "QualitySampleResult": {
+      "description": "C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qualityRecordId",
+        "callId",
+        "sessionId",
+        "participantId",
+        "jitterMs",
+        "packetLossPercent",
+        "rttMs",
+        "mosEstimate",
+        "observedFrom",
+        "observedTo"
+      ],
+      "properties": {
+        "qualityRecordId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "jitterMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "packetLossPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "rttMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "mosEstimate": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 4.5
+        },
+        "observedFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedTo": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CallQualitySummary": {
+      "description": "C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "participants"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "sampleCount",
+              "jitterMs",
+              "packetLossPercent",
+              "rttMs",
+              "mosEstimate",
+              "lastObservedAt"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sampleCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "jitterMs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "packetLossPercent": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "rttMs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "mosEstimate": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "min"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 4.5
+                  },
+                  "min": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 4.5
+                  }
+                }
+              },
+              "lastObservedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "TransferHostRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/host (1.8.0): the current host hands the host role to another active participant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId",
+        "hostParticipantId"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The current host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "hostParticipantId": {
+          "description": "The new host (an active participant).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "HostActionRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The Call's host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "MuteParticipantRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/mute (1.8.0): the host mutes (true) or unmutes (false) the participant's audio.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId",
+        "muted"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The Call's host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "HostControlResult": {
+      "description": "Result of a host operation (1.8.0): the Call after the command and what changed (hostParticipantId for TRANSFER_HOST; participantId plus removed / muted for the participant operations).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "TRANSFER_HOST",
+            "REMOVE_PARTICIPANT",
+            "MUTE_PARTICIPANT",
+            "UNMUTE_PARTICIPANT"
+          ]
+        },
+        "hostParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RejoinRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "RejoinResult": {
+      "description": "Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "participantId",
+        "sessionId",
+        "rejoined"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "REJOIN"
+          ]
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "rejoined": {
+          "type": "boolean"
         }
       }
     }

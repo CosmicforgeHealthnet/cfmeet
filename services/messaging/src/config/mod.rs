@@ -4,10 +4,11 @@
 //! | Variable | Required | Meaning |
 //! |---|---|---|
 //! | `DATABASE_URL` | yes | Messaging's OWN PostgreSQL database (runtime role) |
-//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10) |
+//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10; production: `activate-database-pools`) |
 //! | `MESSAGING_BIND_ADDRESS` | no | default `127.0.0.1:8097` |
 //! | `MESSAGING_METRICS_ADDRESS` | no | separate `GET /metrics` listener (e.g. `127.0.0.1:9197`) |
-//! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); `true` is refused in `production` (Part V J: production E2EE stays disabled pending external certification) |
+//! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); in `production`, `true` needs `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` (the owner's release decision) and is refused without a valid record |
+//! | `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` | production with E2EE | owner release record (JSON: `version`, `decisionId`, `decidedByRole`, `decidedAt`, `scope` = `PERSONAL_PRIVATE_E2EE`, `independentAssessment` = `NOT_PERFORMED` / `IN_PROGRESS` / `COMPLETED` (+ `assessmentReference`), `acceptedResidualRisks`). It states the actual assessment status; without a completed assessment the owner must accept `NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT`, without witnesses `KEY_TRANSPARENCY_UNWITNESSED`, and always `WEB_CODE_DELIVERY_TRUST`. Reported in the policy `deployment.e2eeProductionRelease` |
 //! | `MESSAGING_DEVICE_CHALLENGE_TTL_SECONDS` | no | registration challenge validity (60–3600, default 300) |
 //! | `MESSAGING_HISTORY_TRANSFER_MAX_BYTES` | no | largest sealed history a device-to-device transfer relays (64 KiB–64 MiB, default 8 MiB) |
 //! | `MESSAGING_DEVICE_CHALLENGES_PER_HOUR` | no | challenges per principal per hour (1–1000, default 20) |
@@ -33,6 +34,10 @@
 //! | `MESSAGING_CLIENT_TOKEN_TTL_SECONDS` / `MESSAGING_REALTIME_TICKET_TTL_SECONDS` | no | token lifetime (60–86400, default 900) / single-use ticket lifetime (5–300, default 30) |
 //! | `MESSAGING_SESSION_DEVICES_ENABLED` | no | `true` / `false`: first-party MANAGED-realtime session devices (Blueprint Section 13, ADR 0049 amendment A1). Default `true` only in `local` / `test`; permitted in `production` because a session device can never acquire E2EE privileges (it never enables `MESSAGING_E2EE_DEVICES_ENABLED`) |
 //! | `MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS` | no | session-device token lifetime (60–900, default 300); renewals go back through the first-party relay |
+//! | `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` | no | `true` / `false` (default `false`): ADR 0062 partner session devices (`POST /v1/messaging/user-sessions` with a CF Meet user token, the MANAGED-only REST allowlist, environment origins, the `CFMEET_PLATFORM_PARTNER` baseline, MESSAGE_SENT facts); parsed by `crate::partner::PartnerSettings` |
+//! | `MESSAGING_PARTNER_PUSH_ENABLED` | no | `true` / `false` (default `false`): ADR 0063 partner push registrations and wake-ups through the Notification Service (requires `CF_NOTIFICATIONS_BASE_URL`) |
+//! | `MESSAGING_APPS_ENABLED` | no | `true` / `false` (default `false`): ADR 0064 CF Meet Apps — OAuth access / bot credentials act only as their restricted principal on a closed MANAGED-only allowlist, record `viaApplicationId`; app bots are MANAGED-only; bot events (`bot.mentioned` / `bot.message_received`) are relayed to the Developer Platform when `MESSAGING_PUBLIC_EVENTS_DESTINATION` includes it; parsed by `crate::apps::AppsSettings` |
+//! | `MESSAGING_MESSAGE_SENT_EXPORT_ENABLED` | no | `true` / `false` (default `false`): export `MESSAGE_SENT` usage facts (with `CFMEET_USAGE_EXPORT_ENABLED`, and only once the usage catalogue knows the type) |
 //! | `MESSAGING_REALTIME_ALLOWED_ORIGINS` | no | comma-separated exact browser origins allowed to connect (default: none; native clients send no Origin) |
 //! | `MESSAGING_REALTIME_REQUIRE_TLS` | no | refuse handshakes not forwarded as `https` (default `true` outside local / test) |
 //! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |
@@ -41,6 +46,11 @@
 //! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
 //! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
 //! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only): the explicitly local adapter |
+//! | `MESSAGING_PUSH_REGISTRATION_MIRROR` | no | `off` (default: unchanged behaviour) or `on`: the N9 facade mirrors CF Meet first-party push registrations to the Notification Service (I13; needs `CF_NOTIFICATIONS_BASE_URL` and `CF_COMMUNICATIONS_PERSONAL_*`), see `push_mirror` |
+//! | `MESSAGING_ORGANIZATION_WAKEUPS` | no | `off` (default: unchanged behaviour) or `on` (gap audit S1): message wake-ups of conversations in an organization's own first-party scope are routed to the Notification Service (route `NEW`, never legacy jobs), addressed to the members' CF Meet accounts; needs `CF_NOTIFICATIONS_BASE_URL`, `CF_COMMUNICATIONS_PERSONAL_*` and the notification-fence history. Turn on only after the Notification Service's `MESSAGE_WAKEUPS` / PUSH is ACTIVE |
+//! | `MESSAGING_PUSH_REGISTRATION_MIRROR_INTERVAL_SECONDS` | no | 10–3600, default 60: copy / repair pass interval (a full pass every 6 h) |
+//! | `MESSAGING_PLAN_ENFORCEMENT` | no | `off` (default: unchanged behaviour) or `on` (ADR 0068 A6): CF Meet user plan limits (`attachmentBytes`) from the Developer Platform's plan read cap uploads in CF Meet's own environment; needs `CF_DEVELOPER_PLATFORM_BASE_URL`; fails open to today's limits when the read is unavailable, see `plans` |
+//! | `MESSAGING_PLAN_CACHE_SECONDS` | no | 5–3600, default 60: how long a holder's plan limits are cached |
 //! | `MESSAGING_PUSH_APNS_KEY_FILE` / `_KEY_ID` / `_TEAM_ID` / `_TOPIC` | no | APNs token-based adapter (all four, or none): the `.p8` key file, its key id, the team id, the bundle id. `MESSAGING_PUSH_APNS_ENVIRONMENT` `production` (default) / `sandbox`; `MESSAGING_PUSH_APNS_BASE_URL` overrides the endpoint in local / test runtimes only |
 //! | `MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE` | no | FCM HTTP v1 adapter: the Google service-account key file (secret). `MESSAGING_PUSH_FCM_BASE_URL` overrides the endpoint in local / test runtimes only |
 //! | `MESSAGING_PUSH_WEB_VAPID_KEY_FILE` / `_VAPID_SUBJECT` | no | Web Push adapter (both, or neither): the VAPID P-256 key (PKCS#8 PEM) and its `mailto:` / `https:` contact. `MESSAGING_PUSH_WEB_ALLOWED_HOSTS` replaces the push-service host allowlist (comma-separated, `*.` = subdomains) |
@@ -53,6 +63,7 @@
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
 //! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
 //! | `MESSAGING_UNLINKED_ATTACHMENT_HOURS` | no | READY uploads never referenced by a message are deleted after (default 24) |
+//! | `MESSAGING_MANAGED_MEDIA_RETENTION_DAYS` | no | MANAGED media sent in a message is deleted from storage this many days after upload (1–3650; unset: kept). The message stays; devices keep their own copies and the user's cloud backup holds the long-term copy. Legal holds still apply |
 //! | `MESSAGING_PUBLIC_EVENTS_DESTINATION` | no | receivers of relayed public events (Part VI §53): `calling` (default — Calling's platform-event ingress, today's customer webhook delivery, unchanged), `developer-platform` (the central event ingestion only; `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the relay row, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
@@ -106,6 +117,102 @@ pub struct DeviceSettings {
     pub directory_lookups_per_minute: i64,
     /// Largest sealed history a device-to-device transfer may carry.
     pub history_transfer_max_bytes: usize,
+    /// Production only: the owner's release decision that allowed E2EE devices
+    /// (`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`). `None` everywhere else.
+    /// Loaded once at startup (a `'static` reference keeps the settings `Copy`).
+    pub production_release: Option<&'static E2eeProductionRelease>,
+}
+
+/// The explicit owner release decision for personal E2EE in production. It records the
+/// ACTUAL independent-assessment status; it never claims an assessment that did not happen.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct E2eeProductionRelease {
+    /// Record format (1).
+    pub version: u32,
+    /// The owner's decision reference (ticket, ADR or signed note id).
+    pub decision_id: String,
+    /// Role of the person who decided (no personal data), e.g. `PRODUCT_OWNER`.
+    pub decided_by_role: String,
+    /// RFC 3339.
+    pub decided_at: String,
+    /// Must be `PERSONAL_PRIVATE_E2EE` (organization MANAGED messaging is out of scope).
+    pub scope: String,
+    /// `NOT_PERFORMED`, `IN_PROGRESS` or `COMPLETED`.
+    pub independent_assessment: String,
+    /// Reference of the assessment report; required when `COMPLETED`.
+    #[serde(default)]
+    pub assessment_reference: Option<String>,
+    /// Residual risks the owner explicitly accepted. Must include
+    /// `NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT` unless the assessment is `COMPLETED`, and
+    /// `KEY_TRANSPARENCY_UNWITNESSED` when no witnesses are configured, and always
+    /// `WEB_CODE_DELIVERY_TRUST` (a compromised web origin can read what a web device
+    /// decrypts; AD-06).
+    pub accepted_residual_risks: Vec<String>,
+}
+
+impl E2eeProductionRelease {
+    fn validate(&self, witnessed: bool) -> Result<(), String> {
+        let short = |v: &str, max: usize| !v.trim().is_empty() && v.len() <= max;
+        if self.version != 1 {
+            return Err("version must be 1".into());
+        }
+        if !short(&self.decision_id, 120) || !short(&self.decided_by_role, 60) {
+            return Err("decisionId and decidedByRole are required".into());
+        }
+        if chrono::DateTime::parse_from_rfc3339(self.decided_at.trim()).is_err() {
+            return Err("decidedAt must be RFC 3339".into());
+        }
+        if self.scope != "PERSONAL_PRIVATE_E2EE" {
+            return Err("scope must be PERSONAL_PRIVATE_E2EE".into());
+        }
+        let accepted = |r: &str| self.accepted_residual_risks.iter().any(|x| x == r);
+        match self.independent_assessment.as_str() {
+            "COMPLETED" => {
+                if !self
+                    .assessment_reference
+                    .as_deref()
+                    .is_some_and(|r| short(r, 200))
+                {
+                    return Err("a COMPLETED assessment needs assessmentReference".into());
+                }
+            }
+            "NOT_PERFORMED" | "IN_PROGRESS" => {
+                if !accepted("NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT") {
+                    return Err(
+                        "without a completed assessment the owner must accept NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT"
+                            .into(),
+                    );
+                }
+            }
+            _ => {
+                return Err(
+                    "independentAssessment must be NOT_PERFORMED, IN_PROGRESS or COMPLETED".into(),
+                )
+            }
+        }
+        if !witnessed && !accepted("KEY_TRANSPARENCY_UNWITNESSED") {
+            return Err(
+                "no key-transparency witnesses are configured: the owner must accept KEY_TRANSPARENCY_UNWITNESSED"
+                    .into(),
+            );
+        }
+        if !accepted("WEB_CODE_DELIVERY_TRUST") {
+            return Err("the owner must accept WEB_CODE_DELIVERY_TRUST (AD-06)".into());
+        }
+        Ok(())
+    }
+
+    /// Public, non-secret view (deployment report, startup log).
+    pub fn summary(&self) -> serde_json::Value {
+        serde_json::json!({
+            "decisionId": self.decision_id,
+            "decidedAt": self.decided_at,
+            "independentAssessment": self.independent_assessment,
+            "assessmentReference": self.assessment_reference,
+            "acceptedResidualRisks": self.accepted_residual_risks,
+        })
+    }
 }
 
 impl Default for DeviceSettings {
@@ -120,6 +227,7 @@ impl Default for DeviceSettings {
             key_package_low_watermark: 10,
             directory_lookups_per_minute: 600,
             history_transfer_max_bytes: 8 * 1024 * 1024,
+            production_release: None,
         }
     }
 }
@@ -189,6 +297,8 @@ pub struct AttachmentSettings {
     pub verify_read_max_bytes: usize,
     pub proxy_max_bytes: usize,
     pub unlinked_ttl: chrono::Duration,
+    /// MANAGED media is a delivery copy: deleted this long after upload (`None`: kept).
+    pub managed_media_retention: Option<chrono::Duration>,
     pub scan_retry_max: i32,
     /// Server-side thumbnails of MANAGED images (never PRIVATE_E2EE).
     pub media_processing: bool,
@@ -204,6 +314,7 @@ impl Default for AttachmentSettings {
             verify_read_max_bytes: 64 * 1024 * 1024,
             proxy_max_bytes: 32 * 1024 * 1024,
             unlinked_ttl: chrono::Duration::hours(24),
+            managed_media_retention: None,
             scan_retry_max: 10,
             media_processing: true,
         }
@@ -352,35 +463,10 @@ pub struct ScanGatewaySettings {
     pub timeout: Duration,
 }
 
-/// The live push adapters' configuration (files are read and checked at startup).
-#[derive(Debug, Clone, Default)]
-pub struct PushAdapterConfig {
-    pub apns: Option<ApnsConfig>,
-    pub fcm: Option<FcmConfig>,
-    pub web: Option<WebPushConfig>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApnsConfig {
-    pub key_file: std::path::PathBuf,
-    pub key_id: String,
-    pub team_id: String,
-    pub topic: String,
-    pub base_url: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct FcmConfig {
-    pub service_account_file: std::path::PathBuf,
-    pub base_url: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct WebPushConfig {
-    pub vapid_key_file: std::path::PathBuf,
-    pub subject: String,
-    pub allowed_hosts: Vec<String>,
-}
+/// The live push adapters' configuration (files are read and checked at startup). The
+/// structures moved to packages/push-transport with the adapters (roadmap N4); this module
+/// still parses the `MESSAGING_*` variables into them.
+pub use cf_push_transport::config::{ApnsConfig, FcmConfig, PushAdapterConfig, WebPushConfig};
 
 /// Which push adapter dispatches notification jobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,15 +554,30 @@ impl MessagingConfig {
                 "must differ from MESSAGING_BIND_ADDRESS",
             ));
         }
+        let mut production_release = None;
         let enabled = match get("MESSAGING_E2EE_DEVICES_ENABLED").as_deref() {
             None => runtime.allows_insecure_transport(),
-            // Part V J: production E2EE stays disabled until the cryptographic design
-            // has external certification; no configuration value enables it.
+            // Part V J + multi-device programme: production E2EE needs an explicit owner
+            // release record that states the actual independent-assessment status and the
+            // accepted residual risks. Without a valid record it stays refused (fail closed).
             Some("true") if runtime == RuntimeEnvironment::Production => {
-                return Err(ConfigError::invalid(
-                    "MESSAGING_E2EE_DEVICES_ENABLED",
-                    "production E2EE is disabled pending external cryptographic certification",
-                ))
+                const VAR: &str = "MESSAGING_E2EE_PRODUCTION_RELEASE_FILE";
+                let path = get(VAR).ok_or_else(|| {
+                    ConfigError::invalid(
+                        "MESSAGING_E2EE_DEVICES_ENABLED",
+                        "production E2EE needs an owner release record (MESSAGING_E2EE_PRODUCTION_RELEASE_FILE)",
+                    )
+                })?;
+                let raw = std::fs::read_to_string(&path)
+                    .map_err(|_| ConfigError::invalid(VAR, "cannot be read"))?;
+                let record: E2eeProductionRelease = serde_json::from_str(&raw)
+                    .map_err(|_| ConfigError::invalid(VAR, "is not a valid release record"))?;
+                let witnessed = get("MESSAGING_KT_WITNESSES_FILE").is_some();
+                if let Err(reason) = record.validate(witnessed) {
+                    return Err(ConfigError::invalid(VAR, reason));
+                }
+                production_release = Some(&*Box::leak(Box::new(record)));
+                true
             }
             Some("true") => true,
             Some("false") => false,
@@ -539,6 +640,7 @@ impl MessagingConfig {
                 64 * 1024,
                 64 * 1024 * 1024,
             )? as usize,
+            production_release,
         };
         let auth_cache = AuthCacheSettings {
             ttl: Duration::from_secs(
@@ -954,6 +1056,16 @@ impl MessagingConfig {
                 1,
                 720,
             )?),
+            managed_media_retention: match get("MESSAGING_MANAGED_MEDIA_RETENTION_DAYS") {
+                None => None,
+                Some(_) => Some(chrono::Duration::days(bounded(
+                    &get,
+                    "MESSAGING_MANAGED_MEDIA_RETENTION_DAYS",
+                    14,
+                    1,
+                    3650,
+                )?)),
+            },
             scan_retry_max: 10,
             media_processing: match get("MESSAGING_MEDIA_PROCESSING").as_deref() {
                 None | Some("true") => true,
@@ -1119,11 +1231,83 @@ mod tests {
                 .devices
                 .enabled
         );
-        // Part V J: production E2EE stays disabled (pending external certification).
+        // Production E2EE without an owner release record stays refused (fail closed).
         let err = MessagingConfig::from_lookup(RuntimeEnvironment::Production, lookup(&on))
             .unwrap_err()
             .to_string();
         assert!(err.contains("MESSAGING_E2EE_DEVICES_ENABLED"), "{err}");
+    }
+
+    /// Controlled production activation: only a valid owner release record that states the
+    /// actual assessment status and accepts the residual risks enables E2EE devices.
+    #[test]
+    fn production_e2ee_needs_a_valid_owner_release_record() {
+        let dir = std::env::temp_dir().join(format!("cfm-release-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, v: serde_json::Value| {
+            let p = dir.join(name);
+            std::fs::write(&p, v.to_string()).unwrap();
+            p.to_string_lossy().to_string()
+        };
+        let good = serde_json::json!({
+            "version": 1, "decisionId": "OWNER-E2EE-2026-11", "decidedByRole": "PRODUCT_OWNER",
+            "decidedAt": "2026-11-15T09:00:00Z", "scope": "PERSONAL_PRIVATE_E2EE",
+            "independentAssessment": "NOT_PERFORMED",
+            "acceptedResidualRisks": ["NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT", "KEY_TRANSPARENCY_UNWITNESSED", "WEB_CODE_DELIVERY_TRUST"]
+        });
+        let run = |path: Option<String>| {
+            let mut pairs: Vec<(&str, String)> =
+                BASE.iter().map(|(k, v)| (*k, v.to_string())).collect();
+            pairs.push(("MESSAGING_E2EE_DEVICES_ENABLED", "true".into()));
+            if let Some(p) = path {
+                pairs.push(("MESSAGING_E2EE_PRODUCTION_RELEASE_FILE", p));
+            }
+            MessagingConfig::from_lookup(RuntimeEnvironment::Production, move |k: &str| {
+                pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
+            })
+        };
+        let cfg = run(Some(write("good.json", good.clone()))).unwrap();
+        assert!(cfg.devices.enabled);
+        let rel = cfg.devices.production_release.unwrap();
+        assert_eq!(rel.independent_assessment, "NOT_PERFORMED");
+        assert_eq!(rel.summary()["decisionId"], "OWNER-E2EE-2026-11");
+        // Missing file, unreadable file, or any missing acceptance: refused.
+        assert!(run(None).is_err());
+        assert!(run(Some(dir.join("absent.json").to_string_lossy().to_string())).is_err());
+        for risk in [
+            "NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT",
+            "KEY_TRANSPARENCY_UNWITNESSED",
+            "WEB_CODE_DELIVERY_TRUST",
+        ] {
+            let mut bad = good.clone();
+            bad["acceptedResidualRisks"] = serde_json::json!(good["acceptedResidualRisks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| *r != risk)
+                .collect::<Vec<_>>());
+            let err = run(Some(write("bad.json", bad))).unwrap_err().to_string();
+            assert!(
+                err.contains(risk) || err.contains("MESSAGING_E2EE_PRODUCTION_RELEASE_FILE"),
+                "{err}"
+            );
+        }
+        // A COMPLETED claim needs its report reference; unknown fields and scopes are refused.
+        let mut claimed = good.clone();
+        claimed["independentAssessment"] = serde_json::json!("COMPLETED");
+        assert!(run(Some(write("claimed.json", claimed))).is_err());
+        let mut org = good.clone();
+        org["scope"] = serde_json::json!("ORGANIZATION_MANAGED");
+        assert!(run(Some(write("org.json", org))).is_err());
+        let mut extra = good.clone();
+        extra["bypass"] = serde_json::json!(true);
+        assert!(run(Some(write("extra.json", extra))).is_err());
+        // Staging never needs (or reads) a record.
+        let mut on = BASE.to_vec();
+        on.push(("MESSAGING_E2EE_DEVICES_ENABLED", "true"));
+        let cfg = MessagingConfig::from_lookup(RuntimeEnvironment::Staging, lookup(&on)).unwrap();
+        assert!(cfg.devices.production_release.is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Blueprint Section 13 (D-5): production may enable MANAGED-realtime session devices

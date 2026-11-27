@@ -8,6 +8,9 @@
 //!   `/v1/calling/history`,
 //!   `/v1/calling/sessions/…/media-credentials`) authenticate with a short-lived signaling
 //!   credential and never accept a platform API credential.
+//! * The device exchange `POST /v1/calling/user-sessions` (ADR 0062; mounted only while
+//!   `CALLING_USER_TOKEN_EXCHANGE_ENABLED`) authenticates a CF Meet user token
+//!   (`cfut_…`), verified live with Platform Access, and never accepts anything else.
 //! * The media provider callback (`POST /internal/provider/media/events`) is
 //!   authenticated by the provider's signature only and accepts nothing else.
 //! * The media connection gateway (`GET /v1/calling/media/rtc…`) is authenticated by the
@@ -67,6 +70,11 @@ pub fn internal_api() -> Router<AppState> {
         .merge(crate::telephony::http::internal_routes())
         .merge(crate::webhooks::ingest::internal_routes())
         .merge(crate::webhooks::ownership_migration::internal_routes())
+        .merge(crate::calls::app::abuse_review::internal_routes())
+        .merge(crate::organization_members::internal_routes())
+        .merge(crate::account_privacy::internal_routes())
+        .merge(crate::operator_reads::internal_routes())
+        .merge(crate::operator_commands::internal_routes())
 }
 
 fn cors_layer() -> CorsLayer {
@@ -122,9 +130,18 @@ pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppSta
     } else {
         protected
     };
+    // ADR 0062: the device exchange of a CF Meet user token, mounted only while
+    // `CALLING_USER_TOKEN_EXCHANGE_ENABLED` configured a verifier (off: the path does not
+    // exist). It authenticates the user token itself, then reads the body.
+    let user_sessions = if state.user_sessions.is_some() {
+        crate::endpoints::user_sessions::routes()
+    } else {
+        Router::new()
+    };
     let customer = Router::new()
         .route("/health", get(health))
         .merge(protected)
+        .merge(user_sessions)
         .merge(crate::signaling::http::routes().route_layer(from_fn(require_object_body)))
         .merge(crate::calls::app::http::callback_routes())
         .merge(crate::media::gateway::routes())
@@ -153,7 +170,9 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     match state.db.execute_unprepared("SELECT 1").await {
         Ok(_) => (
             StatusCode::OK,
-            Json(json!({ "status": "ok", "service": "calling" })),
+            Json(
+                json!({ "status": "ok", "service": "calling", "sendPolicyProtocol":1, "sendPolicySynchronous":std::env::var("CALLING_SYNCHRONOUS_BLOCK_PROJECTION_ENABLED").ok().as_deref()==Some("true"), "sendPolicyGeneration":std::env::var("COMMUNICATIONS_SEND_POLICY_GENERATION").ok().and_then(|v| uuid::Uuid::parse_str(&v).ok()) }),
+            ),
         ),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,

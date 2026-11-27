@@ -220,6 +220,11 @@ fn contract_paths_equal_the_registered_routes() {
             || path.ends_with("src/telephony/http.rs")
             || path.ends_with("src/webhooks/ingest.rs")
             || path.ends_with("src/webhooks/ownership_migration.rs")
+            || path.ends_with("src/calls/app/abuse_review.rs")
+            || path.ends_with("src/organization_members.rs")
+            || path.ends_with("src/account_privacy.rs")
+            || path.ends_with("src/operator_reads.rs")
+            || path.ends_with("src/operator_commands.rs")
             || path.ends_with("src/communications.rs")
         {
             "/internal/v1"
@@ -604,6 +609,20 @@ fn every_operation_declares_its_authentication() {
                     p if p.starts_with("/internal/v1/webhook-migration/") => {
                         "webhook-migration.export"
                     }
+                    p if p.starts_with("/internal/v1/abuse-reports") => {
+                        "calling-abuse-reports.review"
+                    }
+                    "/internal/v1/organization-members/extension-status" => {
+                        "calling-organization-member.offboard"
+                    }
+                    p if p.starts_with("/internal/v1/organization-members/") => {
+                        "calling-organization-member.act"
+                    }
+                    p if p.starts_with("/internal/v1/account-privacy/") => {
+                        "calling-account.privacy"
+                    }
+                    // ADR 0068: the admin bridge's tenant-scoped operator reads.
+                    p if p.starts_with("/internal/v1/operator/") => "calling.administer",
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(
@@ -621,6 +640,9 @@ fn every_operation_declares_its_authentication() {
                 || path.starts_with("/v1/calling/sessions/")
             {
                 "signalingCredential"
+            } else if path == "/v1/calling/user-sessions" {
+                // ADR 0062: the device exchange of a CF Meet user token.
+                "userToken"
             } else {
                 "platformCredential"
             };
@@ -984,6 +1006,26 @@ async fn exercise_app_calling(a: &common::app::AppWorld) {
             StatusCode::OK
         );
     }
+    // C5: upgrade to video (CALL_KIND_CHANGED).
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/upgrade"),
+            json!({ "kind": "VIDEO", "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // C6: alice presents her screen, then stops (CALL_SCREEN_SHARE_STARTED / _STOPPED).
+    let alice_participant = a.participant_of(call, alice.id().as_uuid()).await;
+    for path in ["screen-share", "screen-share/stop"] {
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/{path}"),
+                json!({ "participantId": alice_participant }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
     // An unknown connection is quarantined and evicted; drift is reconciled.
     let intruder = ProviderParticipant {
         identity: "intruder".into(),
@@ -1000,7 +1042,7 @@ async fn exercise_app_calling(a: &common::app::AppWorld) {
         .signed_event("participant_joined", &room, Some(&intruder));
     assert_eq!(a.callback(&auth, body).await.status, StatusCode::OK);
     let mut drift = bob_p.permissions;
-    drift.can_publish_video = true;
+    drift.can_publish_data = !drift.can_publish_data;
     a.media().force_permissions(&room, &bob_p.identity, drift);
     a.h().clock.advance(chrono::Duration::seconds(30));
     a.h().state.app.reconcile_due(100).await.unwrap();
@@ -1499,6 +1541,25 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
     assert_eq!(r.status, StatusCode::OK, "{} {bob_token}", r.text);
     conforms(&r, "/v1/calling/invitations", "get");
     let invitation = a.invitation_for(call, bob_1.endpoint).await.unwrap();
+    // Device 1 acknowledges receipt (C1): PENDING → RINGING; repeating it is a no-op.
+    for _ in 0..2 {
+        let r = a
+            .as_endpoint(
+                &bob_token,
+                Method::POST,
+                &format!("/v1/calling/invitations/{invitation}/acknowledge"),
+                None,
+                &[],
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["status"], "RINGING", "{}", r.text);
+        conforms(
+            &r,
+            "/v1/calling/invitations/{invitation_id}/acknowledge",
+            "post",
+        );
+    }
     let (_, version) = a.state(call).await;
     let r = a
         .as_endpoint(
@@ -1579,6 +1640,54 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
         let r = a.command(call, action, version).await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.text);
         conforms(&r, &format!("/v1/calls/{{call_id}}/{action}"), "post");
+    }
+    // C5: the VOICE call becomes VIDEO (then a repeat is an idempotent no-op).
+    for _ in 0..2 {
+        let (_, version) = a.state(call).await;
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/upgrade"),
+                json!({ "kind": "VIDEO", "expectedVersion": version }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        conforms(&r, "/v1/calls/{call_id}/upgrade", "post");
+    }
+    // C6: alice presents, a second start replays, bob cannot stop it, alice stops.
+    let alice_participant = a.participant_of(call, alice.id().as_uuid()).await;
+    let bob_participant = a.participant_of(call, bob.id().as_uuid()).await;
+    for (path, participant, status) in [
+        ("screen-share", alice_participant, StatusCode::OK),
+        ("screen-share", alice_participant, StatusCode::OK),
+        ("screen-share/stop", bob_participant, StatusCode::CONFLICT),
+        ("screen-share/stop", alice_participant, StatusCode::OK),
+    ] {
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/{path}"),
+                json!({ "participantId": participant }),
+            )
+            .await;
+        assert_eq!(r.status, status, "{}", r.text);
+        conforms(&r, &format!("/v1/calls/{{call_id}}/{path}"), "post");
+    }
+    // C7: alice invites a fourth person into the answered call; a repeat conflicts.
+    let gina = a.principal("contract-gina").await;
+    a.device(&gina, "contract-gina").await;
+    for status in [StatusCode::OK, StatusCode::CONFLICT] {
+        let (_, version) = a.state(call).await;
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/participants"),
+                json!({
+                    "invitingParticipantId": alice_participant,
+                    "targetPrincipalIds": [gina.id()],
+                    "expectedVersion": version,
+                }),
+            )
+            .await;
+        assert_eq!(r.status, status, "{}", r.text);
+        conforms(&r, "/v1/calls/{call_id}/participants", "post");
     }
     let bob_participant = a.participant_of(call, bob.id().as_uuid()).await;
     let (_, version) = a.state(call).await;
@@ -1684,6 +1793,10 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
         "call.connected",
         "call.held",
         "call.resumed",
+        "call.kind_changed",
+        "call.screen_share_started",
+        "call.screen_share_stopped",
+        "call.participants_changed",
         "call.transfer_started",
         "call.transferred",
         "call.ended",

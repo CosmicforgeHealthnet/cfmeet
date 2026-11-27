@@ -24,6 +24,14 @@
 //!
 //! Every transition is recorded in `devplat_production_access_transitions` and the
 //! tenant activity history.
+//!
+//! The Developer Platform itself sends no email about a decision: today the operator
+//! console (release tooling) asks the Meeting Service to email the applicant after an
+//! audited approve / reject. On the explicit `notification-service` route
+//! (`DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE`, with
+//! `CF_NOTIFICATIONS_BASE_URL`) the decision transaction instead enqueues
+//! `developer-platform.production-access.decided` for the Notification Service
+//! ([`crate::notification_publications`]); the operator-console email must then be off.
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
@@ -34,11 +42,15 @@ use uuid::Uuid;
 
 use super::{
     activity::{self, Event},
-    authorize, delegate, delegate_with, membership, stmt, Caller,
+    authorize,
+    bridge_command::{self, BridgeCommand, Subject},
+    delegate, delegate_with, membership, stmt, Caller,
 };
 use crate::{
+    bridge_events::{self, BridgeEvents, Source},
     domain::{rbac::Action, RequestContext},
     http::error::{ApiError, ErrorCode},
+    notification_publications,
     platform_access::{DelegationActor, DelegationCall},
     state::AppState,
 };
@@ -136,6 +148,23 @@ pub const CAPABILITIES: &[Capability] = &[
         name: "SMS",
         regulated: true,
         scopes: &["sms.send", "sms.read"],
+    },
+    // ADR 0062: the partner Users API and CF Meet user tokens in PRODUCTION (software only,
+    // never regulated). The grant scopes a token carries (`messages.*`, `calls.write`,
+    // `meetings.write`) stay with MESSAGING / APP_CALLING / MEETINGS.
+    Capability {
+        name: "END_USERS",
+        regulated: false,
+        scopes: &["principals.read", "principals.write", "user_tokens.issue"],
+    },
+    // ADR 0063: partner push credentials (APNs / FCM) in PRODUCTION. Control plane only:
+    // uploaded from the console by OWNER / ADMIN, no machine scope beyond
+    // PLATFORM_CONTROL; required (approved and LIVE) before a PRODUCTION environment may
+    // hold push credentials.
+    Capability {
+        name: "PUSH",
+        regulated: false,
+        scopes: &[],
     },
 ];
 
@@ -251,6 +280,7 @@ impl Actor<'_> {
 #[allow(clippy::too_many_arguments)]
 async fn transition<C: ConnectionTrait>(
     db: &C,
+    ev: BridgeEvents,
     id: Uuid,
     tenant_id: Uuid,
     from: &[&str],
@@ -298,6 +328,8 @@ async fn transition<C: ConnectionTrait>(
         ],
     ))
     .await?;
+    // ADR 0068 A7: the verification case changed (same transaction).
+    bridge_events::record(db, ev, Source::ProductionAccess(id)).await?;
     Ok(old)
 }
 
@@ -448,6 +480,7 @@ pub async fn submit(
         ],
     ))
     .await?;
+    bridge_events::record(&txn, state.bridge_events, Source::ProductionAccess(id)).await?;
     record_activity(
         &txn,
         &customer,
@@ -465,6 +498,7 @@ pub async fn submit(
         let policy = Actor::Policy(&caller.request);
         transition(
             &txn,
+            state.bridge_events,
             id,
             tenant_id,
             &["PRODUCTION_REQUESTED"],
@@ -489,6 +523,17 @@ pub async fn submit(
             json!({ "capabilities": caps, "policy": "AUTOMATIC" }),
         )
         .await?;
+        if state.notifications.production_access {
+            let p = notification_publications::production_access_decided(
+                id,
+                tenant_id,
+                project_id,
+                "APPROVED",
+                caller.request.correlation_id.as_str(),
+                now,
+            );
+            notification_publications::enqueue(&txn, &p, now).await?;
+        }
     }
     let v = view(&txn, id, true).await?;
     txn.commit().await?;
@@ -507,7 +552,7 @@ pub async fn list(
     if page.has_cursor() && page.cursor_key().is_none() {
         return Err(ApiError(ErrorCode::ValidationError));
     }
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     let (at, id) = page.cursor_key().unzip();
     let rows = state
         .db
@@ -545,7 +590,7 @@ pub async fn list(
 pub async fn get(state: &AppState, caller: &Caller, id: Uuid) -> Result<Value, ApiError> {
     let r = load(&state.db, id).await?;
     authorize(state, caller, r.tenant_id, Action::ProductionAccessRead).await?;
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     view(&state.db, id, true).await
 }
 
@@ -557,7 +602,7 @@ pub async fn status(
 ) -> Result<Value, ApiError> {
     let (tenant_id, _) = project_tenant(&state.db, project_id).await?;
     authorize(state, caller, tenant_id, Action::ProductionAccessRead).await?;
-    expire_due(&state.db).await?;
+    expire_due(&state.db, state.bridge_events).await?;
     project_status(&state.db, project_id).await
 }
 
@@ -623,6 +668,7 @@ pub async fn cancel(state: &AppState, caller: &Caller, id: Uuid) -> Result<Value
     let txn = state.db.begin().await?;
     transition(
         &txn,
+        state.bridge_events,
         id,
         r.tenant_id,
         &["PRODUCTION_REQUESTED", "UNDER_REVIEW", "APPROVED"],
@@ -688,7 +734,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
         return Err(ApiError(ErrorCode::InvalidState));
     }
     if r.approval_expires_at.is_some_and(|t| t <= Utc::now()) {
-        expire_due(&state.db).await?;
+        expire_due(&state.db, state.bridge_events).await?;
         return Err(ApiError(ErrorCode::ApprovalExpired));
     }
     let actor = caller.delegation_actor();
@@ -762,6 +808,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
     let customer = Actor::Customer(caller);
     transition(
         &txn,
+        state.bridge_events,
         id,
         r.tenant_id,
         &["APPROVED"],
@@ -787,7 +834,7 @@ pub async fn activate(state: &AppState, caller: &Caller, id: Uuid) -> Result<Val
 }
 
 /// Approvals not activated in time become REJECTED (`APPROVAL_EXPIRED`).
-pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
+pub async fn expire_due(db: &DatabaseConnection, ev: BridgeEvents) -> Result<u64, ApiError> {
     let rows = db
         .query_all(stmt(
             "SELECT id, tenant_id FROM devplat_production_access_requests \
@@ -804,6 +851,7 @@ pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
         let txn = db.begin().await?;
         if transition(
             &txn,
+            ev,
             id,
             tenant,
             &["APPROVED"],
@@ -839,9 +887,10 @@ pub async fn expire_due(db: &DatabaseConnection) -> Result<u64, ApiError> {
 /// `GET /internal/v1/operator/production-access-requests?state=`.
 pub async fn operator_list(
     db: &DatabaseConnection,
+    ev: BridgeEvents,
     state: Option<&str>,
 ) -> Result<Value, ApiError> {
-    expire_due(db).await?;
+    expire_due(db, ev).await?;
     if let Some(s) = state {
         if !matches!(
             s,
@@ -886,6 +935,9 @@ pub struct Decision {
     /// reject / suspend: safe reason code.
     #[serde(default)]
     pub reason_code: Option<String>,
+    /// Admin bridge decisions: the request version the decision applies to.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 /// The decision kinds.
@@ -898,6 +950,24 @@ pub enum OperatorCommand {
     Reinstate,
 }
 
+impl OperatorCommand {
+    /// The command's name in the bridge's operation record.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            OperatorCommand::Review => "production-access.review",
+            OperatorCommand::Approve => "production-access.approve",
+            OperatorCommand::Reject => "production-access.reject",
+            OperatorCommand::Suspend => "production-access.suspend",
+            OperatorCommand::Reinstate => "production-access.reinstate",
+        }
+    }
+
+    /// Decisions HQ takes with two people.
+    pub const fn two_person(self) -> bool {
+        !matches!(self, OperatorCommand::Review)
+    }
+}
+
 fn reason(d: &Decision, default: &str) -> Result<String, ApiError> {
     let r = d.reason_code.clone().unwrap_or_else(|| default.to_string());
     if super::operator::valid_reason(&r) {
@@ -907,8 +977,42 @@ fn reason(d: &Decision, default: &str) -> Result<String, ApiError> {
     }
 }
 
+/// Notification Service N7 / N11: enqueues `developer-platform.production-access.decided`
+/// in the decision's transaction, only on the explicit `notification-service` route (with
+/// `CF_NOTIFICATIONS_BASE_URL`). On the default `legacy` route nothing is written: the
+/// operator-console email (Meeting Service `developer-access-decision`) stays the only
+/// notice, so the applicant is never notified twice.
+async fn publish_decision<C: ConnectionTrait>(
+    state: &AppState,
+    txn: &C,
+    id: Uuid,
+    r: &Request,
+    decision: &'static str,
+    request: &RequestContext,
+) -> Result<(), ApiError> {
+    if !state.notifications.production_access {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let p = notification_publications::production_access_decided(
+        id,
+        r.tenant_id,
+        r.application_id,
+        decision,
+        request.correlation_id.as_str(),
+        now,
+    );
+    notification_publications::enqueue(txn, &p, now).await?;
+    Ok(())
+}
+
 /// Runs an operator command. `operator_user` is the reviewing operator's CF Meet user id
 /// (`x-cf-operator-user-id`): a member of the requesting organization can never decide.
+///
+/// `bridge`: a decision relayed by the HQ admin bridge ([`bridge_command`]): HQ's
+/// two-person approval replaces the named-reviewer list, the change happens only at the
+/// expected version, and the applied command is recorded in the same transaction.
+#[allow(clippy::too_many_arguments)]
 pub async fn operator_decide(
     state: &AppState,
     operator: &str,
@@ -917,23 +1021,45 @@ pub async fn operator_decide(
     id: Uuid,
     command: OperatorCommand,
     d: Decision,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
     let r = load(&state.db, id).await?;
-    // Explicit reviewer roles: only a named reviewer decides production access.
-    if !state.production_reviewers.is_empty()
-        && !state.production_reviewers.iter().any(|n| n == operator)
-    {
-        // POLICY_VIOLATION: deciding production access is reserved to named reviewers.
-        return Err(ApiError(ErrorCode::PolicyViolation));
-    }
-    if matches!(command, OperatorCommand::Approve | OperatorCommand::Reject) {
-        let Some(user) = operator_user else {
-            return Err(ApiError(ErrorCode::OperatorRequired));
-        };
-        if membership(&state.db, r.tenant_id, user).await?.is_some() {
-            return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+    let name = command.as_str();
+    if let Some(b) = bridge {
+        if command == OperatorCommand::Reinstate {
+            // Not an HQ capability.
+            return Err(ApiError(ErrorCode::PolicyViolation));
+        }
+        if bridge_command::replayed(&state.db, b, name, Subject::ProductionAccess, id).await? {
+            return view(&state.db, id, true).await;
+        }
+        // No self-review when the staff member's CF Meet account is linked.
+        if let Some(user) = b.linked_user {
+            if command != OperatorCommand::Review
+                && membership(&state.db, r.tenant_id, user).await?.is_some()
+            {
+                return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+            }
+        }
+        bridge_command::lock_version(&state.db, b, Subject::ProductionAccess, id).await?;
+    } else {
+        // Explicit reviewer roles: only a named reviewer decides production access.
+        if !state.production_reviewers.is_empty()
+            && !state.production_reviewers.iter().any(|n| n == operator)
+        {
+            // POLICY_VIOLATION: deciding production access is reserved to named reviewers.
+            return Err(ApiError(ErrorCode::PolicyViolation));
+        }
+        if matches!(command, OperatorCommand::Approve | OperatorCommand::Reject) {
+            let Some(user) = operator_user else {
+                return Err(ApiError(ErrorCode::OperatorRequired));
+            };
+            if membership(&state.db, r.tenant_id, user).await?.is_some() {
+                return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+            }
         }
     }
+
     let actor = Actor::Operator {
         name: operator,
         request,
@@ -942,8 +1068,12 @@ pub async fn operator_decide(
     match command {
         OperatorCommand::Review => {
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &["PRODUCTION_REQUESTED"],
@@ -963,6 +1093,10 @@ pub async fn operator_decide(
                 json!({}),
             )
             .await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Approve => {
@@ -978,6 +1112,9 @@ pub async fn operator_decide(
                 return Err(ApiError(ErrorCode::ValidationError));
             }
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             // Regulated capabilities are only approved after an explicit review.
             let from: &[&str] = if regulated(&caps) {
                 &["UNDER_REVIEW"]
@@ -986,6 +1123,7 @@ pub async fn operator_decide(
             };
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 from,
@@ -1011,13 +1149,22 @@ pub async fn operator_decide(
                 json!({ "capabilities": caps, "policy": "OPERATOR" }),
             )
             .await?;
+            publish_decision(state, &txn, id, &r, "APPROVED", request).await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Reject => {
             let code = reason(&d, "NOT_ELIGIBLE")?;
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &["PRODUCTION_REQUESTED", "UNDER_REVIEW", "APPROVED"],
@@ -1037,6 +1184,11 @@ pub async fn operator_decide(
                 json!({ "reasonCode": code }),
             )
             .await?;
+            publish_decision(state, &txn, id, &r, "REJECTED", request).await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Suspend | OperatorCommand::Reinstate => {
@@ -1097,8 +1249,12 @@ pub async fn operator_decide(
                 .await?;
             }
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
+                state.bridge_events,
                 id,
                 r.tenant_id,
                 &[from],
@@ -1133,6 +1289,10 @@ pub async fn operator_decide(
                 json!({ "reasonCode": code, "environmentId": env }),
             )
             .await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
     }
@@ -1160,6 +1320,26 @@ pub async fn production_scope_approved<C: ConnectionTrait>(
         .iter()
         .filter_map(|c| capability(c))
         .any(|c| c.scopes.contains(&scope)))
+}
+
+/// Whether capability `name` is approved for `project` and LIVE.
+pub async fn production_capability_live<C: ConnectionTrait>(
+    db: &C,
+    project: Uuid,
+    name: &str,
+) -> Result<bool, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT approved_capabilities FROM devplat_production_access_requests \
+             WHERE application_id = $1 AND state = 'LIVE'",
+            vec![project.into()],
+        ))
+        .await?;
+    let caps: Vec<String> = match row {
+        Some(r) => r.try_get("", "approved_capabilities")?,
+        None => return Ok(false),
+    };
+    Ok(caps.iter().any(|c| c == name))
 }
 
 /// The organization's production status for its support profile.
@@ -1208,6 +1388,13 @@ mod tests {
         );
         assert!(regulated(&["SMS".into()]));
         assert!(!regulated(&["MEETINGS".into(), "APP_CALLING".into()]));
+        // ADR 0062 / 0063: software capabilities, never regulated.
+        assert!(!regulated(&["END_USERS".into(), "PUSH".into()]));
+        assert_eq!(
+            capability("END_USERS").unwrap().scopes,
+            ["principals.read", "principals.write", "user_tokens.issue"]
+        );
+        assert!(capability("PUSH").unwrap().scopes.is_empty());
         assert!(capabilities(&["NOPE".into()]).is_err());
         assert!(capabilities(&[]).is_err());
         assert_eq!(

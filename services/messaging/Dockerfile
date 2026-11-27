@@ -9,10 +9,11 @@
 # build context (services/messaging/Dockerfile.dockerignore); no other service's source is
 # copied. The image is independent of every other service's image and release.
 #
-# The image contains the service (`messaging`) and its migration runner
-# (`messaging-migration`). Configuration — DATABASE_URL, the service signing key FILE, the
-# trust bundle FILE and the Platform Access URL — is supplied at runtime only; nothing
-# secret is baked in. Docker is never required for local development.
+# The image contains the service (`messaging`) and its migration runners
+# (`messaging-migration`, plus the independently versioned additive histories
+# `messaging-communications-migration` and `messaging-notification-fence-migration`).
+# Configuration — DATABASE_URL, the service signing key FILE, the trust bundle FILE and
+# the Platform Access URL — is supplied at runtime only; nothing secret is baked in. Docker is never required for local development.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /src
@@ -26,11 +27,15 @@ COPY packages/messaging-crypto packages/messaging-crypto
 COPY packages/object-storage packages/object-storage
 # Shared scan gateway wire contract (signed verdicts); not the gateway itself.
 COPY packages/scan-gateway-contract packages/scan-gateway-contract
+# Push transport (APNs / FCM / Web Push adapters; Notification Service roadmap N4).
+COPY packages/push-transport packages/push-transport
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+COPY packages/notification-client packages/notification-client
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
-RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration \
- && cargo build --release --locked -p messaging --bin messaging
+RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration --bin messaging-notification-fence-migration --bin messaging-send-policy-projection-migration \
+ && cargo build --release --locked -p messaging --bin messaging --bin messaging-kt-witness
 
 FROM debian:bookworm-slim
 # Apply pending Debian security updates at build time; nothing else is installed.
@@ -41,8 +46,11 @@ RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin mess
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 COPY --from=builder /src/services/messaging/target/release/messaging ./messaging
+COPY --from=builder /src/services/messaging/target/release/messaging-kt-witness ./messaging-kt-witness
 COPY --from=builder /src/services/messaging/target/release/messaging-migration ./messaging-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-communications-migration ./messaging-communications-migration
+COPY --from=builder /src/services/messaging/target/release/messaging-send-policy-projection-migration ./messaging-send-policy-projection-migration
+COPY --from=builder /src/services/messaging/target/release/messaging-notification-fence-migration ./messaging-notification-fence-migration
 USER messaging
 ENV MESSAGING_BIND_ADDRESS=0.0.0.0:8097 \
     LOG_FORMAT=json

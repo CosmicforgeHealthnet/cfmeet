@@ -18,6 +18,8 @@
 //!   "delete for me" markers.
 
 pub mod e2ee;
+pub mod forward;
+pub mod franking;
 pub mod http;
 pub mod keys;
 pub mod managed;
@@ -99,6 +101,14 @@ pub struct MessageRow {
     pub channel: String,
     pub reply_to_message_id: Option<Uuid>,
     pub thread_root_id: Option<Uuid>,
+    /// S11: set on a server-side forward (MANAGED); never shown to members.
+    pub forwarded_from_message_id: Option<Uuid>,
+    /// S11: the original sender, only when policy showed it at forward time.
+    pub forwarded_sender_principal_id: Option<Uuid>,
+    /// S2: the sender's franking commitment (PRIVATE_E2EE, optional).
+    pub franking_commitment: Option<String>,
+    /// ADR 0064: the CF Meet App whose OAuth credential sent this message (MANAGED).
+    pub via_application_id: Option<Uuid>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -106,7 +116,9 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.mls_ciphertext, m.ciphertext_sha256, m.acceptance_digest, m.managed_sealed, m.managed_seal_nonce, \
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
-     m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id";
+     m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id, \
+     m.forwarded_from_message_id, m.forwarded_sender_principal_id, m.via_application_id, \
+     (SELECT f.commitment FROM messaging_message_frankings f WHERE f.message_id = m.id) AS franking_commitment";
 
 impl MessageRow {
     pub fn profile(&self) -> SecurityProfile {
@@ -150,7 +162,15 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "channel": row.channel,
         "replyToMessageId": row.reply_to_message_id,
         "threadRootId": row.thread_root_id,
+        // S11: provenance only (the source conversation and message are never disclosed).
+        "forwarded": row.forwarded_from_message_id.is_some(),
+        "forwardedFromPrincipalId": row.forwarded_sender_principal_id,
     });
+    // ADR 0064: "sent by App X" (only on messages a CF Meet App sent; absent otherwise,
+    // so every other message renders exactly as before).
+    if let Some(app) = row.via_application_id {
+        v["viaApplicationId"] = json!(app);
+    }
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
             v["e2ee"] = json!({
@@ -164,6 +184,7 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
                 "ciphertext": if show { row.mls_ciphertext.as_deref().map(b64) } else { None },
                 "ciphertextSha256": row.ciphertext_sha256,
                 "acceptanceDigest": row.acceptance_digest,
+                "frankingCommitment": row.franking_commitment,
             });
         }
         SecurityProfile::Managed => {
@@ -268,6 +289,7 @@ pub struct SendRequest {
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
     /// `false`: no push notification jobs for this message (mirrored / migrated writes).
+    /// Honoured only for delegated callers ([`SendRequest::with_notify_authority`]).
     #[serde(default)]
     pub notify: Option<bool>,
     /// MANAGED only: `STANDARD` (default) or `ANNOUNCEMENT`.
@@ -276,17 +298,41 @@ pub struct SendRequest {
     /// A reply to this earlier message of the conversation (thread metadata, ids only).
     #[serde(default)]
     pub reply_to_message_id: Option<Uuid>,
-    /// Section 13 (MSG-007), MANAGED only: current members this message mentions (ids
-    /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
+    /// Section 13 (MSG-007): current members this message mentions (ids only; at most
+    /// [`MAX_MENTIONS`]). B3: PRIVATE_E2EE too — the ids serve the mention count and the
+    /// "mentions only" notification preference; the mention TEXT stays inside the
+    /// ciphertext.
     #[serde(default)]
     pub mentioned_principal_ids: Vec<Uuid>,
+    /// S2, PRIVATE_E2EE only: the sender's franking commitment ([`franking`]).
+    #[serde(default)]
+    pub franking_commitment: Option<String>,
+}
+
+impl SendRequest {
+    /// S-4: `notify: false` (no push jobs for the recipients) is reserved for mirrored and
+    /// migrated writes, i.e. a first-party backend on the delegated mirror
+    /// (`messaging-application.delegate`). Any other caller — a customer credential, a
+    /// gateway-forwarded credential or an end-user client token — cannot silence other
+    /// members' notifications: the field stays accepted (the contract is unchanged) and
+    /// is ignored. The legacy import path never reaches here (it records `notify: false`
+    /// itself).
+    pub fn with_notify_authority(mut self, delegated: bool) -> Self {
+        if !delegated && self.notify == Some(false) {
+            crate::metrics::inc("messaging_notify_suppression_ignored_total", &[]);
+            self.notify = None;
+        }
+        self
+    }
 }
 
 /// Most principals one message may mention.
 pub const MAX_MENTIONS: usize = 50;
 
-/// The distinct principals a MANAGED message mentions: current ACTIVE members other than
-/// the sender (anyone else is refused, so mentions never probe who exists).
+/// The distinct principals a message mentions: current ACTIVE members other than the
+/// sender (anyone else is refused, so mentions never probe who exists), deduplicated and
+/// capped at [`MAX_MENTIONS`]. Both profiles (B3): for PRIVATE_E2EE only these ids reach
+/// the server, the mention text stays inside the ciphertext.
 pub(crate) async fn mentions_of<C: ConnectionTrait>(
     db: &C,
     conversation: &ConversationRow,
@@ -295,12 +341,6 @@ pub(crate) async fn mentions_of<C: ConnectionTrait>(
 ) -> Result<Vec<Uuid>> {
     if requested.is_empty() {
         return Ok(Vec::new());
-    }
-    if conversation.profile() != SecurityProfile::Managed {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
     }
     let mut wanted: Vec<Uuid> = requested.iter().copied().filter(|p| *p != sender).collect();
     wanted.sort();
@@ -416,6 +456,21 @@ pub(crate) async fn same_attachments<C: ConnectionTrait>(
 
 /// Checks shared by both profiles, before the transaction: membership, lifecycle,
 /// sending policy, mute, abuse limits.
+/// S13: in an announcement-only conversation only OWNER / ADMIN members send (and edit
+/// and forward into it). Everyone else keeps reading (and reacting, as policy allows).
+pub(crate) fn require_announcement_sender(
+    conversation: &ConversationRow,
+    member: &Membership,
+) -> Result<()> {
+    if conversation.announcement_only && !member.is_admin() {
+        return Err(Error::reason(
+            ErrorCode::SendRestricted,
+            "ANNOUNCEMENT_ONLY",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn send_prelude(
     state: &AppState,
     ctx: &TrustedContext,
@@ -442,6 +497,7 @@ pub(crate) async fn send_prelude(
             "READ_ONLY_MEMBER",
         ));
     }
+    require_announcement_sender(&conversation, &member)?;
     crate::safety::abuse::require_not_restricted(state, ctx, acting.principal_id).await?;
     // Tenant fairness first (one environment cannot monopolize shared capacity), then
     // the principal's own velocity.
@@ -618,14 +674,6 @@ async fn send_checked(
     }
     let (conversation, _member, effective) =
         send_prelude(state, ctx, acting, conversation_id).await?;
-    if !request.mentioned_principal_ids.is_empty()
-        && conversation.profile() != SecurityProfile::Managed
-    {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
-    }
     if !request.attachment_ids.is_empty() {
         crate::attachments::check_message_attachments(
             state,
@@ -691,6 +739,9 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
                 // Never accepted from the message request or exposed as push payload.
                 "initiating_service_account_id": ctx.scope.service_account_id,
                 "environment_kind": ctx.scope.environment_kind.as_str(),
+                // Gap audit S1: the authenticated tenant classification (Platform Access),
+                // so a delayed worker knows an organization's first-party scope.
+                "first_party": ctx.first_party,
             }),
         ),
     };
@@ -720,6 +771,11 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
             now,
         )
         .await?;
+        // ADR 0062 / build contract §5: the MESSAGE_SENT fact of an EXTERNAL environment
+        // (ids, context class and security profile only).
+        if !ctx.first_party && crate::partner::message_sent_recording() {
+            crate::usage::record_message_sent(db, ctx, row, now).await?;
+        }
     }
     crate::metrics::inc(
         "messaging_messages_accepted_total",

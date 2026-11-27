@@ -324,6 +324,8 @@ class RealRepository(unittest.TestCase):
             "call_endpoints", "call_invitations", "call_answer_claims",
             "call_participant_media_permissions", "call_media_sessions", "call_commands",
             "call_transfers", "call_media_provider_events",
+            # Gap audit C14: attended (consultative) transfer.
+            "call_consultations",
             # Part D sections 26-30: evidence of Privacy Relay decisions / enforcement.
             "call_privacy_authorizations", "call_privacy_enforcements",
             # Part E sections 37-38: the typed routing policy of the Routing Engine.
@@ -372,7 +374,14 @@ class RealRepository(unittest.TestCase):
                                      # and the retention audit (ADR 0030).
                                      "calling_orphan_objects", "calling_retention_holds",
                                      "calling_retention_audit", "calling_communication_inbox",
-                                     "calling_communication_revocations"}
+                                     "calling_communication_revocations",
+                                     # Roadmap N7: Calling's outbox of publications to the
+                                     # Notification Service (its own history).
+                                     "calling_notification_publications",
+                                     # ADR 0068 A4 / A7: the admin bridge's operator
+                                     # command ledger and owner events outbox.
+                                     "calling_admin_operations",
+                                     "calling_admin_bridge_events"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

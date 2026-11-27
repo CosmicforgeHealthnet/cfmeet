@@ -4,8 +4,12 @@
 //! call one service method, and serialize. No role checks, transactions, policy
 //! orchestration or provider calls live here.
 
+pub mod account_devices;
+pub mod account_identity;
+pub mod account_phone;
 pub mod account_profile;
 pub mod account_sessions;
+pub mod apps;
 pub mod artifacts;
 pub mod breakouts;
 pub mod calendar;
@@ -15,7 +19,9 @@ pub mod conferences;
 pub mod engagement;
 pub mod invitations;
 pub mod members;
+pub mod notifications;
 pub mod organization_calling;
+pub mod organization_member_calling;
 pub mod organization_messaging;
 pub mod organizations;
 pub mod participants;

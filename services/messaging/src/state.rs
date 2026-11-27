@@ -26,6 +26,8 @@ pub struct AppState {
     pub principals: Arc<dyn PrincipalDirectory>,
     pub service_auth: ServiceAuthRuntime,
     pub communications: Option<cf_communications_policy::PolicyClient>,
+    pub local_send_policy: bool,
+    pub local_send_generation: Option<uuid::Uuid>,
     pub devices: DeviceSettings,
     pub conversations: ConversationSettings,
     pub workers: WorkerSettings,
@@ -48,6 +50,26 @@ pub struct AppState {
     pub attachments: AttachmentSettings,
     /// Part V H: the SMS Gateway's bridge API (unconfigured: bridges are refused).
     pub sms: Arc<dyn crate::sms_bridge::SmsTransport>,
+    /// N9 push-registration facade towards the Notification Service (`None`: off, the
+    /// default — Messaging behaves exactly as before).
+    pub push_mirror: Option<Arc<crate::push_mirror::PushMirror>>,
+    /// ADR 0062 / 0063 partner devices and push (every flag off by default: nothing
+    /// partner-specific is reachable).
+    pub partner: Arc<crate::partner::Partner>,
+    /// ADR 0064 CF Meet Apps (`MESSAGING_APPS_ENABLED`, default off: OAuth credentials
+    /// are refused and nothing app-specific happens).
+    pub apps: crate::apps::AppsSettings,
+    /// Gap audit S1 (`MESSAGING_ORGANIZATION_WAKEUPS=on`, default off): message wake-ups of
+    /// conversations in an organization's own first-party scope go to the Notification
+    /// Service (route `NEW`), addressed to the members' CF Meet accounts.
+    pub organization_wakeups: bool,
+    /// "Added to a group" notices (`messaging_member_notifications`) are written for the
+    /// Notification Service: set when `CF_NOTIFICATIONS_BASE_URL` is configured (default
+    /// off: nothing is written).
+    pub member_notices: bool,
+    /// ADR 0068 A6: CF Meet user plan limits (`MESSAGING_PLAN_ENFORCEMENT=on`; `None`, the
+    /// default: today's limits only).
+    pub plans: Option<Arc<crate::plans::PlanEnforcement>>,
 }
 
 impl AppState {
@@ -70,6 +92,8 @@ impl AppState {
             principals: Arc::new(Unconfigured),
             service_auth,
             communications: None,
+            local_send_policy: false,
+            local_send_generation: None,
             devices: DeviceSettings::default(),
             conversations: ConversationSettings::default(),
             workers: WorkerSettings::default(),
@@ -82,6 +106,12 @@ impl AppState {
             scanner: Arc::new(crate::attachments::scanner::UnconfiguredScanner),
             attachments: AttachmentSettings::default(),
             sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
+            push_mirror: None,
+            partner: Arc::new(crate::partner::Partner::disabled()),
+            apps: crate::apps::AppsSettings::default(),
+            organization_wakeups: false,
+            member_notices: false,
+            plans: None,
         }
     }
 

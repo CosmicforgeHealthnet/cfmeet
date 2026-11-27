@@ -152,6 +152,7 @@ async fn insert<C: ConnectionTrait>(
     content: &ManagedContent,
     attachment_count: i32,
     presentation: Option<&str>,
+    forwarded: Option<&Forwarded>,
     now: DateTime<Utc>,
 ) -> Result<MessageRow> {
     let sequence = allocate_sequence(db, conversation.id).await?;
@@ -173,8 +174,10 @@ async fn insert<C: ConnectionTrait>(
         db,
         "INSERT INTO messaging_messages (id, conversation_id, tenant_id, application_id, environment_id, sequence, \
            message_kind, security_profile, sender_principal_id, client_message_id, managed_sealed, managed_seal_nonce, \
-           managed_seal_key_id, managed_search, attachment_count, created_at, managed_presentation) \
-         VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, to_tsvector('simple', $12), $13, $14, $15)",
+           managed_seal_key_id, managed_search, attachment_count, created_at, managed_presentation, \
+           forwarded_from_message_id, forwarded_from_conversation_id, forwarded_sender_principal_id, via_application_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, to_tsvector('simple', $12), $13, $14, $15, \
+                 $16, $17, $18, $19)",
         vec![
             id.into(),
             conversation.id.into(),
@@ -191,6 +194,11 @@ async fn insert<C: ConnectionTrait>(
             attachment_count.into(),
             now.into(),
             presentation.map(str::to_string).into(),
+            forwarded.map(|f| f.from_message).into(),
+            forwarded.map(|f| f.from_conversation).into(),
+            forwarded.and_then(|f| f.sender).into(),
+            // ADR 0064: the sending app of an OAuth credential.
+            ctx.oauth.map(|o| o.app_id).into(),
         ],
     )
     .await?;
@@ -225,6 +233,7 @@ pub(crate) async fn insert_channel<C: ConnectionTrait>(
         content,
         0,
         None,
+        None,
         now,
     )
     .await?;
@@ -249,6 +258,15 @@ pub(crate) async fn same_text(state: &AppState, existing: &MessageRow, text: &st
     }
 }
 
+/// S11: the provenance of a server-side forward (MANAGED to MANAGED only). The original
+/// sender is recorded only when the environment's policy shows it.
+#[derive(Debug, Clone, Copy)]
+pub struct Forwarded {
+    pub from_message: Uuid,
+    pub from_conversation: Uuid,
+    pub sender: Option<Uuid>,
+}
+
 pub async fn send(
     state: &AppState,
     ctx: &TrustedContext,
@@ -256,6 +274,19 @@ pub async fn send(
     conversation: &ConversationRow,
     effective: &EffectivePolicy,
     request: SendRequest,
+) -> Result<(u16, Value)> {
+    send_with(state, ctx, acting, conversation, effective, request, None).await
+}
+
+/// [`send`] of a forwarded copy (`forwarded`: its provenance, set at insert).
+pub(crate) async fn send_with(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation: &ConversationRow,
+    effective: &EffectivePolicy,
+    request: SendRequest,
+    forwarded: Option<Forwarded>,
 ) -> Result<(u16, Value)> {
     let threads = effective.messages.threads;
     crate::operations::require_open(
@@ -271,6 +302,12 @@ pub async fn send(
     )
     .await?;
 
+    if request.franking_commitment.is_some() {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "FRANKING_E2EE_ONLY",
+        ));
+    }
     if request.ciphertext.is_some() || request.device_id.is_some() || request.epoch.is_some() {
         return Err(Error::reason(
             ErrorCode::ContentRejected,
@@ -325,6 +362,9 @@ pub async fn send(
         effective.abuse.managed_links_per_hour,
     )
     .await?;
+    // ADR 0064: the CF Meet App bots this message concerns (mentions, DIRECT).
+    let bots =
+        crate::apps::bot_targets(state, ctx, conversation, acting.principal_id, &mentions).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let acting = acting.clone();
@@ -370,6 +410,7 @@ pub async fn send(
                     &content,
                     attachments.len() as i32,
                     presentation,
+                    forwarded.as_ref(),
                     now,
                 )
                 .await?;
@@ -378,6 +419,9 @@ pub async fn send(
                 let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
                 super::record_mentions(txn, &row, &mentions).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
+                if !bots.is_empty() {
+                    crate::apps::record_bot_events(txn, &ctx2, &bots, &row, &request_ctx, now).await?;
+                }
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;
                 Ok((201, row))
@@ -424,6 +468,7 @@ pub async fn edit(
         ));
     }
     crate::conversations::access::require_accepting(&conversation, state.now())?;
+    super::require_announcement_sender(&conversation, &member)?;
     let effective =
         crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
     crate::operations::require_open(

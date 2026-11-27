@@ -69,7 +69,8 @@ pub struct UsageTypeDefinition {
 
 use producers::*;
 
-/// The eight Part VI usage types (Appendix D).
+/// The Part VI usage types (Appendix D): the original eight plus `MESSAGE_SENT` (ADR 0062:
+/// a chat message sent in an EXTERNAL environment, metered per message).
 pub const CATALOGUE: &[UsageTypeDefinition] = &[
     UsageTypeDefinition {
         name: "API_OPERATION",
@@ -147,6 +148,17 @@ pub const CATALOGUE: &[UsageTypeDefinition] = &[
         producers: &[MEETING_SERVICE, CALLING, MESSAGING],
         interval: true,
         dimensions: &["storageDomain", "storedBytes"],
+        internal_dimensions: &[],
+    },
+    // ADR 0062 / build contract §5: one fact per message sent in an EXTERNAL environment
+    // (never the content, the sender or the conversation: the context class and security
+    // profile only).
+    UsageTypeDefinition {
+        name: "MESSAGE_SENT",
+        unit: Unit::Operation,
+        producers: &[MESSAGING],
+        interval: false,
+        dimensions: &["contextClass", "securityProfile"],
         internal_dimensions: &[],
     },
 ];
@@ -394,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalogue_has_the_eight_part_vi_types() {
+    fn the_catalogue_has_the_part_vi_types() {
         let names: Vec<_> = usage_types().collect();
         assert_eq!(
             names,
@@ -406,9 +418,53 @@ mod tests {
                 "NUMBER_ACTIVE",
                 "SMS_SEGMENT",
                 "RECORDING_MINUTE",
-                "STORAGE_BYTE_TIME"
+                "STORAGE_BYTE_TIME",
+                "MESSAGE_SENT"
             ]
         );
+    }
+
+    #[test]
+    fn message_sent_is_a_messaging_operation_with_safe_dimensions() {
+        let mut f = fact();
+        f.source_fact_id = "message:7c9e6679-7425-40de-944b-e07fc1f90ae7".into();
+        f.usage_type = "MESSAGE_SENT".into();
+        f.unit = "OPERATION".into();
+        f.quantity = 1;
+        f.resource_ref = "message:7c9e6679-7425-40de-944b-e07fc1f90ae7".into();
+        f.dimensions = [
+            ("contextClass".to_string(), json!("DIRECT")),
+            ("securityProfile".to_string(), json!("MANAGED")),
+        ]
+        .into();
+        let f = f.sealed();
+        assert!(f.validate(producers::MESSAGING).is_ok());
+        for other in [
+            producers::CALLING,
+            producers::MEETING_SERVICE,
+            producers::API_GATEWAY,
+        ] {
+            assert_eq!(
+                f.validate(other),
+                Err(Refusal::ProducerNotAllowed),
+                "{other}"
+            );
+        }
+        let mut g = f.clone();
+        g.unit = "SEGMENT".into();
+        assert_eq!(
+            g.sealed().validate(producers::MESSAGING),
+            Err(Refusal::WrongUnit)
+        );
+        let mut g = f.clone();
+        g.dimensions.insert("conversationId".into(), json!("c1"));
+        assert_eq!(
+            g.sealed().validate(producers::MESSAGING),
+            Err(Refusal::InvalidDimensions)
+        );
+        let def = definition("MESSAGE_SENT").unwrap();
+        assert!(!def.interval);
+        assert_eq!(def.unit, Unit::Operation);
     }
 
     #[test]

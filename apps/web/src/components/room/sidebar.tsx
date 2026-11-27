@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { X, Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X, Send, UserPlus, Check, Trash2, MessageCircle } from "lucide-react";
+import { NiceSelect } from "@/components/ui/nice-select";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import ParticipantsPanel from "@/components/conferences/ParticipantsPanel";
 import ConferenceRecordingsPanel from "@/components/conferences/ConferenceRecordingsPanel";
@@ -15,7 +17,7 @@ import { useConference } from "@/hooks/v2/useConferences";
 import { useSpace } from "@/hooks/v2/useSpaces";
 import { useCollaborationState, useDeleteMessage, useLoadOlderMessages, useMessages, useSendMessage } from "@/hooks/v2";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
-import type { BulkAdmissionResponse, DenyRequest, MessageListQuery, MessageView, ParticipantResponse } from "@/types/v2";
+import type { DenyRequest, MessageListQuery, MessageView, ParticipantResponse } from "@/types/v2";
 import { ActionDialog, Field } from "@/components/meeting-spaces/ManagementUI";
 
 export type SidebarPanel = "people" | "chat" | "breakouts" | "polls" | "qa" | "recordings";
@@ -112,63 +114,123 @@ export default function Sidebar({ conferenceId, participantId, onClose, initialP
       setDraft(current => current.trim() === text ? "" : current);
     } catch { /* Mutation error is displayed below. */ }
   };
-  return <div className="flex h-full flex-col gap-4 rounded-2xl bg-card p-4">
-    <header className="flex items-center justify-between"><h2 className="font-semibold">Conference</h2><Button aria-label="Close conference sidebar" variant="ghost" size="icon" onClick={onClose}><X className="size-4" /></Button></header>
-    <nav aria-label="Conference tools" className="grid grid-cols-6 gap-1 border-b border-border pb-3">
-      {([
-        ["people", "People"],
-        ...(canSeeRecordings ? [["recordings", "Recordings"] as const] : []),
-        ["chat", "Chat"],
-        ...(policy?.maxBreakouts !== 0 ? [["breakouts", "Breakouts"] as const] : []),
-        ...(policy?.pollsEnabled !== false ? [["polls", "Polls"] as const] : []),
-        ...(policy?.qnaEnabled !== false ? [["qa", "Q&A"] as const] : []),
-      ] as const).map(([panel, label]) => (
-        <button key={panel} type="button" aria-pressed={activePanel === panel}
-          onClick={() => setActivePanel(panel)}
-          className={`rounded-md px-1 py-2 text-xs font-medium ${activePanel === panel ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
-          {label}
-        </button>
-      ))}
-    </nav>
-    {activePanel === "people" && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto"><ParticipantsPanel conferenceId={id} spaceRole={space.data?.viewerRole} policy={space.data?.rolePolicy} />
-      {canAdmit && <section className="space-y-2"><h3 className="font-semibold text-sm">Waiting room</h3>{waiting.isLoading && <p role="status" className="text-sm">Loading waiting room…</p>}{waiting.isError && <RequestError error={waiting.error} retry={() => void waiting.refetch()} />}{waiting.data && <WaitingQueue id={id} people={waiting.data.participants} live={conference.data?.status === "LIVE"} canAdmit={canAdmit} canDeny={meetingAllows(effectiveRole, "participant.deny", space.data?.rolePolicy)} />}</section>}
+  const TITLES: Record<SidebarPanel, string> = { people: "People", chat: "In-call messages", breakouts: "Breakout rooms", polls: "Polls", qa: "Q&A", recordings: "Recordings" };
+  const [copied, setCopied] = useState(false);
+  const meetingCode = space.data?.meetingCode;
+  const copyInvite = () => {
+    if (!meetingCode) return;
+    void navigator.clipboard.writeText(`${window.location.origin}/${meetingCode}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  const waitingPeople = waiting.data?.participants ?? [];
+  const thread = [...(messages.data?.messages ?? []), ...olderMessages].reverse();
+
+  return <div className="flex h-full flex-col overflow-hidden rounded-2xl bg-card text-foreground">
+    <header className="flex h-16 shrink-0 items-center justify-between px-5">
+      <h2 className="text-lg font-semibold">{TITLES[activePanel]}</h2>
+      <button type="button" aria-label="Close panel" onClick={onClose} className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-5" /></button>
+    </header>
+
+    {activePanel === "people" && <div className="no-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5">
+      {meetingCode && <button type="button" onClick={copyInvite} className="inline-flex h-10 items-center gap-2 rounded-full bg-primary/15 px-4 text-sm font-semibold text-primary hover:bg-primary/20">
+        {copied ? <Check className="size-4" /> : <UserPlus className="size-4" />}{copied ? "Invite link copied" : "Add people"}
+      </button>}
+
+      {canAdmit && waitingPeople.length > 0 && <WaitingQueue id={id} people={waitingPeople} live={conference.data?.status === "LIVE"} canAdmit={canAdmit} canDeny={meetingAllows(effectiveRole, "participant.deny", space.data?.rolePolicy)} />}
+      {canAdmit && waiting.isError && <RequestError error={waiting.error} retry={() => void waiting.refetch()} />}
+
+      <ParticipantsPanel conferenceId={id} spaceRole={space.data?.viewerRole} policy={space.data?.rolePolicy} />
     </div>}
-    {activePanel === "recordings" && canSeeRecordings && <div className="min-h-0 flex-1 overflow-y-auto"><ConferenceRecordingsPanel
+
+    {activePanel === "recordings" && canSeeRecordings && <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5"><ConferenceRecordingsPanel
       conferenceId={id}
       spaceRole={space.data?.viewerRole}
       rolePolicy={space.data?.rolePolicy}
       recordingPolicy={space.data?.recordingPolicy}
       live={conference.data?.status === "LIVE"}
     /></div>}
-    {activePanel === "chat" && <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-3"><h3 className="text-sm font-medium">Chat</h3><select aria-label="Chat scope" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-sm" value={scope} onChange={event => setChatScope(event.target.value as typeof scope)} disabled={chatOptions.length < 2}>{chatOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
-      {scope === "PRIVATE" && <label className="grid gap-1 border-b border-border p-3 text-xs font-medium">Private conversation<select aria-label="Private conversation participant" className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={privatePeer} onChange={event => setPrivatePeer(event.target.value)}><option value="">Select a participant</option>{(people.data || []).filter(person => person.id !== collaboration.data?.me?.participantId).map(person => <option key={person.id} value={person.id}>{person.displayName}</option>)}</select></label>}
-      <div className="flex-1 space-y-3 overflow-y-auto bg-muted/40 p-3">
-      {messages.isLoading && <p role="status" className="text-sm">Loading messages…</p>}{messages.isError && <RequestError error={messages.error} retry={() => void messages.refetch()} />}
-      {(olderMessages.length === 0 && messages.data?.messages.length === 0) && <p className="text-sm text-muted-foreground">No messages yet.</p>}
-      {(olderCursor || (olderMessages.length === 0 && messages.data?.nextCursor)) && <Button type="button" variant="outline" size="sm" className="self-center" disabled={loadOlder.isPending} onClick={() => void loadOlderMessages()}>{loadOlder.isPending ? "Loading older messages…" : "Load older messages"}</Button>}
-      {[...(messages.data?.messages ?? []), ...olderMessages].reverse().map(message => <div key={message.id} className={`flex flex-col ${message.senderParticipantId === myParticipantId ? "items-end" : "items-start"}`}><p className="mb-1 text-xs text-muted-foreground">{message.senderDisplayName}{message.kind !== "MESSAGE" ? ` · ${message.kind.replaceAll("_", " ").toLowerCase()}` : ""}</p><p className="max-w-full break-words rounded-lg border border-border bg-card px-3 py-2 text-sm">{message.deleted ? "Message deleted" : message.body}</p>{!message.deleted && (message.senderParticipantId === myParticipantId || (scope !== "PRIVATE" && canModerateChat)) && <ActionDialog label="Delete message" destructive description="Hide this message from the conference chat." submit={async () => { await deleteMessage.mutateAsync(message.id); }} />}</div>)}
-      {!chatOptions.length && <p className="text-sm text-muted-foreground">Chat is unavailable in this room.</p>}
-      {scope === "PRIVATE" && !privatePeer && <p className="text-sm text-muted-foreground">Select an admitted participant to open a private conversation.</p>}
-    </div><form className="space-y-2 border-t border-border p-3" onSubmit={event => { event.preventDefault(); void handleSend(); }}>{send.isError && <RequestError error={send.error} />}{loadOlder.isError && <RequestError error={loadOlder.error} />}{deleteMessage.isError && <RequestError error={deleteMessage.error} />}{!canSendChat && chatOptions.length > 0 && <p className="text-xs text-muted-foreground">{chatRestricted ? "Chat is disabled for your participant." : "Chat is currently read-only for your role or this chat scope."}</p>}<div className="flex gap-2"><Input aria-label="Chat message" placeholder={canSendChat ? "Type a message…" : "Chat is read-only"} value={draft} onChange={e => setDraft(e.target.value)} disabled={!canSendChat || (scope === "PRIVATE" && !privatePeer)} /><Button aria-label="Send message" size="icon" type="submit" disabled={!draft.trim() || send.isPending || !canSendChat || (scope === "PRIVATE" && !privatePeer)}><Send className="size-4" /></Button></div></form></section>}
-    {activePanel === "breakouts" && <BreakoutRoomsPanel conferenceId={id} isHost={canManageBreakouts} onClose={() => setActivePanel("people")} />}
-    {activePanel === "polls" && <PollsPanel conferenceId={id} isHost={canManageRoom} onClose={() => setActivePanel("chat")} />}
-    {activePanel === "qa" && <QAPanel conferenceId={id} isHost={canManageRoom} anonymousAllowed={policy?.qnaAnonymousAllowed} onClose={() => setActivePanel("chat")} />}
+
+    {activePanel === "chat" && <section className="flex min-h-0 flex-1 flex-col">
+      {(chatOptions.length > 1 || scope === "PRIVATE") && <div className="space-y-2 px-5 pb-3">
+        {chatOptions.length > 1 && <NiceSelect value={scope} onChange={setChatScope} options={chatOptions.map(o => ({ value: o.value, label: o.value === "MAIN" ? "Everyone" : o.value === "BREAKOUT" ? "This breakout room" : "Private message" }))} />}
+        {scope === "PRIVATE" && <NiceSelect value={privatePeer} placeholder="Choose who to message" onChange={setPrivatePeer} options={(people.data || []).filter(person => person.id !== collaboration.data?.me?.participantId).map(person => ({ value: person.id, label: person.displayName }))} />}
+      </div>}
+
+      <div className="no-scrollbar flex-1 space-y-4 overflow-y-auto px-5 py-2">
+        {messages.isLoading && <div aria-busy="true" className="space-y-3">{[0, 1, 2].map(i => <div key={i} className="h-12 animate-pulse rounded-xl bg-muted" />)}</div>}
+        {messages.isError && <RequestError error={messages.error} retry={() => void messages.refetch()} />}
+        {(olderCursor || (olderMessages.length === 0 && messages.data?.nextCursor)) && <button type="button" className="mx-auto block text-xs font-semibold text-primary hover:underline disabled:opacity-60" disabled={loadOlder.isPending} onClick={() => void loadOlderMessages()}>{loadOlder.isPending ? "Loading…" : "Show earlier messages"}</button>}
+        {!messages.isLoading && thread.length === 0 && chatOptions.length > 0 && !(scope === "PRIVATE" && !privatePeer) && (
+          <div className="flex flex-col items-center py-10 text-center">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><MessageCircle className="size-5" /></span>
+            <p className="mt-3 text-sm font-medium">No messages yet</p>
+            <p className="text-sm text-muted-foreground">Messages here are only seen by people in this call.</p>
+          </div>
+        )}
+        {thread.map(message => {
+          const mine = message.senderParticipantId === myParticipantId;
+          return <div key={message.id} className={cn("group flex flex-col", mine ? "items-end" : "items-start")}>
+            <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{mine ? "You" : message.senderDisplayName}</span>
+              {message.kind !== "MESSAGE" ? <span className="rounded bg-muted px-1.5">{message.kind.replaceAll("_", " ").toLowerCase()}</span> : null}
+              {message.createdAt ? <span>{new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span> : null}
+            </p>
+            <div className="flex max-w-[90%] items-start gap-1.5">
+              {!message.deleted && (mine || (scope !== "PRIVATE" && canModerateChat)) && <span className="order-first opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"><DeleteMessage onDelete={() => deleteMessage.mutateAsync(message.id)} /></span>}
+              <p className={cn("break-words rounded-2xl px-3.5 py-2 text-sm", message.deleted ? "italic text-muted-foreground" : mine ? "rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground")}>{message.deleted ? "Message deleted" : message.body}</p>
+            </div>
+          </div>;
+        })}
+        {!chatOptions.length && <p className="py-10 text-center text-sm text-muted-foreground">Chat is turned off for this call.</p>}
+        {scope === "PRIVATE" && !privatePeer && <p className="py-10 text-center text-sm text-muted-foreground">Choose someone above to send them a private message.</p>}
+      </div>
+
+      <form className="space-y-2 p-4" onSubmit={event => { event.preventDefault(); void handleSend(); }}>
+        {send.isError && <RequestError error={send.error} />}{loadOlder.isError && <RequestError error={loadOlder.error} />}{deleteMessage.isError && <RequestError error={deleteMessage.error} />}
+        {!canSendChat && chatOptions.length > 0 && <p className="text-xs text-muted-foreground">{chatRestricted ? "A host turned off chat for you." : "Only hosts can send messages here."}</p>}
+        <div className="flex items-center gap-2 rounded-full bg-muted px-2 py-1.5">
+          <Input aria-label="Chat message" placeholder={canSendChat ? "Send a message" : "You can't send messages"} value={draft} onChange={e => setDraft(e.target.value)} disabled={!canSendChat || (scope === "PRIVATE" && !privatePeer)} className="h-9 flex-1 rounded-full border-0 bg-transparent px-3 text-sm shadow-none focus:ring-0 sm:h-9 sm:px-3 sm:text-sm" />
+          <button aria-label="Send message" type="submit" disabled={!draft.trim() || send.isPending || !canSendChat || (scope === "PRIVATE" && !privatePeer)} className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-30"><Send className="size-4" /></button>
+        </div>
+      </form>
+    </section>}
+
+    {activePanel === "breakouts" && <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5"><BreakoutRoomsPanel conferenceId={id} isHost={canManageBreakouts} onClose={() => setActivePanel("people")} /></div>}
+    {activePanel === "polls" && <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5"><PollsPanel conferenceId={id} isHost={canManageRoom} onClose={() => setActivePanel("chat")} /></div>}
+    {activePanel === "qa" && <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5"><QAPanel conferenceId={id} isHost={canManageRoom} anonymousAllowed={policy?.qnaAnonymousAllowed} onClose={() => setActivePanel("chat")} /></div>}
   </div>;
+}
+
+function DeleteMessage({ onDelete }: { onDelete: () => Promise<unknown> }) {
+  const [confirm, setConfirm] = useState(false);
+  return confirm
+    ? <button type="button" onClick={() => { void onDelete(); setConfirm(false); }} onBlur={() => setConfirm(false)} className="rounded-lg bg-destructive px-2 py-1 text-xs font-semibold text-white">Delete?</button>
+    : <button type="button" aria-label="Delete message" onClick={() => setConfirm(true)} className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 className="size-3.5" /></button>;
 }
 
 function WaitingQueue({ id, people, live, canAdmit, canDeny }: { id: string; people: ParticipantResponse[]; live: boolean; canAdmit: boolean; canDeny: boolean }) {
   const admit = useAdmitParticipants(id), deny = useDenyParticipants(id);
-  const [result, setResult] = useState<BulkAdmissionResponse>();
   const pending = admit.isPending || deny.isPending;
   const runAdmit = async (participantId?: string) => {
-    try { setResult(await admit.mutateAsync(participantId ? { participantIds: [participantId] } : { all: true })); } catch { /* Mutation error is displayed below. */ }
+    try { await admit.mutateAsync(participantId ? { participantIds: [participantId] } : { all: true }); } catch { /* Mutation error is displayed below. */ }
   };
-  return <div className="space-y-2">
-    {!live && <p className="text-xs text-muted-foreground">Start the conference to admit waiting people.</p>}
-    {admit.isError && <RequestError error={admit.error} />}{deny.isError && <RequestError error={deny.error} />}
-    {result && <p role="status" className="text-xs text-muted-foreground">Changed {result.changed.length}; unchanged {result.unchanged.length}; skipped {result.skipped.length}.{result.skipped.map(item => ` ${item.participantId}: ${item.admissionState}`).join("")}</p>}
-    {people.length === 0 ? <p className="text-sm text-muted-foreground">Nobody is waiting.</p> : <>{canAdmit && <Button size="sm" variant="outline" disabled={pending || !live} onClick={() => void runAdmit()}>Admit all ({people.length})</Button>}{canDeny && <WaitingDenyAction label={`Deny all (${people.length})`} disabled={pending} submit={async data => setResult(await deny.mutateAsync({ ...data, all: true }))} />}{people.map(person => <div key={person.id} className="space-y-2 rounded-md border border-border p-2"><p className="break-words text-sm">{person.displayName}</p><div className="flex gap-2">{canAdmit && <Button size="sm" disabled={pending || !live} onClick={() => void runAdmit(person.id)}>Admit</Button>}{canDeny && <WaitingDenyAction label="Deny" disabled={pending} submit={async data => setResult(await deny.mutateAsync({ ...data, participantIds: [person.id] }))} />}</div></div>)}</>}
-  </div>;
+  return <section className="rounded-2xl border border-primary/30 bg-primary/10 p-4">
+    <div className="flex items-center justify-between gap-2">
+      <h3 className="text-sm font-semibold">Waiting to join · {people.length}</h3>
+      {canAdmit && people.length > 1 && <button type="button" disabled={pending || !live} onClick={() => void runAdmit()} className="text-sm font-semibold text-primary hover:underline disabled:opacity-50">Admit all</button>}
+    </div>
+    {!live && <p className="mt-1 text-xs text-muted-foreground">Start the meeting to let people in.</p>}
+    {admit.isError && <div className="mt-2"><RequestError error={admit.error} /></div>}{deny.isError && <div className="mt-2"><RequestError error={deny.error} /></div>}
+    <ul className="mt-3 space-y-2">
+      {people.map(person => <li key={person.id} className="flex items-center gap-3">
+        <Avatar className="size-9"><AvatarFallback className="bg-primary/20 text-xs font-semibold text-primary">{person.displayName.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{person.displayName}</span>
+        {canDeny && <WaitingDenyAction label="Deny" disabled={pending} submit={async data => deny.mutateAsync({ ...data, participantIds: [person.id] })} />}
+        {canAdmit && <button type="button" disabled={pending || !live} onClick={() => void runAdmit(person.id)} className="h-9 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Admit</button>}
+      </li>)}
+    </ul>
+  </section>;
 }
 
 function WaitingDenyAction({ label, disabled, submit }: {
@@ -183,8 +245,8 @@ function WaitingDenyAction({ label, disabled, submit }: {
   return (
     <ActionDialog
       label={label}
-      title="Deny admission"
-      description="The message is shown to the participant. The internal note is visible only to meeting administrators."
+      title="Don't let them in?"
+      description="You can add a short message they'll see. The internal note is only visible to meeting admins."
       destructive
       disabled={disabled}
       submit={() => submit({
@@ -193,8 +255,7 @@ function WaitingDenyAction({ label, disabled, submit }: {
         ...(internalNote.trim() ? { internalNote: internalNote.trim() } : {}),
       })}
     >
-      <Field label="Reason code (optional)" value={reasonCode} maxLength={64} onChange={event => setReasonCode(event.target.value)} />
-      <Field label="Message to participant (optional)" value={message} maxLength={500} onChange={event => setMessage(event.target.value)} />
+            <Field label="Message to them (optional)" value={message} maxLength={500} onChange={event => setMessage(event.target.value)} />
       <Field label="Internal note (optional)" value={internalNote} onChange={event => setInternalNote(event.target.value)} />
     </ActionDialog>
   );

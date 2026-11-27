@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — numbering",
+    "title": "CF Meet Platform API — numbering",
     "version": "1.13.0",
     "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. 1.12.0 lifecycle stewardship (Part IV P–X): suspension / restoration, release / quarantine / reassignment, audited ownership history, usage, risk and appeals, portability (flagged), kill switches, drift reconciliation, and the relay-number import / lease / resolution API (Part P). 1.13.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 51 customer operations whose handler requires exactly one registry scope; GET /v1/numbers/catalog/countries/{countryCode} accepts numbers.search OR numbers.read and stays upstream-checked (Section 15, PLT-011).",
     "x-cfmeet-source-contract": "cfmeet.numbering.internal-api",
@@ -10,7 +10,7 @@
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {
@@ -8497,7 +8497,7 @@
         "pattern": "^req_[0-9a-f]{32}$"
       },
       "platform.common.v1.ServiceId": {
-        "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway. Never a wildcard.",
+        "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway, cfmeet.organizations, cfmeet.notifications, cfmeet.admin-bridge. Never a wildcard.",
         "type": "string",
         "maxLength": 64,
         "pattern": "^cfmeet\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$"

@@ -153,6 +153,21 @@ pub struct MessageFeatures {
     pub threads: bool,
     pub reactions: bool,
     pub pins: bool,
+    /// S11: server-side forwarding of MANAGED messages (default on). Serialized only when
+    /// changed, so existing policy digests stay the same.
+    #[serde(skip_serializing_if = "is_true")]
+    pub forwarding: bool,
+    /// S11: a forwarded copy shows its original sender (default off: provenance only).
+    #[serde(skip_serializing_if = "is_false")]
+    pub forward_shows_original_sender: bool,
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Opt-in secure backups (Appendix I.3): client-encrypted objects the server stores but
@@ -243,6 +258,8 @@ pub fn platform_defaults() -> EffectivePolicy {
             threads: true,
             reactions: true,
             pins: true,
+            forwarding: true,
+            forward_shows_original_sender: false,
         },
         // Attachments exist but are OFF until an application enables them; no commercial
         // storage budget is invented here (deployment limits apply).
@@ -382,6 +399,8 @@ overrides!(MessageFeaturesOverride {
     threads: bool,
     reactions: bool,
     pins: bool,
+    forwarding: bool,
+    forward_shows_original_sender: bool,
 });
 overrides!(AbuseOverride {
     messages_per_minute: i64,
@@ -777,6 +796,12 @@ pub fn resolve(
         if let Some(v) = o.pins {
             t.pins = v;
         }
+        if let Some(v) = o.forwarding {
+            t.forwarding = v;
+        }
+        if let Some(v) = o.forward_shows_original_sender {
+            t.forward_shows_original_sender = v;
+        }
     }
     if let Some(o) = &overrides.abuse {
         let t = &mut p.abuse;
@@ -803,8 +828,274 @@ pub fn resolve(
 /// privacy, retention, moderation, abuse — follow the current policy; a conversation's
 /// snapshot fixes its security profile and creation rules).
 pub async fn current<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<EffectivePolicy> {
-    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let (overrides, version) = load_layered(db, environment_id).await?;
     resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))
+}
+
+/// CF Meet's per-file attachment limit (25 MiB): the first-party baseline below, equal
+/// to the production scan engine's `StreamMaxLength`
+/// (`infra/calling/production/messaging_runtime.py` `MANAGED_SCAN_MAX_BYTES`), so a
+/// MANAGED file the policy admits can always be scanned.
+pub const CFMEET_ATTACHMENT_MAX_BYTES: i64 = 26_214_400;
+
+/// A named, code-defined policy layer between the platform defaults and an
+/// environment's own application policy (`messaging_application_baselines`).
+///
+/// Effective policy = platform defaults ← baseline ← application policy: every setting
+/// the application policy states explicitly wins (an operator can still turn
+/// attachments off with `attachments.enabled: false`), and an environment without a
+/// registered baseline keeps the platform defaults unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationBaseline {
+    /// CF Meet's own personal application environment (`CF_COMMUNICATIONS_PERSONAL_*`):
+    /// attachments ON, [`CFMEET_ATTACHMENT_MAX_BYTES`], every attachment kind. MANAGED
+    /// files stay scanned (`managedScanRequired` is untouched); PRIVATE_E2EE files stay
+    /// client-encrypted ciphertext the server never inspects.
+    CfMeetFirstParty,
+    /// ADR 0062 / build contract §5: EXTERNAL tenants while
+    /// `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` is on (registered lazily, ignored while
+    /// the flag is off). Every context class allows `[MANAGED, PRIVATE_E2EE]` with MANAGED
+    /// as the default, and attachments are on; an explicit application setting wins.
+    PlatformPartner,
+}
+
+impl ApplicationBaseline {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CfMeetFirstParty => "CFMEET_FIRST_PARTY",
+            Self::PlatformPartner => "CFMEET_PLATFORM_PARTNER",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "CFMEET_FIRST_PARTY" => Some(Self::CfMeetFirstParty),
+            "CFMEET_PLATFORM_PARTNER" => Some(Self::PlatformPartner),
+            _ => None,
+        }
+    }
+
+    /// The settings this baseline contributes.
+    pub fn attachments(self) -> AttachmentOverride {
+        match self {
+            Self::CfMeetFirstParty => AttachmentOverride {
+                enabled: Some(true),
+                max_bytes: Some(CFMEET_ATTACHMENT_MAX_BYTES),
+                allowed_kinds: Some(ATTACHMENT_KINDS.iter().map(|k| k.to_string()).collect()),
+                ..Default::default()
+            },
+            Self::PlatformPartner => AttachmentOverride {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// The per-context settings this baseline contributes, under the application's own
+    /// override of that context (`None`: the baseline leaves contexts alone).
+    fn context(
+        self,
+        class: ContextClass,
+        own: Option<&ContextOverride>,
+    ) -> Option<ContextOverride> {
+        match self {
+            // Product decision (26 November 2026): CF Meet's personal chats are server-stored
+            // (MANAGED) and sync on every device the person signs in on. One-to-one and group
+            // chats therefore always allow MANAGED; older PRIVATE_E2EE chats keep working, and
+            // an explicit default the application chose is kept.
+            Self::CfMeetFirstParty => {
+                if !matches!(class, ContextClass::Direct | ContextClass::Group) {
+                    return None;
+                }
+                let mut o = own.cloned().unwrap_or_default();
+                let mut allowed = o
+                    .allowed_profiles
+                    .clone()
+                    .unwrap_or_else(|| vec![SecurityProfile::PrivateE2ee]);
+                if !allowed.contains(&SecurityProfile::Managed) {
+                    allowed.insert(0, SecurityProfile::Managed);
+                }
+                o.allowed_profiles = Some(allowed);
+                if o.default_profile.is_none() {
+                    o.default_profile = Some(SecurityProfile::Managed);
+                }
+                Some(o)
+            }
+            Self::PlatformPartner => {
+                let mut o = own.cloned().unwrap_or_default();
+                let managed_allowed = o
+                    .allowed_profiles
+                    .as_ref()
+                    .is_none_or(|a| a.contains(&SecurityProfile::Managed));
+                if o.allowed_profiles.is_none() {
+                    o.allowed_profiles =
+                        Some(vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]);
+                }
+                if o.default_profile.is_none() && managed_allowed {
+                    o.default_profile = Some(SecurityProfile::Managed);
+                }
+                Some(o)
+            }
+        }
+    }
+
+    /// Gap audit S6: the secure-backup settings this baseline contributes. CF Meet's
+    /// personal E2EE chats get opt-in, client-encrypted backups, so losing every device
+    /// need not lose history (the server stores objects it cannot read).
+    pub fn backups(self) -> BackupOverride {
+        match self {
+            Self::CfMeetFirstParty => BackupOverride {
+                enabled: Some(true),
+                max_bytes: Some(256 * 1024 * 1024),
+                retain_count: Some(2),
+            },
+            // Partner devices are MANAGED-only session devices: no secure backups.
+            Self::PlatformPartner => BackupOverride::default(),
+        }
+    }
+
+    /// `application` layered over this baseline: an attachment or backup setting the
+    /// application left unset takes the baseline's value; everything else is the
+    /// application's.
+    pub fn under(self, application: &ApplicationPolicy) -> ApplicationPolicy {
+        let base = self.attachments();
+        let own = application.attachments.clone().unwrap_or_default();
+        let mut layered = application.clone();
+        let base_backups = self.backups();
+        let own_backups = application.backups.clone().unwrap_or_default();
+        layered.backups = Some(BackupOverride {
+            enabled: own_backups.enabled.or(base_backups.enabled),
+            max_bytes: own_backups.max_bytes.or(base_backups.max_bytes),
+            retain_count: own_backups.retain_count.or(base_backups.retain_count),
+        });
+        layered.attachments = Some(AttachmentOverride {
+            enabled: own.enabled.or(base.enabled),
+            max_bytes: own.max_bytes.or(base.max_bytes),
+            max_per_message: own.max_per_message.or(base.max_per_message),
+            allowed_kinds: own.allowed_kinds.or(base.allowed_kinds),
+            managed_scan_required: own.managed_scan_required.or(base.managed_scan_required),
+            max_voice_note_seconds: own.max_voice_note_seconds.or(base.max_voice_note_seconds),
+            max_video_seconds: own.max_video_seconds.or(base.max_video_seconds),
+            storage_budget_bytes: own.storage_budget_bytes.or(base.storage_budget_bytes),
+            daily_upload_bytes: own.daily_upload_bytes.or(base.daily_upload_bytes),
+            max_concurrent_uploads: own.max_concurrent_uploads.or(base.max_concurrent_uploads),
+        });
+        if own_backups == BackupOverride::default() && base_backups == BackupOverride::default() {
+            layered.backups = application.backups.clone();
+        }
+        for class in ContextClass::ALL {
+            if let Some(c) = self.context(*class, application.contexts.get(class)) {
+                layered.contexts.insert(*class, c);
+            }
+        }
+        layered
+    }
+}
+
+/// `application` over the environment's baseline, if it has one.
+pub fn layer(
+    baseline: Option<ApplicationBaseline>,
+    application: &ApplicationPolicy,
+) -> ApplicationPolicy {
+    match baseline {
+        Some(b) => b.under(application),
+        None => application.clone(),
+    }
+}
+
+#[derive(Debug, Clone, FromQueryResult)]
+struct BaselineRow {
+    baseline: String,
+}
+
+/// The baseline registered for an environment (`None` for every other application).
+pub async fn load_baseline<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<Option<ApplicationBaseline>> {
+    let row: Option<BaselineRow> = db::one(
+        db,
+        "SELECT baseline FROM messaging_application_baselines WHERE environment_id = $1",
+        vec![environment_id.into()],
+    )
+    .await?;
+    Ok(row
+        .and_then(|r| ApplicationBaseline::parse(&r.baseline))
+        // The partner baseline applies only while the partner flag is on.
+        .filter(|b| {
+            *b != ApplicationBaseline::PlatformPartner || crate::partner::baseline_enabled()
+        }))
+}
+
+/// Registers the `CFMEET_PLATFORM_PARTNER` baseline for an EXTERNAL environment unless
+/// the environment already has a baseline (never replaces CF Meet's own). Idempotent.
+pub async fn register_partner_baseline<C: ConnectionTrait>(
+    db: &C,
+    scope: &crate::identity::OwnerScope,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "INSERT INTO messaging_application_baselines (environment_id, tenant_id, application_id, baseline, registered_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (environment_id) DO NOTHING",
+        vec![
+            scope.environment_id.into(),
+            scope.tenant_id.into(),
+            scope.application_id.into(),
+            ApplicationBaseline::PlatformPartner.as_str().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// The stored application policy layered over the environment's baseline, and the
+/// application policy version.
+pub async fn load_layered<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<(ApplicationPolicy, i64)> {
+    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let baseline = load_baseline(db, environment_id).await?;
+    Ok((layer(baseline, &overrides), version))
+}
+
+/// Registers `baseline` for exactly one application environment (startup, from the
+/// deployment's CF Meet personal scope). The same baseline registered for any OTHER
+/// environment (a previous configuration) is removed, so it never outlives the
+/// configuration that named it. Idempotent; replicas starting together converge.
+pub async fn register_baseline<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    baseline: ApplicationBaseline,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "DELETE FROM messaging_application_baselines WHERE baseline = $1 AND environment_id <> $2",
+        vec![baseline.as_str().into(), environment_id.into()],
+    )
+    .await?;
+    db::exec(
+        db,
+        "INSERT INTO messaging_application_baselines (environment_id, tenant_id, application_id, baseline, registered_at) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (environment_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, \
+           application_id = EXCLUDED.application_id, baseline = EXCLUDED.baseline, \
+           registered_at = EXCLUDED.registered_at",
+        vec![
+            environment_id.into(),
+            tenant_id.into(),
+            application_id.into(),
+            baseline.as_str().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 /// JSON with recursively sorted object keys (independent of serde_json feature flags).
@@ -909,7 +1200,7 @@ pub async fn current_snapshot<C: ConnectionTrait>(
     environment_id: Uuid,
     now: DateTime<Utc>,
 ) -> Result<Snapshot> {
-    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let (overrides, version) = load_layered(db, environment_id).await?;
     let policy = resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))?;
     let digest = policy.digest();
     db::exec(
@@ -1054,9 +1345,14 @@ mod tests {
                 replies: true,
                 threads: true,
                 reactions: true,
-                pins: true
+                pins: true,
+                forwarding: true,
+                forward_shows_original_sender: false,
             }
         );
+        // S11: the defaults are not serialized, so existing policy digests are unchanged.
+        let v = serde_json::to_value(&p.messages).unwrap();
+        assert!(v.get("forwarding").is_none() && v.get("forwardShowsOriginalSender").is_none());
         assert!(
             !p.editing.revision_history_visible,
             "revisions are kept, not shown, by default"
@@ -1165,6 +1461,157 @@ mod tests {
         .unwrap();
         let r = resolve(&ok, 2).unwrap();
         assert!(!r.privacy.presence && r.attachments.enabled);
+    }
+
+    /// M1: the CF Meet first-party baseline turns attachments on with its own limits;
+    /// without it the platform default (off) stands, and an explicit application setting
+    /// always wins over the baseline.
+    #[test]
+    fn the_cfmeet_baseline_enables_attachments_and_explicit_settings_win() {
+        let none = ApplicationPolicy::default();
+        assert!(!resolve(&layer(None, &none), 0).unwrap().attachments.enabled);
+
+        let b = ApplicationBaseline::CfMeetFirstParty;
+        assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
+        let r = resolve(&b.under(&none), 0).unwrap();
+        assert!(r.attachments.enabled);
+        assert_eq!(r.attachments.max_bytes, 26_214_400);
+        let mut kinds = r.attachments.allowed_kinds.clone();
+        kinds.sort();
+        assert_eq!(
+            kinds,
+            vec!["DOCUMENT", "FILE", "IMAGE", "VIDEO", "VOICE_NOTE"]
+        );
+        // MANAGED scanning is untouched by the baseline.
+        assert!(r.attachments.managed_scan_required);
+
+        let off: ApplicationPolicy = serde_json::from_value(
+            json!({ "attachments": { "enabled": false }, "privacy": { "presence": false } }),
+        )
+        .unwrap();
+        let r = resolve(&b.under(&off), 3).unwrap();
+        assert!(
+            !r.attachments.enabled,
+            "an explicit application setting wins"
+        );
+        assert_eq!(r.attachments.max_bytes, 26_214_400);
+        assert!(!r.privacy.presence);
+        let narrower: ApplicationPolicy = serde_json::from_value(
+            json!({ "attachments": { "maxBytes": 1024, "allowedKinds": ["IMAGE"] } }),
+        )
+        .unwrap();
+        let r = resolve(&b.under(&narrower), 4).unwrap();
+        assert!(r.attachments.enabled);
+        assert_eq!(r.attachments.max_bytes, 1024);
+        assert_eq!(r.attachments.allowed_kinds, vec!["IMAGE"]);
+    }
+
+    /// CF Meet's one-to-one and group chats always allow MANAGED (they sync on every device).
+    #[test]
+    fn the_cfmeet_baseline_always_allows_synced_personal_chats() {
+        let b = ApplicationBaseline::CfMeetFirstParty;
+        let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
+        for class in [ContextClass::Direct, ContextClass::Group] {
+            let c = r.contexts.get(&class).unwrap();
+            assert!(c.allowed_profiles.contains(&SecurityProfile::Managed));
+            assert!(c.allowed_profiles.contains(&SecurityProfile::PrivateE2ee));
+            assert_eq!(c.default_profile, Some(SecurityProfile::Managed));
+        }
+        // A stored policy that only lists PRIVATE_E2EE (the old default) still gets MANAGED.
+        let own: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": {
+                "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" },
+                "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"] }
+            }
+        }))
+        .unwrap();
+        let r = resolve(&b.under(&own), 1).unwrap();
+        let direct = r.contexts.get(&ContextClass::Direct).unwrap();
+        assert!(direct.allowed_profiles.contains(&SecurityProfile::Managed));
+        assert_eq!(
+            direct.default_profile,
+            Some(SecurityProfile::PrivateE2ee),
+            "an explicit default is kept"
+        );
+        let group = r.contexts.get(&ContextClass::Group).unwrap();
+        assert_eq!(
+            group.allowed_profiles,
+            vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]
+        );
+        // Other contexts are left to the application.
+        let support = r.contexts.get(&ContextClass::Support).unwrap();
+        assert_eq!(support.allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
+    }
+
+    /// ADR 0062: the partner baseline makes MANAGED the default of every context with
+    /// both profiles allowed and turns attachments on; explicit settings win and a policy
+    /// without MANAGED keeps its own default.
+    #[test]
+    fn the_partner_baseline_defaults_to_managed_and_explicit_settings_win() {
+        let b = ApplicationBaseline::PlatformPartner;
+        assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
+        let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
+        assert!(r.attachments.enabled);
+        assert!(
+            !r.backups.enabled,
+            "no secure backups for MANAGED-only partner devices"
+        );
+        for c in r.contexts.values() {
+            assert_eq!(
+                c.allowed_profiles,
+                vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]
+            );
+            assert_eq!(c.default_profile, Some(SecurityProfile::Managed));
+        }
+        let own: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": {
+                "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE"] },
+                "GROUP": { "defaultProfile": "PRIVATE_E2EE" },
+                "SUPPORT": { "allowedProfiles": ["MANAGED"] }
+            },
+            "attachments": { "enabled": false }
+        }))
+        .unwrap();
+        let r = resolve(&b.under(&own), 2).unwrap();
+        assert!(
+            !r.attachments.enabled,
+            "an explicit application setting wins"
+        );
+        let ctx = |c: ContextClass| r.contexts.get(&c).unwrap();
+        assert_eq!(
+            ctx(ContextClass::Direct).allowed_profiles,
+            vec![SecurityProfile::PrivateE2ee]
+        );
+        assert_eq!(
+            ctx(ContextClass::Direct).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Group).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Support).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        assert_eq!(
+            ctx(ContextClass::Meeting).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        // The first-party baseline makes personal chats server-stored by default
+        // (product decision of 26 November 2026; see the_cfmeet_baseline_always_allows_synced_personal_chats).
+        let r = resolve(
+            &ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            r.contexts
+                .get(&ContextClass::Direct)
+                .unwrap()
+                .default_profile,
+            Some(SecurityProfile::Managed)
+        );
     }
 
     #[test]

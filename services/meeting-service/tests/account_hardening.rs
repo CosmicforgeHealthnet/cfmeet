@@ -5,10 +5,11 @@
 //!   keys verify by hash, the plaintext fallback heals old rows, the quota is atomic.
 //! * SEC-009: a legacy kick removes the participant from the media room server-side, and a
 //!   reconnect with an earlier credential is removed again by the verified webhook.
-//! * ACC-026: self-deactivation needs the current password or a recent sign-in; both
+//! * ACC-026: self-deactivation needs a step-up code emailed to the account; both
 //!   outcomes and the administrator reactivation are audited.
-//! * ACC-016: the (off by default) email-verification enforcement points.
-//! * ACC-025: passwords beyond the bcrypt input limit are refused.
+//! * ACC-016: the (off by default) email-verification enforcement points; a sign-in code
+//!   verifies a pending account.
+//! * Passwordless cutover: the password endpoints no longer exist.
 mod common;
 
 use std::sync::Arc;
@@ -18,8 +19,6 @@ use common::*;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
-
-const PASSWORD: &str = "Str0ng!Passw0rd";
 
 macro_rules! app_with_redis {
     () => {{
@@ -33,20 +32,18 @@ macro_rules! app_with_redis {
     }};
 }
 
-async fn password_user(app: &TestApp, email: &str, status: &str) -> Uuid {
+async fn email_user(app: &TestApp, email: &str, status: &str) -> Uuid {
     let id = Uuid::new_v4();
-    let hash = backend::services::auth::hash_password(PASSWORD).unwrap();
     app.db
         .conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "INSERT INTO users (id, username, email, password_hash, auth_type, role, status, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, 'local', 'user', $5::user_status, now(), now())",
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', $4::user_status, now(), now())",
             [
                 id.into(),
                 format!("h_{}", &id.simple().to_string()[..10]).into(),
                 email.into(),
-                hash.into(),
                 status.into(),
             ],
         ))
@@ -55,11 +52,13 @@ async fn password_user(app: &TestApp, email: &str, status: &str) -> Uuid {
     id
 }
 
+/// Passwordless sign-in with a seeded code: the raw `/otp/verify` answer.
 async fn login(app: &TestApp, email: &str) -> (StatusCode, Value) {
+    app.seed_sign_in_code(email, TEST_SIGN_IN_CODE).await;
     app.post(
-        "/api/v1/auth/login",
+        "/api/v1/auth/otp/verify",
         Auth::None,
-        json!({ "email": email, "password": PASSWORD }),
+        json!({ "email": email, "code": TEST_SIGN_IN_CODE }),
     )
     .await
 }
@@ -425,72 +424,92 @@ async fn events(app: &TestApp, id: Uuid, kind: &str, outcome: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn deactivation_requires_reauthentication() {
+async fn deactivation_requires_a_step_up_code() {
     let app = app_with_redis!();
-    let id = password_user(&app, "deact@example.com", "active").await;
-    // A pre-session (or stolen, stale) token alone is not enough.
+    let id = email_user(&app, "deact@example.com", "active").await;
+    let (s, v) = login(&app, "deact@example.com").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
     let stale = app
         .state
         .jwt_service
         .generate_access_token(id, "user")
         .unwrap();
-    for body in [json!({}), json!({ "current_password": "wrong-password" })] {
+
+    // A session token alone, a made-up token, or a pre-session token is not enough.
+    for (token, body) in [
+        (&access, json!({})),
+        (&access, json!({ "step_up_token": "not-a-token" })),
+        (&stale, json!({})),
+    ] {
         let (s, v) = app
-            .post("/api/v1/users/me/deactivate", Auth::Bearer(&stale), body)
+            .post("/api/v1/users/me/deactivate", Auth::Bearer(token), body)
             .await;
         assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
         assert_eq!(code(&v), "REAUTHENTICATION_REQUIRED");
     }
     assert_eq!(status_of(&app, id).await, "active");
-    assert_eq!(events(&app, id, "ACCOUNT_DEACTIVATED", "DENIED").await, 2);
+    assert_eq!(events(&app, id, "ACCOUNT_DEACTIVATED", "DENIED").await, 3);
 
-    // The current password is enough.
+    // A token for another purpose does not work, and is used up by the attempt.
+    let wrong_purpose = app.step_up_token(&access, id, "CHANGE_EMAIL").await;
+    let (s, _) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&access),
+            json!({ "step_up_token": wrong_purpose }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A token from another session of the same account does not work either.
+    let (_, other) = login(&app, "deact@example.com").await;
+    let other_access = other["access_token"].as_str().unwrap().to_string();
+    let foreign = app
+        .step_up_token(&other_access, id, "DEACTIVATE_ACCOUNT")
+        .await;
+    let (s, _) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&access),
+            json!({ "step_up_token": foreign }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, id).await, "active");
+
+    // The right token, from this session, deactivates; it is single use.
+    let token = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
     let (s, v) = app
         .post(
             "/api/v1/users/me/deactivate",
-            Auth::Bearer(&stale),
-            json!({ "current_password": PASSWORD }),
+            Auth::Bearer(&access),
+            json!({ "step_up_token": token }),
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(status_of(&app, id).await, "inactive");
-    assert_eq!(events(&app, id, "ACCOUNT_DEACTIVATED", "SUCCESS").await, 1);
-    // Every token ended with it.
-    let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(&stale)).await;
-    assert!(s.is_client_error());
-}
-
-#[tokio::test]
-async fn a_fresh_sign_in_is_recent_reauthentication_and_admins_can_reactivate() {
-    let app = app_with_redis!();
-    let id = password_user(&app, "fresh@example.com", "active").await;
-    let (s, v) = login(&app, "fresh@example.com").await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    let token = v["access_token"].as_str().unwrap().to_string();
-    // Without a body (the current web client) a sign-in made just now suffices.
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/api/v1/users/me/deactivate")
-        .header("authorization", format!("Bearer {token}"))
-        .body(axum::body::Body::empty())
-        .unwrap();
-    use tower::ServiceExt;
-    let resp = app.router.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(status_of(&app, id).await, "inactive");
     assert_eq!(
         app.scalar(&format!(
             "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
-             AND event_type = 'ACCOUNT_DEACTIVATED' AND detail->>'reauthentication' = 'RECENT_SIGN_IN'"
+             AND event_type = 'ACCOUNT_DEACTIVATED' AND outcome = 'SUCCESS' \
+             AND detail->>'reauthentication' = 'STEP_UP'"
         ))
         .await,
         1
     );
-    let (s, _) = login(&app, "fresh@example.com").await;
+    // Every token ended with it, and a deactivated account cannot sign in.
+    for t in [&access, &stale] {
+        let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(t)).await;
+        assert!(s.is_client_error());
+    }
+    // Past the self-reactivation window (gap audit A16), signing in does not bring it back.
+    backdate_deactivation(&app, id, 31).await;
+    let (s, _) = login(&app, "deact@example.com").await;
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
-        "a deactivated account cannot sign in"
+        "a long-deactivated account cannot sign in"
     );
 
     // Administrator reactivation is the reverse path, and it is audited.
@@ -513,8 +532,171 @@ async fn a_fresh_sign_in_is_recent_reauthentication_and_admins_can_reactivate() 
         .await,
         1
     );
-    let (s, v) = login(&app, "fresh@example.com").await;
+    let (s, v) = login(&app, "deact@example.com").await;
     assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+/// Move the account's own deactivation `days` into the past (the audit trail is
+/// append-only, so its guard is lifted for this one statement).
+async fn backdate_deactivation(app: &TestApp, id: Uuid, days: i64) {
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "BEGIN; ALTER TABLE account_security_events DISABLE TRIGGER trg_account_security_events_no_update; \
+             UPDATE account_security_events SET occurred_at = now() - interval '{days} days' \
+              WHERE user_id = '{id}' AND event_type = 'ACCOUNT_DEACTIVATED'; \
+             ALTER TABLE account_security_events ENABLE TRIGGER trg_account_security_events_no_update; COMMIT;"
+        ))
+        .await
+        .unwrap();
+}
+
+async fn self_deactivate(app: &TestApp, id: Uuid, email: &str) -> String {
+    let (_, v) = login(app, email).await;
+    let access = v["access_token"].as_str().unwrap().to_string();
+    let token = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&access),
+            json!({ "step_up_token": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(status_of(app, id).await, "inactive");
+    access
+}
+
+/// Gap audit A16: the owner of an account they deactivated reactivates it by signing in
+/// again within 30 days; old credentials stay void, and the Hub, Messaging and Calling
+/// are told. An administrator's deactivation or a suspension is never undone this way.
+#[tokio::test]
+async fn owners_reactivate_by_signing_in_again() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "back@example.com", "active").await;
+    let old = self_deactivate(&app, id, "back@example.com").await;
+    // A code can be requested again (it is mailed) ...
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": "back@example.com" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'AUTH_VERIFICATION' \
+              AND recipient_hash = encode(sha256(convert_to('back@example.com', 'UTF8')), 'hex')"
+        )
+        .await,
+        1
+    );
+    // ... and signing in reactivates the account.
+    let (s, v) = login(&app, "back@example.com").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(status_of(&app, id).await, "active");
+    assert_eq!(events(&app, id, "ACCOUNT_REACTIVATED", "SUCCESS").await, 1);
+    let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(&old)).await;
+    assert!(s.is_client_error(), "credentials from before stay void");
+    let fresh = v["access_token"].as_str().unwrap();
+    let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(fresh)).await;
+    assert_eq!(s, StatusCode::OK);
+    // The status trigger carries the reactivation to the Hub, Messaging and Calling
+    // (covered with the communications authority history).
+
+    // An administrator's deactivation is not undone by signing in.
+    let admin = app.admin("deactivator").await;
+    let (s, v) = app
+        .patch(
+            format!("/api/v1/admin/users/{id}"),
+            Auth::Bearer(&admin.token),
+            json!({ "status": "inactive" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = login(&app, "back@example.com").await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, id).await, "inactive");
+
+    // Nor is an account its owner never deactivated (suspension is covered by the
+    // same rule: only the owner's own deactivation qualifies).
+    let seeded = email_user(&app, "seeded@example.com", "inactive").await;
+    let (s, _) = login(&app, "seeded@example.com").await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, seeded).await, "inactive");
+}
+
+#[tokio::test]
+async fn step_up_codes_are_mailed_limited_and_need_a_session() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "stepup@example.com", "active").await;
+    let (_, v) = login(&app, "stepup@example.com").await;
+    let access = v["access_token"].as_str().unwrap().to_string();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/step-up/request",
+            Auth::Bearer(&access),
+            json!({ "purpose": "DEACTIVATE_ACCOUNT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["expiresInSecs"], 600);
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'SECURITY_DEVICE_STEP_UP' \
+              AND idempotency_key LIKE 'otp:stepup:%'"
+        )
+        .await,
+        1
+    );
+    // Wrong code: 400; unknown purpose: 400; pre-session tokens are refused.
+    let (s, _) = app
+        .post(
+            "/api/v2/me/step-up/verify",
+            Auth::Bearer(&access),
+            json!({ "purpose": "DEACTIVATE_ACCOUNT", "code": "000000" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app
+        .post(
+            "/api/v2/me/step-up/request",
+            Auth::Bearer(&access),
+            json!({ "purpose": "DELETE_EVERYTHING" }),
+        )
+        .await;
+    assert!(s.is_client_error());
+    let stale = app
+        .state
+        .jwt_service
+        .generate_access_token(id, "user")
+        .unwrap();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/step-up/request",
+            Auth::Bearer(&stale),
+            json!({ "purpose": "DEACTIVATE_ACCOUNT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    // At most five codes per purpose per window.
+    for _ in 0..4 {
+        app.post(
+            "/api/v2/me/step-up/request",
+            Auth::Bearer(&access),
+            json!({ "purpose": "DEACTIVATE_ACCOUNT" }),
+        )
+        .await;
+    }
+    let (s, _) = app
+        .post(
+            "/api/v2/me/step-up/request",
+            Auth::Bearer(&access),
+            json!({ "purpose": "DEACTIVATE_ACCOUNT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]
@@ -553,38 +735,37 @@ async fn the_reauthentication_window_is_configurable_and_can_be_switched_off() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn pending_accounts_sign_in_unless_enforcement_is_switched_on() {
+async fn a_sign_in_code_verifies_a_pending_account() {
     let app = app_with_redis!();
-    password_user(&app, "pending@example.com", "pending_verification").await;
-    let (s, v) = login(&app, "pending@example.com").await;
-    assert_eq!(s, StatusCode::OK, "default unchanged: {v}");
-
+    // A legacy registration that never verified its address. Even with the strictest
+    // enforcement, the code proves the address: the account becomes active and verified.
     let app = app.with_auth_env(&[("EMAIL_VERIFICATION_ENFORCEMENT", "login")]);
+    let id = email_user(&app, "pending@example.com", "pending_verification").await;
     let (s, v) = login(&app, "pending@example.com").await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
-    assert_eq!(code(&v), "EMAIL_VERIFICATION_REQUIRED");
-    // A wrong password still gets the uniform answer (no verification-state oracle).
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": "pending@example.com", "password": "Wr0ng!Password" }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
-    // Active accounts are unaffected.
-    password_user(&app, "verified@example.com", "active").await;
-    assert_eq!(login(&app, "verified@example.com").await.0, StatusCode::OK);
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["user"]["status"], "active");
+    assert_eq!(v["is_new_account"], false);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM users WHERE id = '{id}' AND status::text = 'active' \
+             AND email_verified_at IS NOT NULL"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(events(&app, id, "EMAIL_VERIFIED", "SUCCESS").await, 1);
 }
 
 #[tokio::test]
 async fn communications_refuse_unverified_accounts_only_when_enforced() {
     let app = app_with_redis!();
-    password_user(&app, "pendingcomms@example.com", "pending_verification").await;
-    // The deployment allows pending sign-in by default.
-    let (s, v) = login(&app, "pendingcomms@example.com").await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    let token = v["access_token"].as_str().unwrap().to_string();
+    // A pending account still holding a token from before the cutover.
+    let id = email_user(&app, "pendingcomms@example.com", "pending_verification").await;
+    let token = app
+        .state
+        .jwt_service
+        .generate_access_token(id, "user")
+        .unwrap();
     // Default: the Hub relay is reached (not configured in this test: 503).
     let (s, v) = app
         .get("/api/v2/communications/me", Auth::Bearer(&token))
@@ -600,31 +781,32 @@ async fn communications_refuse_unverified_accounts_only_when_enforced() {
 }
 
 // ---------------------------------------------------------------------------
-// ACC-025
+// Passwordless cutover
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn registration_refuses_passwords_beyond_the_bcrypt_limit() {
+async fn the_password_endpoints_are_gone() {
     let app = app_with_redis!();
-    let long = "Aa1!".repeat(19); // 76 bytes
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/register",
-            Auth::None,
-            json!({
-                "username": "longpassword",
-                "email": "long@example.com",
-                "password": long,
-                "confirm_password": long,
-            }),
-        )
-        .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-    assert_eq!(
-        app.scalar("SELECT count(*) FROM users WHERE email = 'long@example.com'")
-            .await,
-        0
-    );
+    let user = app.user("cutover").await;
+    for path in [
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/verify-email",
+        "/api/v1/auth/resend-verification",
+        "/api/v1/auth/forgot-password",
+        "/api/v1/auth/verify-reset-token",
+        "/api/v1/auth/reset-password",
+        "/api/v1/auth/change-password",
+    ] {
+        let (s, _) = app
+            .post(
+                path,
+                Auth::Bearer(&user.token),
+                json!({ "email": user.email, "password": "Str0ng!Passw0rd" }),
+            )
+            .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -679,4 +861,288 @@ async fn reference_reconciliation_reports_local_invariant_breaks_without_repairi
         .try_get_by_index::<i64>(0)
         .unwrap();
     assert_eq!(n, 1);
+}
+
+/// Gap audit A23: a kicked v1 guest's token stops working at once (not at expiry).
+#[tokio::test]
+async fn a_kicked_guest_loses_api_access_at_once() {
+    let app = app_with_redis!();
+    let host = app.user("kickhost2").await;
+    let (meeting, _, participant) = legacy_meeting_with_guest(&app, &host).await;
+    let guest = app
+        .state
+        .jwt_service
+        .generate_access_token(participant, "guest")
+        .unwrap();
+    let path = format!("/api/v1/meetings/{meeting}/participants");
+    let (before, v) = app.get(&path, Auth::Bearer(&guest)).await;
+    assert_ne!(before, StatusCode::UNAUTHORIZED, "{v}");
+    let (s, v) = app
+        .post(
+            &format!("/api/v1/participants/{participant}/kick"),
+            Auth::Bearer(&host.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (after, _) = app.get(&path, Auth::Bearer(&guest)).await;
+    assert_eq!(after, StatusCode::UNAUTHORIZED);
+}
+
+/// Gap audit A2: the personal-data export holds the account's own data; deletion needs a
+/// DELETE_ACCOUNT step-up, anonymizes the account, ends every sign-in and is audited
+/// without personal data.
+#[tokio::test]
+async fn personal_data_is_exported_and_the_account_can_be_deleted() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "erase-me@example.com", "active").await;
+    let (s, v) = login(&app, "erase-me@example.com").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+
+    let (s, export) = app
+        .get("/api/v2/me/data-export", Auth::Bearer(&access))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{export}");
+    assert_eq!(export["account"]["email"], "erase-me@example.com");
+    assert!(export["signIns"].as_array().unwrap().len() >= 1, "{export}");
+    // S2: the other services' data is in the same document (here none is configured, so
+    // each owner is reported as unavailable rather than failing the download).
+    for owner in ["messaging", "communications", "calling"] {
+        assert!(export["elsewhere"][owner].is_object(), "{export}");
+    }
+
+    // A token for another purpose does not delete.
+    let wrong = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
+    let (s, _) = app
+        .post(
+            "/api/v2/me/account/delete",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": wrong }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, id).await, "active");
+
+    let token = app.step_up_token(&access, id, "DELETE_ACCOUNT").await;
+    let (s, v) = app
+        .post(
+            "/api/v2/me/account/delete",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{v}");
+    assert_eq!(status_of(&app, id).await, "inactive");
+    assert_eq!(
+        text(&app, &format!("SELECT email FROM users WHERE id = '{id}'"))
+            .await
+            .unwrap(),
+        format!("deleted+{}@deleted.invalid", id.simple())
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}' AND revoked_at IS NULL"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(events(&app, id, "ACCOUNT_DELETED", "SUCCESS").await, 1);
+    // S2: one durable erasure job per owner service, queued with the deletion.
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_privacy_jobs WHERE user_id = '{id}' AND state = 'PENDING' \
+               AND target IN ('MESSAGING','COMMUNICATIONS','CALLING')"
+        ))
+        .await,
+        3
+    );
+    let (s, _) = app
+        .get("/api/v2/me/data-export", Auth::Bearer(&access))
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // The address can sign up afresh: it is no longer linked to the deleted account.
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE lower(email) = 'erase-me@example.com'")
+            .await,
+        0
+    );
+}
+
+/// Raw request: (status, headers, body bytes).
+async fn raw(
+    app: &TestApp,
+    method: &str,
+    uri: &str,
+    token: Option<&str>,
+    content_type: Option<&str>,
+    body: Vec<u8>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    use tower::ServiceExt;
+    let mut req = axum::http::Request::builder().method(method).uri(uri);
+    if let Some(t) = token {
+        req = req.header("authorization", format!("Bearer {t}"));
+    }
+    if let Some(c) = content_type {
+        req = req.header("content-type", c);
+    }
+    let resp = app
+        .router
+        .clone()
+        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+/// Gap audit A22: an avatar image is uploaded (PNG, JPEG or WebP, recognised by its
+/// content, at most 512 KiB), served at a public immutable address that becomes the
+/// profile's avatarUrl, replaced by a new upload, and removed with the account's consent.
+#[tokio::test]
+async fn avatars_are_uploaded_served_replaced_and_removed() {
+    // Profiles hold https:// references only; this is the service's public address.
+    std::env::set_var("AVATAR_PUBLIC_BASE_URL", "https://api.example.test");
+    let app = app_with_redis!();
+    let id = email_user(&app, "pic@example.com", "active").await;
+    let (_, v) = login(&app, "pic@example.com").await;
+    let token = v["access_token"].as_str().unwrap().to_string();
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDRpixels".to_vec();
+
+    // Not signed in; not an image; a mismatched type; too large.
+    let (s, _, _) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        None,
+        Some("image/png"),
+        png.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    for (kind, body) in [
+        (
+            "image/svg+xml",
+            b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+        ),
+        ("image/jpeg", png.clone()),
+    ] {
+        let (s, _, b) = raw(
+            &app,
+            "PUT",
+            "/api/v2/me/avatar",
+            Some(&token),
+            Some(kind),
+            body,
+        )
+        .await;
+        assert_eq!(
+            s,
+            StatusCode::BAD_REQUEST,
+            "{}",
+            String::from_utf8_lossy(&b)
+        );
+    }
+    let mut big = png.clone();
+    big.resize(512 * 1024 + 1, 0);
+    let (s, _, _) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        big,
+    )
+    .await;
+    assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // Upload: the profile points at the public address.
+    let (s, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        png.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let profile: Value = serde_json::from_slice(&b).unwrap();
+    let url = profile["avatarUrl"].as_str().unwrap().to_string();
+    let path = &url[url.find("/api/v2/avatars/").unwrap()..];
+    let (s, h, bytes) = raw(&app, "GET", path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(bytes, png);
+    assert_eq!(h["content-type"], "image/png");
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(events(&app, id, "AVATAR_UPLOADED", "SUCCESS").await, 1);
+
+    // A new upload replaces it: the old address is gone.
+    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+    let (s, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/jpeg"),
+        jpeg.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let replaced: Value = serde_json::from_slice(&b).unwrap();
+    let new_url = replaced["avatarUrl"].as_str().unwrap().to_string();
+    assert_ne!(new_url, url);
+    let (s, _, _) = raw(&app, "GET", path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let new_path = new_url[new_url.find("/api/v2/avatars/").unwrap()..].to_string();
+    let (s, h, _) = raw(&app, "GET", &new_path, None, None, vec![]).await;
+    assert_eq!(
+        (s, h["content-type"].to_str().unwrap()),
+        (StatusCode::OK, "image/jpeg")
+    );
+
+    // Pointing the profile elsewhere drops the upload.
+    let (s, v) = app
+        .patch(
+            "/api/v2/me/profile",
+            Auth::Bearer(&token),
+            json!({ "avatarUrl": "https://cdn.example.com/me.png" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _, _) = raw(&app, "GET", &new_path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Upload again, then remove: the profile has no avatar and the image is gone.
+    let (_, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        png,
+    )
+    .await;
+    let again: Value = serde_json::from_slice(&b).unwrap();
+    let again_url = again["avatarUrl"].as_str().unwrap().to_string();
+    let (s, v) = app.delete("/api/v2/me/avatar", Auth::Bearer(&token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["avatarUrl"].is_null());
+    let (s, _, b) = raw(
+        &app,
+        "GET",
+        &again_url[again_url.find("/api/v2/avatars/").unwrap()..],
+        None,
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let body: Value = serde_json::from_slice(&b).unwrap();
+    assert_eq!(body["error"]["code"], "AVATAR_NOT_FOUND");
 }

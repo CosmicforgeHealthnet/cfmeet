@@ -26,11 +26,11 @@ export type PortalSection = {
 export const PORTAL_SECTIONS: PortalSection[] = [
   { key: "overview", label: "Overview", href: `${PORTAL_BASE}`, requires: null, global: true },
   { key: "workspace", label: "Workspaces", href: `${PORTAL_BASE}/workspace`, requires: null, global: true },
-  { key: "members", label: "Members & roles", href: `${PORTAL_BASE}/members`, requires: "MembersRead" },
-  { key: "projects", label: "Projects & environments", href: `${PORTAL_BASE}/projects`, requires: "ProjectsRead" },
-  { key: "credentials", label: "Service accounts & keys", href: `${PORTAL_BASE}/credentials`, requires: "ServiceAccountsRead" },
+  { key: "members", label: "Team", href: `${PORTAL_BASE}/members`, requires: "MembersRead" },
+  { key: "projects", label: "Projects", href: `${PORTAL_BASE}/projects`, requires: "ProjectsRead" },
+  { key: "credentials", label: "API keys", href: `${PORTAL_BASE}/credentials`, requires: "ServiceAccountsRead" },
   { key: "webhooks", label: "Webhooks", href: `${PORTAL_BASE}/webhooks`, requires: "WebhooksRead" },
-  { key: "usage", label: "Usage, limits & plans", href: `${PORTAL_BASE}/usage`, requires: "UsageRead" },
+  { key: "usage", label: "Usage & limits", href: `${PORTAL_BASE}/usage`, requires: "UsageRead" },
   { key: "audit", label: "Audit log", href: `${PORTAL_BASE}/audit`, requires: "ActivityRead" },
   { key: "docs", label: "Docs & SDKs", href: `${PORTAL_BASE}/docs`, requires: null, global: true },
 ];

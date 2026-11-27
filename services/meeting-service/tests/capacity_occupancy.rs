@@ -4,7 +4,8 @@
 //! least one live ParticipantSession (PENDING / CONNECTED, not past `expires_at`). Several
 //! devices count once; the seat is released when the last live session ends. ADMITTED
 //! is the persistent admission authorization (rejoin without waiting again), not a seat.
-//! The dedicated viewer pool (`viewerCapacity`) keeps its admitted-audience count.
+//! The dedicated viewer pool (`viewerCapacity`) counts current viewers the same way
+//! (gap audit M11): a viewer who leaves frees a seat.
 
 mod common;
 
@@ -466,10 +467,10 @@ async fn cap_j_end_finalizes_sessions_and_occupancy() {
     assert_eq!(app.scalar(&format!("SELECT count(*) FROM participant_sessions WHERE conference_id='{cid}' AND state IN ('PENDING','CONNECTED')")).await, 0);
 }
 
-/// K — the dedicated VIEWER audience pool is unchanged (admitted audience, rejoin needs
-/// no new seat) and VIEWERs never consume interactive seats.
+/// K — the dedicated VIEWER pool counts current viewers (gap audit M11): a viewer who
+/// leaves frees a seat; VIEWERs never consume interactive seats.
 #[tokio::test]
-async fn cap_k_viewer_pool_unchanged() {
+async fn cap_k_viewer_pool_frees_seats() {
     let app = app!();
     let owner = app.user("owner").await;
     let (_, cid) = app
@@ -496,13 +497,19 @@ async fn cap_k_viewer_pool_unchanged() {
         "MEETING_CAPACITY_REACHED",
         "viewer pool enforced: {v}"
     );
-    // Unchanged viewer-pool semantics: the pool counts the admitted audience, so a
-    // departed viewer still holds its place and can rejoin; a new viewer cannot.
+    // A departed viewer frees its seat: a new viewer takes it, and the departed viewer
+    // now finds the pool full until someone else leaves.
     leave(&app, cid, Auth::Participant(&viewers[0]), None).await;
-    let (_, v) = app
+    let (s, v) = app
         .join(cid, Auth::None, json!({ "displayName": "v4" }))
         .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let v4 = v["participantToken"].as_str().unwrap().to_string();
+    let (_, v) = app
+        .join(cid, Auth::Participant(&viewers[0]), json!({}))
+        .await;
     assert_eq!(code(&v), "MEETING_CAPACITY_REACHED", "{v}");
+    leave(&app, cid, Auth::Participant(&v4), None).await;
     let (_, v) = app
         .join(cid, Auth::Participant(&viewers[0]), json!({}))
         .await;

@@ -27,13 +27,20 @@
 
 pub mod applications;
 pub mod authentication;
+pub mod bridge;
 pub mod changes;
+pub mod credential_delivery;
 pub mod credential_format;
 pub mod credentials;
+pub mod end_users;
+pub mod environment_origins;
 pub mod environments;
 pub mod error;
 pub mod handoff;
+pub mod oauth;
+pub mod oauth_scopes;
 pub mod operator;
+pub mod organization_bindings;
 pub mod organization_scopes;
 pub mod principals;
 pub mod restrictions;
@@ -41,6 +48,7 @@ pub mod scopes;
 pub mod service_accounts;
 pub mod snapshots;
 pub mod tenants;
+pub mod user_tokens;
 pub mod verifier;
 
 use std::sync::Arc;

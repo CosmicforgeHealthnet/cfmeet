@@ -1,21 +1,16 @@
 import api, { publicApi } from "./api";
 import { storageStore } from "@/store";
 import { signOutMessaging } from "@/lib/messaging/signout";
+import { allowCallingRegistration, signOutCalling } from "@/lib/calling/signout";
 import { accountSession, clearBrowserSession } from "@/lib/auth/session";
-import type {
-  RegisterRequest,
-  RegisterResponse,
-  VerifyEmailRequest,
-  ResendVerificationRequest,
-  LoginRequest,
-  LoginResponse,
-  MessageResponse,
-  VerifyResetTokenRequest,
-  VerifyResetTokenResponse,
-} from "@/types/auth";
+import type { LoginResponse, MessageResponse } from "@/types/auth";
+import type { OtpVerifyResponse } from "@/types/generated/meeting-service";
 import apiV2 from "./v2/api";
 import type { AccountSessionRevokeResponse, GoogleExchangeRequest } from "@/types/generated/meeting-service";
 import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/workspace-core";
+
+/** sessionStorage key: the ?next= destination of a Google sign-in in progress. */
+export const GOOGLE_NEXT_KEY = "cfmeet:google-next";
 
 /**
  * Stores a fresh sign-in: refresh token in the httpOnly session cookie, access token in
@@ -24,32 +19,92 @@ import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/worksp
 async function establish(response: LoginResponse, remember: boolean) {
   await accountSession.establish(response.access_token, response.refresh_token, remember);
   storageStore.setUser(response.user);
+  // A fresh sign-in may register this browser's Calling endpoint again (S-10).
+  allowCallingRegistration();
+  await declareThisBrowser(response.access_token);
+}
+
+/** How long sign-in waits for the device declaration before continuing without it. */
+const DECLARE_WAIT_MS = 5_000;
+
+/**
+ * Multi-device policy (ADR 0060): bind this fresh sign-in to this browser's account device
+ * right away, inside the declaration window, so private messaging can start on its own
+ * (the first browser of an account becomes its trusted device; others are linked). The
+ * device key is generated once per browser profile and reused. Never blocks sign-in: on
+ * any failure or timeout the sign-in simply stays unclassified (Meetings, Calling and
+ * Organizations are unaffected) and Messaging retries.
+ */
+async function declareThisBrowser(accessToken: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const { accountDevice } = await import("@/lib/auth/account-device");
+    const { browserDeviceLabel } = await import("@/lib/auth/device-label");
+    await Promise.race([
+      accountDevice.declare(accessToken, browserDeviceLabel(navigator.userAgent)).catch(() => null),
+      new Promise((resolve) => setTimeout(resolve, DECLARE_WAIT_MS)),
+    ]);
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Thrown when the account needs its authenticator code to finish signing in. */
+export class MfaRequired extends Error {
+  constructor(readonly ticket: string) { super("MFA_REQUIRED"); }
+}
+function mfaOrThrow(e: unknown): never {
+  const err = (e as { response?: { data?: { error?: { code?: string; mfaTicket?: string } } } }).response?.data?.error;
+  if (err?.code === "MFA_REQUIRED" && err.mfaTicket) throw new MfaRequired(err.mfaTicket);
+  throw e;
 }
 
 export const authService = {
-  register: async (data: RegisterRequest) => {
-    const response = await publicApi.post<RegisterResponse>("/auth/register", data);
-    return response.data;
-  },
+  requestPhoneCode: async (phoneNumber: string) =>
+    (await publicApi.post<{ challengeId: string }>("/auth/phone/request", { phoneNumber })).data,
 
-  verifyEmail: async (data: VerifyEmailRequest) => {
-    const response = await publicApi.post<MessageResponse>("/auth/verify-email", data);
-    return response.data;
-  },
-
-  resendVerification: async (data: ResendVerificationRequest) => {
-    const response = await publicApi.post<MessageResponse>("/auth/resend-verification", data);
+  verifyPhoneCode: async (challengeId: string, code: string, rememberMe = true) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/phone/verify", { challengeId, code }).catch(mfaOrThrow);
+    await establish(response.data as unknown as LoginResponse, rememberMe);
     return response.data;
   },
 
   /**
-   * Password sign-in. The browser calls the account authority directly (so per-address
-   * limits and the session's client label see the real client); only the resulting refresh
-   * token is handed to the app's session route.
+   * Passwordless sign-in and sign-up (one flow). Step 1: email a 6-digit code and a one-click
+   * link (valid 10 minutes). The answer is the same for every address; never infer from it.
    */
-  login: async (data: LoginRequest, rememberMe = false) => {
-    const response = await publicApi.post<LoginResponse>("/auth/login", data);
-    await establish(response.data, rememberMe);
+  requestCode: async (email: string) => {
+    const response = await publicApi.post<MessageResponse>("/auth/otp/request", { email });
+    return response.data;
+  },
+
+  /**
+   * Step 2 (code): the first correct code creates the account (`is_new_account`). An account
+   * with an authenticator app answers MFA_REQUIRED: the caller then asks for that code.
+   */
+  verifyCode: async (email: string, code: string, rememberMe = true) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify", { email, code }).catch(mfaOrThrow);
+    await establish(response.data as unknown as LoginResponse, rememberMe);
+    return response.data;
+  },
+
+  /** Step 3 (two-step accounts): the authenticator code, or a recovery code. */
+  verifyMfa: async (mfaTicket: string, code: string, rememberMe = true) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/mfa/verify", { mfaTicket, code });
+    await establish(response.data as unknown as LoginResponse, rememberMe);
+    return response.data;
+  },
+
+  /** Step 2 (email link): POSTed from /auth/magic after a click, never on page load. */
+  verifyLink: async (email: string, token: string) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify-link", { email, token }).catch(mfaOrThrow);
+    await establish(response.data as unknown as LoginResponse, true);
+    return response.data;
+  },
+
+  /** Undo an email change from the link sent to the previous address. */
+  revertEmailChange: async (token: string) => {
+    const response = await publicApi.post<MessageResponse>("/auth/email-change/revert", { token });
     return response.data;
   },
 
@@ -70,8 +125,9 @@ export const authService = {
   /** Ends this session at the API (other sessions stay signed in) and in this browser. */
   logout: async () => {
     try {
-      // While still signed in: revoke this browser's messaging device, erase its keys.
-      await signOutMessaging();
+      // While still signed in: revoke this browser's Calling endpoint (S-10) and messaging
+      // device, erase its keys. Both are bounded and never throw.
+      await Promise.all([signOutCalling(), signOutMessaging()]);
       await api.post<MessageResponse>("/auth/logout");
     } finally {
       await authService.forgetLocalSession();
@@ -83,11 +139,25 @@ export const authService = {
    * (`POST /api/v2/me/sessions/revoke-all`), then this browser's state.
    */
   logoutEverywhere: async () => {
-    await signOutMessaging();
+    await Promise.all([signOutCalling(), signOutMessaging()]);
     // A failure keeps this browser signed in (nothing was revoked); the caller shows it.
     const result = (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-all")).data;
     await authService.forgetLocalSession();
     return result;
+  },
+
+  /**
+   * Standard re-authentication: ends this (too old) sign-in at the API and in this browser,
+   * so the login page starts a fresh one. Local encrypted data is not touched.
+   */
+  endSessionForReauthentication: async () => {
+    try {
+      await api.post<MessageResponse>("/auth/logout");
+    } catch {
+      /* the session may already be gone; the browser side is cleared regardless */
+    } finally {
+      await authService.forgetLocalSession();
+    }
   },
 
   /** Browser-side sign-out only (after the API already ended the session). */
@@ -105,27 +175,14 @@ export const authService = {
   },
 
   initiateGoogleOAuth: () => {
+    // Where sign-in was going (?next=) survives the round trip to Google in this tab only.
+    try {
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next) window.sessionStorage.setItem(GOOGLE_NEXT_KEY, next);
+      else window.sessionStorage.removeItem(GOOGLE_NEXT_KEY);
+    } catch { /* storage disabled: lands on the dashboard */ }
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
     window.location.href = `${apiUrl}/auth/oauth/google`;
   },
 
-  verifyResetToken: async (data: VerifyResetTokenRequest) => {
-    const response = await publicApi.post<VerifyResetTokenResponse>("/auth/verify-reset-token", data);
-    return response.data;
-  },
-
-  forgotPassword: async (data: { email: string }) => {
-    const response = await publicApi.post<MessageResponse>("/auth/forgot-password", data);
-    return response.data;
-  },
-
-  resetPassword: async (data: {
-    email: string;
-    token: string;
-    new_password: string;
-    confirm_password: string;
-  }) => {
-    const response = await publicApi.post<MessageResponse>("/auth/reset-password", data);
-    return response.data;
-  },
 };

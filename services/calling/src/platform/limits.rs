@@ -42,13 +42,24 @@ use crate::{
 pub struct LimitDefaults {
     pub requests_per_minute: i64,
     pub max_concurrent_communications: i64,
+    /// C9: Calls one principal may initiate per minute when its own principal-level
+    /// policy configures no request rate (`CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE`,
+    /// default [`DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE`]; `0` turns the default
+    /// off). Shared by every credential / service account acting for the principal.
+    pub call_creations_per_principal_per_minute: i64,
 }
+
+/// C9: the default per-principal Call-creation rate (no person places 60 calls a minute;
+/// an automated dialer through one principal does).
+pub const DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE: i64 = 60;
 
 impl Default for LimitDefaults {
     fn default() -> Self {
         Self {
             requests_per_minute: 600,
             max_concurrent_communications: 50,
+            call_creations_per_principal_per_minute:
+                DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE,
         }
     }
 }
@@ -426,6 +437,7 @@ impl PlatformService {
                    max_concurrent_communications = EXCLUDED.max_concurrent_communications, \
                    telecom_spend_daily_limit_minor = EXCLUDED.telecom_spend_daily_limit_minor, \
                    telecom_spend_monthly_limit_minor = EXCLUDED.telecom_spend_monthly_limit_minor, \
+                   version = platform_tenant_limits.version + 1, \
                    updated_at = EXCLUDED.updated_at",
             [
                 tenant.id.as_uuid().into(),
@@ -573,28 +585,31 @@ impl PlatformService {
         values.validate()?;
         let application = self.application(application_id).await?;
         let now = self.clock.now();
-        application_limits::Entity::insert(application_limits::ActiveModel {
-            application_id: Set(application.id.as_uuid()),
-            tenant_id: Set(application.tenant_id.as_uuid()),
-            requests_per_minute: Set(values.requests_per_minute),
-            max_concurrent_communications: Set(values.max_concurrent_communications),
-            telecom_spend_daily_limit_minor: Set(values.telecom_spend_daily_limit_minor),
-            telecom_spend_monthly_limit_minor: Set(values.telecom_spend_monthly_limit_minor),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::column(application_limits::Column::ApplicationId)
-                .update_columns([
-                    application_limits::Column::RequestsPerMinute,
-                    application_limits::Column::MaxConcurrentCommunications,
-                    application_limits::Column::TelecomSpendDailyLimitMinor,
-                    application_limits::Column::TelecomSpendMonthlyLimitMinor,
-                    application_limits::Column::UpdatedAt,
-                ])
-                .to_owned(),
-        )
-        .exec_without_returning(db)
+        // The row version (ADR 0068 A4) moves with every change: an admin-bridge change
+        // is locked to it.
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO platform_application_limits (application_id, tenant_id, requests_per_minute, \
+                   max_concurrent_communications, telecom_spend_daily_limit_minor, \
+                   telecom_spend_monthly_limit_minor, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $7) \
+                 ON CONFLICT (application_id) DO UPDATE SET \
+                   requests_per_minute = EXCLUDED.requests_per_minute, \
+                   max_concurrent_communications = EXCLUDED.max_concurrent_communications, \
+                   telecom_spend_daily_limit_minor = EXCLUDED.telecom_spend_daily_limit_minor, \
+                   telecom_spend_monthly_limit_minor = EXCLUDED.telecom_spend_monthly_limit_minor, \
+                   version = platform_application_limits.version + 1, \
+                   updated_at = EXCLUDED.updated_at",
+            [
+                application.id.as_uuid().into(),
+                application.tenant_id.as_uuid().into(),
+                values.requests_per_minute.into(),
+                values.max_concurrent_communications.into(),
+                values.telecom_spend_daily_limit_minor.into(),
+                values.telecom_spend_monthly_limit_minor.into(),
+                now.into(),
+            ],
+        ))
         .await?;
         tracing::info!(application_id = %application_id, "application limit policy set");
         Ok(values)
@@ -771,9 +786,10 @@ fn judge(
 }
 
 /// Part G §70: the request-rate ceiling of a principal-scoped operation (a Call created
-/// for a server-resolved initiator). Counted only when the principal configures a
-/// ceiling; every credential / service account acting for the principal shares the
-/// window. Runs on the caller's connection — the creating transaction — so it never
+/// for a server-resolved initiator): the principal's configured ceiling, else (C9) the
+/// platform default `default_ceiling` (`None` / `0`: no default — counted only when the
+/// principal configures a ceiling); every credential / service account acting for the
+/// principal shares the window. Runs on the caller's connection — the creating transaction — so it never
 /// needs a second pool connection: the increment commits with the creation (a refused
 /// or failed creation does not consume the window; the window row lock serializes the
 /// principal's concurrent creations). Returns the decision and the notices for the
@@ -782,9 +798,12 @@ pub(crate) async fn check_principal_rate<C: ConnectionTrait>(
     db: &C,
     now: DateTime<Utc>,
     principal_id: PrincipalId,
+    default_ceiling: Option<i64>,
 ) -> Result<(RateDecision, Vec<crate::webhooks::notices::LimitNotice>), DbErr> {
     use crate::webhooks::notices::LimitLevel;
-    let Some(ceiling) = rpm(&principal_level(db, principal_id).await?) else {
+    let Some(ceiling) =
+        rpm(&principal_level(db, principal_id).await?).or(default_ceiling.filter(|c| *c > 0))
+    else {
         return Ok((RateDecision::Allowed, Vec::new()));
     };
     let window_start = window_of(now);

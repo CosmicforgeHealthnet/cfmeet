@@ -783,7 +783,13 @@ async fn h_c01_same_idempotency_key_registers_once() {
         "{other:?}"
     );
     if other.0 == StatusCode::OK {
-        assert!(other.1["admissionToken"].is_null(), "token shown once");
+        // Audit M10: a repeat returns the same token (with a deployment secret) or none.
+        let first = if a.0 == StatusCode::CREATED { &a } else { &b };
+        assert!(
+            other.1["admissionToken"].is_null()
+                || other.1["admissionToken"] == first.1["admissionToken"],
+            "{other:?}"
+        );
     }
     assert_eq!(
         app.scalar(&format!(
@@ -1671,4 +1677,304 @@ async fn h_e2e_18_no_clinical_payload_persisted() {
         .await;
     assert!(!list.to_string().contains("SECRET"));
     no_clinical_payload(&app).await;
+}
+
+/// Gap audit M4: an address is not held by whoever registered it first. The account whose
+/// verified email it is reclaims the registration (the squatter's token is revoked) and
+/// gets a fresh token; a registrant cancels their own registration with its token.
+#[tokio::test]
+async fn gap_registration_is_reclaimed_by_the_verified_owner_and_self_cancelled() {
+    use sea_orm::ConnectionTrait;
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (sid, _) = live(&app, &owner, webinar()).await;
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "email": "REQUIRED" } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    // Someone registers another person's address first.
+    let (s, squatted) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Not Kim", "email": "kim@example.com" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{squatted}");
+    // An anonymous repeat is still refused (the address is taken)...
+    let (s, _) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Kim", "email": "kim@example.com" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // ...but the verified owner of the address reclaims it.
+    let kim = app.user_with_email("kim", "kim@example.com").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE users SET email_verified_at = now() WHERE id = '{}'",
+            kim.id
+        ))
+        .await
+        .unwrap();
+    let (s, mine) = app
+        .post(
+            format!("/api/v2/meeting-spaces/{sid}/registrations"),
+            Auth::Bearer(&kim.token),
+            json!({ "displayName": "Kim", "email": "kim@example.com" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{mine}");
+    assert_ne!(mine["admissionToken"], squatted["admissionToken"]);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM webinar_registrations WHERE id = '{}' AND status = 'CANCELLED' AND cancelled_by = 'self:reclaimed-by-verified-owner'",
+            squatted["registrationId"].as_str().unwrap()
+        ))
+        .await,
+        1
+    );
+    // The squatter's token no longer cancels anything; the owner's does, once.
+    let (s, _) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": "reg_definitely-not-a-token" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, cancelled) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": mine["admissionToken"] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["status"], "CANCELLED");
+    let (s, again) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": mine["admissionToken"] }),
+        )
+        .await;
+    assert_eq!(
+        (s, again["status"].as_str()),
+        (StatusCode::OK, Some("CANCELLED"))
+    );
+}
+
+/// Gap audit M5: a webinar attendee (VIEWER) sees the people running the session and
+/// themselves in the roster, never the other attendees.
+#[tokio::test]
+async fn gap_viewers_do_not_see_other_attendees_in_the_roster() {
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (_, cid) = live(&app, &owner, webinar()).await;
+    let host = join_user(&app, cid, &owner).await;
+    connect(&app, cid, &host).await;
+    let a = attendee(&app, cid, "Attendee A").await;
+    let b = attendee(&app, cid, "Attendee B").await;
+    assert_eq!(role_of(&app, a.participant_id).await, "VIEWER");
+    let (s, list) = app
+        .get(format!("/api/v2/conferences/{cid}/participants"), a.auth())
+        .await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    let ids: Vec<String> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(ids.contains(&a.participant_id.to_string()), "themselves");
+    assert!(ids.contains(&host.participant_id.to_string()), "the host");
+    assert!(
+        !ids.contains(&b.participant_id.to_string()),
+        "never another attendee"
+    );
+    // The host still sees everyone.
+    let (_, all) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/participants"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(all.as_array().unwrap().len() >= 3, "{all}");
+}
+
+/// Gap audit M10: registration has a capacity and a deadline, and the organizer's list
+/// pages with a cursor instead of stopping at 500.
+#[tokio::test]
+async fn h_m10_registration_capacity_deadline_and_paging() {
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (sid, cid) = live(&app, &owner, webinar()).await;
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "capacity": 2 } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let mut ids = vec![];
+    for name in ["Ann", "Ben"] {
+        let (s, v) = register(
+            &app,
+            sid,
+            json!({ "displayName": name, "conferenceId": cid }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        ids.push(v["registrationId"].as_str().unwrap().to_string());
+    }
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Cat", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "REGISTRATION_FULL".into()),
+        "{v}"
+    );
+
+    // A cancellation frees a place.
+    let (s, v) = app
+        .delete(
+            format!("/api/v2/meeting-spaces/{sid}/registrations/{}", ids[0]),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Cat", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // Paging: one at a time, newest first, every registration exactly once.
+    let mut seen = vec![];
+    let mut after: Option<String> = None;
+    loop {
+        let uri = match &after {
+            Some(a) => format!("/api/v2/meeting-spaces/{sid}/registrations?limit=1&after={a}"),
+            None => format!("/api/v2/meeting-spaces/{sid}/registrations?limit=1"),
+        };
+        let (s, v) = app.get(uri, Auth::Bearer(&owner.token)).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let page = v["registrations"].as_array().unwrap();
+        assert!(page.len() <= 1);
+        seen.extend(page.iter().map(|r| r["id"].as_str().unwrap().to_string()));
+        match v["nextCursor"].as_str() {
+            Some(n) => after = Some(n.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 3);
+
+    // A passed deadline closes registration.
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "capacity": 0, "deadline": "2020-01-01T00:00:00Z" } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Dan", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "REGISTRATION_CLOSED".into()),
+        "{v}"
+    );
+}
+
+/// Gap audit M13: reports download directly (no artifact storage needed) under the same
+/// rules; without storage, a stored report says exactly that instead of "temporarily
+/// unavailable".
+#[tokio::test]
+async fn h_m13_reports_download_without_storage() {
+    let Some(app) = TestApp::with(TestOptions {
+        artifact_backends: Some(Default::default()),
+        ..Default::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let owner = app.user("owner").await;
+    let (_, cid) = live(&app, &owner, webinar()).await;
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/artifacts/reports"),
+            Auth::Bearer(&owner.token),
+            json!({ "artifactType": "ATTENDANCE_REPORT" }),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            "ARTIFACT_STORAGE_NOT_CONFIGURED".into()
+        ),
+        "{v}"
+    );
+    for (kind, key) in [
+        ("ATTENDANCE_REPORT", "participants"),
+        ("POLL_REPORT", "polls"),
+        ("CHAT_EXPORT", "messages"),
+    ] {
+        let (s, v) = app
+            .get(
+                format!("/api/v2/conferences/{cid}/exports/{kind}"),
+                Auth::Bearer(&owner.token),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{kind}: {v}");
+        assert!(v[key].is_array(), "{kind}: {v}");
+        assert_eq!(v["conferenceId"], json!(cid));
+    }
+    let (s, _) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/exports/RECORDING"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Someone without the export permission cannot download.
+    let stranger = app.user("stranger").await;
+    let (s, _) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/exports/CHAT_EXPORT"),
+            Auth::Bearer(&stranger.token),
+        )
+        .await;
+    assert!(s.is_client_error() && s != StatusCode::BAD_REQUEST, "{s}");
+    assert!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_audit_events WHERE conference_id = '{cid}' \
+              AND action = 'ARTIFACT_GENERATE' AND metadata->>'delivery' = 'INLINE'"
+        ))
+        .await
+            >= 3
+    );
 }

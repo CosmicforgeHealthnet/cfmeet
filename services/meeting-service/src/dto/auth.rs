@@ -1,87 +1,73 @@
+use crate::services::account_devices::DeviceProof;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use utoipa::ToSchema;
 use uuid::Uuid;
-use validator::{Validate, ValidationError};
+use validator::Validate;
 
-// Username: alphanumeric and underscores only
-static USERNAME_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_]+$").unwrap());
+// One-time code: exactly 6 digits (leading zeros allowed).
+static OTP_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]{6}$").unwrap());
 
-// Verification code: 6 digits only
-static VERIFICATION_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{6}$").unwrap());
+// Magic-link token: 64 lower-case hex characters.
+static LINK_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{64}$").unwrap());
 
-// Custom password validation function (Rust regex doesn't support lookahead)
-fn validate_password_strength(password: &str) -> bool {
-    let has_lowercase = password.chars().any(|c| c.is_lowercase());
-    let has_uppercase = password.chars().any(|c| c.is_uppercase());
-    let has_digit = password.chars().any(|c| c.is_numeric());
-    let has_special = password.chars().any(|c| "!@#$%^&*(),.?:{}|<>".contains(c));
-
-    has_lowercase && has_uppercase && has_digit && has_special
-}
-
+/// Start a passwordless sign-in (or sign-up): a one-time code is emailed.
 #[derive(Debug, Deserialize, Validate, ToSchema)]
-#[validate(schema(function = "validate_register_passwords"))]
-pub struct RegisterRequest {
+pub struct OtpRequest {
     #[validate(
-        length(min = 3, max = 50, message = "Username must be between 3 and 50 characters"),
-        regex(path = *USERNAME_REGEX, message = "Username can only contain letters, numbers, and underscores")
+        email(message = "Invalid email address"),
+        length(max = 255, message = "Invalid email address")
     )]
-    pub username: String,
-
-    #[validate(email(message = "Invalid email address"))]
+    #[schema(example = "ada@example.com")]
     pub email: String,
-
-    #[validate(length(
-        min = 8,
-        max = 72,
-        message = "Password must be between 8 and 72 characters"
-    ))]
-    pub password: String,
-
-    #[validate(length(min = 1, message = "Confirm password is required"))]
-    pub confirm_password: String,
 }
 
-fn validate_register_passwords(req: &RegisterRequest) -> Result<(), ValidationError> {
-    if req.password != req.confirm_password {
-        return Err(ValidationError::new("passwords_mismatch")
-            .with_message("Passwords do not match".into()));
-    }
-
-    if !validate_password_strength(&req.password) {
-        return Err(ValidationError::new("password_strength")
-            .with_message("Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (!@#$%^&*(),.?:{}|<>)".into()));
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct RegisterResponse {
-    pub user_id: Uuid,
-    pub email: String,
-    pub role: String,
-    /// `pending_verification` (spelled `pendingverification` until
-    /// `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
-    pub status: String,
-}
-
+/// Finish a passwordless sign-in with the emailed 6-digit code.
 #[derive(Debug, Deserialize, Validate, ToSchema)]
-pub struct LoginRequest {
-    #[validate(email(message = "Invalid email address"))]
+pub struct OtpVerifyRequest {
+    #[validate(
+        email(message = "Invalid email address"),
+        length(max = 255, message = "Invalid email address")
+    )]
+    #[schema(example = "ada@example.com")]
     pub email: String,
 
-    #[validate(length(min = 1, message = "Password is required"))]
-    pub password: String,
+    #[validate(regex(path = *OTP_CODE_REGEX, message = "The code must be 6 digits"))]
+    #[schema(example = "048213")]
+    pub code: String,
 }
 
+/// Finish a passwordless sign-in with the magic link from the same email (the email
+/// address and token both come from the link).
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct OtpVerifyLinkRequest {
+    #[validate(
+        email(message = "Invalid email address"),
+        length(max = 255, message = "Invalid email address")
+    )]
+    pub email: String,
+
+    #[validate(regex(path = *LINK_TOKEN_REGEX, message = "Invalid or expired link"))]
+    pub token: String,
+}
+
+/// Tokens and account of a completed sign-in.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub user: UserInfo,
+}
+
+/// A completed passwordless sign-in.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OtpVerifyResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub user: UserInfo,
+    /// True when this sign-in created the account (first sign-in with this address).
+    pub is_new_account: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -95,120 +81,19 @@ pub struct UserInfo {
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
-pub struct VerifyEmailRequest {
-    #[validate(email(message = "Invalid email address"))]
-    pub email: String,
-
-    #[validate(regex(path = *VERIFICATION_CODE_REGEX, message = "Verification code must be 6 digits"))]
-    pub token: String,
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct RefreshTokenRequest {
     #[validate(length(min = 1, message = "Refresh token is required"))]
     pub refresh_token: String,
+    /// Required when the sign-in is bound to a linked device (multi-device policy): a
+    /// proof of the device key with purpose `REFRESH` and context = the session id.
+    #[serde(default, alias = "deviceProof")]
+    pub device_proof: Option<DeviceProof>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RefreshTokenResponse {
     pub access_token: String,
     pub refresh_token: String,
-}
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-pub struct ResendVerificationRequest {
-    #[validate(email(message = "Invalid email address"))]
-    pub email: String,
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-pub struct ForgotPasswordRequest {
-    #[validate(email(message = "Invalid email address"))]
-    pub email: String,
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-#[validate(schema(function = "validate_reset_passwords"))]
-pub struct ResetPasswordRequest {
-    #[validate(email(message = "Invalid email address"))]
-    pub email: String,
-
-    #[validate(length(min = 1, message = "Reset token is required"))]
-    pub token: String,
-
-    #[validate(length(
-        min = 8,
-        max = 72,
-        message = "Password must be between 8 and 72 characters"
-    ))]
-    pub new_password: String,
-
-    #[validate(length(min = 1, message = "Confirm password is required"))]
-    pub confirm_password: String,
-}
-
-fn validate_reset_passwords(req: &ResetPasswordRequest) -> Result<(), ValidationError> {
-    if req.new_password != req.confirm_password {
-        return Err(ValidationError::new("passwords_mismatch")
-            .with_message("Passwords do not match".into()));
-    }
-
-    if !validate_password_strength(&req.new_password) {
-        return Err(ValidationError::new("password_strength")
-            .with_message("Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (!@#$%^&*(),.?:{}|<>)".into()));
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-pub struct VerifyResetTokenRequest {
-    #[validate(email(message = "Invalid email address"))]
-    pub email: String,
-
-    #[validate(regex(path = *VERIFICATION_CODE_REGEX, message = "Reset token must be 6 digits"))]
-    pub token: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct VerifyResetTokenResponse {
-    pub message: String,
-    pub valid: bool,
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-#[validate(schema(function = "validate_change_passwords"))]
-pub struct ChangePasswordRequest {
-    #[validate(length(min = 1, message = "Current password is required"))]
-    pub current_password: String,
-
-    #[validate(length(
-        min = 8,
-        max = 72,
-        message = "New password must be between 8 and 72 characters"
-    ))]
-    pub new_password: String,
-
-    #[validate(length(min = 1, message = "Confirm password is required"))]
-    pub confirm_password: String,
-}
-
-fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), ValidationError> {
-    if req.new_password != req.confirm_password {
-        return Err(ValidationError::new("passwords_mismatch")
-            .with_message("Passwords do not match".into()));
-    }
-
-    if req.current_password == req.new_password {
-        return Err(ValidationError::new("same_password")
-            .with_message("New password must be different from current password".into()));
-    }
-
-    if !validate_password_strength(&req.new_password) {
-        return Err(ValidationError::new("password_strength")
-            .with_message("Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (!@#$%^&*(),.?:{}|<>)".into()));
-    }
-
-    Ok(())
 }
 
 /// One-time Google sign-in exchange (ACC-005): the callback redirect carries only a
@@ -217,4 +102,50 @@ fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), Validati
 pub struct GoogleExchangeRequest {
     #[validate(length(min = 20, max = 128, message = "Invalid exchange code"))]
     pub exchange_code: String,
+}
+
+/// Undo a self-service email change with the token mailed to the previous address.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct EmailChangeRevertRequest {
+    #[validate(regex(path = *LINK_TOKEN_REGEX, message = "Invalid or expired link"))]
+    pub token: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_must_be_exactly_six_digits_and_may_start_with_zero() {
+        let req = |code: &str| OtpVerifyRequest {
+            email: "ada@example.com".into(),
+            code: code.into(),
+        };
+        assert!(req("012345").validate().is_ok());
+        assert!(req("999999").validate().is_ok());
+        for bad in ["", "12345", "1234567", "12345a", " 12345", "١٢٣٤٥٦"] {
+            assert!(req(bad).validate().is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn emails_and_link_tokens_are_validated() {
+        assert!(OtpRequest {
+            email: "not-an-email".into()
+        }
+        .validate()
+        .is_err());
+        assert!(OtpRequest {
+            email: format!("{}@example.com", "a".repeat(250))
+        }
+        .validate()
+        .is_err());
+        let link = |t: &str| OtpVerifyLinkRequest {
+            email: "ada@example.com".into(),
+            token: t.into(),
+        };
+        assert!(link(&"a1".repeat(32)).validate().is_ok());
+        assert!(link(&"A1".repeat(32)).validate().is_err());
+        assert!(link("abc").validate().is_err());
+    }
 }

@@ -31,7 +31,7 @@ const DOMAINS: &[&str] = &[
 impl State {
     /// (latest position, oldest retained position) of the profile's feed.
     pub async fn sync_head(&self, p: &Profile) -> Result<(i64, i64)> {
-        let v:Value=one(&self.store.db,"SELECT jsonb_build_object('max',COALESCE(max(seq),0),'min',COALESCE(min(seq),0)) doc FROM communication_changes WHERE profile_id=$1",vec![p.id.into()]).await?.ok_or(Error::Unavailable)?;
+        let v:Value=one(&self.store.db,"SELECT jsonb_build_object('max',COALESCE(max(COALESCE(position,seq)),0),'min',COALESCE(min(COALESCE(position,seq)),0)) doc FROM communication_changes WHERE profile_id=$1",vec![p.id.into()]).await?.ok_or(Error::Unavailable)?;
         Ok((
             v["max"].as_i64().unwrap_or(0),
             v["min"].as_i64().unwrap_or(0),
@@ -87,7 +87,7 @@ impl State {
                 "snapshot":"Reload GET /bootstrap, then resume from latestPosition"}),
             );
         }
-        let entries:Vec<Value>=rows(&self.store.db,"SELECT jsonb_build_object('position',seq,'domain',domain,'resourceId',resource_id,'resourceVersion',resource_version,'changedAt',created_at) doc FROM communication_changes WHERE profile_id=$1 AND seq>$2 AND domain IN (SELECT jsonb_array_elements_text($3::jsonb)) ORDER BY seq LIMIT $4",
+        let entries:Vec<Value>=rows(&self.store.db,"SELECT jsonb_build_object('position',COALESCE(position,seq),'domain',domain,'resourceId',resource_id,'resourceVersion',resource_version,'changedAt',created_at) doc FROM communication_changes WHERE profile_id=$1 AND COALESCE(position,seq)>$2 AND domain IN (SELECT jsonb_array_elements_text($3::jsonb)) ORDER BY COALESCE(position,seq) LIMIT $4",
             vec![p.id.into(),after.into(),json!(domains).into(),(limit+1).into()]).await?;
         let more = entries.len() > limit as usize;
         let data: Vec<Value> = entries.into_iter().take(limit as usize).collect();
@@ -120,7 +120,7 @@ impl State {
         let (head, oldest) = self.sync_head(p).await?;
         Ok(
             json!({"schemaVersion":1,"me":self.me(p).await?,"capabilities":self.capabilities(scope,p).await,
-            "privacy":self.get_privacy(p).await?,"notificationPreferences":self.get_notification_preferences(p).await?,
+            "privacy":self.get_privacy(p).await?,"notificationPreferences":self.notification_preferences_embedded(p).await?,
             "counts":counts,"sync":{"latestPosition":head,"oldestRetainedPosition":oldest},
             "areas":{"chats":{"owner":"MESSAGING","list":"GET /api/v2/messaging/relay/v1/conversations","overlay":"GET /api/v2/communications/inbox"},
                 "calls":{"owner":"CALLING","history":"GET /api/v2/communications/calls/history"},
@@ -187,7 +187,7 @@ impl State {
     ) -> Result<Value> {
         let c = self.conversation(scope, p, conversation, None).await?;
         let prefs = self
-            .get_conversation_preferences(scope, p, conversation)
+            .conversation_preferences_view(scope, p, conversation, false)
             .await?;
         let (mark, cleared_at) = self.watermark_full(p, conversation).await?;
         let counterpart = if c.context_class == "DIRECT" {

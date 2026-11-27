@@ -71,3 +71,6 @@ infra/api-gateway/local/.generated/
 
 # Local Redis snapshots (test data; never commit or ship)
 *.rdb
+
+# Built by the production workflow (static acceptance client); never committed.
+infra/calling/production/bin/

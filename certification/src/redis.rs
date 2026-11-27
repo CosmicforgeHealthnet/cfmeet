@@ -100,8 +100,49 @@ pub async fn run(url: &str, args: &[&str]) -> anyhow::Result<Option<String>> {
     reply(&mut r).await
 }
 
+/// Notification Service N0-8: a verification / reset code for a controlled test account.
+/// The Meeting Service stores codes only as `<salt>:<SHA-256(salt || code)>` under
+/// `<prefix>:h:<SHA-256(lower(email))>`, so an issued code cannot be read back: it is
+/// replaced by a fresh controlled code in the same format (only if a code was issued, `XX`).
+/// A plaintext code stored by an older image under `<prefix>:<email>` is still read.
+pub async fn controlled_otp(
+    url: &str,
+    prefix: &str,
+    email: &str,
+) -> anyhow::Result<Option<String>> {
+    use sha2::{Digest, Sha256};
+    let digest = hex::encode(Sha256::digest(email.trim().to_lowercase().as_bytes()));
+    let hashed = format!("{prefix}:h:{digest}");
+    if run(url, &["EXISTS", &hashed]).await?.as_deref() == Some("1") {
+        let code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+        let sealed = sealed_code(&code, rand::random());
+        let set = run(url, &["SET", &hashed, &sealed, "EX", "86400", "XX"]).await?;
+        return Ok((set.as_deref() == Some("OK")).then_some(code));
+    }
+    get(url, &format!("{prefix}:{}", email.to_lowercase())).await
+}
+
+/// `<salt hex>:<SHA-256(salt || code) hex>` (the Meeting Service's stored-code format).
+pub fn sealed_code(code: &str, salt: [u8; 16]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(salt);
+    h.update(code.as_bytes());
+    format!("{}:{}", hex::encode(salt), hex::encode(h.finalize()))
+}
+
 #[cfg(test)]
 mod tests {
+    /// Shared vector with services/meeting-service/src/services/otp.rs.
+    #[test]
+    fn controlled_codes_use_the_meeting_service_format() {
+        let salt: [u8; 16] = core::array::from_fn(|i| i as u8);
+        assert_eq!(
+            super::sealed_code("123456", salt),
+            "000102030405060708090a0b0c0d0e0f:99c90773ea9ce66a355bd6a2a6e55122c3caf5a164785c90b1d58c2d63bb8680"
+        );
+    }
+
     #[test]
     fn urls_parse() {
         assert_eq!(

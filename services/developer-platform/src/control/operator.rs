@@ -16,7 +16,8 @@ use uuid::Uuid;
 
 use super::{
     activity::{self, Event},
-    delegate_with, display_name, email, members, organizations,
+    bridge_command::{self, BridgeCommand, Subject},
+    delegate_with, display_name, email, members, organizations, owner_delivery,
     pagination::Page,
     stmt,
 };
@@ -57,6 +58,177 @@ pub async fn register_first_party(
     request: &RequestContext,
     body: RegisterFirstParty,
 ) -> Result<Value, ApiError> {
+    let (name, owner) = first_party_checks(state, request, &body).await?;
+    let txn = state.db.begin().await?;
+    let (invitation, token) =
+        insert_first_party(&txn, operator, request, &body, &name, &owner, None).await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(body.tenant_id),
+    )
+    .await?;
+    let org = organizations::view(&txn, body.tenant_id, None).await?;
+    txn.commit().await?;
+    let mut invitation = invitation;
+    invitation["token"] = Value::from(token);
+    Ok(json!({ "organization": org, "ownerInvitation": invitation }))
+}
+
+/// The admin bridge's `partners.workspace.register-first-party` command name.
+pub const REGISTER_FIRST_PARTY: &str = "partners.workspace.register-first-party";
+
+/// ADR 0068 A4 (`partners.workspace.register-first-party`, R4, two-person): the same
+/// registration relayed by the HQ admin bridge, with the OWNER-DELIVERED secret rule —
+/// the one-time owner invitation is sealed for the Notification Service and sent ONLY to
+/// the invited address as a single-use claim link ([`super::owner_delivery`]); HQ gets a
+/// reference (`deliveryRef`, the masked address, the expiry). The address is never echoed,
+/// logged or recorded in the operation ledger. No `expectedVersion`: the workspace does
+/// not exist yet (an existing one is INVALID_STATE). A repeated key answers the current
+/// workspace and the same delivery, never a second invitation.
+pub async fn register_first_party_bridge(
+    state: &AppState,
+    operator: &str,
+    request: &RequestContext,
+    body: RegisterFirstParty,
+    cmd: &BridgeCommand,
+) -> Result<Value, ApiError> {
+    let tenant_id = body.tenant_id;
+    if let Some((st, version)) = bridge_command::prior(
+        &state.db,
+        cmd,
+        REGISTER_FIRST_PARTY,
+        Subject::Organization,
+        tenant_id,
+    )
+    .await?
+    {
+        let delivery = owner_delivery::view_of_command(&state.db, cmd.key).await?;
+        return Ok(bridge_command::answer(
+            &st,
+            version,
+            first_party_resource(&state.db, tenant_id, delivery.as_ref()).await?,
+        ));
+    }
+    let delivery = state
+        .owner_delivery
+        .as_ref()
+        .ok_or(ApiError(ErrorCode::CapabilityUnavailable))?;
+    let (name, owner) = first_party_checks(state, request, &body).await?;
+    let now = Utc::now();
+    let delivery_ref = Uuid::new_v4();
+    let txn = state.db.begin().await?;
+    let (invitation, token) = insert_first_party(
+        &txn,
+        operator,
+        request,
+        &body,
+        &name,
+        &owner,
+        Some(delivery_ref),
+    )
+    .await?;
+    crate::bridge_events::record(
+        &txn,
+        state.bridge_events,
+        crate::bridge_events::Source::Workspace(tenant_id),
+    )
+    .await?;
+    let invitation_id = invitation["id"]
+        .as_str()
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(ApiError(ErrorCode::InternalError))?;
+    let expires_at = txn
+        .query_one(stmt(
+            "SELECT expires_at FROM devplat_invitations WHERE id = $1",
+            vec![invitation_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::InternalError))?
+        .try_get::<chrono::DateTime<Utc>>("", "expires_at")?;
+    // The token and the address leave here only sealed to the Notification Service.
+    let (event, envelope) = owner_delivery::seal_owner_invitation(
+        &delivery.sealing_key,
+        tenant_id,
+        invitation_id,
+        expires_at,
+        &token,
+        &owner,
+        request.correlation_id.as_str(),
+        now,
+    )?;
+    drop(token);
+    let masked = owner_delivery::mask_email(&owner);
+    owner_delivery::insert(
+        &txn,
+        owner_delivery::NewDelivery {
+            id: delivery_ref,
+            admin_key: cmd.key,
+            tenant_id,
+            invitation_id,
+            recipient_masked: &masked,
+            event_id: &event,
+            envelope,
+            expires_at,
+            now,
+        },
+    )
+    .await?;
+    bridge_command::record(
+        &txn,
+        cmd,
+        REGISTER_FIRST_PARTY,
+        Subject::Organization,
+        tenant_id,
+        tenant_id,
+    )
+    .await?;
+    let delivery_view = owner_delivery::view(&txn, delivery_ref).await?;
+    let resource = first_party_resource(&txn, tenant_id, delivery_view.as_ref()).await?;
+    let version = resource["version"].as_i64();
+    txn.commit().await?;
+    tracing::info!(
+        command = REGISTER_FIRST_PARTY,
+        delivery_ref = %delivery_ref,
+        "first-party workspace registered; owner invitation queued for owner delivery"
+    );
+    let state = resource["state"].as_str().unwrap_or("INVITED").to_string();
+    Ok(bridge_command::answer(&state, version, resource))
+}
+
+/// The bridge's resource of a registered workspace: ids, state, version and the delivery
+/// reference (never the address, a token or a link).
+async fn first_party_resource<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    delivery: Option<&Value>,
+) -> Result<Value, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT state, version, created_at FROM devplat_organizations WHERE tenant_id = $1",
+            vec![tenant_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    let mut v = json!({
+        "organizationId": tenant_id,
+        "state": row.try_get::<String>("", "state")?,
+        "version": row.try_get::<i64>("", "version")?,
+        "createdAt": row.try_get::<chrono::DateTime<Utc>>("", "created_at")?,
+    });
+    match delivery {
+        Some(d) => owner_delivery::resource_fields(&mut v, d),
+        None => owner_delivery::resource_fields(&mut v, &owner_delivery::no_delivery()),
+    }
+    Ok(v)
+}
+
+/// Validation and the FIRST_PARTY check (Platform Access) before any write.
+async fn first_party_checks(
+    state: &AppState,
+    request: &RequestContext,
+    body: &RegisterFirstParty,
+) -> Result<(String, String), ApiError> {
     let name = display_name(&body.display_name)?;
     let owner = email(&body.owner_email)?;
     let tenant = delegate_with(
@@ -70,8 +242,21 @@ pub async fn register_first_party(
     if tenant.get("classification").and_then(Value::as_str) != Some("FIRST_PARTY") {
         return Err(ApiError(ErrorCode::PolicyViolation));
     }
+    Ok((name, owner))
+}
+
+/// The registration writes (in `txn`): the INVITED organization, the OWNER invitation
+/// (its token returned to the caller, only its digest stored) and the OPERATOR activity.
+async fn insert_first_party(
+    txn: &sea_orm::DatabaseTransaction,
+    operator: &str,
+    request: &RequestContext,
+    body: &RegisterFirstParty,
+    name: &str,
+    owner: &str,
+    delivery_ref: Option<Uuid>,
+) -> Result<(Value, String), ApiError> {
     let now = Utc::now();
-    let txn = state.db.begin().await?;
     let inserted = txn
         .execute(stmt(
             "INSERT INTO devplat_organizations \
@@ -79,7 +264,7 @@ pub async fn register_first_party(
              VALUES ($1, $2, 'INVITED', 'AWAITING_OWNER', $3, $4, $4) ON CONFLICT DO NOTHING",
             vec![
                 body.tenant_id.into(),
-                name.clone().into(),
+                name.into(),
                 format!("operator:{operator}").into(),
                 now.into(),
             ],
@@ -90,15 +275,21 @@ pub async fn register_first_party(
         return Err(ApiError(ErrorCode::InvalidState));
     }
     let (invitation, token) = members::insert_invitation(
-        &txn,
+        txn,
         body.tenant_id,
-        &owner,
+        owner,
         Role::Owner,
         &format!("operator:{operator}"),
     )
     .await?;
+    let mut summary = json!({ "displayName": name, "classification": "FIRST_PARTY",
+                              "ownerInvitationId": invitation["id"] });
+    if let Some(d) = delivery_ref {
+        // ADR 0068 A4: the reference of the owner delivery (never the address).
+        summary["deliveryRef"] = json!(d);
+    }
     activity::record_operator(
-        &txn,
+        txn,
         operator,
         request.request_id.as_str(),
         request.correlation_id.as_str(),
@@ -107,16 +298,11 @@ pub async fn register_first_party(
             action: "organization.first_party_registered",
             target_type: "ORGANIZATION",
             target_id: body.tenant_id.to_string(),
-            summary: json!({ "displayName": name, "classification": "FIRST_PARTY",
-                             "ownerInvitationId": invitation["id"] }),
+            summary,
         },
     )
     .await?;
-    let org = organizations::view(&txn, body.tenant_id, None).await?;
-    txn.commit().await?;
-    let mut invitation = invitation;
-    invitation["token"] = Value::from(token);
-    Ok(json!({ "organization": org, "ownerInvitation": invitation }))
+    Ok((invitation, token))
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +310,9 @@ pub async fn register_first_party(
 pub struct SetState {
     pub state: String,
     pub reason: String,
+    /// Admin bridge: the workspace version the change applies to.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 pub fn valid_reason(reason: &str) -> bool {
@@ -279,6 +468,9 @@ pub struct OperatorActivityFilter {
     pub operator: Option<String>,
     /// Exact action or a family prefix ending in `.`.
     pub action: Option<String>,
+    /// ADR 0068: `occurred_at >= since` / `occurred_at < until`.
+    pub since: Option<chrono::DateTime<Utc>>,
+    pub until: Option<chrono::DateTime<Utc>>,
 }
 
 /// Section 15 (PLT-009): every operator command, newest first — the OPERATOR events of
@@ -331,6 +523,8 @@ pub async fn operator_activity<C: ConnectionTrait>(
                AND ($2::text IS NULL OR operator = $2) \
                AND ($3::text IS NULL OR action = $3) AND ($4::text IS NULL OR action LIKE $4) \
                AND ($5::timestamptz IS NULL OR (occurred_at, id) < ($5, $6::uuid)) \
+               AND ($8::timestamptz IS NULL OR occurred_at >= $8) \
+               AND ($9::timestamptz IS NULL OR occurred_at < $9) \
              ORDER BY occurred_at DESC, id DESC LIMIT $7",
             vec![
                 filter.organization_id.into(),
@@ -340,6 +534,8 @@ pub async fn operator_activity<C: ConnectionTrait>(
                 before_at.into(),
                 before_id.into(),
                 (page.limit as i64 + 1).into(),
+                filter.since.into(),
+                filter.until.into(),
             ],
         ))
         .await?;

@@ -1,11 +1,22 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "noEmit": true,
     "rootDir": ".",
     "baseUrl": ".",
-    "paths": { "@cfmeet/platform-sdk": ["./src/index.ts"] }
+    "paths": {
+      "@cfmeet/platform-sdk": [
+        "./src/index.ts"
+      ]
+    }
   },
-  "files": ["examples/server-send-sms.ts", "examples/paginate-conversations.ts", "examples/webhook-receiver.ts"]
+  "files": [
+    "examples/server-send-sms.ts",
+    "examples/paginate-conversations.ts",
+    "examples/webhook-receiver.ts",
+    "examples/server-partner-users.ts"
+  ]
 }

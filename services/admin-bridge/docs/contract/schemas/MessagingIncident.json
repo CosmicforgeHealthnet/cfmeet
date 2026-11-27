@@ -1,0 +1,66 @@
+{
+  "description": "One operational incident. Its summary text is not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_id",
+    "category",
+    "severity",
+    "status",
+    "occurrences",
+    "first_seen_at",
+    "last_seen_at",
+    "resolved_at",
+    "resolved_by"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "category": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "severity": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "status": {
+      "enum": [
+        "OPEN",
+        "RESOLVED"
+      ]
+    },
+    "occurrences": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "first_seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "resolved_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    }
+  }
+}

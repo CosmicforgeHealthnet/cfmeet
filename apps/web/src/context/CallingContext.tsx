@@ -14,6 +14,7 @@
  * It is inert for guests and signed-out pages (no request is made).
  */
 
+import { rememberCallName } from "@/lib/calling/call-names";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import axios from "axios";
 import { useProfile } from "@/hooks";
@@ -23,6 +24,7 @@ import { callsService } from "@/services/calling";
 import { hubCallsService } from "@/services/calling/hub-calls.service";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import { isWindingDown, ownSession } from "@/lib/calling/call-permissions";
+import { endedCallText } from "@/lib/calling/launch";
 import { INITIAL_MEDIA_STATE, isRetryableCredentialFailure, mediaReducer, type MediaEvent, type MediaState } from "@/lib/calling/media-reconnect";
 import IncomingCallLayer from "@/components/calling/IncomingCallLayer";
 import ActiveCallDock from "@/components/calling/ActiveCallDock";
@@ -51,10 +53,19 @@ export interface CallingContextValue {
   retryMedia: () => void;
   answer: (invitation: RecoveredInvitation, accept: boolean) => Promise<string>;
   /** Direct (1:1), group (several principals) or extension call through the adapter; returns the callId. */
-  startCall: (kind: CallKind, target: CallTarget) => Promise<string>;
+  startCall: (kind: CallKind, target: CallTarget, label?: string) => Promise<string>;
   /** Communications Hub launch from a contact / a conversation; returns the callId. */
-  callContact: (contactId: string, kind: CallKind) => Promise<string>;
-  callConversation: (conversationId: string, kind: CallKind) => Promise<string>;
+  callContact: (contactId: string, kind: CallKind, label?: string) => Promise<string>;
+  callConversation: (conversationId: string, kind: CallKind, label?: string) => Promise<string>;
+  /** A call being placed (shown at once, before the server answers). `ended` is the reason
+   *  shown briefly when it ended at once (CF1: "<name> is on another call"). */
+  placing: { kind: CallKind; label: string | null; ended?: string } | null;
+  /** Cancel the call being placed: the screen closes now, the call is cancelled as soon as it exists. */
+  cancelPlacing: () => void;
+  /** Show the call screen now for a call about to be placed (e.g. arriving from a Call button). */
+  announce: (kind: CallKind, label: string | null) => void;
+  /** The name shown since the call was placed; kept until the call screen closes. */
+  callLabel: string | null;
   /** Media callbacks for the dock. */
   mediaEvents: {
     connected: () => void;
@@ -93,6 +104,21 @@ function status(error: unknown): number | undefined {
 const LEFT: MediaState = { status: "left", attempt: 0, retryInMs: null, reason: null };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A just-placed call that is already over: the text the calling screen shows for it (CF1:
+ * BUSY — "<name> is on another call"), "" for any other end (the screen just closes), or
+ * null while the call is still going (the normal hand-over to the call screen).
+ */
+async function endedAtOnce(callId: string, label: string | null): Promise<string | null> {
+  try {
+    const call = await callsService.get(callId);
+    if (!isWindingDown(call.state)) return null;
+    return endedCallText(call.state, label);
+  } catch {
+    return null;
+  }
+}
 
 function CallingSession({ principalId, children }: { principalId: string; children: ReactNode }) {
   const device = useCallingDevice(principalId);
@@ -184,43 +210,120 @@ function CallingSession({ principalId, children }: { principalId: string; childr
 
   /** After a Hub launch: find the caller's own session on this endpoint and join its media. */
   const joinLaunched = useCallback(async (callId: string, endpointId: string, kind: CallKind) => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       const call = await callsService.get(callId);
       const session = ownSession(call, principalId, endpointId);
       if (session) { await joinMedia(callId, session.sessionId, kind); return; }
       if (isWindingDown(call.state)) return;
-      await sleep(500);
+      await sleep(150);
     }
     throw new Error("The call was started, but this browser could not join it yet. Open it from Calls.");
   }, [principalId, joinMedia]);
 
-  const startCall = useCallback(async (kind: CallKind, target: CallTarget) => {
+  // The call screen opens the moment you tap call (WhatsApp); the server work happens behind it.
+  const [placing, setPlacing] = useState<{ kind: CallKind; label: string | null; ended?: string } | null>(null);
+  const cancelled = useRef(false);
+  const announced = useRef(false);
+  const [callLabel, setCallLabel] = useState<string | null>(null);
+  const placingLabel = useRef<string | null>(null);
+  const handover = useRef<string | null>(null);
+  // The call's own screen is up: the calling screen hands over.
+  useEffect(() => { if (media && handover.current) { handover.current = null; setPlacing(null); } }, [media]);
+  const announce = useCallback((kind: CallKind, label: string | null) => {
+    placingLabel.current = label;
+    announced.current = true;
+    cancelled.current = false;
+    setCallLabel(label);
+    setPlacing({ kind, label });
+  }, []);
+  const place = useCallback(async (kind: CallKind, label: string | undefined, create: () => Promise<string>) => {
+    // A cancel pressed while the call was announced still counts.
+    if (!announced.current) cancelled.current = false;
+    announced.current = false;
+    const shown = label ?? placingLabel.current;
+    placingLabel.current = null;
+    setCallLabel(shown ?? null);
+    setPlacing((current) => ({ kind, label: label ?? current?.label ?? null }));
+    try {
+      const callId = await create();
+      if (shown) rememberCallName(callId, shown);
+      if (cancelled.current) {
+        // Hung up while it was being placed: drop the media and cancel the call.
+        dispatch({ type: "LEAVE" });
+        setMedia(null);
+        void (async () => {
+          const call = await callsService.get(callId);
+          await callsService.hangUp(callId, "cancel", call.version);
+        })().catch(() => undefined);
+      }
+      // Ended at once (CF1: the person is on another call): say so on the calling screen
+      // for a moment instead of "Calling…", then close it.
+      const ended = !cancelled.current && !mediaRef.current ? await endedAtOnce(callId, shown ?? null) : null;
+      if (ended) {
+        setPlacing((current) => (current ? { ...current, ended } : current));
+        window.setTimeout(() => setPlacing((current) => (current?.ended === ended ? null : current)), 4000);
+        return callId;
+      }
+      if (ended === "") {
+        setPlacing(null);
+        return callId;
+      }
+      // Keep the calling screen up until this call's own screen takes over (no blank gap).
+      if (!cancelled.current && !mediaRef.current) {
+        handover.current = callId;
+        window.setTimeout(() => { if (handover.current === callId) { handover.current = null; setPlacing(null); } }, 20_000);
+      } else {
+        setPlacing(null);
+      }
+      return callId;
+    } catch (error) {
+      setPlacing(null);
+      throw error;
+    }
+  }, []);
+  const cancelPlacing = useCallback(() => {
+    cancelled.current = true;
+    announced.current = false;
+    setPlacing(null);
+    // Cancelled during the hand-over: the call already exists, so cancel it now.
+    const callId = handover.current;
+    handover.current = null;
+    if (callId) {
+      void (async () => {
+        const call = await callsService.get(callId);
+        await callsService.hangUp(callId, "cancel", call.version);
+      })().catch(() => undefined);
+    }
+  }, []);
+
+  const startCall = useCallback((kind: CallKind, target: CallTarget, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const body: CreateCallRequest = { kind, initiatorPrincipalId: principalId, initiatorEndpointId: endpointId, ...target };
     const result = await callsService.create(body, newIdempotencyKey());
-    if (result.initiatorSessionId) await joinMedia(result.call.callId, result.initiatorSessionId, kind);
+    // A call that ended at once (e.g. BUSY: they are on another call) has no media to join.
+    if (result.initiatorSessionId && !cancelled.current && !isWindingDown(result.call.state)) await joinMedia(result.call.callId, result.initiatorSessionId, kind);
     return result.call.callId;
-  }, [principalId, requireEndpoint, joinMedia]);
+  }), [place, principalId, requireEndpoint, joinMedia]);
 
-  const callContact = useCallback(async (contactId: string, kind: CallKind) => {
+  const callContact = useCallback((contactId: string, kind: CallKind, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const launched = await hubCallsService.callContact(contactId, kind, endpointId);
-    await joinLaunched(launched.callId, endpointId, kind);
+    if (!cancelled.current) await joinLaunched(launched.callId, endpointId, kind);
     return launched.callId;
-  }, [requireEndpoint, joinLaunched]);
+  }), [place, requireEndpoint, joinLaunched]);
 
-  const callConversation = useCallback(async (conversationId: string, kind: CallKind) => {
+  const callConversation = useCallback((conversationId: string, kind: CallKind, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const launched = await hubCallsService.callConversation(conversationId, kind, endpointId);
-    await joinLaunched(launched.callId, endpointId, kind);
+    if (!cancelled.current) await joinLaunched(launched.callId, endpointId, kind);
     return launched.callId;
-  }, [requireEndpoint, joinLaunched]);
+  }), [place, requireEndpoint, joinLaunched]);
 
   const value = useMemo<CallingContextValue>(() => ({
     principalId, device, media: activeMedia, mediaState: activeMediaState, joinMedia, leaveMedia,
     retryMedia: () => dispatch({ type: "RETRY_NOW" }),
-    answer, startCall, callContact, callConversation, mediaEvents,
-  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents]);
+    answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing, announce, callLabel,
+  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing, announce, callLabel]);
 
   return (
     <CallingContext.Provider value={value}>

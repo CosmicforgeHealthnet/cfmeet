@@ -60,6 +60,49 @@ pub mod category {
     pub const OPERATIONS_ACCEPTANCE: &str = "OPERATIONS_ACCEPTANCE";
     pub const NOTIFICATION: &str = "NOTIFICATION";
     pub const LEGACY_QUEUE: &str = "LEGACY_QUEUE";
+    /// Device step-up codes (account_devices.rs).
+    pub const SECURITY_DEVICE_STEP_UP: &str = "SECURITY_DEVICE_STEP_UP";
+}
+
+/// Categories that are never suppressed after bounces or complaints: account recovery,
+/// sign-in codes and security notices must still be attempted (Notification Service N0-12;
+/// an operator investigates repeated bounces instead), and operator acceptance mail is the
+/// evidence that the transport works.
+pub const UNSUPPRESSIBLE_CATEGORIES: &[&str] = &[
+    category::AUTH_VERIFICATION,
+    category::AUTH_PASSWORD_RESET,
+    category::SECURITY_PASSWORD_CHANGED,
+    category::SECURITY_DEVICE_STEP_UP,
+    category::NOTIFICATION,
+    category::OPERATIONS_ACCEPTANCE,
+];
+
+/// Categories carrying one-time codes (sign-in, email change, step-up), whose delivery
+/// latency is watched (`auth_code_email_slow`).
+fn is_code_category(category: &str) -> bool {
+    category == category::AUTH_VERIFICATION || category == category::SECURITY_DEVICE_STEP_UP
+}
+
+/// The `ApiError::Conflict` message of an enqueue refused because the recipient is
+/// suppressed (S-12): one complaint, or two bounces, recorded for the same address.
+pub const RECIPIENT_SUPPRESSED: &str = "EMAIL_RECIPIENT_SUPPRESSED";
+
+/// Whether new non-security mail to this recipient is refused (N0-12): the provider
+/// reported a complaint, or at least two bounces, for the address (by its hash).
+pub async fn recipient_suppressed<C: ConnectionTrait>(conn: &C, hash: &str) -> ApiResult<bool> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT (count(*) FILTER (WHERE status = 'COMPLAINED') > 0
+                     OR count(*) FILTER (WHERE status = 'BOUNCED') >= 2) AS suppressed
+               FROM email_deliveries
+              WHERE recipient_hash = $1 AND status IN ('BOUNCED', 'COMPLAINED')",
+            [hash.into()],
+        ))
+        .await?;
+    Ok(row
+        .and_then(|r| r.try_get::<bool>("", "suppressed").ok())
+        .unwrap_or(false))
 }
 
 /// Statuses that are final (content erased, never re-sent).
@@ -122,6 +165,18 @@ fn clean_header(value: &str, max: usize) -> String {
 
 /// Record a message in the durable ledger (QUEUED). Idempotent on `idempotency_key`.
 pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult<Enqueued> {
+    enqueue_with_calendar(conn, email, None).await
+}
+
+/// Gap audit M14: as [`enqueue`], with an RFC 5545 calendar object sent as an `invite.ics`
+/// attachment whose `text/calendar` `method=` parameter is the object's own METHOD
+/// (audit M9: `REQUEST` invitations and updates, `CANCEL` cancellations, `PUBLISH` files).
+pub async fn enqueue_with_calendar<C: ConnectionTrait>(
+    conn: &C,
+    email: NewEmail,
+    calendar: Option<String>,
+) -> ApiResult<Enqueued> {
+    let calendar = calendar.filter(|c| !c.is_empty() && c.len() <= 65_536);
     let to = email.to.trim().to_string();
     if !valid_address(&to) {
         return Err(ApiError::BadRequest(
@@ -131,6 +186,12 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
     let subject = clean_header(&email.subject, 200);
     if subject.is_empty() {
         return Err(ApiError::InternalError("Email subject is empty".into()));
+    }
+    if !UNSUPPRESSIBLE_CATEGORIES.contains(&email.category)
+        && recipient_suppressed(conn, &recipient_hash(&to)).await?
+    {
+        inc(&OM.email_suppressed);
+        return Err(ApiError::Conflict(RECIPIENT_SUPPRESSED.into()));
     }
     let to_name = email
         .to_name
@@ -147,8 +208,8 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "INSERT INTO email_deliveries (id, category, idempotency_key, recipient_hash, recipient,
-                 recipient_name, subject, html_body, text_body, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 recipient_name, subject, html_body, text_body, expires_at, ics_body)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (idempotency_key) DO NOTHING
              RETURNING id",
             [
@@ -162,6 +223,7 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
                 email.html.into(),
                 email.text.into(),
                 email.expires_at.into(),
+                calendar.into(),
             ],
         ))
         .await?;
@@ -228,6 +290,8 @@ pub struct ProviderMessage<'a> {
     pub subject: &'a str,
     pub html: &'a str,
     pub text: &'a str,
+    /// Gap audit M14: calendar invite attached as `invite.ics`.
+    pub calendar: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +328,22 @@ pub trait EmailProvider: Send + Sync {
     fn name(&self) -> &'static str;
     /// Send one message; `Ok(Some(id))` carries the provider message id.
     async fn send(&self, message: &ProviderMessage<'_>) -> Result<Option<String>, ProviderError>;
+}
+
+/// RFC 2606 .invalid recipients are test fixtures, never public mail destinations.
+/// Refuse before the provider hop rather than create hours of delivery-delay retries.
+fn reject_reserved_recipient(recipient: &str) -> Result<(), ProviderError> {
+    let domain = recipient
+        .rsplit_once('@')
+        .map(|(_, d)| d.trim_end_matches('.').to_ascii_lowercase())
+        .unwrap_or_default();
+    if domain == "invalid" || domain.ends_with(".invalid") {
+        return Err(ProviderError::Permanent {
+            class: "RESERVED_INVALID_RECIPIENT",
+            status: None,
+        });
+    }
+    Ok(())
 }
 
 /// Resend HTTPS API (`POST /emails`), with the ledger id as `Idempotency-Key`.
@@ -304,6 +384,14 @@ impl ResendProvider {
         });
         if let Some(r) = m.reply_to {
             body["reply_to"] = json!(r);
+        }
+        if let Some(ics) = m.calendar {
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
+            body["attachments"] = json!([{
+                "filename": "invite.ics",
+                "content": STANDARD.encode(ics.as_bytes()),
+                "content_type": crate::services::ics::IcsMethod::of(ics).content_type(),
+            }]);
         }
         body
     }
@@ -357,6 +445,7 @@ impl EmailProvider for ResendProvider {
     }
 
     async fn send(&self, m: &ProviderMessage<'_>) -> Result<Option<String>, ProviderError> {
+        reject_reserved_recipient(m.to)?;
         let response = self
             .client
             .post(format!("{}/emails", self.base_url))
@@ -446,20 +535,46 @@ impl EmailProvider for SmtpProvider {
         if let Some(r) = m.reply_to.and_then(|r| r.parse::<Mailbox>().ok()) {
             builder = builder.reply_to(r);
         }
-        let email = builder
-            .multipart(
-                MultiPart::alternative()
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(m.text.to_string()),
-                    )
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_HTML)
-                            .body(m.html.to_string()),
-                    ),
+        let mut alternative = MultiPart::alternative()
+            .singlepart(
+                SinglePart::builder()
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(m.text.to_string()),
             )
+            .singlepart(
+                SinglePart::builder()
+                    .header(ContentType::TEXT_HTML)
+                    .body(m.html.to_string()),
+            );
+        let calendar_type = m
+            .calendar
+            .map(|ics| {
+                let method = crate::services::ics::IcsMethod::of(ics);
+                ContentType::parse(&method.content_type())
+                    .map(|t| (method, t))
+                    .map_err(|_| rejected("INVALID_MESSAGE"))
+            })
+            .transpose()?;
+        if let (Some(ics), Some((method, kind))) = (m.calendar, &calendar_type) {
+            // Audit M9: an iTIP request / cancellation is also an alternative part, which is
+            // where Outlook looks for meeting requests (Gmail reads either).
+            if *method != crate::services::ics::IcsMethod::Publish {
+                alternative = alternative.singlepart(
+                    SinglePart::builder()
+                        .header(kind.clone())
+                        .body(ics.to_string()),
+                );
+            }
+        }
+        let body = match (m.calendar, calendar_type) {
+            (Some(ics), Some((_, kind))) => MultiPart::mixed().multipart(alternative).singlepart(
+                lettre::message::Attachment::new("invite.ics".to_string())
+                    .body(ics.to_string(), kind),
+            ),
+            _ => alternative,
+        };
+        let email = builder
+            .multipart(body)
             .map_err(|_| rejected("INVALID_MESSAGE"))?;
         match self.mailer.send(email).await {
             Ok(_) => Ok(None),
@@ -490,6 +605,8 @@ impl EmailProvider for SmtpProvider {
 pub struct RecordingProvider {
     pub sent: std::sync::Mutex<Vec<(Uuid, String, String, String)>>,
     pub fail_next: std::sync::Mutex<Vec<ProviderError>>,
+    /// Calendar invite of each accepted message, by ledger id (gap audit M14).
+    pub calendars: std::sync::Mutex<Vec<(Uuid, String)>>,
 }
 
 impl RecordingProvider {
@@ -521,6 +638,12 @@ impl EmailProvider for RecordingProvider {
             m.subject.to_string(),
             m.text.to_string(),
         ));
+        if let Some(ics) = m.calendar {
+            self.calendars
+                .lock()
+                .expect("recording provider")
+                .push((m.id, ics.to_string()));
+        }
         Ok(Some(format!("rec_{}", m.id.simple())))
     }
 }
@@ -566,6 +689,24 @@ impl WorkerSettings {
     }
 }
 
+/// Smallest ledger retention window the purge applies, in days: a zero or negative
+/// setting must never make the purge erase or delete fresh rows.
+pub const RETENTION_DAYS_MIN: i64 = 1;
+/// Largest ledger retention window the purge applies, in days. Configuration already
+/// limits `EMAIL_LEDGER_RETENTION_DAYS` to 1..=365; this bound keeps a directly built
+/// [`WorkerSettings`] safe and the doubled deletion window well inside `i32`.
+pub const RETENTION_DAYS_MAX: i64 = 3650;
+
+/// The purge's `(scrub, delete)` windows in days, as PostgreSQL `integer`s: the
+/// configured retention clamped to `RETENTION_DAYS_MIN..=RETENTION_DAYS_MAX`, and
+/// twice that for deletion.
+pub fn retention_windows(retention_days: i64) -> (i32, i32) {
+    let days = retention_days.clamp(RETENTION_DAYS_MIN, RETENTION_DAYS_MAX);
+    // Lossless: the clamp keeps `days` (and `2 * days`) far inside `i32`.
+    let scrub = i32::try_from(days).unwrap_or(RETENTION_DAYS_MAX as i32);
+    (scrub, scrub.saturating_mul(2))
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TickReport {
     pub claimed: u64,
@@ -573,6 +714,9 @@ pub struct TickReport {
     pub retried: u64,
     pub failed: u64,
     pub expired: u64,
+    /// Claimed rows whose lease lapsed before their send and were re-claimed elsewhere
+    /// (skipped, never sent twice by this worker).
+    pub lease_lost: u64,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -586,6 +730,7 @@ struct Claimed {
     text_body: Option<String>,
     attempts: i32,
     expires_at: Option<DateTime<Utc>>,
+    ics_body: Option<String>,
 }
 
 /// Exponential backoff with ±20 % jitter: 5 s, 10 s, 20 s … capped at 15 minutes.
@@ -601,6 +746,7 @@ pub struct EmailWorker {
     provider: Arc<dyn EmailProvider>,
     settings: WorkerSettings,
     holder: String,
+    lease_secs: i64,
 }
 
 impl EmailWorker {
@@ -614,7 +760,36 @@ impl EmailWorker {
             provider,
             settings,
             holder: format!("email-{}", Uuid::new_v4().simple()),
+            lease_secs: LEASE_SECS,
         }
+    }
+
+    /// Overrides the lease length (tests; production keeps [`LEASE_SECS`], which exceeds
+    /// the rate-limit spacing plus the longest provider timeout).
+    pub fn with_lease_secs(mut self, secs: i64) -> Self {
+        self.lease_secs = secs.max(1);
+        self
+    }
+
+    /// N0-4 (S-8): renews this worker's lease on every row it still holds and reports
+    /// whether `id` is among them. A row whose lease lapsed and was re-claimed by another
+    /// worker is no longer held, so it is skipped instead of being sent a second time.
+    /// Called immediately before each provider call, so a batch never outlives its lease.
+    async fn renew(&self, id: Uuid) -> ApiResult<bool> {
+        let rows = self
+            .db
+            .query_all(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE email_deliveries
+                    SET lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
+                  WHERE lease_holder = $1 AND status = 'SENDING'
+              RETURNING id",
+                [self.holder.clone().into(), self.lease_secs.into()],
+            ))
+            .await?;
+        Ok(rows
+            .iter()
+            .any(|r| r.try_get::<Uuid>("", "id").ok() == Some(id)))
     }
 
     async fn claim(&self) -> ApiResult<Vec<Claimed>> {
@@ -632,10 +807,10 @@ impl EmailWorker {
                      LIMIT $3
                      FOR UPDATE SKIP LOCKED)
           RETURNING d.id, d.category, d.recipient, d.recipient_name, d.subject, d.html_body,
-                    d.text_body, d.attempts, d.expires_at",
+                    d.text_body, d.attempts, d.expires_at, d.ics_body",
             [
                 self.holder.clone().into(),
-                LEASE_SECS.into(),
+                self.lease_secs.into(),
                 (self.settings.batch as i64).into(),
             ],
         ))
@@ -658,7 +833,7 @@ impl EmailWorker {
                 "UPDATE email_deliveries
                     SET status = $3, provider = $4,
                         provider_message_id = COALESCE($5, provider_message_id),
-                        html_body = NULL, text_body = NULL,
+                        html_body = NULL, text_body = NULL, ics_body = NULL,
                         lease_holder = NULL, lease_expires_at = NULL,
                         last_error_class = $6, last_error_status = $7,
                         accepted_at = CASE WHEN $8 THEN now() ELSE accepted_at END,
@@ -677,6 +852,23 @@ impl EmailWorker {
             ))
             .await?;
         Ok(())
+    }
+
+    /// Passwordless sign-in: count a one-time-code email the provider accepted more than
+    /// 30 seconds after it was queued (`auth_code_email_slow`). Best effort, label-free.
+    async fn note_code_latency(&self, id: Uuid) {
+        let slow = self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS slow FROM email_deliveries \
+                  WHERE id = $1 AND accepted_at - created_at > interval '30 seconds'",
+                [id.into()],
+            ))
+            .await;
+        if matches!(slow, Ok(Some(_))) {
+            inc(&OM.auth_code_email_slow);
+        }
     }
 
     async fn reschedule(
@@ -743,6 +935,13 @@ impl EmailWorker {
             if n > 0 {
                 tokio::time::sleep(spacing).await;
             }
+            if !self.renew(job.id).await? {
+                inc(&OM.email_lease_lost);
+                tracing::warn!(delivery_id = %job.id, category = %job.category,
+                    "email lease lost before sending; another worker holds it");
+                report.lease_lost += 1;
+                continue;
+            }
             let message = ProviderMessage {
                 id: job.id,
                 category: &job.category,
@@ -753,11 +952,15 @@ impl EmailWorker {
                 subject: &job.subject,
                 html,
                 text,
+                calendar: job.ics_body.as_deref(),
             };
             match self.provider.send(&message).await {
                 Ok(provider_id) => {
                     self.finish(job.id, "ACCEPTED", provider_id, None).await?;
                     inc(&OM.email_provider_accepted);
+                    if is_code_category(&job.category) {
+                        self.note_code_latency(job.id).await;
+                    }
                     tracing::info!(delivery_id = %job.id, category = %job.category,
                         provider = self.provider.name(), "email accepted by provider");
                     report.accepted += 1;
@@ -815,28 +1018,41 @@ impl EmailWorker {
     }
 
     /// Erase addresses of old final rows; delete rows past twice the retention.
+    ///
+    /// PostgreSQL's `make_interval(days => ...)` takes an `integer`. Binding the
+    /// configured `i64` sends an `int8` parameter and there is no implicit
+    /// `bigint -> integer` cast, so every purge failed with "function
+    /// make_interval(days => bigint) does not exist". The windows are a checked,
+    /// range-limited `i32` (see [`retention_windows`]) and the SQL casts `$1::int`.
     pub async fn purge(&self) -> ApiResult<()> {
-        let days = self.settings.retention_days;
+        let (scrub_days, delete_days) = retention_windows(self.settings.retention_days);
+        if i64::from(scrub_days) != self.settings.retention_days {
+            tracing::warn!(
+                configured = self.settings.retention_days,
+                applied = scrub_days,
+                "email ledger retention outside {RETENTION_DAYS_MIN}..={RETENTION_DAYS_MAX} days; clamped"
+            );
+        }
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "UPDATE email_deliveries SET recipient = NULL, recipient_name = NULL
-                  WHERE final_at < now() - make_interval(days => $1) AND recipient IS NOT NULL",
-                [days.into()],
+                  WHERE final_at < now() - make_interval(days => $1::int) AND recipient IS NOT NULL",
+                [scrub_days.into()],
             ))
             .await?;
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "DELETE FROM email_deliveries WHERE final_at < now() - make_interval(days => $1)",
-                [(days * 2).into()],
+                "DELETE FROM email_deliveries WHERE final_at < now() - make_interval(days => $1::int)",
+                [delete_days.into()],
             ))
             .await?;
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "DELETE FROM email_delivery_events WHERE received_at < now() - make_interval(days => $1)",
-                [(days * 2).into()],
+                "DELETE FROM email_delivery_events WHERE received_at < now() - make_interval(days => $1::int)",
+                [delete_days.into()],
             ))
             .await?;
         Ok(())
@@ -994,6 +1210,24 @@ fn rank(status: &str) -> i32 {
     }
 }
 
+/// Whether `message_id` is one of this ledger's provider messages. Events for other
+/// messages (sent by the Notification Service through the same provider account) are
+/// handed on to it ([`crate::services::notification_relay::NotificationsRelay::forward_resend_event`]).
+pub async fn owns_message(
+    db: &DatabaseConnection,
+    provider: &str,
+    message_id: &str,
+) -> Result<bool, sea_orm::DbErr> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS one FROM email_deliveries WHERE provider = $1 AND provider_message_id = $2 LIMIT 1",
+            [provider.into(), message_id.into()],
+        ))
+        .await?
+        .is_some())
+}
+
 /// Apply one verified provider event. Returns `false` for a duplicate event id.
 pub async fn apply_provider_event(
     db: &DatabaseConnection,
@@ -1065,7 +1299,8 @@ pub async fn apply_provider_event(
                 "UPDATE email_deliveries
                     SET status = $2, updated_at = now(),
                         delivered_at = CASE WHEN $2 = 'DELIVERED' THEN now() ELSE delivered_at END,
-                        final_at = COALESCE(final_at, now()), html_body = NULL, text_body = NULL
+                        final_at = COALESCE(final_at, now()), html_body = NULL, text_body = NULL,
+                        ics_body = NULL
                   WHERE id = $1 AND status IN ({})",
                 placeholders.join(", ")
             ),
@@ -1170,6 +1405,7 @@ mod tests {
             subject: "Verify",
             html: "<p>1</p>",
             text: "1",
+            calendar: None,
         });
         assert_eq!(b["from"], "CF Meet <no-reply@cfmeet.com>");
         assert_eq!(b["to"][0], "Ada <ada@example.com>");
@@ -1197,5 +1433,33 @@ mod tests {
             recipient_hash("Ada@Example.com "),
             recipient_hash("ada@example.com")
         );
+    }
+}
+
+#[cfg(test)]
+mod reserved_recipient_tests {
+    use super::*;
+    #[test]
+    fn reserved_invalid_addresses_never_reach_the_live_email_provider() {
+        for recipient in [
+            "fixture@example.invalid",
+            "fixture@INVALID",
+            "fixture@sub.example.INVALID.",
+        ] {
+            assert!(matches!(
+                reject_reserved_recipient(recipient),
+                Err(ProviderError::Permanent {
+                    class: "RESERVED_INVALID_RECIPIENT",
+                    ..
+                })
+            ));
+        }
+        for recipient in [
+            "delivered@resend.dev",
+            "user@example.invalid.com",
+            "user@gmail.com",
+        ] {
+            assert!(reject_reserved_recipient(recipient).is_ok());
+        }
     }
 }

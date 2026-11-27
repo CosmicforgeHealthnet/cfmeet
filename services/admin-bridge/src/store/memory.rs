@@ -1,0 +1,916 @@
+//! In-memory [`Store`] for tests. Same semantics as `PgStore`, including all-or-nothing
+//! claims and the audit hash chain; `fail_audit` simulates an audit outage.
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
+
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
+
+use super::*;
+
+#[derive(Default)]
+struct Inner {
+    principals: HashMap<(PrincipalKind, String), Principal>,
+    revoked_subs: HashMap<String, DateTime<Utc>>,
+    revoked_sessions: HashMap<String, DateTime<Utc>>,
+    claims: HashMap<(ClaimKind, String), DateTime<Utc>>,
+    rates: HashMap<(String, DateTime<Utc>), u32>,
+    policies: HashMap<i64, PolicyRow>,
+    audit: Vec<(AuditDraft, AuditReceipt)>,
+    datasets: Vec<DatasetDay>,
+    projections: Vec<ProjectionRow>,
+    operations: Vec<Operation>,
+    privacy: Vec<PrivacyRequest>,
+    inbox: HashMap<(String, uuid::Uuid), &'static str>,
+    /// `received_at` of every quarantined owner event.
+    quarantined_at: Vec<DateTime<Utc>>,
+    outbox: Vec<FeedEvent>,
+    cursors: HashMap<String, i64>,
+    activations: Vec<ActivationRequest>,
+}
+
+#[derive(Default)]
+pub struct MemoryStore {
+    inner: Mutex<Inner>,
+    fail_audit: AtomicBool,
+    fail_all: AtomicBool,
+}
+
+impl MemoryStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Tests: moves an operation's timestamps `seconds` into the past.
+    pub fn backdate_operation(&self, key: uuid::Uuid, seconds: i64) {
+        let mut inner = self.inner.lock().unwrap();
+        for o in inner
+            .operations
+            .iter_mut()
+            .filter(|o| o.idempotency_key == key)
+        {
+            o.created_at -= Duration::seconds(seconds);
+            o.sent_at = o.sent_at.map(|t| t - Duration::seconds(seconds));
+        }
+    }
+
+    pub fn operations(&self) -> Vec<Operation> {
+        self.inner.lock().unwrap().operations.clone()
+    }
+
+    pub fn activations(&self) -> Vec<ActivationRequest> {
+        self.inner.lock().unwrap().activations.clone()
+    }
+
+    pub fn enroll(&self, p: Principal) {
+        self.inner
+            .lock()
+            .unwrap()
+            .principals
+            .insert((p.kind, p.key_id.clone()), p);
+    }
+
+    pub fn revoke_sub(&self, sub: &str, at: DateTime<Utc>) {
+        self.inner
+            .lock()
+            .unwrap()
+            .revoked_subs
+            .insert(sub.into(), at);
+    }
+
+    pub fn revoke_session(&self, session: &str, at: DateTime<Utc>) {
+        self.inner
+            .lock()
+            .unwrap()
+            .revoked_sessions
+            .insert(session.into(), at);
+    }
+
+    pub fn put_policy(&self, row: PolicyRow) {
+        self.inner
+            .lock()
+            .unwrap()
+            .policies
+            .insert(row.revision, row);
+    }
+
+    pub fn put_dataset_day(&self, day: DatasetDay) {
+        let mut g = self.inner.lock().unwrap();
+        g.datasets
+            .retain(|d| !(d.dataset_id == day.dataset_id && d.day == day.day));
+        g.datasets.push(day);
+    }
+
+    pub fn put_projection(&self, row: ProjectionRow) {
+        let mut g = self.inner.lock().unwrap();
+        g.projections.retain(|p| p.name != row.name);
+        g.projections.push(row);
+    }
+
+    pub fn fail_audit(&self, fail: bool) {
+        self.fail_audit.store(fail, Ordering::SeqCst);
+    }
+
+    pub fn fail_all(&self, fail: bool) {
+        self.fail_all.store(fail, Ordering::SeqCst);
+    }
+
+    pub fn audit_entries(&self) -> Vec<(AuditDraft, AuditReceipt)> {
+        self.inner.lock().unwrap().audit.clone()
+    }
+
+    fn check(&self) -> StoreResult<()> {
+        if self.fail_all.load(Ordering::SeqCst) {
+            Err(StoreError::Unavailable("simulated outage".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[async_trait]
+impl Store for MemoryStore {
+    async fn ping(&self) -> StoreResult<()> {
+        self.check()
+    }
+
+    async fn principal(&self, kind: PrincipalKind, key_id: &str) -> StoreResult<Option<Principal>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .principals
+            .get(&(kind, key_id.to_string()))
+            .cloned())
+    }
+
+    async fn is_revoked(
+        &self,
+        sub: &str,
+        session_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<bool> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        Ok(g.revoked_subs.get(sub).is_some_and(|at| *at <= now)
+            || g.revoked_sessions
+                .get(session_id)
+                .is_some_and(|at| *at <= now))
+    }
+
+    async fn claim_once(&self, claims: &[Claim]) -> StoreResult<ClaimOutcome> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let mut seen = HashSet::new();
+        for c in claims {
+            if g.claims.contains_key(&(c.kind, c.value.clone()))
+                || !seen.insert((c.kind, c.value.clone()))
+            {
+                return Ok(ClaimOutcome::Replay(c.kind));
+            }
+        }
+        for c in claims {
+            g.claims.insert((c.kind, c.value.clone()), c.keep_until);
+        }
+        Ok(ClaimOutcome::Recorded)
+    }
+
+    async fn rate_allow(&self, key: &RateKey, limit: u32) -> StoreResult<bool> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let n = g
+            .rates
+            .entry((key.bucket.clone(), key.window_start))
+            .or_insert(0);
+        *n += 1;
+        Ok(*n <= limit)
+    }
+
+    async fn policy_revision(&self, revision: i64) -> StoreResult<Option<PolicyRow>> {
+        self.check()?;
+        Ok(self.inner.lock().unwrap().policies.get(&revision).cloned())
+    }
+
+    async fn append_audit(&self, draft: &AuditDraft) -> StoreResult<AuditReceipt> {
+        self.check()?;
+        if self.fail_audit.load(Ordering::SeqCst) {
+            return Err(StoreError::Unavailable("simulated audit outage".into()));
+        }
+        let mut g = self.inner.lock().unwrap();
+        let previous = g
+            .audit
+            .last()
+            .map(|(_, r)| r.entry_hash.clone())
+            .unwrap_or_else(|| GENESIS_HASH.to_string());
+        let receipt = AuditReceipt {
+            sequence: g.audit.len() as i64 + 1,
+            entry_hash: chain_hash(&previous, draft),
+        };
+        g.audit.push((draft.clone(), receipt.clone()));
+        Ok(receipt)
+    }
+
+    async fn dataset_days(
+        &self,
+        dataset_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        limit: u32,
+    ) -> StoreResult<Vec<DatasetDay>> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        let mut v: Vec<DatasetDay> = g
+            .datasets
+            .iter()
+            .filter(|d| d.dataset_id == dataset_id && d.day >= start && d.day <= end)
+            .cloned()
+            .collect();
+        v.sort_by_key(|d| d.day);
+        v.truncate(limit as usize);
+        Ok(v)
+    }
+
+    async fn projections(&self) -> StoreResult<Vec<ProjectionRow>> {
+        self.check()?;
+        let mut v = self.inner.lock().unwrap().projections.clone();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
+    }
+
+    async fn merge_dataset_day(
+        &self,
+        dataset_id: &str,
+        day: NaiveDate,
+        metrics: &serde_json::Map<String, Value>,
+        sources: &[String],
+        at: DateTime<Utc>,
+    ) -> StoreResult<()> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let i = match g
+            .datasets
+            .iter()
+            .position(|d| d.dataset_id == dataset_id && d.day == day)
+        {
+            Some(i) => i,
+            None => {
+                g.datasets.push(DatasetDay {
+                    dataset_id: dataset_id.to_string(),
+                    day,
+                    metrics: serde_json::Map::new(),
+                    sources_reported: Vec::new(),
+                    updated_at: at,
+                });
+                g.datasets.len() - 1
+            }
+        };
+        let d = &mut g.datasets[i];
+        for (k, v) in metrics {
+            d.metrics.insert(k.clone(), v.clone());
+        }
+        d.sources_reported.extend(sources.iter().cloned());
+        d.sources_reported.sort();
+        d.sources_reported.dedup();
+        d.updated_at = at;
+        Ok(())
+    }
+
+    async fn event_states(
+        &self,
+        event_type: &str,
+        end: DateTime<Utc>,
+    ) -> StoreResult<Vec<EventStateCount>> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        let mut latest: HashMap<(String, String, String), (i64, String)> = HashMap::new();
+        for f in g
+            .outbox
+            .iter()
+            .filter(|f| f.event.event_type == event_type && f.event.occurred_at < end)
+        {
+            let e = &f.event;
+            let key = (
+                e.producer.clone(),
+                e.subject_kind.clone(),
+                e.subject_id.clone(),
+            );
+            let newer = latest.get(&key).is_none_or(|(v, _)| e.version > *v);
+            if newer {
+                latest.insert(key, (e.version, e.state.clone()));
+            }
+        }
+        let mut counts: HashMap<(String, String), i64> = HashMap::new();
+        for ((producer, _, _), (_, state)) in latest {
+            *counts.entry((producer, state)).or_default() += 1;
+        }
+        let mut v: Vec<EventStateCount> = counts
+            .into_iter()
+            .map(|((producer, state), subjects)| EventStateCount {
+                producer,
+                state,
+                subjects,
+            })
+            .collect();
+        v.sort_by(|a, b| (&a.producer, &a.state).cmp(&(&b.producer, &b.state)));
+        Ok(v)
+    }
+
+    async fn quarantined_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> StoreResult<i64> {
+        self.check()?;
+        let g = self.inner.lock().unwrap();
+        Ok(g.quarantined_at
+            .iter()
+            .filter(|t| **t >= start && **t < end)
+            .count() as i64)
+    }
+
+    async fn audit_window(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<(AuditDraft, AuditReceipt)>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .audit
+            .iter()
+            .filter(|(d, r)| {
+                d.occurred_at >= start
+                    && d.occurred_at < end
+                    && after.is_none_or(|a| r.sequence > a)
+            })
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
+    async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(BeginOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) {
+            return Ok(BeginOutcome::VersionTaken);
+        }
+        let mut row = op.clone();
+        row.status = OpStatus::Pending;
+        row.sent_at = None;
+        row.settled_at = None;
+        inner.operations.push(row);
+        Ok(BeginOutcome::Started)
+    }
+
+    async fn mark_sent(&self, sub: &str, key: uuid::Uuid, at: DateTime<Utc>) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        {
+            Some(o) if o.status == OpStatus::Pending => {
+                o.status = OpStatus::Sent;
+                o.sent_at = Some(at);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn settle_operation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        st: &Settlement,
+    ) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        {
+            Some(o) if o.status.may_become(st.status) => {
+                o.status = st.status;
+                o.source_status = st.source_status.clone();
+                o.source_version = st.source_version.clone();
+                o.error_code = st.error_code.clone();
+                if st.status.settled() {
+                    o.settled_at = Some(st.at);
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .operations
+            .iter()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+            .cloned())
+    }
+
+    async fn open_operations(
+        &self,
+        before: DateTime<Utc>,
+        limit: u32,
+    ) -> StoreResult<Vec<Operation>> {
+        self.check()?;
+        let mut open: Vec<Operation> = self
+            .inner
+            .lock()
+            .unwrap()
+            .operations
+            .iter()
+            .filter(|o| !o.status.settled() && o.created_at < before)
+            .cloned()
+            .collect();
+        open.sort_by_key(|o| o.created_at);
+        open.truncate(limit as usize);
+        Ok(open)
+    }
+
+    async fn local_command(
+        &self,
+        op: &Operation,
+        change: &LocalChange,
+    ) -> StoreResult<LocalOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(LocalOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) {
+            return Ok(LocalOutcome::VersionTaken);
+        }
+        let now = op.created_at;
+        let applied: Result<(String, i64), &'static str> = match change {
+            LocalChange::PrivacyRegister { kind, subject_ref } => {
+                if inner
+                    .privacy
+                    .iter()
+                    .any(|p| p.request_id == op.operation_id)
+                {
+                    Err("VERSION_CONFLICT")
+                } else {
+                    inner.privacy.push(PrivacyRequest {
+                        request_id: op.operation_id,
+                        kind: kind.clone(),
+                        subject_ref: *subject_ref,
+                        state: "OPEN".into(),
+                        created_by: format!("hq:{}", op.principal_sub),
+                        created_at: now,
+                        updated_at: now,
+                        completed_at: None,
+                        version: 1,
+                        services: PRIVACY_SERVICES
+                            .iter()
+                            .map(|s| PrivacyService {
+                                service: s.to_string(),
+                                outcome: "PENDING".into(),
+                                recorded_by: None,
+                                recorded_at: None,
+                            })
+                            .collect(),
+                    });
+                    Ok(("OPEN".into(), 1))
+                }
+            }
+            LocalChange::PrivacyRecord {
+                request_id,
+                service,
+                outcome,
+                expected_version,
+            } => {
+                match inner
+                    .privacy
+                    .iter_mut()
+                    .find(|p| p.request_id == *request_id)
+                {
+                    None => Err("RESOURCE_NOT_FOUND"),
+                    Some(p) if p.version != *expected_version || p.state != "OPEN" => {
+                        Err("VERSION_CONFLICT")
+                    }
+                    Some(p) => match p.services.iter_mut().find(|s| s.service == *service) {
+                        None => Err("RESOURCE_NOT_FOUND"),
+                        Some(s) if s.outcome != "PENDING" => Err("VERSION_CONFLICT"),
+                        Some(s) => {
+                            s.outcome = outcome.clone();
+                            s.recorded_by = Some(format!("hq:{}", op.principal_sub));
+                            s.recorded_at = Some(now);
+                            p.version += 1;
+                            p.updated_at = now;
+                            if p.services.iter().all(|s| s.outcome != "PENDING") {
+                                p.state = "COMPLETE".into();
+                                p.completed_at = Some(now);
+                            }
+                            Ok((p.state.clone(), p.version))
+                        }
+                    },
+                }
+            }
+        };
+        let mut row = op.clone();
+        match applied {
+            Ok((status, version)) => {
+                row.status = OpStatus::Succeeded;
+                row.sent_at = Some(now);
+                row.settled_at = Some(now);
+                row.source_status = Some(status.clone());
+                row.source_version = Some(version.to_string());
+                inner.operations.push(row);
+                Ok(LocalOutcome::Applied { status, version })
+            }
+            Err(code) => {
+                row.status = OpStatus::Failed;
+                row.settled_at = Some(now);
+                row.source_status = Some("REFUSED".into());
+                row.error_code = Some(code.into());
+                inner.operations.push(row);
+                Ok(LocalOutcome::Refused(code))
+            }
+        }
+    }
+
+    async fn privacy_requests(
+        &self,
+        after: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<PrivacyRequest>> {
+        self.check()?;
+        let mut all = self.inner.lock().unwrap().privacy.clone();
+        all.sort_by_key(|p| (p.created_at, p.request_id));
+        Ok(all
+            .into_iter()
+            .filter(|p| after.is_none_or(|a| (p.created_at, p.request_id) > a))
+            .take(limit as usize)
+            .collect())
+    }
+
+    async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .privacy
+            .iter()
+            .find(|p| p.request_id == id)
+            .cloned())
+    }
+
+    async fn ingest_event(
+        &self,
+        event: &OwnerEvent,
+        accepted: bool,
+        received_at: DateTime<Utc>,
+    ) -> StoreResult<IngestOutcome> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let key = (event.producer.clone(), event.event_id);
+        if g.inbox.contains_key(&key) {
+            return Ok(IngestOutcome::Duplicate);
+        }
+        let outcome = if !accepted {
+            IngestOutcome::Quarantined
+        } else if g.outbox.iter().any(|f| {
+            f.event.producer == event.producer
+                && f.event.subject_kind == event.subject_kind
+                && f.event.subject_id == event.subject_id
+                && f.event.version >= event.version
+        }) {
+            IngestOutcome::Stale
+        } else {
+            let sequence = g.outbox.last().map_or(1, |f| f.sequence + 1);
+            g.outbox.push(FeedEvent {
+                sequence,
+                event: event.clone(),
+                appended_at: received_at,
+            });
+            IngestOutcome::Appended(sequence)
+        };
+        g.inbox.insert(key, outcome.as_str());
+        if outcome == IngestOutcome::Quarantined {
+            g.quarantined_at.push(received_at);
+        }
+        let name = crate::routes::EVENT_INBOX_PROJECTION;
+        let mut row = g
+            .projections
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .unwrap_or(ProjectionRow {
+                name: name.to_string(),
+                last_event_at: None,
+                open_gaps: 0,
+                quarantined: 0,
+                updated_at: received_at,
+            });
+        match outcome {
+            IngestOutcome::Quarantined => row.quarantined += 1,
+            _ => {
+                row.last_event_at = Some(
+                    row.last_event_at
+                        .map_or(received_at, |t| t.max(received_at)),
+                )
+            }
+        }
+        row.updated_at = received_at;
+        g.projections.retain(|p| p.name != name);
+        g.projections.push(row);
+        Ok(outcome)
+    }
+
+    async fn event_feed(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<FeedEvent>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .outbox
+            .iter()
+            .filter(|f| {
+                f.appended_at >= start
+                    && f.appended_at < end
+                    && after.is_none_or(|a| f.sequence > a)
+            })
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
+    async fn acknowledge_events(
+        &self,
+        consumer: &str,
+        sequence: i64,
+        _at: DateTime<Utc>,
+    ) -> StoreResult<AckOutcome> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let head = g.outbox.last().map_or(0, |f| f.sequence);
+        if sequence > head {
+            return Ok(AckOutcome::BeyondHead);
+        }
+        let stored = g.cursors.entry(consumer.to_string()).or_insert(sequence);
+        *stored = (*stored).max(sequence);
+        Ok(AckOutcome::Acknowledged(*stored))
+    }
+
+    async fn begin_activation(
+        &self,
+        op: &Operation,
+        request: &ActivationRequest,
+    ) -> StoreResult<BeginOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(BeginOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) || inner
+            .activations
+            .iter()
+            .any(|a| a.request_id == request.request_id)
+        {
+            return Ok(BeginOutcome::VersionTaken);
+        }
+        let mut row = op.clone();
+        row.status = OpStatus::Pending;
+        row.sent_at = None;
+        row.settled_at = None;
+        inner.operations.push(row);
+        let mut rec = request.clone();
+        rec.state = "REQUESTED".into();
+        rec.dispatched_at = None;
+        rec.run_id = None;
+        inner.activations.push(rec);
+        Ok(BeginOutcome::Started)
+    }
+
+    async fn settle_activation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        st: &Settlement,
+        update: &ActivationUpdate,
+    ) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(run) = update.run_id {
+            if inner.activations.iter().any(|a| a.run_id == Some(run)) {
+                return Err(StoreError::Invalid("run already linked"));
+            }
+        }
+        let Some(o) = inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        else {
+            return Ok(false);
+        };
+        if !o.status.may_become(st.status) {
+            return Ok(false);
+        }
+        o.status = st.status;
+        o.source_status = st.source_status.clone();
+        o.source_version = st.source_version.clone();
+        o.error_code = st.error_code.clone();
+        if st.status.settled() {
+            o.settled_at = Some(st.at);
+        }
+        let id = o.operation_id;
+        if let Some(a) = inner
+            .activations
+            .iter_mut()
+            .find(|a| a.request_id == id && a.state == "REQUESTED")
+        {
+            if let Some(state) = update.state {
+                a.state = state.to_string();
+            }
+            a.dispatched_at = a.dispatched_at.or(update.dispatched_at);
+            a.run_id = a.run_id.or(update.run_id);
+        }
+        Ok(true)
+    }
+
+    async fn link_activation_run(&self, request_id: uuid::Uuid, run_id: i64) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if inner.activations.iter().any(|a| a.run_id == Some(run_id)) {
+            return Ok(false);
+        }
+        match inner
+            .activations
+            .iter_mut()
+            .find(|a| a.request_id == request_id && a.state == "DISPATCHED" && a.run_id.is_none())
+        {
+            Some(a) => {
+                a.run_id = Some(run_id);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    async fn activation_requests(
+        &self,
+        before: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationRequest>> {
+        self.check()?;
+        let mut all = self.inner.lock().unwrap().activations.clone();
+        all.sort_by_key(|a| std::cmp::Reverse((a.created_at, a.request_id)));
+        Ok(all
+            .into_iter()
+            .filter(|a| before.is_none_or(|b| (a.created_at, a.request_id) < b))
+            .take(limit as usize)
+            .collect())
+    }
+
+    async fn activation_request(&self, id: uuid::Uuid) -> StoreResult<Option<ActivationRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .activations
+            .iter()
+            .find(|a| a.request_id == id)
+            .cloned())
+    }
+
+    async fn activations_for_runs(&self, run_ids: &[i64]) -> StoreResult<Vec<ActivationRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .activations
+            .iter()
+            .filter(|a| a.run_id.is_some_and(|r| run_ids.contains(&r)))
+            .cloned()
+            .collect())
+    }
+
+    async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {
+        self.check()?;
+        let mut g = self.inner.lock().unwrap();
+        let (c0, r0) = (g.claims.len(), g.rates.len());
+        g.claims.retain(|_, keep| *keep > now);
+        g.rates
+            .retain(|(_, start), _| *start > now - Duration::hours(1));
+        Ok(CleanupStats {
+            claims: (c0 - g.claims.len()) as u64,
+            rate_buckets: (r0 - g.rates.len()) as u64,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claim(kind: ClaimKind, v: &str) -> Claim {
+        Claim {
+            kind,
+            value: v.into(),
+            keep_until: Utc::now() + Duration::minutes(11),
+        }
+    }
+
+    #[tokio::test]
+    async fn claims_are_all_or_nothing() {
+        let s = MemoryStore::new();
+        assert_eq!(
+            s.claim_once(&[claim(ClaimKind::Nonce, "n1"), claim(ClaimKind::Jti, "j1")])
+                .await
+                .unwrap(),
+            ClaimOutcome::Recorded
+        );
+        assert_eq!(
+            s.claim_once(&[claim(ClaimKind::Nonce, "n2"), claim(ClaimKind::Jti, "j1")])
+                .await
+                .unwrap(),
+            ClaimOutcome::Replay(ClaimKind::Jti)
+        );
+        // n2 was not recorded by the refused batch.
+        assert_eq!(
+            s.claim_once(&[claim(ClaimKind::Nonce, "n2")])
+                .await
+                .unwrap(),
+            ClaimOutcome::Recorded
+        );
+    }
+
+    #[tokio::test]
+    async fn audit_chain_links_entries() {
+        let s = MemoryStore::new();
+        let d = AuditDraft {
+            correlation_id: uuid::Uuid::nil(),
+            occurred_at: Utc::now(),
+            actor: "hq:a".into(),
+            session_id: None,
+            capability: None,
+            method: "GET".into(),
+            path: "/x".into(),
+            purpose: None,
+            scope: Value::Null,
+            decision: "ALLOWED".into(),
+            http_status: 200,
+            request_digest: None,
+            approval_id: None,
+            approver: None,
+            detail: Value::Null,
+        };
+        let a = s.append_audit(&d).await.unwrap();
+        let b = s.append_audit(&d).await.unwrap();
+        assert_eq!(a.entry_hash, chain_hash(GENESIS_HASH, &d));
+        assert_eq!(b.entry_hash, chain_hash(&a.entry_hash, &d));
+        assert_eq!((a.sequence, b.sequence), (1, 2));
+    }
+}

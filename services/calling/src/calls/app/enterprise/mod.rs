@@ -17,6 +17,7 @@
 
 mod capture;
 mod dcn;
+mod direct;
 mod forward;
 mod ivr;
 mod orphans;
@@ -133,7 +134,8 @@ text_enum!(
 #[derive(Debug, Clone, FromQueryResult)]
 pub(crate) struct ContextRow {
     pub call_id: Uuid,
-    pub entry_extension_id: Uuid,
+    /// `None` for a direct person-to-person call (`direct`, entry = the callee).
+    pub entry_extension_id: Option<Uuid>,
     pub entry_extension_number: String,
     pub entry_label: String,
     pub policy_id: Option<Uuid>,
@@ -920,18 +922,17 @@ impl AppCallService {
                 if endpoints.is_empty() {
                     // The principal's UNAVAILABLE forwarding, if any, takes the SAME Call.
                     let fresh = context_of(txn, call.id).await?.unwrap_or(context.clone());
-                    if let Some(action) = router::resolve_forward(
-                        &self.calls,
-                        txn,
-                        &self.principals,
-                        super::scope_of(call),
-                        policy,
-                        &fresh,
-                        principal.id().as_uuid(),
-                        ForwardingCondition::Unavailable,
-                        now,
-                    )
-                    .await?
+                    if let Some(action) = self
+                        .forward_or_voicemail_in(
+                            txn,
+                            call,
+                            policy,
+                            &fresh,
+                            principal.id().as_uuid(),
+                            ForwardingCondition::Unavailable,
+                            now,
+                        )
+                        .await?
                     {
                         match action {
                             // A forward that would loop / exceed the budget: evidence, then
@@ -1213,6 +1214,11 @@ impl AppCallService {
         let Some(c) = context_of(db, call_id).await? else {
             return Ok(None);
         };
+        // A direct call routed by enterprise forwarding / voicemail is not an enterprise
+        // call: its representation is unchanged.
+        if c.entry_extension_id.is_none() {
+            return Ok(None);
+        }
         let mut view = json!({
             "extensionId": c.entry_extension_id,
             "extensionNumber": c.entry_extension_number,
@@ -1228,8 +1234,10 @@ impl AppCallService {
                     "SELECT e.queue_id, e.state, e.entered_at, CASE WHEN e.state IN ('WAITING', 'OFFERING') \
                        THEN (SELECT count(*) FROM enterprise_queue_entries o \
                               WHERE o.queue_id = e.queue_id AND o.state IN ('WAITING', 'OFFERING') \
-                                AND (o.entered_at, o.seq) <= (e.entered_at, e.seq)) END AS position \
-                       FROM enterprise_queue_entries e WHERE e.id = $1",
+                                AND (o.entered_at, o.seq) <= (e.entered_at, e.seq)) END AS position, \
+                           q.hold_music \
+                       FROM enterprise_queue_entries e JOIN enterprise_call_queues q ON q.id = e.queue_id \
+                      WHERE e.id = $1",
                     vec![entry.into()],
                 ))
                 .await?
@@ -1238,10 +1246,13 @@ impl AppCallService {
                 let state: String = row.try_get("", "state")?;
                 let entered: chrono::DateTime<chrono::Utc> = row.try_get("", "entered_at")?;
                 let position: Option<i64> = row.try_get("", "position")?;
+                // C15: the queue's built-in hold music for the waiting caller (null = none).
+                let hold_music: Option<String> = row.try_get("", "hold_music")?;
                 view["queue"] = json!({
                     "queueId": queue_id,
                     "state": state,
                     "position": position,
+                    "holdMusic": hold_music.map(|b| json!({ "builtin": b })),
                     "enteredAt": entered.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 });
             }

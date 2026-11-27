@@ -14,11 +14,12 @@ Authority rules: [ADR 0056](../../../docs/decisions/0056-first-party-organizatio
 | `organization_invitations` | SHA-256 token digest, normalized email (binding only; never in events, audit or logs), role, status, expiry |
 | `organization_audit_events` | append-only audit (actor kind, user, calling service, request / correlation ids) |
 | `organization_outbox` | transactional outbox (event envelopes without email, token or profile text) |
+| `organization_notification_publications` | Notification Service relay state (roadmap N7): per source outbox event and recipient chunk, the ids-only `cfmeet.notifications.event` envelope (account references and ids, never email, token or name), state, attempts, expiry; written only while `CF_NOTIFICATIONS_BASE_URL` is set, purged 30 days after settling |
 | `organization_idempotency_records` | stored responses for `Idempotency-Key` replay (never a token) |
 | `organization_service_nonces` | first use of each service token (replay refusal) |
 | `organization_import_runs` | migration import receipts |
 | `organization_platform_scopes`, `organization_provisioning` | Section 7 scope mapping / provisioning (ids and states only; empty in Section 5) |
-| `organization_scope_service_bindings` | Section 12 follow-up: operator-recorded Platform Access service account / credential **ids** for Enterprise Calling inside an organization's triple (never a credential value; Platform Access re-verifies at use) |
+| `organization_scope_service_bindings` | Section 12 follow-up / ADR 0058 A2: Platform Access service account / credential **ids** for Calling and Messaging inside an organization's triple, `source` AUTOMATIC (saga) or OPERATOR, last verification, credential expiry and the pending-revocation state after archive (never a credential value; Platform Access re-verifies at use) |
 
 Sections 6–7 add `organization_teams`, `organization_team_members` (+ append-only
 `organization_team_member_history`), `organization_policies` (typed document, revision) and

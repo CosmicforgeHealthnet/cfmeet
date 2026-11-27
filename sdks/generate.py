@@ -143,8 +143,18 @@ def operations(config: dict) -> tuple[list[dict], list[str]]:
     ops: list[dict] = []
     names: dict[tuple[str, str], str] = {}
     found_paid = set()
+    # ADR 0061 / 0062: a route that has a partner alias (`/v1/meetings/*`, `aliasOf`) is
+    # reached by platform and app credentials ONLY through that alias; the SDK therefore
+    # never offers the machine credential modes on the original `/api/v2` operation.
+    aliased = {r["aliasOf"] for r in manifest["routes"] if r.get("aliasOf")}
+    machine_modes = {"PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"}
     for r in manifest["routes"]:
         domain, method, path = r["domain"], r["method"], r["pattern"]
+        auth = r["auth"]
+        if r["id"] in aliased:
+            auth = [a for a in auth if a not in machine_modes]
+            if not auth:
+                continue
         doc = docs.get(domain)
         node = doc and doc["paths"].get(path, {}).get(method.lower())
         if not node:
@@ -186,7 +196,7 @@ def operations(config: dict) -> tuple[list[dict], list[str]]:
         success = sorted(int(k) for k in node.get("responses", {}) if k.isdigit() and k.startswith("2"))
         ops.append({
             "domain": domain, "name": name, "operationId": node.get("operationId", ""), "method": method,
-            "path": path, "protocol": r["protocol"], "auth": r["auth"], "scope": r.get("requiredScope"),
+            "path": path, "protocol": r["protocol"], "auth": auth, "scope": r.get("requiredScope"),
             "pathParams": path_params, "query": query, "headers": headers,
             "body": "NONE" if not body else ("REQUIRED" if body.get("required") else "OPTIONAL"),
             "idempotency": idempotency, "retry": retry, "paidTelecom": is_paid, "pagination": pagination,

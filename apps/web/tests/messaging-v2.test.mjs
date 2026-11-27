@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import axios from "axios";
+import * as privateShares from "../src/lib/messaging/private-shares.ts";
 
 function load(path, dependencies = {}, globals = {}) {
   const exports = {};
@@ -182,6 +183,7 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
     "@/services/messaging-realtime": { MessagingRealtimeTransport: Transport },
     "@/services/messaging-session": { messagingClientAccessToken: () => ({}), messagingSessionDeviceToken: () => ({}) },
     "./api": {},
+    "./private-shares": privateShares,
     "./managed-store": load("../src/lib/messaging/managed-store.ts"),
     "./outbox": load("../src/lib/messaging/outbox.ts"),
     "./routes": routes,
@@ -195,6 +197,14 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
       return { conversations: [], nextCursor: null };
     } },
     "./crypto-client": { CryptoClient: class {}, CryptoWorkerError: class extends Error {} },
+    "./urls": urls,
+    "@/lib/auth/device-label": load("../src/lib/auth/device-label.ts"),
+    "./conversation-title": load("../src/lib/messaging/conversation-title.ts"),
+    "./e2ee-membership": load("../src/lib/messaging/e2ee-membership.ts"),
+    "./chat-list": load("../src/lib/messaging/chat-list.ts"),
+    "./rich-content": load("../src/lib/messaging/rich-content.ts"),
+    "@/lib/auth/account-device": { accountDevice: {} },
+    "@/lib/auth/session": { accountSession: {} },
   }, { process: { env: { NEXT_PUBLIC_MESSAGING_URL: "https://messaging.example" } },
     setInterval, clearInterval, setTimeout, navigator: { onLine: true },
     window: { addEventListener() {}, removeEventListener() {} }, crypto: globalThis.crypto });

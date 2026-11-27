@@ -3,8 +3,8 @@ name: CF Meet coordinated production release
 # The single production release path for every CF Meet backend service (Meeting Service,
 # Platform Access, Organizations, Messaging, Calling, Communications, Numbering, Privacy
 # Relay, SMS Gateway, Telephony, Developer Platform, API Gateway; the shared scan gateway
-# is upgraded only where it is already deployed). Dispatch only, main only, and the
-# dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
+# is upgraded only where it is already deployed). Reusable automatic release or manual
+# dispatch, main only, and the dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
 # for that SHA, their revision label is verified, and they are transferred to the VPS over
 # SSH; infra/calling/production/coordinated_release.py then performs the operation there.
 # `certify` is the read-only live-production certification: it changes nothing on the VPS,
@@ -12,6 +12,28 @@ name: CF Meet coordinated production release
 # public API from the runner and writes the verdict (certification_report.py).
 # Runbook: docs/operations/coordinated-production-release.md.
 on:
+  workflow_call:
+    inputs:
+      operation:
+        description: Production operation (automatic caller always selects release)
+        required: true
+        type: string
+      release_sha:
+        description: Full SHA of the main head
+        required: true
+        type: string
+      confirm:
+        required: false
+        type: string
+        default: ''
+      request_id:
+        required: false
+        type: string
+        default: ''
+      reason_code:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       operation:
@@ -19,13 +41,13 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, developer-acceptance, diagnose, email-acceptance, developer-access-review]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, activate-organization-bindings, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, org-cutover-first-activation, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-personal-encryption, activate-web-push, activate-web-origins, activate-gateway-docs, activate-edge-rate-limits, activate-token-ceiling, activate-service-key-publish, activate-service-key-switch, activate-service-key-retire, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, activate-admin-bridge, activate-admin-bridge-hq, activate-admin-bridge-notifications, activate-admin-bridge-partners, activate-admin-bridge-communications, activate-admin-bridge-meetings, activate-admin-bridge-messaging, activate-admin-bridge-calling, activate-admin-bridge-hq-commands, activate-admin-bridge-events, activate-plan-enforcement, activate-developer-owner-invitations, activate-organization-export-delivery, activate-meeting-notice-preferences, activate-public-internal-denial, activate-client-address-limits, activate-account-privacy, activate-database-pools, activate-database-capacity, activate-local-send-policy, activate-meeting-recording, activate-device-local-recording, activate-service-log-collector, activate-phone-accounts, activate-native-push, activate-managed-kt-witness, activate-notifications-owners, activate-notifications-routing, activate-notifications-relay, activate-messaging-publications, activate-organizations-publications, activate-communications-publications, activate-developer-publications, activate-meeting-publications, activate-calling-publications, activate-notifications-push, activate-messaging-push-mirror, activate-calling-push, activate-critical-lane, activate-preference-copy, activate-preference-authority, activate-notifications-email, activate-notification-fence, activate-meeting-in-app-notices, activate-platform-users, activate-platform-user-tokens, activate-partner-chat, activate-partner-calls, activate-gateway-calling-edge, activate-partner-push, activate-platform-meetings, activate-oauth-apps, activate-oauth, activate-delegated-apps, activate-app-installs, activate-app-events, activate-app-directory, activate-in-meeting-apps, developer-acceptance, organization-acceptance, diagnose, email-acceptance, developer-access-review, notifications-acceptance, deploy-monitoring, platform-acceptance]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
         required: true
       confirm:
-        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp'
+        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp; activate-service-key-*: service=<name>; activate-gateway-calling-edge: owner-approved-calling-edge; activate-oauth-apps: no-reviewers-yet (only while CFMEET_APP_REVIEWERS is empty); activate-notifications-routing: <category>-<channel>-<mode> or user-facing-<in-app|push>-<mode>; activate-meeting-in-app-notices: enable | disable; activate-database-capacity: restart-core-database; activate-local-send-policy: prepare | enable | disable; activate-meeting-recording: prepare | enable-30-days; activate-device-local-recording: device-only; activate-service-log-collector: retain-14-days; activate-phone-accounts: twilio-verify-ready; activate-native-push: native-push-credentials-ready; activate-managed-kt-witness: operator-managed; activate-admin-bridge-hq: hq-enrolled-read-only; activate-admin-bridge-hq-commands: hq-commands-two-person; activate-plan-enforcement: plan-limits-reviewed'
         type: string
         required: false
         default: ''
@@ -83,13 +105,20 @@ jobs:
             // that ran on this push must be green; a path-filtered one that did not run must
             // have its latest completed main run green (its inputs did not change).
             const required = [
-              'backend.yml', 'platform-access.yml', 'organizations.yml', 'messaging.yml', 'calling.yml',
-              'communications-hub.yml', 'numbering.yml', 'privacy-relay.yml', 'sms-gateway.yml',
-              'telephony.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
+              'backend.yml', 'platform-access.yml', 'organizations.yml', 'notifications.yml', 'admin-bridge.yml', 'messaging.yml', 'calling.yml',
+              'communications-hub.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
               'contracts.yml', 'service-boundaries.yml', 'dependency-security.yml', 'migration-guard.yml',
-              'backup-restore-drill.yml', 'certification.yml', 'unified-messaging-e2e.yml',
-              'enterprise-calling-certification.yml', 'communications-e2e.yml'
+              'certification.yml', 'unified-messaging-e2e.yml', 'enterprise-calling-certification.yml'
             ];
+            // Owner decision 2026-11-13: external-telecom features (PSTN/SIP carrier, number
+            // provisioning, SMS, phone OTP, telecom Privacy Relay) stay disabled until provider
+            // credentials exist. Their CI and certifications still run on every push and are
+            // reported here, but they are advisory: they never block a first-party release.
+            // The backup drill is advisory too (owner decision: no backup prerequisite).
+            const advisory = new Set([
+              'telephony.yml', 'telephony-sip-certification.yml', 'sms-gateway.yml', 'numbering.yml',
+              'privacy-relay.yml', 'communications-e2e.yml', 'backup-restore-drill.yml', 'cfmeet-offsite-backup.yml'
+            ]);
             const ignored = new Set(['Deploy Backend', 'CF Meet coordinated production release']);
             const deadline = Date.now() + 70 * 60 * 1000;
             let stable = 0;
@@ -102,8 +131,16 @@ jobs:
               const all = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
                 owner, repo, head_sha: sha, event: 'push', per_page: 100
               });
-              const runs = all.filter(r => r.head_sha === sha && r.event === 'push' &&
+              const pushed = all.filter(r => r.head_sha === sha && r.event === 'push' &&
                 r.head_branch === 'main' && !ignored.has(r.name));
+              // Gate only the named backend/contract/security CI checks; unrelated
+              // frontend or Vercel workflows are intentionally non-blocking.
+              // The automatic caller itself is also excluded to prevent a deadlock.
+              const runs = pushed.filter(r => required.includes(r.path.split('/').pop()));
+              for (const r of pushed.filter(r => advisory.has(r.path.split('/').pop()) && r.status === 'completed' &&
+                  !['success', 'skipped', 'neutral'].includes(r.conclusion))) {
+                core.warning('Advisory (external telecom / backup, not blocking): ' + r.name + ': ' + r.conclusion);
+              }
               const bad = runs.filter(r => r.status === 'completed' &&
                 !['success', 'skipped', 'neutral'].includes(r.conclusion));
               if (bad.length) {
@@ -135,19 +172,67 @@ jobs:
             }
             core.setFailed('Timed out waiting for green main CI for ' + sha);
 
-  images:
-    name: Build or reuse release images
-    needs: gate
+  plan:
+    name: Plan changes and missing first-time services
     if: inputs.operation == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    outputs:
+      services: ${{ steps.scope.outputs.services }}
+      scope_b64: ${{ steps.scope.outputs.scope_b64 }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Compare latest main with last completed VPS release
+        id: scope
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15)
+          base=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" python3 - <<'PY'
+          import json, os
+          path = '/opt/cfmeet-core/coordinated/journal.json'
+          journal = json.load(open(path)) if os.path.exists(path) else []
+          done = [e['sha'] for e in journal if e['operation'] == 'release' and e['status'] == 'done']
+          print(done[-1] if done else '')
+          PY
+          )
+          [[ -z "$base" || "$base" =~ ^[a-f0-9]{40}$ ]]
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "docker ps --format '{{.Names}}'" > "$RUNNER_TEMP/running-containers.txt"
+          python3 infra/calling/production/release_scope.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "${base:--}" "$RUNNER_TEMP/release-scope.json" "$RUNNER_TEMP/running-containers.txt"
+          echo "services=$(python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1]))["changed"],separators=(",",":")))' "$RUNNER_TEMP/release-scope.json")" >> "$GITHUB_OUTPUT"
+          echo "scope_b64=$(base64 -w0 "$RUNNER_TEMP/release-scope.json")" >> "$GITHUB_OUTPUT"
+          echo '### Release plan' >> "$GITHUB_STEP_SUMMARY"
+          python3 -m json.tool "$RUNNER_TEMP/release-scope.json" >> "$GITHUB_STEP_SUMMARY"
+
+  images:
+    name: Build only changed service images
+    needs: plan
+    # No image matrix at all for documentation-only or already-released updates.
+    if: inputs.operation == 'release' && needs.plan.result == 'success' && needs.plan.outputs.services != '[]'
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/cfmeet-core-images.yml
+    with:
+      services: ${{ needs.plan.outputs.services }}
 
   production:
     name: ${{ inputs.operation }} on the production VPS
-    needs: [gate, images]
-    if: ${{ always() && needs.gate.result == 'success' && (needs.images.result == 'success' || needs.images.result == 'skipped') }}
+    needs: [gate, plan, images]
+    if: ${{ always() && needs.gate.result == 'success' && (needs.plan.result == 'success' || needs.plan.result == 'skipped') && (needs.images.result == 'success' || needs.images.result == 'skipped') }}
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 180
@@ -185,6 +270,22 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
 
+      - name: Restore precomputed image scope
+        if: inputs.operation == 'release'
+        env:
+          SCOPE_BASE64: ${{ needs.plan.outputs.scope_b64 }}
+        run: |
+          set -euo pipefail
+          test -n "$SCOPE_BASE64"
+          printf '%s' "$SCOPE_BASE64" | base64 -d > infra/calling/production/release-scope.json
+          python3 -m json.tool infra/calling/production/release-scope.json > /dev/null
+          python3 - <<'PY'
+          import json, os
+          scope=json.load(open('infra/calling/production/release-scope.json'))
+          assert scope['head']==os.environ['GITHUB_SHA'], 'Wrong planned release SHA'
+          print('Images to deploy:',scope['changed'],'Images to keep:',scope['unchanged'])
+          PY
+
       - name: Authenticate for release images
         if: inputs.operation == 'release'
         uses: docker/login-action@v3
@@ -210,7 +311,7 @@ jobs:
           [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 10485760 )) || { echo "::error::Less than 10 GiB free on the VPS"; exit 1; }
           manifest="$RUNNER_TEMP/registry.json"
           printf '{}' > "$manifest"
-          for service in platform-access organizations messaging calling communications numbering privacy-relay sms-gateway telephony meeting-service developer-platform api-gateway security-scan-gateway; do
+          for service in $(python3 -c 'import json;print(" ".join(json.load(open("infra/calling/production/release-scope.json"))["changed"]))'); do
             image="ghcr.io/$owner/cfmeet-$service:$IMAGE_SHA"
             docker pull -q "$image"
             revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
@@ -229,30 +330,23 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > '/opt/cfmeet-core/coordinated/registry-$IMAGE_SHA.json'" < "$manifest"
           { echo '### Release images'; echo '```json'; cat "$manifest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Release scope (replace only images whose build inputs changed)
-        # Services whose image build inputs did not change since the latest completed release
-        # keep their running container; the VPS re-checks that each runs exactly the image
-        # recorded for that release before keeping it.
+      - name: Refuse a stale image plan if another release completed
         if: inputs.operation == 'release'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
-          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
-          base=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" python3 - <<'PY'
+          live_base=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" python3 - <<'PY'
           import json, os
-          path = '/opt/cfmeet-core/coordinated/journal.json'
-          journal = json.load(open(path)) if os.path.exists(path) else []
-          done = [e['sha'] for e in journal if e['operation'] == 'release' and e['status'] == 'done']
+          path='/opt/cfmeet-core/coordinated/journal.json'
+          journal=json.load(open(path)) if os.path.exists(path) else []
+          done=[e['sha'] for e in journal if e['operation']=='release' and e['status']=='done']
           print(done[-1] if done else '')
           PY
           )
-          [[ -z "$base" || "$base" =~ ^[a-f0-9]{40}$ ]]
-          cd infra/calling/production
-          python3 release_scope.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "${base:--}" release-scope.json
-          { echo '### Release scope'; echo '```json'; python3 -c 'import json; d=json.load(open("release-scope.json")); print(json.dumps({k: d[k] for k in ("base", "changed", "unchanged", "reason")}, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          planned_base=$(python3 -c 'import json;print(json.load(open("infra/calling/production/release-scope.json")).get("base") or "")')
+          test "$live_base" = "$planned_base" || { echo "::error::Another release completed after planning; rerun latest main"; exit 1; }
 
       - name: Activation base (images of the dispatched head equal the deployed release)
         # Activations change flags, trust bundles and routing, never images. When the head has
@@ -278,35 +372,48 @@ jobs:
           python3 activation_base.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "$base" activation-base.json
           { echo '### Activation base'; echo '```json'; python3 -c 'import json; d=json.load(open("activation-base.json")); d.pop("inputs"); print(json.dumps(d, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install the Resend credentials and the acceptance recipient (never printed)
-        # The dedicated CF Meet Resend API key (and optional webhook signing secret) live in
-        # the production environment's secrets; they reach the VPS only through SSH stdin
-        # into 0400 files of the existing secret store. The acceptance recipient (a
-        # controlled inbox; default Resend's test inbox) is a non-secret variable.
+      - name: Verify the Resend credentials on the VPS and install the acceptance recipient (never printed)
+        # Owner decision (2026-11-16): the dedicated CF Meet Resend API key and the webhook
+        # signing secret are stored ONLY on the production VPS, as root-owned files of the
+        # existing secret store. Nothing is read from GitHub secrets and nothing is copied: this
+        # step proves over SSH that each file exists, is a regular file owned by root with no
+        # group/other access, and holds a value of the expected form. Values never leave the
+        # VPS and are never printed (format checks run there with grep -q). email_operations.py
+        # mounts the same files read-only into the Meeting Service. The acceptance recipient (a
+        # controlled inbox; default Resend's test inbox) stays a non-secret variable.
         if: inputs.operation == 'activate-resend-email' || inputs.operation == 'email-acceptance'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          OPERATION: ${{ inputs.operation }}
-          RESEND_API_KEY: ${{ secrets.CFMEET_RESEND_API_KEY }}
-          RESEND_WEBHOOK_SECRET: ${{ secrets.CFMEET_RESEND_WEBHOOK_SECRET }}
           ACCEPTANCE_RECIPIENT: ${{ vars.CFMEET_EMAIL_ACCEPTANCE_RECIPIENT }}
         run: |
           set -euo pipefail
           ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
-          install_secret() {  # name, value
-            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-              "umask 077; mkdir -p /opt/cfmeet-core/secrets; cat > '/opt/cfmeet-core/secrets/$1.new' && chmod 0400 '/opt/cfmeet-core/secrets/$1.new' && mv -f '/opt/cfmeet-core/secrets/$1.new' '/opt/cfmeet-core/secrets/$1'" <<< "$2"
-          }
-          if [[ "$OPERATION" == activate-resend-email ]]; then
-            [[ "$RESEND_API_KEY" =~ ^re_[A-Za-z0-9_]{8,200}$ ]] || { echo "::error::CFMEET_RESEND_API_KEY is missing or not a Resend API key"; exit 1; }
-            install_secret resend-api-key "$RESEND_API_KEY"
-            if [[ -n "$RESEND_WEBHOOK_SECRET" ]]; then
-              [[ "$RESEND_WEBHOOK_SECRET" =~ ^whsec_[A-Za-z0-9+/=]{16,200}$ ]] || { echo "::error::CFMEET_RESEND_WEBHOOK_SECRET is not a whsec_ signing secret"; exit 1; }
-              install_secret resend-webhook-secret "$RESEND_WEBHOOK_SECRET"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          dir=/opt/cfmeet-core/secrets
+          [[ -d "$dir" && ! -L "$dir" ]] || { echo "::error::$dir is missing"; exit 1; }
+          read -r downer dmode < <(stat -c '%u %a' "$dir")
+          [[ "$downer" == 0 ]] || { echo "::error::$dir is not owned by root"; exit 1; }
+          (( (8#$dmode & 8#022) == 0 )) || { echo "::error::$dir is writable by group or others (mode $dmode)"; exit 1; }
+          check() {  # file name, value pattern, required|optional
+            local f="$dir/$1" owner mode
+            if [[ ! -e "$f" && ! -L "$f" ]]; then
+              [[ "$3" == required ]] && { echo "::error::$f is missing on the VPS"; exit 1; }
+              echo "$1: absent"; return 0
             fi
-            echo "Resend credentials installed (webhook secret: $([[ -n "$RESEND_WEBHOOK_SECRET" ]] && echo yes || echo no))"
-          fi
+            [[ -f "$f" && ! -L "$f" ]] || { echo "::error::$f is not a regular file"; exit 1; }
+            read -r owner mode < <(stat -c '%u %a' "$f")
+            [[ "$owner" == 0 ]] || { echo "::error::$f is not owned by root"; exit 1; }
+            (( (8#$mode & 8#077) == 0 )) || { echo "::error::$f is accessible to group or others (mode $mode)"; exit 1; }
+            [[ "$(wc -l < "$f")" -le 1 ]] || { echo "::error::$f must hold a single value"; exit 1; }
+            head -c 512 "$f" | tr -d '\r\n' | grep -Eq "$2" \
+              || { echo "::error::$f does not hold a value of the expected form"; exit 1; }
+            echo "$1: present, root-owned, mode $mode, form valid"
+          }
+          check resend-api-key '^re_[A-Za-z0-9_]{8,200}$' required
+          check resend-webhook-secret '^whsec_[A-Za-z0-9+/=]{16,200}$' optional
+          REMOTE
           if [[ -n "$ACCEPTANCE_RECIPIENT" ]]; then
             [[ "$ACCEPTANCE_RECIPIENT" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "::error::CFMEET_EMAIL_ACCEPTANCE_RECIPIENT is not an address"; exit 1; }
             ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > /opt/cfmeet-core/coordinated/email-acceptance-recipient" <<< "$ACCEPTANCE_RECIPIENT"
@@ -342,6 +449,57 @@ jobs:
               | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > /opt/cfmeet-core/coordinated/developer-access-review.json"
           fi
 
+      - name: Alertmanager receiver URLs on the VPS (from environment secrets, never printed)
+        # Backend gap audit P1: the receivers of the production Alertmanager are driven only
+        # by the production environment secrets CFMEET_ALERT_WEBHOOK_URL (generic Alertmanager
+        # webhook JSON) and CFMEET_ALERT_SLACK_WEBHOOK_URL (Slack-compatible incoming webhook),
+        # both optional. A set secret is written to a root-only file of the VPS secret store;
+        # an unset one removes its file, and monitoring_stack.py then deploys Alertmanager
+        # without that integration. This step never fails the operation.
+        if: inputs.operation == 'release' || inputs.operation == 'deploy-monitoring'
+        continue-on-error: true
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          CFMEET_ALERT_WEBHOOK_URL: ${{ secrets.CFMEET_ALERT_WEBHOOK_URL }}
+          CFMEET_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.CFMEET_ALERT_SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          valid_url() {
+            python3 -c 'import os, re, sys; v = os.environ[sys.argv[1]]; sys.exit(0 if re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[\x21-\x7e]{0,2000}", v) else 1)' "$1"
+          }
+          for pair in CFMEET_ALERT_WEBHOOK_URL:alertmanager-webhook-url CFMEET_ALERT_SLACK_WEBHOOK_URL:alertmanager-slack-webhook-url; do
+            name="${pair%%:*}"; file="/opt/cfmeet-core/secrets/${pair#*:}"
+            if [[ -z "${!name}" ]]; then
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f '$file'"
+              echo "::warning::$name is not set: Alertmanager runs without this integration (alerts are not delivered through it)"
+            elif valid_url "$name"; then
+              printf '%s\n' "${!name}" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > '$file.tmp' && mv '$file.tmp' '$file'"
+              echo "$name: installed"
+            else
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f '$file'"
+              echo "::warning::$name is not an https URL: not installed, Alertmanager runs without this integration"
+            fi
+          done
+
+      - name: App reviewers (named reviewers only)
+        if: inputs.operation == 'activate-oauth-apps'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          REVIEWERS: ${{ vars.CFMEET_APP_REVIEWERS }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          if [[ -z "$REVIEWERS" ]]; then
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f /opt/cfmeet-core/coordinated/app-reviewers"
+            echo "::warning::CFMEET_APP_REVIEWERS is not set: apps can be registered (confirm=no-reviewers-yet) but nobody can review them"
+          else
+            [[ "$REVIEWERS" =~ ^[A-Za-z0-9=,\ -]{1,2000}$ ]] || { echo "::error::CFMEET_APP_REVIEWERS has unexpected characters"; exit 1; }
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > /opt/cfmeet-core/coordinated/app-reviewers" <<< "$REVIEWERS"
+          fi
+
       - name: Run the operation on the VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -349,19 +507,33 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           RELEASE_SHA: ${{ inputs.release_sha }}
           CONFIRM: ${{ inputs.confirm }}
+          AUDIT_ACTIVATIONS: ${{ vars.CFMEET_AUDIT_ACTIVATIONS }}
         run: |
           set -euo pipefail
           ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40)
           [[ "$OPERATION" =~ ^[a-z][a-z-]{1,40}$ ]]
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$CONFIRM" =~ ^[a-z,-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, comma and hyphen"; exit 1; }
+          # a-z, comma and hyphen; `service=<name>` (digits allowed) for activate-service-key-*.
+          [[ "$CONFIRM" =~ ^[a-z0-9,=-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, 0-9, comma, equals and hyphen"; exit 1; }
+          [[ "$AUDIT_ACTIVATIONS" == '' || "$AUDIT_ACTIVATIONS" == disabled || "$AUDIT_ACTIVATIONS" == enabled ]] || {
+            echo '::error::CFMEET_AUDIT_ACTIVATIONS must be enabled, disabled, or unset'; exit 1;
+          }
+          campaign=disabled
+          [[ "$OPERATION" != release || "$AUDIT_ACTIVATIONS" != enabled ]] || campaign=enabled
+          if [[ "$OPERATION" == release ]]; then
+            latest=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+            [[ "$latest" == "$GITHUB_SHA" ]] || { echo "::error::Superseded main; refusing old production release"; exit 1; }
+          fi
           run_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           remote="/opt/cfmeet-core/coordinated-releases/$GITHUB_SHA"
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
+          # The monitoring stack's rules, routing and exporter configuration (monitoring_stack.py).
+          rm -rf infra/calling/production/monitoring-config
+          cp -R infra/monitoring infra/calling/production/monitoring-config
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
           tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-            "cd '$remote' && python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
+            "cd '$remote' && CFMEET_AUDIT_ACTIVATIONS='$campaign' python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
 
       - name: Public API and gateway certification (read-only, unauthenticated)
         id: public

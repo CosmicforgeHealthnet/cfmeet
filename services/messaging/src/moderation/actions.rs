@@ -1,7 +1,7 @@
 //! Moderation actions (§86): application moderators, append-only and audited.
 
 use chrono::{DateTime, Utc};
-use sea_orm::{FromQueryResult, TransactionTrait};
+use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -50,8 +50,8 @@ pub struct ActionRequest {
 }
 
 #[derive(Debug, Clone, FromQueryResult)]
-struct ActionRow {
-    id: Uuid,
+pub(crate) struct ActionRow {
+    pub(crate) id: Uuid,
     kind: String,
     conversation_id: Option<Uuid>,
     message_id: Option<Uuid>,
@@ -60,6 +60,7 @@ struct ActionRow {
     reason: String,
     effective_until: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    moderator_principal_id: Option<Uuid>,
 }
 
 fn view(a: &ActionRow) -> Value {
@@ -73,6 +74,7 @@ fn view(a: &ActionRow) -> Value {
         "reason": a.reason,
         "effectiveUntil": a.effective_until.map(rfc3339),
         "createdAt": rfc3339(a.created_at),
+        "moderatorPrincipalId": a.moderator_principal_id,
     })
 }
 
@@ -80,12 +82,21 @@ fn require<T>(v: Option<T>, field: &str) -> Result<T> {
     v.ok_or_else(|| Error::validation(format!("{field} is required for this kind")))
 }
 
-/// `POST /v1/messaging/moderation/actions`.
-pub async fn apply(
+/// What [`prepare`] checked outside the transaction: the timed action's duration and
+/// the environment's purge grace.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Prepared {
+    pub duration: Option<chrono::Duration>,
+    pub grace: chrono::Duration,
+}
+
+/// Validates an action against the kill switch, the kinds, the reason and the
+/// environment's moderation policy (no change).
+pub(crate) async fn prepare(
     state: &AppState,
     ctx: &TrustedContext,
-    request: ActionRequest,
-) -> Result<Value> {
+    request: &ActionRequest,
+) -> Result<Prepared> {
     crate::operations::require_open(
         &state.db,
         crate::operations::KillSwitch::ModerationActions,
@@ -127,162 +138,212 @@ pub async fn apply(
         }
         (false, None) => None,
     };
-    let grace = chrono::Duration::seconds(effective.retention.deleted_purge_grace_seconds);
+    Ok(Prepared {
+        duration,
+        grace: chrono::Duration::seconds(effective.retention.deleted_purge_grace_seconds),
+    })
+}
+
+/// `POST /v1/messaging/moderation/actions`. `moderator`: the organization moderator a
+/// relayed organization request acts for (gap audit G6), recorded on the action, its
+/// event and its audit entry; `None` for an application moderator credential.
+pub async fn apply(
+    state: &AppState,
+    ctx: &TrustedContext,
+    request: ActionRequest,
+    moderator: Option<Uuid>,
+) -> Result<Value> {
+    let prepared = prepare(state, ctx, &request).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
-    let req = request.clone();
     let row = state
         .db
         .transaction::<_, ActionRow, Error>(move |txn| {
-            Box::pin(async move {
-                let now = st.now();
-                let rctx = request_context();
-                if let Some(r) = req.report_id {
-                    reports::load(txn, &ctx2, r, true).await?.ok_or(Error::code(ErrorCode::NotFound))?;
-                }
-                let conversation = match req.conversation_id {
-                    Some(c) => Some(service::load(txn, &ctx2, c, true).await?.ok_or(Error::code(ErrorCode::NotFound))?),
-                    None => None,
-                };
-                let until = duration.map(|d| now + d);
-                match req.kind.as_str() {
-                    "REMOVE_MESSAGE" => {
-                        let c = require(conversation.as_ref(), "conversationId")?;
-                        let m = messages::load_message(txn, c.id, require(req.message_id, "messageId")?, true)
-                            .await?
-                            .ok_or(Error::code(ErrorCode::NotFound))?;
-                        if m.message_kind == "MLS_COMMIT" {
-                            return Err(Error::reason(ErrorCode::MessageNotModifiable, "HANDSHAKE"));
-                        }
-                        // A tombstone: no member, replay or fanout delivers it again; the
-                        // purge removes the stored ciphertext / text (unless held). The
-                        // moderator never sees E2EE content.
-                        messages::tombstone(txn, &scope_of(&ctx2), &m, "MODERATED", &req.reason, now + grace, &rctx, now).await?;
-                    }
-                    "MUTE_MEMBER" | "UNMUTE_MEMBER" => {
-                        let c = require(conversation.as_ref(), "conversationId")?;
-                        let p = require(req.principal_id, "principalId")?;
-                        membership::restrict_in(txn, &ctx2, c, p, until, &req.reason, &rctx, now).await?;
-                    }
-                    "REMOVE_MEMBER" => {
-                        let c = require(conversation.as_ref(), "conversationId")?;
-                        if c.context_class == "DIRECT" {
-                            return Err(Error::reason(ErrorCode::InvalidTransition, "DIRECT_MEMBERSHIP_FIXED"));
-                        }
-                        let p = require(req.principal_id, "principalId")?;
-                        membership::remove_in(txn, &ctx2, c, p, false, &req.reason, None, &rctx, now).await?;
-                    }
-                    "RESTRICT_PRINCIPAL" => {
-                        let p = require(req.principal_id, "principalId")?;
-                        db::exec(
-                            txn,
-                            "INSERT INTO messaging_principal_restrictions (id, tenant_id, application_id, environment_id, principal_id, \
-                               reason, source, starts_at, ends_at, created_by_credential_id) \
-                             VALUES ($1, $2, $3, $4, $5, $6, 'MODERATOR', $7, $8, $9)",
-                            vec![
-                                Uuid::new_v4().into(),
-                                ctx2.scope.tenant_id.into(),
-                                ctx2.scope.application_id.into(),
-                                ctx2.scope.environment_id.into(),
-                                p.into(),
-                                req.reason.clone().into(),
-                                now.into(),
-                                until.into(),
-                                ctx2.credential_id.into(),
-                            ],
-                        )
-                        .await?;
-                    }
-                    "LIFT_RESTRICTION" => {
-                        let p = require(req.principal_id, "principalId")?;
-                        let n = db::exec(
-                            txn,
-                            "UPDATE messaging_principal_restrictions SET lifted_at = $3 WHERE environment_id = $1 AND principal_id = $2 \
-                               AND lifted_at IS NULL AND ends_at > $3",
-                            vec![ctx2.scope.environment_id.into(), p.into(), now.into()],
-                        )
-                        .await?;
-                        if n == 0 {
-                            return Err(Error::code(ErrorCode::NotFound));
-                        }
-                    }
-                    _ => {
-                        require(req.report_id, "reportId")?;
-                    }
-                }
-                if let Some(r) = req.report_id {
-                    if req.kind == "DISMISS_REPORT" {
-                        reports::resolve(txn, &ctx2, r, "DISMISSED", &req.reason, now).await?;
-                    } else {
-                        reports::resolve(txn, &ctx2, r, "ACTIONED", &req.kind, now).await?;
-                    }
-                }
-                let id = Uuid::new_v4();
-                db::exec(
-                    txn,
-                    "INSERT INTO messaging_moderation_actions (id, tenant_id, application_id, environment_id, kind, conversation_id, \
-                       message_id, principal_id, report_id, reason, effective_until, credential_id, created_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
-                    vec![
-                        id.into(),
-                        ctx2.scope.tenant_id.into(),
-                        ctx2.scope.application_id.into(),
-                        ctx2.scope.environment_id.into(),
-                        req.kind.clone().into(),
-                        req.conversation_id.into(),
-                        req.message_id.into(),
-                        req.principal_id.into(),
-                        req.report_id.into(),
-                        req.reason.clone().into(),
-                        until.into(),
-                        ctx2.credential_id.into(),
-                        now.into(),
-                    ],
-                )
-                .await?;
-                crate::events::outbox::record(
-                    txn,
-                    "messaging.moderation.actioned",
-                    "MODERATION_ACTION",
-                    id,
-                    crate::conversations::service::scope_of(&ctx2),
-                    json!({ "action_id": id, "kind": req.kind, "conversation_id": req.conversation_id,
-                            "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
-                    now,
-                )
-                .await?;
-                audit::record(
-                    txn,
-                    AuditEntry {
-                        ctx: &ctx2,
-                        principal_id: None,
-                        action: "MODERATION_ACTION",
-                        target_kind: "MODERATION_ACTION",
-                        target_id: id,
-                        detail: json!({ "kind": req.kind, "reason": req.reason, "conversation_id": req.conversation_id,
-                                        "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
-                    },
-                    &rctx,
-                    now,
-                )
-                .await?;
-                Ok(ActionRow {
-                    id,
-                    kind: req.kind,
-                    conversation_id: req.conversation_id,
-                    message_id: req.message_id,
-                    principal_id: req.principal_id,
-                    report_id: req.report_id,
-                    reason: req.reason,
-                    effective_until: until,
-                    created_at: now,
-                })
-            })
+            Box::pin(
+                async move { apply_in(txn, &ctx2, &request, moderator, &prepared, st.now()).await },
+            )
         })
         .await
         .map_err(Error::from)?;
     crate::metrics::inc("messaging_moderation_actions_total", &[]);
     Ok(view(&row))
+}
+
+/// Applies a [`prepare`]d action inside the caller's transaction: the change, the
+/// append-only action record, its event and its audit entry. Also used by the admin
+/// bridge's operator commands ([`crate::operator_commands::moderation`]).
+pub(crate) async fn apply_in<C: ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    req: &ActionRequest,
+    moderator: Option<Uuid>,
+    prepared: &Prepared,
+    now: DateTime<Utc>,
+) -> Result<ActionRow> {
+    let rctx = request_context();
+    if let Some(r) = req.report_id {
+        reports::load(txn, ctx, r, true)
+            .await?
+            .ok_or(Error::code(ErrorCode::NotFound))?;
+    }
+    let conversation = match req.conversation_id {
+        Some(c) => Some(
+            service::load(txn, ctx, c, true)
+                .await?
+                .ok_or(Error::code(ErrorCode::NotFound))?,
+        ),
+        None => None,
+    };
+    let until = prepared.duration.map(|d| now + d);
+    match req.kind.as_str() {
+        "REMOVE_MESSAGE" => {
+            let c = require(conversation.as_ref(), "conversationId")?;
+            let m = messages::load_message(txn, c.id, require(req.message_id, "messageId")?, true)
+                .await?
+                .ok_or(Error::code(ErrorCode::NotFound))?;
+            if m.message_kind == "MLS_COMMIT" {
+                return Err(Error::reason(ErrorCode::MessageNotModifiable, "HANDSHAKE"));
+            }
+            // A tombstone: no member, replay or fanout delivers it again; the
+            // purge removes the stored ciphertext / text (unless held). The
+            // moderator never sees E2EE content.
+            messages::tombstone(
+                txn,
+                &scope_of(ctx),
+                &m,
+                "MODERATED",
+                &req.reason,
+                now + prepared.grace,
+                &rctx,
+                now,
+            )
+            .await?;
+        }
+        "MUTE_MEMBER" | "UNMUTE_MEMBER" => {
+            let c = require(conversation.as_ref(), "conversationId")?;
+            let p = require(req.principal_id, "principalId")?;
+            membership::restrict_in(txn, ctx, c, p, until, &req.reason, &rctx, now).await?;
+        }
+        "REMOVE_MEMBER" => {
+            let c = require(conversation.as_ref(), "conversationId")?;
+            if c.context_class == "DIRECT" {
+                return Err(Error::reason(
+                    ErrorCode::InvalidTransition,
+                    "DIRECT_MEMBERSHIP_FIXED",
+                ));
+            }
+            let p = require(req.principal_id, "principalId")?;
+            membership::remove_in(txn, ctx, c, p, false, &req.reason, None, &rctx, now).await?;
+        }
+        "RESTRICT_PRINCIPAL" => {
+            let p = require(req.principal_id, "principalId")?;
+            db::exec(
+                txn,
+                "INSERT INTO messaging_principal_restrictions (id, tenant_id, application_id, environment_id, principal_id, \
+                   reason, source, starts_at, ends_at, created_by_credential_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'MODERATOR', $7, $8, $9)",
+                vec![
+                    Uuid::new_v4().into(),
+                    ctx.scope.tenant_id.into(),
+                    ctx.scope.application_id.into(),
+                    ctx.scope.environment_id.into(),
+                    p.into(),
+                    req.reason.clone().into(),
+                    now.into(),
+                    until.into(),
+                    ctx.credential_id.into(),
+                ],
+            )
+            .await?;
+        }
+        "LIFT_RESTRICTION" => {
+            let p = require(req.principal_id, "principalId")?;
+            let n = db::exec(
+                txn,
+                "UPDATE messaging_principal_restrictions SET lifted_at = $3 WHERE environment_id = $1 AND principal_id = $2 \
+                   AND lifted_at IS NULL AND ends_at > $3",
+                vec![ctx.scope.environment_id.into(), p.into(), now.into()],
+            )
+            .await?;
+            if n == 0 {
+                return Err(Error::code(ErrorCode::NotFound));
+            }
+        }
+        _ => {
+            require(req.report_id, "reportId")?;
+        }
+    }
+    if let Some(r) = req.report_id {
+        if req.kind == "DISMISS_REPORT" {
+            reports::resolve(txn, ctx, r, "DISMISSED", &req.reason, now).await?;
+        } else {
+            reports::resolve(txn, ctx, r, "ACTIONED", &req.kind, now).await?;
+        }
+    }
+    let id = Uuid::new_v4();
+    db::exec(
+        txn,
+        "INSERT INTO messaging_moderation_actions (id, tenant_id, application_id, environment_id, kind, conversation_id, \
+           message_id, principal_id, report_id, reason, effective_until, credential_id, created_at, \
+           moderator_principal_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        vec![
+            id.into(),
+            ctx.scope.tenant_id.into(),
+            ctx.scope.application_id.into(),
+            ctx.scope.environment_id.into(),
+            req.kind.clone().into(),
+            req.conversation_id.into(),
+            req.message_id.into(),
+            req.principal_id.into(),
+            req.report_id.into(),
+            req.reason.clone().into(),
+            until.into(),
+            ctx.credential_id.into(),
+            now.into(),
+            moderator.into(),
+        ],
+    )
+    .await?;
+    crate::events::outbox::record(
+        txn,
+        "messaging.moderation.actioned",
+        "MODERATION_ACTION",
+        id,
+        crate::conversations::service::scope_of(ctx),
+        json!({ "action_id": id, "kind": req.kind, "conversation_id": req.conversation_id,
+                "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
+        now,
+    )
+    .await?;
+    audit::record(
+        txn,
+        AuditEntry {
+            ctx,
+            principal_id: moderator,
+            action: "MODERATION_ACTION",
+            target_kind: "MODERATION_ACTION",
+            target_id: id,
+            detail: json!({ "kind": req.kind, "reason": req.reason, "conversation_id": req.conversation_id,
+                            "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id,
+                            "organization_moderator_principal_id": moderator }),
+        },
+        &rctx,
+        now,
+    )
+    .await?;
+    Ok(ActionRow {
+        id,
+        kind: req.kind.clone(),
+        conversation_id: req.conversation_id,
+        message_id: req.message_id,
+        principal_id: req.principal_id,
+        report_id: req.report_id,
+        reason: req.reason.clone(),
+        effective_until: until,
+        created_at: now,
+        moderator_principal_id: moderator,
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -300,7 +361,8 @@ pub async fn list(state: &AppState, ctx: &TrustedContext, q: ListQuery) -> Resul
     }
     let rows: Vec<ActionRow> = db::all(
         &state.db,
-        "SELECT id, kind, conversation_id, message_id, principal_id, report_id, reason, effective_until, created_at \
+        "SELECT id, kind, conversation_id, message_id, principal_id, report_id, reason, effective_until, created_at, \
+                moderator_principal_id \
            FROM messaging_moderation_actions WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
           ORDER BY created_at DESC, id LIMIT $4",
         vec![ctx.scope.tenant_id.into(), ctx.scope.application_id.into(), ctx.scope.environment_id.into(), limit.into()],

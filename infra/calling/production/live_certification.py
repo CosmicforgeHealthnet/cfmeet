@@ -47,28 +47,42 @@ READ_ONLY_SQL = 'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;\n'
 # certification document). The meeting service's /health is liveness only; its database
 # is proven separately by the service-credential query below.
 READINESS_PROVES_DB = {
-    'platform-access': True, 'organizations': True, 'messaging': True, 'calling': True,
+    'platform-access': True, 'organizations': True, 'notifications': True, 'notifications-2': True,
+    'messaging': True, 'calling': True,
     'communications': True, 'numbering': True, 'privacy-relay': True, 'sms-gateway': True,
     'telephony': True, 'meeting-service': False, 'developer-platform': True,
     'developer-platform-worker': False, 'api-gateway': False,
+    # Dark admin bridge: /ready proves the database only once enabled (disabled: no database).
+    'admin-bridge': False,
 }
 
 # One credential-free GET per service that its authentication layer must reject before any
 # handler runs (401). Placeholder IDs cannot match data.
+#
+# Audit C6 / D2: Calling and the Developer Platform are not probed on an internal route. Each
+# such probe was recorded by the service as a failed internal call (missing_service_token,
+# Calling's GET /internal/v1/webhook-migration/inventory) and looked like a misconfigured job. Calling is probed on its customer API instead (customer-credential authentication, 401);
+# the Developer Platform has no listener without service authentication, so it is not probed
+# (None): its route tests prove the internal-service and gateway-caller layers.
 NIL = '00000000-0000-0000-0000-000000000000'
+NOT_PROBED = 'service-token-only listener: a credential-free probe would record a failed internal call'
 AUTH_PROBES = {
     'platform-access': '/internal/v1/scopes',
     'organizations': '/internal/v1/admin/event-delivery',
+    'notifications': '/internal/v1/admin/routing',
+    'notifications-2': '/internal/v1/admin/routing',
     'messaging': '/v1/messaging/sms-bridge/disclosure',
-    'calling': '/internal/v1/webhook-migration/inventory',
+    'calling': '/v1/calls',
     'communications': '/internal/v1/communications/metrics',
     'numbering': '/internal/v1/number-resources/' + NIL,
     'privacy-relay': '/internal/v1/contexts/' + NIL,
     'sms-gateway': '/internal/v1/sms-bridge/messages/' + NIL,
     'telephony': '/internal/v1/routes/availability',
     'meeting-service': '/api/v1/users/me',
-    'developer-platform': '/internal/v1/operator/activity',
+    'developer-platform': None,
     'api-gateway': '/v1/calls',
+    # The loopback ops listener must never serve the HQ API (it exists only behind mTLS).
+    'admin-bridge': '/internal/cfmeet-admin/v1/capabilities',
 }
 
 # External integrations and the switch that governs each. A value in `off` means the
@@ -88,6 +102,7 @@ INTEGRATIONS = (
     ('privacy-relay', 'RELAY_NUMBER_POOL_ENABLED', 'Relay number pool', (None, 'false')),
     ('messaging', 'MESSAGING_PUSH_PROVIDER', 'Mobile push provider', (None, '', 'none')),
     ('messaging', 'MESSAGING_E2EE_DEVICES_ENABLED', 'End-to-end encrypted devices', (None, 'false')),
+    ('messaging', 'MESSAGING_PUSH_WEB_VAPID_KEY_FILE', 'Web Push (VAPID, no provider account)', (None, '')),
     ('calling', 'CALLING_PUBLIC_OUTBOUND_ENABLED', 'Calling public outbound', (None, 'false')),
     ('calling', 'CALLING_PUBLIC_INBOUND_ENABLED', 'Calling public inbound', (None, 'false')),
     ('calling', 'CALL_RECORDING_ENABLED', 'Call recording', (None, 'false')),
@@ -101,6 +116,11 @@ INTEGRATIONS = (
     ('api-gateway', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED', 'API gateway public routing', (None, 'false')),
     ('api-gateway', 'API_GATEWAY_WEBSOCKETS_ENABLED', 'API gateway WebSockets', (None, 'false')),
     ('organizations', 'ORGANIZATIONS_PROVISIONING_ENABLED', 'Organization provisioning', (None, 'false')),
+    ('notifications', 'NOTIFICATIONS_EMAIL_PROVIDER', 'Notification Service email provider', (None, '', 'none')),
+    ('notifications', 'NOTIFICATIONS_PUSH_PROVIDER', 'Notification Service push provider', (None, '', 'none')),
+    ('organizations', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'Automatic organization service bindings', (None, 'false')),
+    ('admin-bridge', 'ADMIN_BRIDGE_ENABLED', 'HQ admin bridge', (None, 'false')),
+    ('admin-bridge', 'ADMIN_BRIDGE_WRITES_ENABLED', 'HQ admin bridge commands', (None, 'false')),
 )
 
 UPSTREAM_URL = re.compile(r'^CF_[A-Z_]+_BASE_URL$')
@@ -177,6 +197,8 @@ def readiness(name, container):
 
 
 def authentication(name, container):
+    if name in AUTH_PROBES and AUTH_PROBES[name] is None:
+        return dict(result='N/A', reason=NOT_PROBED)
     path = AUTH_PROBES.get(name)
     if not path:
         return dict(result='N/A', reason='no listener (worker)')
@@ -185,6 +207,8 @@ def authentication(name, container):
     expected = (401,)
     if name == 'api-gateway' and p.env_of(p.inspect(container)).get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true':
         expected = (404,)  # deny-all table while public routing is off
+    if name == 'admin-bridge':
+        expected = (404,)  # ops listener: /health, /ready, /metrics only; the HQ API is mTLS-only
     return dict(probe='GET ' + path, status=status, errorCode=code.group(1) if code else None,
                 expected=list(expected), result='PASS' if status in expected else 'FAIL')
 
@@ -269,10 +293,13 @@ def upstreams(name, container, env):
         if not owner:
             checks.append(dict(variable=var, result='WARN', reason='not a private service route'))
             continue
-        path = cr.SERVICES[owner]['health']
+        # Through the private TLS route: the route's own probe (the admin bridge's route
+        # serves only its owner events listener, whose GET answers 405); direct: health.
+        s = cr.SERVICES[owner]
+        path, expected = s['probe'] if url.port == s['tls'] else (s['health'], 200)
         status, _ = http_probe(container, '%s://%s:%d%s' % (url.scheme, url.hostname, url.port or 80, path))
         checks.append(dict(variable=var, upstream=owner, path=path, status=status, tls=url.scheme == 'https',
-                           result='PASS' if status == 200 else 'FAIL'))
+                           result='PASS' if status == expected else 'FAIL'))
     failed = [c for c in checks if c['result'] == 'FAIL']
     return dict(result='N/A' if not checks else ('FAIL' if failed else 'PASS'), checks=checks)
 
@@ -429,8 +456,8 @@ def platform(envs, latest, journal):
     out['integrations'] = integrations(envs)
     out['featureFlags'] = {name: cr.safe_flags(env) for name, env in envs.items()}
     try:
-        delivery = cr.event_delivery()
-        out['organizationsEventDelivery'] = dict(states=delivery, result='PASS' if not delivery.get('DEAD') else 'FAIL')
+        out['organizationsEventDelivery'] = cr.classify_event_delivery(
+            cr.event_delivery(), cr.configured_event_destinations(envs.get('organizations')))
     except Exception as error:
         out['organizationsEventDelivery'] = dict(result='FAIL', error=type(error).__name__)
     try:

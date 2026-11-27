@@ -42,6 +42,7 @@ const PARTICIPATION: &str = "/internal/v1/communications/calls/participation";
 const HISTORY: &str = "/internal/v1/communications/calls/history";
 const VERIFY: &str = "/internal/v1/communications/endpoints/verify";
 const REVOKE: &str = "/internal/v1/communications/endpoints/revoke";
+const INVITE: &str = "/internal/v1/communications/calls/participants";
 
 /// The Hub's policy endpoint: denies DIRECT_CALL to the scripted targets.
 #[derive(Clone, Default)]
@@ -204,6 +205,12 @@ fn bodies(principal: Uuid, endpoint: Uuid) -> Vec<(&'static str, Value)> {
             REVOKE,
             json!({"principalId": principal, "endpointId": endpoint}),
         ),
+        (
+            INVITE,
+            json!({"idempotencyKey": "k-2", "actingPrincipalId": principal,
+                   "callId": Uuid::new_v4(), "invitingParticipantId": Uuid::new_v4(),
+                   "targetPrincipalIds": [Uuid::new_v4()], "expectedVersion": 1}),
+        ),
     ]
 }
 
@@ -356,7 +363,7 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 
-    // Created and ringing, exactly like POST /v1/calls.
+    // Created and offered (DIALING until a callee device acknowledges), exactly like POST /v1/calls.
     let r = hub_as(
         &w,
         me_id,
@@ -368,7 +375,7 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     assert_eq!(r.json["schemaVersion"], 1);
     assert_eq!(r.json["replayed"], false);
     assert_eq!(r.json["kind"], "VOICE");
-    assert_eq!(r.json["state"], "RINGING", "{}", r.text);
+    assert_eq!(r.json["state"], "DIALING", "{}", r.text);
     let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
     assert!(w.invitation_for(call, theirs.endpoint).await.is_some());
 
@@ -418,6 +425,98 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     assert_ne!(r.json["call"]["callId"], call.to_string());
     assert_eq!(w.w.count("SELECT count(*) FROM calls").await, 2);
+}
+
+/// The callee's device as the web app runs it: recover the offers over its own signaling
+/// credential and acknowledge every new PENDING one. Returns the acknowledged offer.
+async fn device_rings(w: &AppWorld, device: &Device, call: Uuid) -> Value {
+    let token = w.signaling_token(device).await;
+    let offers = w
+        .as_endpoint(&token, Method::GET, "/v1/calling/invitations", None, &[])
+        .await;
+    assert_eq!(offers.status, StatusCode::OK, "{}", offers.text);
+    let offer = offers.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["callId"] == call.to_string())
+        .unwrap_or_else(|| panic!("no offer of {call} reached the device: {}", offers.text))
+        .clone();
+    assert_eq!(offer["status"], "PENDING", "{offer}");
+    assert_eq!(offer["actionable"], true, "{offer}");
+    let invitation = offer["invitationId"].as_str().unwrap();
+    let ack = w
+        .as_endpoint(
+            &token,
+            Method::POST,
+            &format!("/v1/calling/invitations/{invitation}/acknowledge"),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+    ack.json
+}
+
+/// Owner report (2026-11-19): after adding a contact directly by CF Meet ID (no request:
+/// the connection is CONNECTED at once), calling her stayed on "Calling…" although she was
+/// online, while her call to the adder rang. A Hub launch rings the callee's device in
+/// BOTH directions, the device's acknowledgement moves the Call to RINGING (what the
+/// caller's "Ringing…" shows), and nothing on the Calling side depends on who added whom.
+#[tokio::test]
+async fn hub_launch_rings_the_callee_both_ways_between_directly_added_contacts() {
+    let Some((w, hub)) = world(true).await else {
+        return;
+    };
+    // Production runs Calling's independently versioned Communications migration too
+    // (credential revocations read by every signaling request in a governed scope).
+    {
+        use calling_migration::MigratorTrait;
+        calling_migration::CommunicationsMigrator::up(w.h().conn(), None)
+            .await
+            .unwrap();
+    }
+    let (adder, added) = (&w.w.initiator, &w.w.recipient);
+    let adder_device = w.device(adder, "adder-web").await;
+    let added_device = w.device(added, "added-web").await;
+    let (adder_id, added_id) = (adder.id().as_uuid(), added.id().as_uuid());
+
+    for (key, from, from_device, to, to_device) in [
+        (
+            "direct-a-to-b",
+            adder_id,
+            &adder_device,
+            added_id,
+            &added_device,
+        ),
+        (
+            "direct-b-to-a",
+            added_id,
+            &added_device,
+            adder_id,
+            &adder_device,
+        ),
+    ] {
+        let checks = hub.checks();
+        let r = hub_as(&w, from, LAUNCH, launch_body(key, from, from_device, &[to])).await;
+        assert_eq!(r.status, StatusCode::OK, "{key}: {}", r.text);
+        // DIALING until the callee's device says it rings (never RINGING on its own).
+        assert_eq!(r.json["state"], "DIALING", "{key}: {}", r.text);
+        assert!(
+            hub.checks() > checks,
+            "{key}: the personal policy was asked"
+        );
+        let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
+        // The offer reached the callee's device, and its acknowledgement rings the Call.
+        let ack = device_rings(&w, to_device, call).await;
+        assert_eq!(ack["status"], "RINGING", "{key}: {ack}");
+        assert_eq!(ack["callState"], "RINGING", "{key}: {ack}");
+        // The caller sees RINGING.
+        assert_eq!(w.call_view(call).await["state"], "RINGING", "{key}");
+        let (_, version) = w.state(call).await;
+        let r = w.command(call, "cancel", version).await;
+        assert_eq!(r.status, StatusCode::OK, "{key}: {}", r.text);
+    }
 }
 
 #[tokio::test]
@@ -717,4 +816,50 @@ async fn endpoint_verify_and_revoke_see_only_the_delegated_users_endpoints() {
     )
     .await;
     assert_eq!(r.json["status"], "REVOKED", "{}", r.text);
+}
+
+/// The Hub adds the delegated user's resolved contacts to a running call through the
+/// canonical invite path; the inviting participant must be the user's own participant,
+/// and a replay answers from the command record.
+#[tokio::test]
+async fn invite_adds_people_to_the_delegated_users_running_call() {
+    let Some((w, hub)) = world(true).await else {
+        return;
+    };
+    let (call, _caller, _callee) = w.connected_call("VIDEO").await;
+    let me = w.w.initiator.id().as_uuid();
+    let them = w.w.recipient.id().as_uuid();
+    let third = w.principal("invite-third").await;
+    let third_id = third.id().as_uuid();
+    let _third_device = w.device(&third, "third-main").await;
+    let mine = w.participant_of(call, me).await;
+    let theirs = w.participant_of(call, them).await;
+    let version = w.state(call).await.1;
+    let body = |inviter: Uuid, key: &str| {
+        json!({"idempotencyKey": key, "actingPrincipalId": me, "callId": call,
+               "invitingParticipantId": inviter, "targetPrincipalIds": [third_id],
+               "expectedVersion": version})
+    };
+    // Another party's participant cannot be used to invite in the user's name.
+    let r = hub_as(&w, me, INVITE, body(theirs, "inv-0")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // Personal policy applies to each target.
+    hub.deny(third_id);
+    let r = hub_as(&w, me, INVITE, body(mine, "inv-1")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    hub.allow(third_id);
+    let r = hub_as(&w, me, INVITE, body(mine, "inv-2")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["schemaVersion"], 1, "{}", r.text);
+    assert_eq!(r.json["replayed"], false);
+    assert_eq!(
+        w.w.count(&format!(
+            "SELECT count(*) FROM call_participants WHERE call_id = '{call}' AND principal_id = '{third_id}'"
+        ))
+        .await,
+        1
+    );
+    let replay = hub_as(&w, me, INVITE, body(mine, "inv-2")).await;
+    assert_eq!(replay.status, StatusCode::OK, "{}", replay.text);
+    assert_eq!(replay.json["replayed"], true, "{}", replay.text);
 }

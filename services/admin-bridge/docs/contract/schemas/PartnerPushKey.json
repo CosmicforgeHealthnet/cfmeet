@@ -1,0 +1,133 @@
+{
+  "description": "Push credential DETAILS of an environment: provider identifiers and the credential fingerprint. The credential itself never leaves the owner's vault.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "push_key_id",
+    "project_id",
+    "environment_id",
+    "environment_kind",
+    "provider",
+    "key_id",
+    "team_id",
+    "bundle_id",
+    "apns_host",
+    "fcm_project",
+    "fingerprint",
+    "verification",
+    "last_verified_at",
+    "last_error_code",
+    "created_at",
+    "updated_at",
+    "state",
+    "disabled_at",
+    "version"
+  ],
+  "properties": {
+    "push_key_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "provider": {
+      "enum": [
+        "APNS",
+        "APNS_VOIP",
+        "FCM"
+      ]
+    },
+    "key_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z0-9]{10}$"
+    },
+    "team_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z0-9]{10}$"
+    },
+    "bundle_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 155
+    },
+    "apns_host": {
+      "enum": [
+        "SANDBOX",
+        "PRODUCTION",
+        null
+      ]
+    },
+    "fcm_project": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 30
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "verification": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "last_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_error_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "state": {
+      "enum": [
+        "ACTIVE",
+        "DISABLED"
+      ]
+    },
+    "disabled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

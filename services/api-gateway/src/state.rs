@@ -1,12 +1,17 @@
 //! Shared application state (cheap to clone). The gateway holds no database handle.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use crate::{
     config::{service_auth::ServiceAuthRuntime, FeatureFlags, QuotaSettings},
     identity::CustomerAuthority,
+    origins::OriginIndex,
     quota::QuotaEngine,
     routing::{RouteTable, RoutingControls},
+    user_tokens::UserTokenVerifier,
 };
 
 #[derive(Clone)]
@@ -14,6 +19,9 @@ pub struct AppState {
     pub authority: Arc<dyn CustomerAuthority>,
     pub service_auth: ServiceAuthRuntime,
     pub routes: Arc<RouteTable>,
+    /// The public OpenAPI documents reduced to this deployment's routable operations
+    /// (built once, on first use: the route table never changes after start).
+    pub published_docs: Arc<OnceLock<crate::docs::PublishedDocs>>,
     pub flags: FeatureFlags,
     pub controls: RoutingControls,
     pub quotas: QuotaSettings,
@@ -27,6 +35,12 @@ pub struct AppState {
     pub max_headers: usize,
     pub ws_max_message_bytes: usize,
     pub cors_allowed_origins: Arc<Vec<String>>,
+    /// CF Meet user-token pre-check (`API_GATEWAY_USER_TOKENS_ENABLED`; with the flag on
+    /// and no verifier, user tokens are refused).
+    pub user_tokens: Option<Arc<UserTokenVerifier>>,
+    /// Partner-website origins (`API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`; with the flag
+    /// on and no index, partner origins are refused).
+    pub origins: Option<Arc<OriginIndex>>,
     /// Forwarding client: no redirects, no proxy, bounded connect time.
     pub http: reqwest::Client,
 }
@@ -51,6 +65,7 @@ impl AppState {
             authority,
             service_auth,
             routes: Arc::new(routes),
+            published_docs: Arc::new(OnceLock::new()),
             flags: FeatureFlags::default(),
             controls: RoutingControls::default(),
             quotas: QuotaSettings::default(),
@@ -62,6 +77,8 @@ impl AppState {
             max_headers: 64,
             ws_max_message_bytes: 1_048_576,
             cors_allowed_origins: Arc::new(Vec::new()),
+            user_tokens: None,
+            origins: None,
             http: forwarding_client(),
         }
     }
@@ -116,5 +133,29 @@ impl AppState {
     pub fn with_cors_allowed_origins(mut self, origins: Vec<String>) -> Self {
         self.cors_allowed_origins = Arc::new(origins);
         self
+    }
+
+    pub fn with_user_token_verifier(mut self, verifier: Arc<UserTokenVerifier>) -> Self {
+        self.user_tokens = Some(verifier);
+        self
+    }
+
+    pub fn with_origin_index(mut self, index: Arc<OriginIndex>) -> Self {
+        self.origins = Some(index);
+        self
+    }
+
+    /// The user-token verifier when `API_GATEWAY_USER_TOKENS_ENABLED` is on.
+    pub fn user_token_verifier(&self) -> Option<&UserTokenVerifier> {
+        self.user_tokens
+            .as_deref()
+            .filter(|_| self.flags.user_tokens)
+    }
+
+    /// The origin index when `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` is on.
+    pub fn origin_index(&self) -> Option<&OriginIndex> {
+        self.origins
+            .as_deref()
+            .filter(|_| self.flags.environment_origins)
     }
 }

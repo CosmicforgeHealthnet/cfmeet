@@ -15,9 +15,11 @@
 //! Messaging holds no private key, group secret or plaintext E2EE content, owns no other
 //! service's data and never reads another service's database.
 
+pub mod apps;
 pub mod attachments;
 pub mod audit;
 pub mod backups;
+pub mod bridge_events;
 pub mod compliance;
 pub mod config;
 pub mod conversations;
@@ -31,12 +33,22 @@ pub mod http;
 pub mod identity;
 pub mod integrations;
 pub mod limits;
+pub mod member_notifications;
 pub mod membership;
 pub mod messages;
 pub mod metrics;
 pub mod mls;
 pub mod moderation;
+pub mod notification_fence;
+pub mod notification_publications;
+pub mod notifications;
 pub mod operations;
+pub mod operator_commands;
+pub mod operator_datasets;
+pub mod operator_reads;
+pub mod partner;
+pub mod plans;
+pub mod push_mirror;
 pub mod realtime;
 pub mod reference_reconciliation;
 pub mod safety;

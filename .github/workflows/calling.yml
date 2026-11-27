@@ -29,6 +29,7 @@ on:
       - "packages/usage-facts/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
+      - "packages/notification-client/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/calling.yml"
@@ -42,6 +43,7 @@ on:
       - "packages/usage-facts/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
+      - "packages/notification-client/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/calling.yml"
@@ -212,11 +214,12 @@ jobs:
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
           # group-level single-winner claim of ring groups / queue offers) and §61 the five
-          # call_recording_* tables. The count is updated intentionally with each family and
+          # call_recording_* tables; the gap-closure history adds call_consultations (C14,
+          # attended transfer). The count is updated intentionally with each family and
           # paired with the structural checks below (required tables, no foreign domain).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "36"
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "37"
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           registered="$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
@@ -243,13 +246,15 @@ jobs:
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
              ('enterprise_calls', 'pbx_calls', 'voicemail_calls', 'ivr_calls', 'queue_calls', \
               'enterprise_call_legs', 'enterprise_participants')")" = "0"
-          # Every public table is Calling's own.
+          # Every public table is Calling's own (ADR 0068 A4 / A7: the admin bridge's
+          # command ledger and owner events outbox in their own history).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \
                tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
                'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents', \
                'calling_block_rules', 'calling_abuse_windows', 'calling_abuse_reports', 'calling_orphan_objects', \
-               'calling_retention_holds', 'calling_retention_audit') OR tablename LIKE 'enterprise\_%' \
+               'calling_retention_holds', 'calling_retention_audit', 'calling_notification_publications', 'calling_notification_publications_seaql_migrations', 'calling_gap_closure_seaql_migrations', 'calling_call_kind_offer_seaql_migrations', \
+               'calling_admin_operations', 'calling_admin_bridge_events', 'calling_admin_operations_seaql_migrations') OR tablename LIKE 'enterprise\_%' \
                OR tablename LIKE 'voicemail\_%' OR tablename LIKE 'webhook\_%')")" = "0"
 
       # Part K §120: the REAL Calling migrations apply as the least-privilege migrator role,

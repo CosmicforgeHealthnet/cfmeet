@@ -1,0 +1,1153 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Notification Service user API (via the Meeting Service relay)",
+    "version": "1.0.0",
+    "description": "Public user APIs U1–U9 of the unified Notification Service (blueprint Document 4 §3.1) and its Resend provider callback (§3.2). Frozen by roadmap N1 before the service exists (lifecycle experimental; nothing is served yet). U1–U9 are served through the Meeting Service relay like /api/v2/communications/*: the Account session is verified by Meeting, which forwards to I2 with the server-resolved account; the routes join packages/contracts/openapi/meeting-service.json (generated) when the relay is implemented (N8). Responses never contain codes, tokens, addresses, push handles, E2EE text or URLs. Errors: {error:{code,message,requestId}}. Mutations require Idempotency-Key (24 h). The EXISTING Hub and Messaging notification endpoints keep their contracts and become facades in Phases 4.1 / 4.2."
+  },
+  "paths": {
+    "/api/v2/notifications": {
+      "get": {
+        "operationId": "listMyNotifications",
+        "summary": "List my notifications (inbox)",
+        "description": "U1. The caller's own inbox items, newest first, opaque cursor. Silent items are listed but never counted. Rate limit 120/min per account.",
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unread",
+                "all"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "maxItems": 14,
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Category"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inbox page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items",
+                    "nextCursor",
+                    "unreadCount"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/NotificationItem"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 200
+                    },
+                    "unreadCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/unread-count": {
+      "get": {
+        "operationId": "getMyNotificationUnreadCount",
+        "summary": "My unread notification count",
+        "description": "U2. ETag / If-None-Match supported (304). Rate limit 240/min per account.",
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unread count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unreadCount",
+                    "latestCreatedAt",
+                    "version"
+                  ],
+                  "properties": {
+                    "unreadCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "latestCreatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified."
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/{notificationId}": {
+      "patch": {
+        "operationId": "updateMyNotification",
+        "summary": "Mark one notification read or dismissed",
+        "description": "U3. Own items only: a foreign or unknown id is 404. Optimistic concurrency with expectedVersion. Rate limit 60/min.",
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notificationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every mutation; kept 24 h.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "minProperties": 2,
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "dismissed": {
+                    "type": "boolean"
+                  },
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/NotificationItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/read": {
+      "post": {
+        "operationId": "markMyNotificationsRead",
+        "summary": "Mark notifications read (by ids or up to a time)",
+        "description": "U4. Either `ids` (≤ 100, own items only) or `upTo`. Rate limit 30/min.",
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every mutation; kept 24 h.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "maxProperties": 1,
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "upTo": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "updated",
+                    "unreadCount"
+                  ],
+                  "properties": {
+                    "updated": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unreadCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/dismiss": {
+      "post": {
+        "operationId": "dismissMyNotifications",
+        "summary": "Dismiss notifications (by ids or up to a time)",
+        "description": "U5. Either `ids` (≤ 100) or `upTo`, optionally restricted to categories. Rate limit 30/min.",
+        "tags": [
+          "Inbox"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every mutation; kept 24 h.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "upTo": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "category": {
+                    "type": "array",
+                    "maxItems": 14,
+                    "items": {
+                      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Category"
+                    }
+                  }
+                },
+                "oneOf": [
+                  {
+                    "required": [
+                      "ids"
+                    ],
+                    "not": {
+                      "required": [
+                        "upTo"
+                      ]
+                    }
+                  },
+                  {
+                    "required": [
+                      "upTo"
+                    ],
+                    "not": {
+                      "required": [
+                        "ids"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "dismissed",
+                    "unreadCount"
+                  ],
+                  "properties": {
+                    "dismissed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unreadCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/preferences": {
+      "get": {
+        "operationId": "getMyNotificationPreferences",
+        "summary": "My notification preferences",
+        "description": "U6. Categories, channel matrix, quiet hours, conversation and contact notification levels; timeZone is read-only (Account). Rate limit 60/min.",
+        "tags": [
+          "Preferences"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMyNotificationPreferences",
+        "summary": "Update my notification preferences (full or partial)",
+        "description": "U7. Partial update with expectedVersion (optimistic concurrency), unknown fields refused. The security category cannot be changed. Rate limit 30/min.",
+        "tags": [
+          "Preferences"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every mutation; kept 24 h.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/NotificationPreferencesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/notifications/devices/{accountDeviceId}/push": {
+      "put": {
+        "operationId": "registerMyPushEndpoint",
+        "summary": "Register a push endpoint for my device",
+        "description": "U8. The device must be the caller's ACTIVE Account device. The handle is validated per platform (Web Push: HTTPS endpoint on the push-service host allowlist, ported from packages/push-transport) and is never echoed; it is sealed at rest and unique by digest. Rate limit 10/min.",
+        "tags": [
+          "Push"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "accountDeviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The caller's ACTIVE Account device (ADR 0060)."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on every mutation; kept 24 h.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "platform",
+                  "handle"
+                ],
+                "properties": {
+                  "platform": {
+                    "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/PushPlatform"
+                  },
+                  "handle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registered (no handle returned).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "pushTargetRef",
+                    "platform",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "pushTargetRef": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "platform": {
+                      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/PushPlatform"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (invalid handle or platform).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (not the caller's active device).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeMyPushEndpoint",
+        "summary": "Remove my device's push endpoint for one platform",
+        "description": "U9. Idempotent: removing an absent endpoint is 204. Rate limit 10/min.",
+        "tags": [
+          "Push"
+        ],
+        "security": [
+          {
+            "cfAccountSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "accountDeviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The caller's ACTIVE Account device (ADR 0060)."
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/PushPlatform"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed (or already absent)."
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (not the caller's device).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/provider-events/resend": {
+      "post": {
+        "operationId": "receiveResendProviderEvent",
+        "summary": "Resend delivery webhook (Svix-signed)",
+        "description": "Provider callback. Svix signature verification (port of verify_svix); 404 until a webhook secret is configured; 256 KiB cap; dedupe by (provider, event id); monotonic status; unknown message ids are ignored. During the drain Resend calls both this endpoint and the Meeting Service endpoint, and each applies only its own messages.",
+        "tags": [
+          "Provider callbacks"
+        ],
+        "security": [
+          {
+            "svixSignature": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "data"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "created_at": {
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Processed, duplicate or ignored."
+          },
+          "400": {
+            "description": "Malformed payload."
+          },
+          "401": {
+            "description": "Signature missing, invalid or outside the tolerance window."
+          },
+          "404": {
+            "description": "No webhook secret configured."
+          },
+          "413": {
+            "description": "Payload larger than 256 KiB."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfAccountSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "CF Meet Account session (verified by the Meeting Service relay)."
+      },
+      "svixSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "svix-signature",
+        "description": "Svix webhook signature (with svix-id and svix-timestamp)."
+      }
+    }
+  }
+}

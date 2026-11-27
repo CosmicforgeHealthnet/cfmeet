@@ -39,7 +39,10 @@ export function useSpaces() {
   return useQuery({
     queryKey: spaceKeys.list(),
     queryFn: () => spacesService.list(),
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    // Live / ended status changes often: re-check on every visit and on focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -51,6 +54,9 @@ export function useSpace(id: string) {
     queryKey: spaceKeys.detail(id),
     queryFn: () => spacesService.get(id),
     enabled: !!id,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -109,6 +115,8 @@ export function useCreateSpace() {
     mutationFn: ({ data, idempotencyKey }: { data: CreateMeetingSpaceRequest; idempotencyKey?: string }) => spacesService.create(data, idempotencyKey),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
   });
 }
@@ -124,6 +132,8 @@ export function useUpdateSpace(id: string) {
     onSuccess: (data) => {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
@@ -141,6 +151,8 @@ export function useArchiveSpace() {
     onSuccess: (data, { id }) => {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
@@ -157,6 +169,8 @@ export function useDuplicateSpace() {
       spacesService.duplicate(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
   });
 }
@@ -173,6 +187,8 @@ export function useTransferOwnership(id: string) {
     onSuccess: (data) => {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
@@ -188,6 +204,8 @@ export function useCreateInstantMeeting() {
     mutationFn: (data?: InstantMeetingRequestV2) => spacesService.createInstant(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
+      // The calendar, Home and Upcoming read the agenda: a new or changed meeting shows there at once.
+      queryClient.invalidateQueries({ queryKey: ["v2", "conferences", "agenda"] });
     },
   });
 }

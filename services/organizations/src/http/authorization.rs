@@ -10,7 +10,7 @@ use axum::{
 };
 use cf_service_auth::InternalPermission;
 use chrono::{DateTime, Utc};
-use sea_orm::FromQueryResult;
+use sea_orm::{ConnectionTrait, FromQueryResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -390,6 +390,68 @@ pub struct AuditQuery {
     pub before: Option<i64>,
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Exact action, e.g. `membership.updated`.
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Only changes made by this user.
+    #[serde(default)]
+    pub actor_user_id: Option<Uuid>,
+    /// Inclusive lower bound (RFC 3339).
+    #[serde(default)]
+    pub from: Option<String>,
+    /// Exclusive upper bound (RFC 3339).
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+fn audit_time(
+    value: Option<&str>,
+    name: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    value
+        .map(|v| {
+            chrono::DateTime::parse_from_rfc3339(v)
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .map_err(|_| ApiError::validation(format!("{name} must be an RFC 3339 timestamp")))
+        })
+        .transpose()
+}
+
+/// One page of an organization's audit history with the query's filters (newest first).
+async fn audit_page(state: &AppState, id: Uuid, q: &AuditQuery) -> ApiResult<Response> {
+    let limit = page_limit(q.limit)?;
+    if q.action.as_deref().is_some_and(|a| {
+        a.is_empty()
+            || a.len() > 64
+            || !a
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')
+    }) {
+        return Err(ApiError::validation(
+            "action must be an audit action such as membership.updated",
+        ));
+    }
+    let from = audit_time(q.from.as_deref(), "from")?;
+    let to = audit_time(q.to.as_deref(), "to")?;
+    let rows: Vec<AuditRow> = db::all(
+        &state.db,
+        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at \
+         FROM organization_audit_events WHERE organization_id = $1 AND ($2::bigint IS NULL OR seq < $2) \
+           AND ($4::text IS NULL OR action = $4) AND ($5::uuid IS NULL OR actor_user_id = $5) \
+           AND ($6::timestamptz IS NULL OR occurred_at >= $6) AND ($7::timestamptz IS NULL OR occurred_at < $7) \
+         ORDER BY seq DESC LIMIT $3",
+        vec![
+            id.into(),
+            q.before.into(),
+            (limit + 1).into(),
+            q.action.clone().into(),
+            q.actor_user_id.into(),
+            from.into(),
+            to.into(),
+        ],
+    )
+    .await?;
+    audit_items(&rows, limit)
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -419,15 +481,83 @@ pub async fn audit_events(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationRead)?;
     let user = caller.user()?;
-    let limit = page_limit(q.limit)?;
     authorize(&state.db, id, user, Capability::AuditRead, false).await?;
+    audit_page(&state, id, &q).await
+}
+
+/// `GET /internal/v1/admin/organizations/{id}/audit-events` — the operator's read of an
+/// organization's audit history in any lifecycle state (`organization.administer`), with the
+/// same filters and paging as the member read.
+pub async fn admin_audit_events(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+    Query(q): Query<AuditQuery>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    store::org(&state.db, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    audit_page(&state, id, &q).await
+}
+
+/// Query of the admin bridge's cross-organization audit read.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorAuditQuery {
+    /// Only events with `seq` below this (the previous page's `nextCursor`).
+    #[serde(default)]
+    pub cursor: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Inclusive lower bound (RFC 3339).
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Exclusive upper bound (RFC 3339).
+    #[serde(default)]
+    pub until: Option<String>,
+}
+
+/// Longest `since`..`until` window of the cross-organization audit read.
+pub const OPERATOR_AUDIT_MAX_WINDOW_DAYS: i64 = 31;
+
+/// One page of the audit history of every organization (newest first, `seq` order),
+/// for the admin bridge (`/internal/v1/operator/audit-events`).
+pub(super) async fn operator_audit_page(
+    state: &AppState,
+    q: &OperatorAuditQuery,
+) -> ApiResult<Response> {
+    let limit = page_limit(q.limit)?;
+    let since = audit_time(q.since.as_deref(), "since")?;
+    let until = audit_time(q.until.as_deref(), "until")?;
+    if let (Some(s), Some(u)) = (since, until) {
+        if u <= s {
+            return Err(ApiError::validation("until must be after since"));
+        }
+        if u - s > chrono::Duration::days(OPERATOR_AUDIT_MAX_WINDOW_DAYS) {
+            return Err(ApiError::validation(
+                "the since..until window must be at most 31 days",
+            ));
+        }
+    }
+    if q.cursor.is_some_and(|c| c < 1) {
+        return Err(ApiError::validation("cursor must be a positive sequence"));
+    }
     let rows: Vec<AuditRow> = db::all(
         &state.db,
-        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at \
-         FROM organization_audit_events WHERE organization_id = $1 AND ($2::bigint IS NULL OR seq < $2) ORDER BY seq DESC LIMIT $3",
-        vec![id.into(), q.before.into(), (limit + 1).into()],
+        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at          FROM organization_audit_events WHERE ($1::bigint IS NULL OR seq < $1)            AND ($3::timestamptz IS NULL OR occurred_at >= $3) AND ($4::timestamptz IS NULL OR occurred_at < $4)          ORDER BY seq DESC LIMIT $2",
+        vec![
+            q.cursor.into(),
+            (limit + 1).into(),
+            since.into(),
+            until.into(),
+        ],
     )
     .await?;
+    audit_items(&rows, limit)
+}
+
+fn audit_items(rows: &[AuditRow], limit: i64) -> ApiResult<Response> {
     let more = rows.len() as i64 > limit;
     let items: Vec<Value> = rows
         .iter()
@@ -457,4 +587,110 @@ pub async fn audit_events(
         StatusCode::OK,
         json!({ "items": items, "nextCursor": next }),
     ))
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ExportDoc {
+    doc: Value,
+}
+
+/// Most audit events an export carries (newest first).
+pub const EXPORT_AUDIT_LIMIT: i64 = 10_000;
+
+/// Gap audit G11: everything the Organizations Service holds about one organization, as
+/// one JSON document: the organization and its profile, policies, memberships (with
+/// history), teams and team memberships, invitations (never their token) and the newest
+/// audit events. Identifiers only for people: names and emails of accounts live with
+/// the Account service.
+///
+/// Also the document of an owner-delivered export ([`crate::exports`]), built in that
+/// command's own transaction.
+pub(crate) async fn export_document<C: ConnectionTrait>(c: &C, id: Uuid) -> ApiResult<Value> {
+    let row: Option<ExportDoc> = db::one(
+        c,
+        "SELECT jsonb_build_object( \
+           'schemaVersion', 1, \
+           'exportedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+           'organization', (SELECT to_jsonb(o) FROM organizations o WHERE o.id = $1), \
+           'profile', (SELECT to_jsonb(p) FROM organization_profiles p WHERE p.organization_id = $1), \
+           'policies', (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]'::jsonb) FROM organization_policies x WHERE x.organization_id = $1), \
+           'memberships', (SELECT COALESCE(jsonb_agg(to_jsonb(m) ORDER BY m.created_at), '[]'::jsonb) FROM organization_memberships m WHERE m.organization_id = $1), \
+           'membershipHistory', (SELECT COALESCE(jsonb_agg(to_jsonb(h)), '[]'::jsonb) FROM organization_membership_history h WHERE h.organization_id = $1), \
+           'teams', (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.created_at), '[]'::jsonb) FROM organization_teams t WHERE t.organization_id = $1), \
+           'teamMemberships', (SELECT COALESCE(jsonb_agg(to_jsonb(tm)), '[]'::jsonb) FROM organization_team_members tm WHERE tm.organization_id = $1), \
+           'invitations', (SELECT COALESCE(jsonb_agg(to_jsonb(i) - 'token_hash' ORDER BY i.created_at), '[]'::jsonb) FROM organization_invitations i WHERE i.organization_id = $1), \
+           'auditEvents', (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.seq DESC), '[]'::jsonb) FROM \
+               (SELECT * FROM organization_audit_events WHERE organization_id = $1 ORDER BY seq DESC LIMIT $2) a) \
+         ) AS doc",
+        vec![id.into(), EXPORT_AUDIT_LIMIT.into()],
+    )
+    .await?;
+    let doc = row.map(|r| r.doc).unwrap_or(Value::Null);
+    if doc["organization"].is_null() {
+        return Err(ApiError::new(ErrorCode::OrganizationNotFound));
+    }
+    Ok(doc)
+}
+
+/// `GET /internal/v1/organizations/{id}/export` — gap audit G11: the organization's data
+/// for its OWNER (`organization.lifecycle.manage`). Audited.
+pub async fn export(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationRead)?;
+    let user = caller.user()?;
+    authorize(&state.db, id, user, Capability::LifecycleManage, false).await?;
+    let doc = export_document(&state.db, id).await?;
+    let _ = user;
+    store::audit(
+        &state.db,
+        &caller.as_user(),
+        Utc::now(),
+        Some(id),
+        "organization.exported",
+        "ORGANIZATION",
+        Some(id),
+        json!({}),
+    )
+    .await?;
+    Ok(respond(StatusCode::OK, doc))
+}
+
+/// `GET /internal/v1/admin/organizations/{id}/export` — gap audit G11: the operator's
+/// export of an organization in any lifecycle state, archived included
+/// (`organization.administer`). Audited.
+///
+/// Never for the HQ admin bridge (ADR 0068): the document carries invitation addresses,
+/// and HQ never receives exported personal data. The bridge asks for an owner-delivered
+/// export instead (`POST /internal/v1/admin/organizations/{id}/exports`).
+pub async fn admin_export(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    if caller.operator.is_some() {
+        return Err(ApiError::with_message(
+            ErrorCode::ActorNotAllowed,
+            "The admin bridge never receives an export document; request an owner-delivered export.",
+        ));
+    }
+    store::org(&state.db, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    let doc = export_document(&state.db, id).await?;
+    store::audit(
+        &state.db,
+        &caller.as_operator(),
+        Utc::now(),
+        Some(id),
+        "organization.exported",
+        "ORGANIZATION",
+        Some(id),
+        json!({ "byOperator": true }),
+    )
+    .await?;
+    Ok(respond(StatusCode::OK, doc))
 }

@@ -43,6 +43,7 @@ error_codes! {
     ValidationError = "VALIDATION_ERROR" => BAD_REQUEST, "The request is invalid.";
     AuthenticationFailed = "AUTHENTICATION_FAILED" => UNAUTHORIZED, "Authentication failed.";
     InsufficientScope = "INSUFFICIENT_SCOPE" => FORBIDDEN, "The credential lacks the required scope.";
+    CredentialNotAccepted = "CREDENTIAL_NOT_ACCEPTED" => FORBIDDEN, "This kind of credential is not accepted on this route.";
     RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests.";
     QuotaExceeded = "QUOTA_EXCEEDED" => TOO_MANY_REQUESTS, "The platform request quota of this environment is exhausted.";
     HeadersTooLarge = "HEADERS_TOO_LARGE" => REQUEST_HEADER_FIELDS_TOO_LARGE, "The request headers are too large.";

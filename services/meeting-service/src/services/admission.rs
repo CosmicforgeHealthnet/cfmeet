@@ -32,9 +32,9 @@ use crate::{
         participant_sessions,
     },
     services::{
-        actor::{ActorContext, ActorKind},
+        actor::{ActorContext, ActorKind, PlatformUserActor},
         invitations::{self, InvitationService},
-        meeting_access::{AccessDecision, AccessRequest, MeetingAccessService},
+        meeting_access::{AccessDecision, AccessGrant, AccessRequest, MeetingAccessService},
         meeting_core::{
             conference_authority, find_conference, find_scoped_participant, find_space,
             lock_conference, not_found_participant, own_participant, permission_denied,
@@ -42,7 +42,8 @@ use crate::{
         },
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
         meeting_permissions::{
-            can_moderate, check_role_change, MediaPermissions, Permission, PermissionContext,
+            can_moderate, check_grant, check_role_change, MediaPermissions, Permission,
+            PermissionContext,
         },
         meeting_space::access_config,
         rtc_control::{Enforcement, RtcControl},
@@ -55,6 +56,11 @@ use crate::{
 // ---------------------------------------------------------------------------
 // Pure policy
 // ---------------------------------------------------------------------------
+
+/// Gap audit M6: the most WAITING entries one conference holds at a time.
+pub const MAX_WAITING: u64 = 1000;
+/// Gap audit M6: a WAITING entry older than this is expired by the scheduler.
+pub const WAITING_TTL_MINUTES: i64 = 60;
 
 #[derive(Debug, Clone)]
 pub struct WaitingInput {
@@ -108,6 +114,48 @@ pub fn resolve_role(decision: &AccessDecision, default_role: Role) -> (Role, Rol
         consider(r, RoleSource::Default);
     }
     best.unwrap_or((default_role, RoleSource::Default))
+}
+
+/// ADR 0062: the role a partner user's meeting grant yields — the strongest contract role
+/// (`HOST`, `CO_HOST`, `PRESENTER`, `PARTICIPANT`, `VIEWER`) at or below the granted one
+/// that the space's owner (the environment) may grant under the space's role policy
+/// (e.g. a space whose policy withholds `cohost.assign` turns CO_HOST into PRESENTER).
+/// Never OWNER.
+pub fn clamp_granted_role(granted: Role, ctx: &PermissionContext) -> Role {
+    [
+        Role::Host,
+        Role::CoHost,
+        Role::Presenter,
+        Role::Participant,
+        Role::Viewer,
+    ]
+    .into_iter()
+    .filter(|r| r.rank() <= granted.rank())
+    .find(|r| check_grant(Role::Owner, *r, ctx).is_ok())
+    .unwrap_or(Role::Viewer)
+}
+
+/// ADR 0062: a participant that a partner user holds (identity `principal:<id>`; an
+/// invitation's identity is always an email address, so it can never look like this).
+pub fn is_platform_participant(p: &conference_participants::Model) -> bool {
+    p.external_ref
+        .as_deref()
+        .and_then(|r| r.strip_prefix("principal:"))
+        .is_some_and(|id| Uuid::parse_str(id).is_ok())
+}
+
+/// ADR 0062: the generic name a partner user without a profile display name joins under
+/// (never the partner's `externalId`).
+pub const PLATFORM_USER_FALLBACK_NAME: &str = "Participant";
+
+/// ADR 0062: a partner user's presentation name comes from the user profile only.
+pub fn platform_user_display_name(user: &PlatformUserActor) -> String {
+    user.token
+        .user
+        .display_name
+        .as_deref()
+        .and_then(|n| sanitize_display_name(n).ok())
+        .unwrap_or_else(|| PLATFORM_USER_FALLBACK_NAME.to_string())
 }
 
 pub fn sanitize_display_name(raw: &str) -> ApiResult<String> {
@@ -334,20 +382,50 @@ impl AdmissionService {
     /// count once; the seat is released when the last live session ends (leave, expiry,
     /// replacement, removal, ban, conference end). ADMITTED itself stays the persistent
     /// admission authorization that lets a participant rejoin without waiting again.
-    /// The dedicated viewer pool keeps its admitted-audience count.
+    /// The dedicated viewer pool counts the same way (gap audit M11): a viewer who leaves
+    /// frees a seat for the next one.
     ///
     /// Every seat-taking path runs under the conference row lock (`lock_conference`),
     /// so two requests can never both take the last seat.
+    ///
+    /// ADR 0068 A6: `plan_cap` is the participants-per-meeting limit of the space holder's
+    /// plan (when plan enforcement is on): every live seat of the conference, interactive
+    /// and viewer alike, counts against it.
     async fn ensure_capacity<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
         conference_id: Uuid,
         role: Role,
+        plan_cap: Option<u32>,
     ) -> ApiResult<()> {
         let viewer_pool = role == Role::Viewer && space.viewer_capacity > 0;
-        let mut q = conference_participants::Entity::find()
+        let seated = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted));
+        let live = Query::select()
+            .column(participant_sessions::Column::ConferenceParticipantId)
+            .from(participant_sessions::Entity)
+            .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
+            .and_where(
+                participant_sessions::Column::State
+                    .is_in([SessionState::Pending, SessionState::Connected]),
+            )
+            .and_where(
+                participant_sessions::Column::ExpiresAt
+                    .is_null()
+                    .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
+            )
+            .to_owned();
+        let seated = seated.filter(conference_participants::Column::Id.in_subquery(live));
+        if let Some(cap) = plan_cap {
+            if seated.clone().count(conn).await? >= u64::from(cap) {
+                return Err(ApiError::domain(
+                    ErrorCode::MeetingCapacityReached,
+                    "This meeting has reached the participant limit of its plan",
+                ));
+            }
+        }
+        let mut q = seated;
         let limit = if viewer_pool {
             q = q.filter(conference_participants::Column::Role.eq(Role::Viewer));
             space.viewer_capacity
@@ -355,21 +433,6 @@ impl AdmissionService {
             if space.viewer_capacity > 0 {
                 q = q.filter(conference_participants::Column::Role.ne(Role::Viewer));
             }
-            let live = Query::select()
-                .column(participant_sessions::Column::ConferenceParticipantId)
-                .from(participant_sessions::Entity)
-                .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
-                .and_where(
-                    participant_sessions::Column::State
-                        .is_in([SessionState::Pending, SessionState::Connected]),
-                )
-                .and_where(
-                    participant_sessions::Column::ExpiresAt
-                        .is_null()
-                        .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
-                )
-                .to_owned();
-            q = q.filter(conference_participants::Column::Id.in_subquery(live));
             space.interactive_capacity
         };
         if q.count(conn).await? >= limit as u64 {
@@ -384,15 +447,13 @@ impl AdmissionService {
     /// Seat check for an already-ADMITTED participant that is (re)connecting: one that
     /// still holds a seat (another live device, or the session a reconnect replaces)
     /// needs no new seat; one whose sessions have all ended takes a free seat again.
-    /// The dedicated viewer pool counts admitted viewers, so a rejoin needs no new seat.
+    /// Viewers follow the same rule (gap audit M11).
     async fn ensure_seat<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
         participant: &conference_participants::Model,
+        plan_cap: Option<u32>,
     ) -> ApiResult<()> {
-        if participant.role == Role::Viewer && space.viewer_capacity > 0 {
-            return Ok(());
-        }
         let now = Utc::now();
         let holds_seat = Self::active_sessions(conn, participant.id)
             .await?
@@ -401,7 +462,14 @@ impl AdmissionService {
         if holds_seat {
             return Ok(());
         }
-        Self::ensure_capacity(conn, space, participant.conference_id, participant.role).await
+        Self::ensure_capacity(
+            conn,
+            space,
+            participant.conference_id,
+            participant.role,
+            plan_cap,
+        )
+        .await
     }
 
     fn is_internal(space: &meeting_spaces::Model, ctx: &ActorContext) -> bool {
@@ -417,6 +485,14 @@ impl AdmissionService {
         r.verified_domain()
             .map(|d| domains.iter().any(|a| a.eq_ignore_ascii_case(&d)))
             .unwrap_or(false)
+    }
+
+    /// ADR 0068 A6: the participants-per-meeting limit of the space holder's plan (`None`:
+    /// enforcement off, no plan limit, or the plan read unavailable — fail open).
+    async fn plan_participants(&self, space: &meeting_spaces::Model) -> Option<u32> {
+        crate::services::plan_limits::for_space(&self.core.plan_limits, space)
+            .await
+            .and_then(|p| p.participants())
     }
 
     async fn custom_waiting(
@@ -546,6 +622,68 @@ impl AdmissionService {
         .await?)
     }
 
+    /// ADR 0062: a partner user joins only conferences of meetings owned by ITS
+    /// application environment (any other conference is 404, exactly as an unknown id) and
+    /// only conferences its user token's effective `mtg` grants name (403 otherwise).
+    async fn platform_user_role(
+        &self,
+        conference: &conference_sessions::Model,
+        user: &PlatformUserActor,
+    ) -> ApiResult<Role> {
+        let space = find_space(&self.core.db, conference.meeting_space_id)
+            .await
+            .map_err(|_| crate::services::meeting_core::not_found_conference())?;
+        let t = &user.token;
+        let owned = space.owner_user_id.is_none()
+            && space.platform_environment_id == Some(t.environment_id)
+            && space.platform_application_id == Some(t.application_id)
+            && space.platform_tenant_id == Some(t.tenant_id);
+        if !owned {
+            return Err(crate::services::meeting_core::not_found_conference());
+        }
+        let granted = t.meeting_grant(conference.id).ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::MeetingAccessDenied,
+                "Your user token does not grant access to this conference",
+            )
+        })?;
+        Ok(clamp_granted_role(
+            granted,
+            &PermissionContext::for_space(&space),
+        ))
+    }
+
+    /// ADR 0062: remember the partner user's participant (one per conference and
+    /// principal) and the user token / minting credential of this join.
+    async fn record_platform_participant<C: ConnectionTrait>(
+        conn: &C,
+        participant: &conference_participants::Model,
+        user: &PlatformUserActor,
+    ) -> ApiResult<()> {
+        let t = &user.token;
+        conn.execute(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "INSERT INTO meeting_platform_participants (conference_id, principal_id, participant_id, \
+                 environment_id, environment_kind, token_id, credential_id, service_account_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             ON CONFLICT (conference_id, principal_id) DO UPDATE SET token_id = EXCLUDED.token_id, \
+                 credential_id = EXCLUDED.credential_id, service_account_id = EXCLUDED.service_account_id, \
+                 environment_kind = EXCLUDED.environment_kind, last_joined_at = now()",
+            [
+                participant.conference_id.into(),
+                user.principal_id().into(),
+                participant.id.into(),
+                t.environment_id.into(),
+                t.environment_kind.clone().into(),
+                t.token_id.into(),
+                t.credential_id.into(),
+                t.service_account_id.into(),
+            ],
+        ))
+        .await?;
+        Ok(())
+    }
+
     /// `POST /api/v2/conferences/{id}/join` — the join pipeline plus the Part I join
     /// SLI (attempt, credential issued, denial vs infrastructure failure; latency to
     /// the media connection is completed by the provider webhook).
@@ -608,6 +746,12 @@ impl AdmissionService {
         }
         // 1. Resolve conference / space (fail fast; re-checked under lock below).
         let conference = find_conference(&self.core.db, conference_id).await?;
+        // ADR 0062: a partner user's scope and grant come first (other environments'
+        // conferences do not exist for it).
+        let platform_role = match ctx.platform_user() {
+            Some(u) => Some(self.platform_user_role(&conference, u).await?),
+            None => None,
+        };
         Self::ensure_v2(&conference)?;
         let space = find_space(&self.core.db, conference.meeting_space_id)
             .await
@@ -623,6 +767,18 @@ impl AdmissionService {
         }
         if matches!(ctx.kind, ActorKind::System(_)) {
             return Err(permission_denied("System actors cannot join conferences"));
+        }
+        // ADR 0062: a partner user's participant (re)joins only with its user token, so
+        // Platform Access re-verifies the user (suspension, revoked sessions, revoked
+        // minting key) and its grant on every join. Its participant token serves every
+        // other participant operation.
+        if matches!(ctx.kind, ActorKind::ParticipantCredential(_))
+            && existing.as_ref().is_some_and(is_platform_participant)
+        {
+            return Err(ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "Join this conference with your user token",
+            ));
         }
         // 3./4. Lifecycle and space status.
         if conference.status != ConferenceStatus::Live {
@@ -645,7 +801,13 @@ impl AdmissionService {
         .await?;
         let ctx: &ActorContext = &narrowed;
         // 5./6. Access policy (membership / invitation / passcode / adapters).
-        let invitation = match req.invitation_token.as_deref() {
+        // A partner user's access is its verified grant (ADR 0062): no invitation, passcode
+        // or space policy step applies to it.
+        let invitation = match req
+            .invitation_token
+            .as_deref()
+            .filter(|_| platform_role.is_none())
+        {
             Some(t) => Some(
                 self.invitations
                     .validate_for_join(ctx, t, space.id, conference_id)
@@ -653,18 +815,29 @@ impl AdmissionService {
             ),
             None => None,
         };
-        let decision = self
-            .access
-            .evaluate(AccessRequest {
-                space: &space,
-                conference_id,
-                actor: ctx,
-                existing_participant: existing.as_ref(),
-                invitation,
-                passcode: req.passcode.as_deref(),
-                external_context: req.external_context.as_deref(),
-            })
-            .await?;
+        let decision = match platform_role {
+            Some(role) => AccessDecision {
+                grant: AccessGrant::PlatformUser,
+                is_owner: false,
+                membership: None,
+                invitation: None,
+                adapter_role: Some(role),
+                external: None,
+            },
+            None => {
+                self.access
+                    .evaluate(AccessRequest {
+                        space: &space,
+                        conference_id,
+                        actor: ctx,
+                        existing_participant: existing.as_ref(),
+                        invitation,
+                        passcode: req.passcode.as_deref(),
+                        external_context: req.external_context.as_deref(),
+                    })
+                    .await?
+            }
+        };
         // Part H: the effective profile policy (meeting type → security profile →
         // organization → space → conference) gates regulated entry.
         let profile = crate::services::profiles::MeetingProfileResolver::load(
@@ -733,7 +906,11 @@ impl AdmissionService {
                 ctx,
                 space.security_profile,
             );
+        // ADR 0062: a partner user always presents under its user profile name.
         let display_name = match (&req.display_name, ctx.registered(), &existing) {
+            _ if ctx.platform_user().is_some() => {
+                platform_user_display_name(ctx.platform_user().expect("checked"))
+            }
             (_, Some(r), _) if profile_locked => r.display_name.chars().take(100).collect(),
             (Some(n), _, _) => sanitize_display_name(n)?,
             (None, Some(r), _) => r.display_name.chars().take(100).collect(),
@@ -817,8 +994,10 @@ impl AdmissionService {
 
         // 10. Role (authoritative sources only). Live-assigned roles survive reconnect.
         let (mut role, mut role_source) = resolve_role(&decision, space.default_role);
-        // Part F §53: webinar attendees (default role) are subscribe-only.
+        // Part F §53: webinar attendees (default role) are subscribe-only. A partner user's
+        // role is an explicit grant (ADR 0062), never the attendee default.
         if collab
+            && decision.grant != AccessGrant::PlatformUser
             && role_source == RoleSource::Default
             && matches!(
                 space.meeting_type,
@@ -870,6 +1049,8 @@ impl AdmissionService {
         let external_ref = existing
             .as_ref()
             .and_then(|p| p.external_ref.clone())
+            // ADR 0062: a partner user is banned by identity (`principal:<id>`).
+            .or_else(|| ctx.platform_user().map(PlatformUserActor::external_ref))
             .or_else(|| {
                 decision
                     .invitation
@@ -910,6 +1091,10 @@ impl AdmissionService {
         // 11. Waiting room.
         let identity_type = match (&existing, ctx.registered(), &decision.invitation) {
             (Some(p), _, _) => p.identity_type,
+            // ADR 0062: an externally authenticated partner identity.
+            (None, None, _) if decision.grant == AccessGrant::PlatformUser => {
+                IdentityType::InvitedExternal
+            }
             (None, Some(_), _) => IdentityType::RegisteredUser,
             (None, None, Some(_)) => IdentityType::InvitedExternal,
             (None, None, None) => IdentityType::Guest,
@@ -936,10 +1121,27 @@ impl AdmissionService {
             _ if wait => AdmissionState::Waiting,
             _ => AdmissionState::Admitted,
         };
+        // Gap audit M6: a bounded waiting room. A new knock is refused once the conference
+        // already has MAX_WAITING entries waiting (a flood of guest knocks can never bury
+        // the host's queue); WAITING entries also expire (scheduler) and can be withdrawn.
+        if target == AdmissionState::Waiting && previous_state != Some(AdmissionState::Waiting) {
+            let waiting = conference_participants::Entity::find()
+                .filter(conference_participants::Column::ConferenceId.eq(conference_id))
+                .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Waiting))
+                .count(&txn)
+                .await?;
+            if waiting >= MAX_WAITING {
+                return Err(ApiError::domain(
+                    ErrorCode::RateLimited,
+                    "The waiting room is full; try again later",
+                ));
+            }
+        }
         let newly_admitted =
             target == AdmissionState::Admitted && previous_state != Some(AdmissionState::Admitted);
         if newly_admitted && !exempt {
-            Self::ensure_capacity(&txn, &space, conference_id, role).await?;
+            let plan_cap = self.plan_participants(&space).await;
+            Self::ensure_capacity(&txn, &space, conference_id, role, plan_cap).await?;
         }
 
         // 12. Commit the logical participant (one per person per conference).
@@ -1072,6 +1274,23 @@ impl AdmissionService {
                 .await?
             }
         };
+        // ADR 0062: a re-join keeps the participant and issues a fresh participant token
+        // (the device presents a user token, never a previous participant token).
+        if let Some(u) = ctx.platform_user() {
+            if existing.is_some() {
+                let token = secrets::generate_bearer_secret("pt_");
+                conference_participants::Entity::update_many()
+                    .col_expr(
+                        conference_participants::Column::CredentialHash,
+                        Expr::value(secrets::hash_secret(&token)),
+                    )
+                    .filter(conference_participants::Column::Id.eq(participant.id))
+                    .exec(&txn)
+                    .await?;
+                participant_token = Some(token);
+            }
+            Self::record_platform_participant(&txn, &participant, u).await?;
+        }
         if let Some(inv) = consume_invitation {
             invitations::consume(&txn, inv).await?;
             audit(
@@ -1186,7 +1405,8 @@ impl AdmissionService {
         // participants were checked above).
         let session = if participant.admission_state == AdmissionState::Admitted {
             if !newly_admitted && !exempt {
-                Self::ensure_seat(&txn, &space, &participant).await?;
+                let plan_cap = self.plan_participants(&space).await;
+                Self::ensure_seat(&txn, &space, &participant, plan_cap).await?;
             }
             Some(
                 self.establish_session(
@@ -1201,6 +1421,20 @@ impl AdmissionService {
         } else {
             None
         };
+        // Multi-device policy: remember which sign-in opened this media session, so ending
+        // that sign-in (device replaced or revoked) ends only this device's media.
+        if let (Some(s), Some(sid)) = (
+            session.as_ref(),
+            ctx.registered().and_then(|r| r.account_session_id),
+        ) {
+            crate::services::account_devices::record_session_media(
+                &txn,
+                sid,
+                s.id,
+                s.conference_id,
+            )
+            .await?;
+        }
         txn.commit().await?;
 
         // 14. RTC credentials only after the authoritative state committed. Part F: the
@@ -1380,6 +1614,19 @@ impl AdmissionService {
         }
         let sessions = q.all(&txn).await?;
         let now = Utc::now();
+        // Gap audit M6: someone still WAITING who leaves withdraws their knock (it no
+        // longer sits in the host's queue).
+        let withdrawn = participant.admission_state == AdmissionState::Waiting;
+        if withdrawn {
+            let mut am: conference_participants::ActiveModel = participant.clone().into();
+            am.admission_state = Set(AdmissionState::Denied);
+            am.denied_at = Set(Some(now));
+            am.denied_by = Set(Some("self:withdrawn".into()));
+            am.denial_reason_code = Set(Some("WITHDRAWN".into()));
+            am.version = Set(participant.version + 1);
+            am.updated_at = Set(now);
+            am.update(&txn).await?;
+        }
         for s in &sessions {
             let mut am: participant_sessions::ActiveModel = s.clone().into();
             am.state = Set(SessionState::Disconnected);
@@ -1388,7 +1635,7 @@ impl AdmissionService {
             am.updated_at = Set(now);
             am.update(&txn).await?;
         }
-        if !sessions.is_empty() {
+        if !sessions.is_empty() || withdrawn {
             let mut payload = participant_payload(&participant);
             payload["sessionIds"] = json!(sessions.iter().map(|s| s.id).collect::<Vec<_>>());
             emit(
@@ -1405,7 +1652,7 @@ impl AdmissionService {
             .await?;
         }
         txn.commit().await?;
-        Ok(sessions.len() as u64)
+        Ok(sessions.len() as u64 + u64::from(withdrawn))
     }
 
     pub async fn me(
@@ -1441,7 +1688,9 @@ impl AdmissionService {
         Ok((txn, conference, space, authority, pctx))
     }
 
-    /// Admitted participants (roster) — visible to anyone with conference authority.
+    /// Admitted participants (roster) — visible to anyone with conference authority. Gap
+    /// audit M5: a VIEWER (a webinar / town-hall attendee) sees only the people running the
+    /// session (presenters and above) and themselves, never the other attendees.
     pub async fn roster(
         &self,
         ctx: &ActorContext,
@@ -1449,15 +1698,23 @@ impl AdmissionService {
     ) -> ApiResult<Vec<conference_participants::Model>> {
         let conference = find_conference(&self.core.db, conference_id).await?;
         let space = find_space(&self.core.db, conference.meeting_space_id).await?;
-        conference_authority(&self.core.db, &space, conference_id, ctx)
+        let authority = conference_authority(&self.core.db, &space, conference_id, ctx)
             .await?
             .ok_or_else(|| permission_denied("You are not part of this conference"))?;
-        Ok(conference_participants::Entity::find()
+        let list = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted))
             .order_by_asc(conference_participants::Column::AdmittedAt)
             .all(&self.core.db)
-            .await?)
+            .await?;
+        if authority.role != Role::Viewer {
+            return Ok(list);
+        }
+        let me = authority.participant.as_ref().map(|p| p.id);
+        Ok(list
+            .into_iter()
+            .filter(|p| Some(p.id) == me || p.role.rank() >= Role::Presenter.rank())
+            .collect())
     }
 
     pub async fn waiting_room(
@@ -1574,7 +1831,9 @@ impl AdmissionService {
                         continue;
                     }
                     if !pctx.allows(p.role, Permission::ParticipantAdmit) {
-                        Self::ensure_capacity(&txn, &space, conference_id, p.role).await?;
+                        let plan_cap = self.plan_participants(&space).await;
+                        Self::ensure_capacity(&txn, &space, conference_id, p.role, plan_cap)
+                            .await?;
                     }
                     let mut am: conference_participants::ActiveModel = p.clone().into();
                     am.admission_state = Set(AdmissionState::Admitted);
@@ -2370,6 +2629,25 @@ mod tests {
             resolve_role(&both, Role::Participant),
             (Role::CoHost, RoleSource::Membership)
         );
+    }
+
+    #[test]
+    fn platform_grants_are_clamped_by_grant_authority_and_never_owner() {
+        let ctx = PermissionContext::default();
+        for role in [
+            Role::Host,
+            Role::CoHost,
+            Role::Presenter,
+            Role::Participant,
+            Role::Viewer,
+        ] {
+            // The environment owns its spaces: every contract role is grantable.
+            assert_eq!(clamp_granted_role(role, &ctx), role);
+        }
+        // OWNER (or anything above HOST) is never the result.
+        assert_eq!(clamp_granted_role(Role::Owner, &ctx), Role::Host);
+        // MODERATOR is not a contract role: it clamps to the next contract role below.
+        assert_eq!(clamp_granted_role(Role::Moderator, &ctx), Role::Presenter);
     }
 
     #[test]

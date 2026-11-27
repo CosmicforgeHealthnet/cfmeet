@@ -156,6 +156,10 @@ const EVENTS: &[&str] = &["after", "limit"];
 /// `afterEventSequence` on the REST replay). Only the canonical key is ever forwarded.
 pub const QUERY_ALIASES: &[(&str, &str)] = &[("afterEventSequence", "after")];
 
+/// ADR 0068: the recipient's owner-delivered exports on Messaging's delegated mirror
+/// (served only there, so never part of the [`ROUTES`] allowlist of customer operations).
+pub const EXPORT_DELIVERIES: &str = "/internal/v1/delegated/v1/messaging/export-deliveries";
+
 /// Every HTTP method the allowlist uses; `routes::v2` mounts exactly these on
 /// `/api/v2/messaging/relay/*path` (a unit test keeps the two in step).
 pub const RELAY_METHODS: &[Method] = &[
@@ -217,6 +221,13 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::PUT,
         &[Lit("conversations"), Id, Lit("read-cursor")],
+        &[],
+        false,
+    ),
+    // F1: the member's own archive / pin of a chat (Messaging enforces membership).
+    r(
+        Method::PUT,
+        &[Lit("conversations"), Id, Lit("inbox-settings")],
         &[],
         false,
     ),
@@ -473,6 +484,13 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // Push platforms of the deployment and the Web Push application-server key (public).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("push"), Lit("configuration")],
+        &[],
+        false,
+    ),
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("search")],
@@ -488,6 +506,13 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::POST,
         &[Lit("conversations"), Id, Lit("reports")],
+        &[],
+        false,
+    ),
+    // Gap audit S3: the owner hands the conversation over.
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("owner")],
         &[],
         false,
     ),
@@ -544,6 +569,51 @@ pub static ROUTES: &[RelayRoute] = &[
             Lit("reactions"),
             Reaction,
         ],
+        &[],
+        false,
+    ),
+    // Forwarding a message into another chat the caller belongs to (Messaging checks
+    // membership of both).
+    r(
+        Method::POST,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("forward"),
+        ],
+        &[],
+        false,
+    ),
+    // Group invite links: list, create, revoke (admins, checked by Messaging) and join.
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("invite-links")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("invite-links")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("invite-links"),
+            Id,
+            Lit("revoke"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("invite-links"), Lit("join")],
         &[],
         false,
     ),
@@ -696,6 +766,28 @@ pub fn native_public_path(method: &str, template: &str) -> Option<String> {
 }
 
 /// A relayed request (the handler parsed it; nothing here is trusted for identity).
+/// The allowlisted client path as forwarded to Messaging: decoded once, then every non-ASCII
+/// byte percent-encoded (upper-case hex). An emoji reaction segment reaches Messaging as
+/// `%F0%9F%91%8D` whichever form the client sent; ASCII stays as it is (the allowlist
+/// already refused `%`, `/` and dots inside a reaction).
+fn forwarded_path(path: &str) -> String {
+    let decoded = urlencoding::decode(path)
+        .map(|d| d.into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    let mut out = String::with_capacity(decoded.len());
+    for c in decoded.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    out
+}
+
 pub struct RelayRequest<'a> {
     pub method: Method,
     pub path: &'a str,
@@ -738,9 +830,56 @@ impl UnifiedMessaging {
                 Peer::Messaging,
                 Some(acting),
                 req.method,
-                &format!("/internal/v1/delegated/{}", req.path),
+                &format!("/internal/v1/delegated/{}", forwarded_path(req.path)),
                 &query,
                 &headers,
+                body.as_ref(),
+            )
+            .await
+            .map_err(|e| chat_error(&e))
+    }
+
+    /// ADR 0068 (owner-delivered exports): the caller's own owner-delivered Messaging exports
+    /// (`GET /internal/v1/delegated/v1/messaging/export-deliveries`, newest first, at most
+    /// 20), as references. Messaging answers only the recipient's own exports.
+    pub async fn export_deliveries(&self, user_id: Uuid) -> ApiResult<(u16, Value)> {
+        self.export_call(user_id, Method::GET, EXPORT_DELIVERIES.to_string(), None)
+            .await
+    }
+
+    /// ADR 0068: the caller's single claim of an owner-delivered export
+    /// (`POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim`): one
+    /// short-lived forced-download grant, answered once and never stored or logged here.
+    pub async fn claim_export(&self, user_id: Uuid, export_id: Uuid) -> ApiResult<(u16, Value)> {
+        self.export_call(
+            user_id,
+            Method::POST,
+            format!("/internal/v1/delegated/v1/messaging/exports/{export_id}/claim"),
+            Some(json!({})),
+        )
+        .await
+    }
+
+    async fn export_call(
+        &self,
+        user_id: Uuid,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+    ) -> ApiResult<(u16, Value)> {
+        let principal = self.principal_for_user(user_id).await?;
+        let acting = Acting {
+            principal_id: principal,
+            kind: PrincipalKind::NativeCfUser,
+        };
+        self.gateway
+            .call_raw_with_headers(
+                Peer::Messaging,
+                Some(acting),
+                method,
+                &path,
+                &[],
+                &[],
                 body.as_ref(),
             )
             .await
@@ -951,6 +1090,18 @@ mod tests {
     const C: &str = "6f1d2c3b-4a59-4e68-9f70-8a91b2c3d4e5";
 
     #[test]
+    fn emoji_reactions_are_forwarded_percent_encoded() {
+        let encoded = "v1/conversations/c/messages/m/reactions/%F0%9F%91%8D";
+        assert_eq!(forwarded_path(encoded), encoded);
+        assert_eq!(
+            forwarded_path("v1/conversations/c/messages/m/reactions/\u{1F44D}"),
+            encoded,
+            "a raw emoji is encoded"
+        );
+        assert_eq!(forwarded_path("v1/conversations"), "v1/conversations");
+    }
+
+    #[test]
     fn only_end_user_operations_are_relayed() {
         for (m, p) in [
             (Method::GET, "v1/conversations".to_string()),
@@ -958,6 +1109,7 @@ mod tests {
             (Method::POST, format!("v1/conversations/{C}/mls/commits")),
             (Method::PATCH, format!("v1/conversations/{C}/members/{C}")),
             (Method::POST, format!("v1/conversations/{C}/bans")),
+            (Method::POST, format!("v1/conversations/{C}/owner")),
             (
                 Method::PUT,
                 format!("v1/conversations/{C}/messages/{C}/reactions/:thumbsup:"),
@@ -969,6 +1121,7 @@ mod tests {
             (Method::GET, "v1/messaging/invitations".into()),
             (Method::PUT, "v1/messaging/presence/settings".into()),
             (Method::GET, format!("v1/messaging/devices/{C}/welcomes")),
+            (Method::GET, "v1/messaging/push/configuration".into()),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),

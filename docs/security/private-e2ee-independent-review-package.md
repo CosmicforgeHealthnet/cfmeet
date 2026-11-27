@@ -1,9 +1,17 @@
 # PRIVATE_E2EE — independent cryptographic review commissioning package
 
 **Status: READY FOR COMMISSIONING. No independent assessment has been performed.**
-Production activation of personal PRIVATE_E2EE messaging stays refused by the Messaging
-configuration validator (`MESSAGING_E2EE_DEVICES_ENABLED=true` is rejected in production)
-until all of the following are recorded against
+
+> **Update (owner decision 2026-11-15, [ADR 0060](../decisions/0060-account-linked-devices-and-production-personal-e2ee.md)):**
+> personal PRIVATE_E2EE is **enabled in production** under the owner's release record
+> (`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`, coordinated `activate-personal-encryption`), which
+> states `independentAssessment: NOT_PERFORMED` and accepts `NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT`,
+> `KEY_TRANSPARENCY_UNWITNESSED` and `WEB_CODE_DELIVERY_TRUST`. The validator no longer refuses
+> production E2EE when that record is mounted. The gates below are no longer preconditions of
+> production activation; they remain the path to an independent certification.
+
+Before the owner decision, production activation stayed refused by the Messaging
+configuration validator until all of the following were recorded against
 [issue 13](https://github.com/CosmicforgeHealthnet/cfmeet/issues/13):
 
 1. an assessment report by a qualified independent party covering the scope below;
@@ -110,5 +118,5 @@ Test vectors live in `packages/messaging-crypto/tests/vectors/`.
 | 7 | Owner approval of the exact configuration and image digests | issue 13 |
 | 8 | A dedicated, reviewed change that lifts the validator refusal for production, deployed by the normal release workflow with stage acceptance | PR + release run id |
 
-Until gate 8, `communications-release` and `messaging-configure` keep refusing production
-E2EE activation, and Sections 8–23 closure records PRIVATE_E2EE as `BLOCKED_EXTERNAL`.
+Gate 8 was superseded by the owner's release record (ADR 0060): production E2EE is
+activated by `activate-personal-encryption` and checked by every release, verify and certify.

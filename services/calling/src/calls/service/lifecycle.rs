@@ -177,8 +177,13 @@ impl CallService {
             scope.application_id().as_uuid(),
             scope.environment_id().as_uuid(),
         );
-        let (decision, rate_notices) =
-            crate::platform::limits::check_principal_rate(txn, self.now(), initiator.id()).await?;
+        let (decision, rate_notices) = crate::platform::limits::check_principal_rate(
+            txn,
+            self.now(),
+            initiator.id(),
+            Some(self.limit_defaults.call_creations_per_principal_per_minute),
+        )
+        .await?;
         if let crate::platform::limits::RateDecision::Limited { retry_after_secs } = decision {
             // The creating transaction rolls back: the notice is emitted on its own.
             crate::webhooks::notices::emit_detached(
@@ -607,6 +612,28 @@ impl CallService {
                 plan.at,
             )
             .await?;
+        if plan.to == CallState::Ending || plan.to.is_terminal() {
+            // C6: a finished Call has no presenter (the media is torn down with it).
+            self.clear_screen_share_in(txn, cmd, &call, None, "CALL_ENDED")
+                .await?;
+        }
+        if plan.to == CallState::Ending {
+            // A Call that is ending rings nobody: every live offer is closed in the SAME
+            // transaction as the state change, whichever path ends the Call (END, auto-end,
+            // public-network media loss, a reverted transfer), so no history or recovery
+            // read can observe an ENDING Call with an open offer.
+            closed.cancelled_invitations = self
+                .finish_live_invitations_in(
+                    txn,
+                    cmd,
+                    &call,
+                    None,
+                    None,
+                    InvitationStatus::Cancelled,
+                    InvitationTerminalReason::CallTerminated,
+                )
+                .await?;
+        }
         if plan.to.is_terminal() {
             closed = self.close_subordinates_in(txn, cmd, &call).await?;
             // Recipients that were offered the Call and never answered, declined or lost
@@ -629,6 +656,11 @@ impl CallService {
                 &[("call_kind", call.call_kind.as_str())],
                 missed.max(0) as u64,
             );
+            // Roadmap N7 (D-10): the same participants, one notification publication each
+            // (CF Meet accounts only), atomic with the terminal state.
+            if missed > 0 && self.config.notification_publications {
+                crate::notification_publications::enqueue_missed(txn, &call).await?;
+            }
         }
         record_lifecycle_metrics(row, &call, &plan);
         tracing::info!(

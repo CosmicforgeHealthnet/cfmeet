@@ -88,6 +88,8 @@ pub struct ConversationRow {
     pub title: Option<String>,
     /// Section 13 (MSG-007): opaque avatar reference of a MANAGED conversation.
     pub avatar_ref: Option<String>,
+    /// S13: only OWNER / ADMIN members may send (send, edit and forward check it).
+    pub announcement_only: bool,
 }
 
 impl ConversationRow {
@@ -103,7 +105,7 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
      c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
-     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref";
+     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref, c.announcement_only";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -165,6 +167,7 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "readReceipts": c.read_receipts,
         "title": c.title,
         "avatarRef": c.avatar_ref,
+        "announcementOnly": c.announcement_only,
     })
 }
 
@@ -482,6 +485,12 @@ pub async fn create(
             }
         }
     }
+    // ADR 0064: a CF Meet App's bot (creator or DIRECT counterpart) takes part in
+    // MANAGED conversations only; the profile is decided in the transaction below.
+    // (The counterpart's kind is not kept above: it is looked up when the flag is on.)
+    let mut parties = vec![(acting.principal_id, Some(acting.kind.as_str()))];
+    parties.extend(counterpart.map(|p| (p, None)));
+    let app_bot = crate::apps::involves_bot(state, ctx, &parties).await?;
     let digest = hex::encode(Sha256::digest(
         canonical_json(&json!({
             "request": serde_json::to_value(&request).expect("serializes"),
@@ -505,6 +514,7 @@ pub async fn create(
                     &acting,
                     request,
                     counterpart,
+                    app_bot,
                     &key,
                     &digest,
                     &request_ctx,
@@ -531,6 +541,7 @@ async fn create_in(
     acting: &Acting,
     request: CreateRequest,
     counterpart: Option<Uuid>,
+    app_bot: bool,
     key: &str,
     digest: &str,
     request_ctx: &RequestContext,
@@ -596,6 +607,9 @@ async fn create_in(
             ))
         }
     };
+    if app_bot && profile == SecurityProfile::PrivateE2ee {
+        return Err(crate::apps::bot_managed_only());
+    }
     if !context_policy.allowed_profiles.contains(&profile) {
         return Err(Error::reason(
             ErrorCode::SecurityProfileNotAllowed,
@@ -635,18 +649,23 @@ async fn create_in(
                 "E2EE_DEVICES_DISABLED",
             ));
         }
-        for (principal, reason) in std::iter::once((acting.principal_id, "CREATOR_HAS_NO_DEVICE"))
-            .chain(counterpart.map(|p| (p, "COUNTERPART_HAS_NO_DEVICE")))
-        {
-            let devices = db::scalar_i64(
-                txn,
-                "SELECT count(*) FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2 AND status = 'ACTIVE'",
-                vec![env.into(), principal.into()],
-            )
-            .await?;
-            if devices == 0 {
-                return Err(Error::reason(ErrorCode::E2eeNotAvailable, reason));
-            }
+        // The creator's device builds the MLS group, so it must exist. A counterpart without
+        // a device yet does NOT block the chat: the conversation is PRIVATE_E2EE from the
+        // start and stays pending setup; the counterpart's devices are added to the group by
+        // a member device once they enroll, and no message is encrypted for nobody (clients
+        // hold them sealed until then). Never a MANAGED conversation instead, never a
+        // server-generated key.
+        let devices = db::scalar_i64(
+            txn,
+            "SELECT count(*) FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2 AND status = 'ACTIVE'",
+            vec![env.into(), acting.principal_id.into()],
+        )
+        .await?;
+        if devices == 0 {
+            return Err(Error::reason(
+                ErrorCode::E2eeNotAvailable,
+                "CREATOR_HAS_NO_DEVICE",
+            ));
         }
     }
     let expires_at = match (request.expires_at, context_policy.max_lifetime_seconds) {
@@ -675,7 +694,7 @@ async fn create_in(
         }
     }
     if let Some(seconds) = request.retention_seconds {
-        check_retention(&snapshot.policy, request.context_class, seconds, None)?;
+        check_retention(&snapshot.policy, request.context_class, Some(seconds))?;
     }
     let (title, avatar_ref) = display_metadata(
         profile,
@@ -958,6 +977,10 @@ pub struct ListQuery {
     /// (latest application message first; the inbox order).
     #[serde(default)]
     pub order_by: Option<String>,
+    /// ADR 0062: a partner session device sees MANAGED conversations only (set by the
+    /// handler from the request's authentication, never from the query).
+    #[serde(skip)]
+    pub managed_only: bool,
 }
 
 pub(crate) fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
@@ -1055,15 +1078,20 @@ async fn inbox_summary(
             })
         }
     };
-    Ok((
-        json!({
-            "lastActivityAt": rfc3339(activity),
-            "lastMessage": last_message,
-            "unreadCount": counts.unread,
-            "mentionCount": counts.mentions,
-        }),
-        activity,
-    ))
+    let mut summary = json!({
+        "lastActivityAt": rfc3339(activity),
+        "lastMessage": last_message,
+        "unreadCount": counts.unread,
+        "mentionCount": counts.mentions,
+    });
+    // F1: the member's own archive / pin of this chat.
+    for (k, v) in super::inbox_settings::load(&state.db, row.id, viewer)
+        .await?
+        .summary_fields()
+    {
+        summary[k] = v;
+    }
+    Ok((summary, activity))
 }
 
 /// The `lastActivity` ordering key of one conversation (same expression as the list).
@@ -1166,6 +1194,7 @@ pub async fn list(
                AND ($5::text IS NULL OR c.lifecycle_state = $5) \
                AND ($6::text IS NULL OR c.context_class = $6) \
                AND ($7::timestamptz IS NULL OR ({order_key}, c.id) < ($7, $8)) \
+               AND ($10::bool IS NOT TRUE OR c.security_profile = 'MANAGED') \
              ORDER BY {order_key} DESC, c.id DESC LIMIT $9"
         ),
         vec![
@@ -1178,6 +1207,7 @@ pub async fn list(
             cursor_t.into(),
             cursor_id.into(),
             ((limit + 1) as i64).into(),
+            q.managed_only.into(),
         ],
     )
     .await?;
@@ -1224,9 +1254,11 @@ pub struct PatchRequest {
     pub reason: Option<String>,
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
-    /// §90: a stricter, conversation-specific retention in seconds (only tightens).
-    #[serde(default)]
-    pub retention_seconds: Option<i64>,
+    /// §90 / disappearing messages: a conversation-specific retention in seconds, never
+    /// looser than the context's policy; `null` turns it off. Applies to messages sent
+    /// after the change (each message keeps the retention it was sent with).
+    #[serde(default, deserialize_with = "present")]
+    pub retention_seconds: Option<Option<i64>>,
     /// Accepted only to be refused explicitly: a profile can never change.
     #[serde(default)]
     pub security_profile: Option<Value>,
@@ -1236,6 +1268,9 @@ pub struct PatchRequest {
     /// Section 13 (MSG-007): a new avatar reference (`null` clears it). MANAGED only.
     #[serde(default, deserialize_with = "present")]
     pub avatar_ref: Option<Option<String>>,
+    /// S13: announcement-only (only OWNER / ADMIN members send). GROUP / CHANNEL only.
+    #[serde(default)]
+    pub announcement_only: Option<bool>,
 }
 
 /// A field that is present (possibly `null`) versus absent.
@@ -1275,9 +1310,10 @@ pub async fn patch(
         && request.retention_seconds.is_none()
         && request.title.is_none()
         && request.avatar_ref.is_none()
+        && request.announcement_only.is_none()
     {
         return Err(Error::validation(
-            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title or avatarRef is required",
+            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title, avatarRef or announcementOnly is required",
         ));
     }
 
@@ -1310,8 +1346,27 @@ pub async fn patch(
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
                 if let Some(a) = &acting {
-                    // A principal administering a conversation must be its owner.
-                    if row.owner_principal_id != a.principal_id {
+                    // A principal administering a conversation must be its owner. B4:
+                    // disappearing messages alone are a chat admin's setting (OWNER /
+                    // ADMIN of a group, either member of a one-to-one chat).
+                    let retention_only = request.retention_seconds.is_some()
+                        && request.lifecycle_state.is_none()
+                        && request.expires_at.is_none()
+                        && request.title.is_none()
+                        && request.avatar_ref.is_none()
+                        && request.announcement_only.is_none();
+                    if retention_only && row.owner_principal_id != a.principal_id {
+                        let member = super::access::membership(txn, id, a.principal_id, false)
+                            .await?
+                            .filter(|m| m.is_active())
+                            .ok_or(Error::code(ErrorCode::NotFound))?;
+                        if !(member.is_admin() || row.context_class == "DIRECT") {
+                            return Err(Error::reason(
+                                ErrorCode::PrincipalNotAuthorized,
+                                "NOT_ADMIN",
+                            ));
+                        }
+                    } else if row.owner_principal_id != a.principal_id {
                         return Err(if is_member(txn, id, a.principal_id).await? {
                             Error::reason(ErrorCode::PrincipalNotAuthorized, "NOT_OWNER")
                         } else {
@@ -1385,7 +1440,11 @@ pub async fn patch(
                 // Display metadata is validated against the PERSISTED profile and applied
                 // in the transition's single version step (`conversation.updated` event).
                 // `Some(None)` clears; only a new value is validated.
-                let mut display = DisplayChange::default();
+                let mut display = DisplayChange {
+                    // B4: `retentionSeconds: null` turns disappearing messages off.
+                    clear_retention: matches!(request.retention_seconds, Some(None)),
+                    ..DisplayChange::default()
+                };
                 if request.title.is_some() || request.avatar_ref.is_some() {
                     let (title, avatar_ref) = display_metadata(
                         row.profile(),
@@ -1395,6 +1454,14 @@ pub async fn patch(
                     display.title = request.title.as_ref().map(|_| title);
                     display.avatar_ref = request.avatar_ref.as_ref().map(|_| avatar_ref);
                 }
+                if let Some(on) = request.announcement_only {
+                    if on && row.context_class == "DIRECT" {
+                        return Err(Error::validation(
+                            "announcementOnly applies to GROUP and CHANNEL conversations",
+                        ));
+                    }
+                    display.announcement_only = Some(on);
+                }
                 let changed = transition_with(
                     txn,
                     &ctx,
@@ -1402,7 +1469,7 @@ pub async fn patch(
                     next,
                     request.reason.as_deref(),
                     request.expires_at,
-                    request.retention_seconds,
+                    request.retention_seconds.flatten(),
                     display,
                     now,
                     &request_ctx,
@@ -1540,14 +1607,17 @@ async fn link_successor<C: ConnectionTrait>(
 /// The longest read-only grace a transactional conversation may have (30 days).
 pub const MAX_EXPIRY_GRACE_SECONDS: i64 = 2_592_000;
 
-/// A conversation retention is 60 s .. 100 years, never looser than the context's (or the
-/// environment's) retention policy and never looser than its current setting.
+/// A conversation retention is 60 s .. 100 years and never looser than the context's (or
+/// the environment's) retention policy. B4: it may be shortened, lengthened or turned off
+/// (`None`: the context's policy alone applies) within that limit.
 fn check_retention(
     effective: &policy::EffectivePolicy,
     class: ContextClass,
-    seconds: i64,
-    current: Option<i64>,
+    seconds: Option<i64>,
 ) -> Result<()> {
+    let Some(seconds) = seconds else {
+        return Ok(());
+    };
     if !(60..=3_153_600_000).contains(&seconds) {
         return Err(Error::validation(
             "retentionSeconds must be between 60 and 3153600000",
@@ -1564,29 +1634,22 @@ fn check_retention(
             "RETENTION_LOOSER_THAN_POLICY",
         ));
     }
-    if current.is_some_and(|c| seconds > c) {
-        return Err(Error::reason(
-            ErrorCode::ValidationError,
-            "RETENTION_ONLY_TIGHTENS",
-        ));
-    }
     Ok(())
 }
 
 /// §90: checks a conversation retention change (never looser than its context's policy,
-/// which keeps applying, nor than an earlier setting — the database refuses that too) and
-/// audits it; [`transition`] stores it with the version bump.
+/// which keeps applying) and audits it; [`transition`] stores it with the version bump.
 async fn check_and_audit_retention<C: ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
     row: &ConversationRow,
-    seconds: i64,
+    seconds: Option<i64>,
     now: DateTime<Utc>,
 ) -> Result<()> {
     let effective = policy::current(db, ctx.scope.environment_id).await?;
     let class = ContextClass::parse(&row.context_class)
         .ok_or_else(|| Error::validation("unknown context class"))?;
-    check_retention(&effective, class, seconds, row.retention_seconds)?;
+    check_retention(&effective, class, seconds)?;
     crate::audit::record(
         db,
         crate::audit::AuditEntry {
@@ -1658,6 +1721,10 @@ pub(crate) async fn transition<C: ConnectionTrait>(
 pub(crate) struct DisplayChange {
     pub title: Option<Option<String>>,
     pub avatar_ref: Option<Option<String>>,
+    /// S13: a new announcement-only setting.
+    pub announcement_only: Option<bool>,
+    /// B4: turn the conversation's retention (disappearing messages) off.
+    pub clear_retention: bool,
 }
 
 /// [`transition`] that may also change the display metadata in the same version step.
@@ -1679,9 +1746,10 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
         db,
         "UPDATE messaging_conversations SET lifecycle_state = $3, \
            lifecycle_reason = CASE WHEN $6 THEN $4 ELSE lifecycle_reason END, \
-           expires_at = COALESCE($5, expires_at), retention_seconds = COALESCE($8, retention_seconds), \
+           expires_at = COALESCE($5, expires_at), retention_seconds = CASE WHEN $14 THEN NULL ELSE COALESCE($8, retention_seconds) END, \
            title = CASE WHEN $9 THEN $10 ELSE title END, \
            avatar_ref = CASE WHEN $11 THEN $12 ELSE avatar_ref END, \
+           announcement_only = COALESCE($13, announcement_only), \
            version = version + 1, updated_at = $7, \
            state_changed_at = CASE WHEN $6 THEN $7 ELSE state_changed_at END \
          WHERE id = $1 AND version = $2",
@@ -1698,6 +1766,8 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
             display.title.flatten().into(),
             display.avatar_ref.is_some().into(),
             display.avatar_ref.flatten().into(),
+            display.announcement_only.into(),
+            display.clear_retention.into(),
         ],
     )
     .await
@@ -1827,17 +1897,86 @@ pub async fn run_expiry(state: AppState, interval: std::time::Duration) {
 // Application policy
 // ---------------------------------------------------------------------------------------
 
+/// Whether this deployment can run a security profile at all, and why not: PRIVATE_E2EE
+/// needs E2EE devices (`MESSAGING_E2EE_DEVICES_ENABLED`), MANAGED needs the managed key ring.
+/// A policy can allow a profile the deployment cannot run; this makes that visible and
+/// keeps new policy writes from relying on it.
+pub(crate) fn deployment_unavailable(
+    state: &AppState,
+    profile: SecurityProfile,
+) -> Option<&'static str> {
+    match profile {
+        SecurityProfile::PrivateE2ee if !state.devices.enabled => Some("E2EE_DEVICES_DISABLED"),
+        SecurityProfile::Managed if state.managed_keys.is_none() => {
+            Some("MANAGED_ENCRYPTION_NOT_CONFIGURED")
+        }
+        _ => None,
+    }
+}
+
+fn profile_name(profile: SecurityProfile) -> String {
+    serde_json::to_value(profile)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// Per enabled context: the allowed profiles this deployment can actually run.
+fn deployment_view(state: &AppState, effective: &policy::EffectivePolicy) -> Value {
+    let mut profiles = serde_json::Map::new();
+    for profile in [SecurityProfile::PrivateE2ee, SecurityProfile::Managed] {
+        let reason = deployment_unavailable(state, profile);
+        profiles.insert(
+            profile_name(profile),
+            json!({ "available": reason.is_none(), "reason": reason }),
+        );
+    }
+    let mut usable = serde_json::Map::new();
+    let mut unusable = Vec::new();
+    for (class, context) in &effective.contexts {
+        if !context.enabled {
+            continue;
+        }
+        let name = serde_json::to_value(class)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let list: Vec<String> = context
+            .allowed_profiles
+            .iter()
+            .filter(|p| deployment_unavailable(state, **p).is_none())
+            .map(|p| profile_name(*p))
+            .collect();
+        if list.is_empty() {
+            unusable.push(Value::String(name.clone()));
+        }
+        usable.insert(name, json!(list));
+    }
+    json!({
+        "profiles": profiles,
+        "usableProfiles": usable,
+        "contextsWithoutUsableProfile": unusable,
+        // The actual production release decision for personal E2EE (independent-assessment
+        // status and accepted residual risks); null outside production or while disabled.
+        "e2eeProductionRelease": state.devices.production_release.as_ref().map(|r| r.summary()),
+    })
+}
+
 pub async fn policy_view(state: &AppState, ctx: &TrustedContext) -> Result<Value> {
     let (overrides, version) =
         policy::load_application_policy(&state.db, ctx.scope.environment_id, false).await?;
-    let effective =
-        policy::resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))?;
+    let baseline = policy::load_baseline(&state.db, ctx.scope.environment_id).await?;
+    let effective = policy::resolve(&policy::layer(baseline, &overrides), version)
+        .map_err(|_| Error::code(ErrorCode::InternalError))?;
     Ok(json!({
         "version": version,
+        // The application's own document (what a PUT replaces), never the baseline.
         "policy": overrides,
+        "applicationBaseline": baseline.map(|b| b.as_str()),
         "effective": effective.to_value(),
         "digest": effective.digest(),
         "platformPolicyVersion": policy::PLATFORM_POLICY_VERSION,
+        "deployment": deployment_view(state, &effective),
     }))
 }
 
@@ -1853,79 +1992,134 @@ pub async fn update_policy(
     ctx: &TrustedContext,
     update: PolicyUpdate,
 ) -> Result<Value> {
-    let resolved =
-        policy::resolve(&update.policy, update.expected_version + 1).map_err(Error::validation)?;
+    let resolved = check_policy_update(state, ctx.scope.environment_id, &update).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let request_ctx = request_context();
     state
         .db
-        .transaction::<_, (), Error>(move |txn| {
+        .transaction::<_, i64, Error>(move |txn| {
             Box::pin(async move {
-                let now = st.now();
-                let env = ctx2.scope.environment_id;
-                // Serialize writers of this environment's policy (also when none exists yet).
-                db::exec(
-                    txn,
-                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 11))",
-                    vec![format!("messaging-policy:{env}").into()],
-                )
-                .await?;
-                let (_, current) = policy::load_application_policy(txn, env, true).await?;
-                if current != update.expected_version {
-                    return Err(Error::code(ErrorCode::PolicyVersionConflict));
-                }
-                let document = serde_json::to_value(&update.policy).expect("serializes");
-                db::exec(
-                    txn,
-                    "INSERT INTO messaging_application_policies (environment_id, tenant_id, application_id, version, \
-                       document, updated_by_credential_id, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-                     ON CONFLICT (environment_id) DO UPDATE SET version = EXCLUDED.version, document = EXCLUDED.document, \
-                       updated_by_credential_id = EXCLUDED.updated_by_credential_id, updated_at = EXCLUDED.updated_at",
-                    vec![
-                        env.into(),
-                        ctx2.scope.tenant_id.into(),
-                        ctx2.scope.application_id.into(),
-                        (current + 1).into(),
-                        document.into(),
-                        ctx2.credential_id.into(),
-                        now.into(),
-                    ],
-                )
-                .await?;
-                // A changed storage budget may make room for thumbnails deferred for it.
-                crate::attachments::derivatives::requeue_quota_deferred(txn, env, now).await?;
-                audit::record(
-                    txn,
-                    AuditEntry {
-                        ctx: &ctx2,
-                        principal_id: None,
-                        action: "POLICY_UPDATED",
-                        target_kind: "MESSAGING_POLICY",
-                        target_id: env,
-                        detail: json!({ "version": current + 1, "digest": resolved.digest() }),
-                    },
-                    &request_ctx,
-                    now,
-                )
-                .await?;
-                outbox::enqueue(
-                    txn,
-                    NewEvent {
-                        event_type: "messaging.policy.updated",
-                        aggregate_type: "MESSAGING_POLICY",
-                        aggregate_id: env,
-                        scope: scope_of(&ctx2),
-                        payload: json!({ "version": current + 1, "policy_digest": resolved.digest() }),
-                    },
-                    &request_ctx,
-                    now,
-                )
-                .await?;
-                Ok(())
+                write_policy_in(txn, &ctx2, &update, &resolved, st.now(), &request_ctx).await
             })
         })
         .await
         .map_err(Error::from)?;
     policy_view(state, ctx).await
+}
+
+/// Validates a policy update for `environment_id` (no change): the layered document
+/// resolves at the next version, and every context it configures keeps a profile this
+/// deployment can run. Returns the effective policy it would produce.
+pub(crate) async fn check_policy_update(
+    state: &AppState,
+    environment_id: Uuid,
+    update: &PolicyUpdate,
+) -> Result<policy::EffectivePolicy> {
+    let baseline = policy::load_baseline(&state.db, environment_id).await?;
+    let resolved = policy::resolve(
+        &policy::layer(baseline, &update.policy),
+        update.expected_version + 1,
+    )
+    .map_err(Error::validation)?;
+    // A context this update configures must leave at least one allowed profile that this
+    // deployment can actually run (otherwise no conversation of it could ever be created).
+    for class in update.policy.contexts.keys() {
+        let context = resolved.context(*class);
+        if !context.enabled {
+            continue;
+        }
+        let unavailable: Vec<String> = context
+            .allowed_profiles
+            .iter()
+            .filter_map(|p| {
+                deployment_unavailable(state, *p).map(|r| format!("{} ({r})", profile_name(*p)))
+            })
+            .collect();
+        if unavailable.len() == context.allowed_profiles.len() {
+            let name = serde_json::to_value(class)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            return Err(Error::validation(format!(
+                "{name}: none of the allowed profiles is available in this deployment: {}",
+                unavailable.join(", ")
+            )));
+        }
+    }
+    Ok(resolved)
+}
+
+/// Writes a [`check_policy_update`]d document inside the caller's transaction, only at
+/// `update.expected_version` (else `POLICY_VERSION_CONFLICT`), with its audit entry and
+/// event. Returns the new version. Also used by the admin bridge
+/// ([`crate::operator_commands::policy`]).
+pub(crate) async fn write_policy_in<C: ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    update: &PolicyUpdate,
+    resolved: &policy::EffectivePolicy,
+    now: DateTime<Utc>,
+    request_ctx: &RequestContext,
+) -> Result<i64> {
+    let env = ctx.scope.environment_id;
+    // Serialize writers of this environment's policy (also when none exists yet).
+    db::exec(
+        txn,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 11))",
+        vec![format!("messaging-policy:{env}").into()],
+    )
+    .await?;
+    let (_, current) = policy::load_application_policy(txn, env, true).await?;
+    if current != update.expected_version {
+        return Err(Error::code(ErrorCode::PolicyVersionConflict));
+    }
+    let document = serde_json::to_value(&update.policy).expect("serializes");
+    db::exec(
+        txn,
+        "INSERT INTO messaging_application_policies (environment_id, tenant_id, application_id, version, \
+           document, updated_by_credential_id, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         ON CONFLICT (environment_id) DO UPDATE SET version = EXCLUDED.version, document = EXCLUDED.document, \
+           updated_by_credential_id = EXCLUDED.updated_by_credential_id, updated_at = EXCLUDED.updated_at",
+        vec![
+            env.into(),
+            ctx.scope.tenant_id.into(),
+            ctx.scope.application_id.into(),
+            (current + 1).into(),
+            document.into(),
+            ctx.credential_id.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    // A changed storage budget may make room for thumbnails deferred for it.
+    crate::attachments::derivatives::requeue_quota_deferred(txn, env, now).await?;
+    audit::record(
+        txn,
+        AuditEntry {
+            ctx,
+            principal_id: None,
+            action: "POLICY_UPDATED",
+            target_kind: "MESSAGING_POLICY",
+            target_id: env,
+            detail: json!({ "version": current + 1, "digest": resolved.digest() }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    outbox::enqueue(
+        txn,
+        NewEvent {
+            event_type: "messaging.policy.updated",
+            aggregate_type: "MESSAGING_POLICY",
+            aggregate_id: env,
+            scope: scope_of(ctx),
+            payload: json!({ "version": current + 1, "policy_digest": resolved.digest() }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    Ok(current + 1)
 }

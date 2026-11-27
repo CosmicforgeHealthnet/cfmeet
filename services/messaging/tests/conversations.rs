@@ -209,18 +209,15 @@ async fn encryption_that_cannot_be_established_is_an_error_never_a_managed_fallb
             "CREATOR_HAS_NO_DEVICE"
         )
     );
-    h.active_device(&c, alice).await;
-    let r = h.create(&c, alice, body.clone(), &key()).await;
-    assert_eq!(r.reason(), "COUNTERPART_HAS_NO_DEVICE");
-    // Even with MANAGED allowed, an unavailable E2EE request is not converted.
+    // Even with MANAGED allowed, an E2EE request without a creator device is not converted.
     h.put_policy(
         &c,
         0,
         json!({ "contexts": { "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE", "MANAGED"] } } }),
     )
     .await;
-    let r = h.create(&c, alice, body, &key()).await;
-    assert_eq!(r.reason(), "COUNTERPART_HAS_NO_DEVICE");
+    let r = h.create(&c, alice, body.clone(), &key()).await;
+    assert_eq!(r.reason(), "CREATOR_HAS_NO_DEVICE");
     // Nothing was written by any refused attempt (the transaction rolled back whole).
     assert_eq!(
         h.scalar("SELECT count(*) FROM messaging_conversations")
@@ -238,6 +235,20 @@ async fn encryption_that_cannot_be_established_is_an_error_never_a_managed_fallb
         )
         .await,
         0
+    );
+    // Section "modern messaging": a counterpart who has not set up a device yet does not block
+    // the chat. It is created PRIVATE_E2EE (never MANAGED, even where MANAGED is allowed),
+    // pending setup; the counterpart's devices join the MLS group when they enroll.
+    h.active_device(&c, alice).await;
+    let r = h.create(&c, alice, body.clone(), &key()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["securityProfile"], "PRIVATE_E2EE", "{}", r.text);
+    assert!(r.json["encryption"]["mlsGroupId"].is_string(), "{}", r.text);
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_conversations WHERE security_profile = 'MANAGED'")
+            .await,
+        0,
+        "never a server-readable conversation instead"
     );
     // Deployments without E2EE devices refuse PRIVATE_E2EE creation explicitly.
     let disabled = Harness::on(h.db.clone(), |s| s.devices.enabled = false);
@@ -913,6 +924,68 @@ async fn conversations_are_isolated_by_tenant_application_environment_and_member
     assert_eq!(
         h.get(&c, Some(alice), &path).await.reason(),
         "PRINCIPAL_INACTIVE"
+    );
+}
+
+/// The policy states what THIS deployment can run, and a write cannot configure a context no
+/// conversation could ever be created in (production: E2EE devices disabled, PRIVATE_E2EE by
+/// platform default, so every personal context had no usable profile and creation failed).
+#[tokio::test]
+async fn policy_reports_and_enforces_the_profiles_this_deployment_can_run() {
+    let Some(h) = Harness::build(|s| s.devices.enabled = false).await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let v = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(v.status, StatusCode::OK, "{}", v.text);
+    conforms("messaging/common/v1.schema.json#/$defs/PolicyView", &v.json);
+    let d = &v.json["deployment"];
+    assert_eq!(
+        d["profiles"]["PRIVATE_E2EE"],
+        json!({"available": false, "reason": "E2EE_DEVICES_DISABLED"})
+    );
+    assert_eq!(
+        d["profiles"]["MANAGED"],
+        json!({"available": true, "reason": null})
+    );
+    assert_eq!(d["usableProfiles"]["DIRECT"], json!([]));
+    assert!(
+        d["contextsWithoutUsableProfile"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("DIRECT")),
+        "{d}"
+    );
+    // Configuring a context with only an unavailable profile is refused, naming why.
+    let r = h
+        .put_policy(&c, 0, json!({ "contexts": { "GROUP": { "allowedProfiles": ["PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" } } }))
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    assert!(r.text.contains("E2EE_DEVICES_DISABLED"), "{}", r.text);
+    // A context with a runnable profile is accepted and becomes usable.
+    let ok = h
+        .put_policy(&c, 0, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } } }))
+        .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text);
+    assert_eq!(
+        ok.json["deployment"]["usableProfiles"]["GROUP"],
+        json!(["MANAGED"])
+    );
+    assert!(!ok.json["deployment"]["contextsWithoutUsableProfile"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("GROUP")));
+    // A fully provisioned deployment has a usable profile for every enabled context.
+    let Some(full) = Harness::new().await else {
+        return;
+    };
+    let c = full.customer(ALL);
+    let v = full.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        v.json["deployment"]["contextsWithoutUsableProfile"],
+        json!([]),
+        "{}",
+        v.text
     );
 }
 

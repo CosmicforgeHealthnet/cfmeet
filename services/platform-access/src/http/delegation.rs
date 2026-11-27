@@ -28,6 +28,8 @@
 //! | `GET/POST /delegation/environments/{id}/service-accounts/{sa}/credentials` | §54: list / issue (raw secret returned once, never stored here) |
 //! | `GET /delegation/environments/{id}/credentials/{c}` | read; another environment's credential is NOT_FOUND |
 //! | `POST /delegation/environments/{id}/credentials/{c}/{rotate,revoke,suspend,resume}` | §54 lifecycle (bounded overlap, immediate revocation, reversible suspension) |
+//! | `GET /delegation/environments/{id}/credential-deliveries` | ADR 0068: the owner-delivered keys (issued / rotated by HQ staff through the admin bridge) still waiting for their one reveal; never a secret |
+//! | `POST /delegation/environments/{id}/credential-deliveries/{ref}/reveal` | ADR 0068: the ONE reveal of an owner-delivered key's secret (a human member `u-…` only); the sealed copy is destroyed in the same transaction |
 //! | `POST /delegation/applications/{id}/scopes`, `DELETE …/scopes/{scope}` | §54: STANDARD scopes only (FIRST_PARTY_ONLY needs an operator command `o-…`; PRIVILEGED never); PRODUCTION in the restriction needs an activated PRODUCTION environment |
 //! | `POST /delegation/applications/{id}/production-environment` | §55: activate the PRODUCTION environment of an approved production-access request (approval reference recorded) |
 //! | `POST /delegation/environments/{id}/live-telecom` | §55: activated PRODUCTION environments only |
@@ -153,6 +155,14 @@ pub fn routes() -> Router<AppState> {
             post(resume_credential),
         )
         .route(
+            "/delegation/environments/:environment_id/credential-deliveries",
+            get(list_credential_deliveries),
+        )
+        .route(
+            "/delegation/environments/:environment_id/credential-deliveries/:delivery_ref/reveal",
+            post(reveal_credential_delivery),
+        )
+        .route(
             "/delegation/applications/:application_id/scopes",
             get(list_scopes).post(grant_scope),
         )
@@ -179,7 +189,10 @@ fn valid_actor(value: &str) -> bool {
 }
 
 /// Authorizes a delegated mutation: permission + a named human actor.
-fn delegated(caller: &InternalCaller, headers: &HeaderMap) -> AccessResult<OperatorContext> {
+pub(crate) fn delegated(
+    caller: &InternalCaller,
+    headers: &HeaderMap,
+) -> AccessResult<OperatorContext> {
     caller.require_permission(InternalPermission::PlatformIdentityDelegate)?;
     let actor = headers
         .get(ACTOR_HEADER)
@@ -190,7 +203,7 @@ fn delegated(caller: &InternalCaller, headers: &HeaderMap) -> AccessResult<Opera
         .map_err(|_| AccessError::Refused(ErrorCode::OperatorRequired))
 }
 
-fn read_only(caller: &InternalCaller) -> AccessResult<()> {
+pub(crate) fn read_only(caller: &InternalCaller) -> AccessResult<()> {
     caller.require_permission(InternalPermission::PlatformIdentityDelegate)
 }
 
@@ -830,6 +843,59 @@ async fn resume_credential(
             .await
             .map_err(op_err)?,
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Owner-delivered API keys (ADR 0068): the partner's one reveal
+// ---------------------------------------------------------------------------
+
+/// The owner-delivered keys of an environment waiting for their reveal (no secret).
+async fn list_credential_deliveries(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(environment_id): Path<Uuid>,
+) -> AccessResult<impl IntoResponse> {
+    read_only(&caller)?;
+    let environment_id = EnvironmentId::from_uuid(environment_id);
+    s.platform
+        .environment(environment_id)
+        .await
+        .map_err(op_err)?;
+    Ok(Json(json!({
+        "deliveries": s
+            .platform
+            .pending_credential_deliveries(environment_id)
+            .await
+            .map_err(op_err)?,
+    })))
+}
+
+/// The ONE reveal: `{credential, secret}` (no-store), the sealed copy destroyed in the
+/// same transaction and audited. Only a human member the Developer Platform authorized
+/// (`u-…`): never a machine credential (`s-…`) or an operator command (`o-…`). An
+/// unknown, already revealed or expired delivery is NOT_FOUND (nothing is resent).
+async fn reveal_credential_delivery(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((environment_id, delivery_ref)): Path<(Uuid, Uuid)>,
+) -> AccessResult<axum::response::Response> {
+    let op = delegated(&caller, &headers)?;
+    let human = headers
+        .get(ACTOR_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("u-"));
+    if !human {
+        return Err(policy(
+            "an owner-delivered key is revealed only to a signed-in human member",
+        ));
+    }
+    let issued = s
+        .platform
+        .reveal_credential_delivery(&op, EnvironmentId::from_uuid(environment_id), delivery_ref)
+        .await
+        .map_err(op_err)?;
+    Ok(secret_response(StatusCode::OK, issued_json(issued)))
 }
 
 // ---------------------------------------------------------------------------

@@ -68,6 +68,13 @@ error_codes! {
     TeamNotFound = "TEAM_NOT_FOUND" => NOT_FOUND, "The team was not found.";
     TeamArchived = "TEAM_ARCHIVED" => CONFLICT, "The team is archived.";
     TeamNameTaken = "TEAM_NAME_TAKEN" => CONFLICT, "An active team of the organization already has this name.";
+    // ADR 0068 (admin bridge commands).
+    ApprovalRequired = "APPROVAL_REQUIRED" => FORBIDDEN, "This operation requires a second-person approval (X-CF-Approver).";
+    // ADR 0068 A4: owner-delivered exports.
+    ExportDeliveryUnavailable = "EXPORT_DELIVERY_UNAVAILABLE" => CONFLICT, "Owner-delivered exports are not available on this deployment.";
+    ExportNoRecipient = "EXPORT_NO_RECIPIENT" => CONFLICT, "The organization has no active owner to deliver the export to.";
+    ExportLinkInvalid = "EXPORT_LINK_INVALID" => NOT_FOUND, "The export link is invalid or was already used.";
+    ExportLinkExpired = "EXPORT_LINK_EXPIRED" => GONE, "The export link has expired.";
     // Infrastructure codes (unknown route / method, oversized body, unexpected failure).
     NotFound = "NOT_FOUND" => NOT_FOUND, "The resource was not found.";
     MethodNotAllowed = "METHOD_NOT_ALLOWED" => METHOD_NOT_ALLOWED, "The method is not allowed.";

@@ -16,19 +16,27 @@
 //! [`CallMediaProvider`] only.
 
 pub mod abuse_reports;
+pub mod abuse_review;
 mod auto_end;
 pub mod blocks;
+mod consultation;
 mod control;
 mod create;
 pub mod enterprise;
 pub mod history;
+mod host;
 pub mod http;
 pub mod incidents;
+mod invite;
 pub mod media;
 mod privacy;
 pub mod public;
+pub mod quality;
+mod rejoin;
 mod ringing;
+mod screen_share;
 mod transfer;
+mod upgrade;
 mod workers;
 
 use std::sync::Arc;
@@ -43,8 +51,10 @@ use uuid::Uuid;
 
 pub use auto_end::AutoEndReason;
 pub use blocks::AbuseControls;
+pub use consultation::{ConsultationRequest, ConsultationStarted, ConsultationView};
 pub use control::{ActionAvailability, AvailableActions};
 pub use create::{CreateAppCall, CreatedAppCall};
+pub use invite::InviteParticipants;
 pub use ringing::{InvitationActor, RecoveredInvitation};
 pub use transfer::TransferRequest;
 pub use workers::WorkerReport;
@@ -61,12 +71,18 @@ use crate::{
     domain::{ApplicationId, EnvironmentId, ServiceAccountId, TenantId},
     endpoints::EndpointService,
     media::{CallMediaProvider, MediaCredentialPolicy},
-    models::{call_endpoints, call_invitations, call_participants, call_sessions, calls},
+    models::{
+        call_endpoints, call_invitations, call_participants, call_sessions, calls, principals,
+        tenants,
+    },
     platform::principals::PrincipalResolver,
     privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     signaling::{
         bus::{RealtimeSignalBus, SignalEnvelope},
-        push::{NoPushTransport, PushDispatcher},
+        push::{
+            NoPushTransport, PartnerPushOffer, PlatformPrincipalRecipient, PushCancel,
+            PushDispatcher, PushOffer,
+        },
         signals::{self, SignalType},
     },
 };
@@ -119,6 +135,14 @@ pub struct AppCallingConfig {
     /// older than this (counted from its first connection, else its answer) ends
     /// (`MAX_DURATION`).
     pub max_call_duration: Duration,
+    /// `CALLING_SCREEN_SHARE_ENABLED` (default ON): active participants of a live
+    /// application Call (VOICE or VIDEO) may present their screen, one presenter per Call
+    /// (C6). Off refuses NEW presentations only; stopping always works.
+    pub screen_share_enabled: bool,
+    /// `CALLING_BUSY_ON_ANOTHER_CALL` (default ON, CF1): a call to someone who is already
+    /// in a live call is not rung; it ends BUSY at once (a group call rings only the people
+    /// who are free) and the busy person has a missed call.
+    pub busy_on_another_call: bool,
 }
 
 impl Default for AppCallingConfig {
@@ -140,6 +164,8 @@ impl Default for AppCallingConfig {
             participation_grace: Duration::seconds(60),
             idle_call_timeout: Duration::seconds(600),
             max_call_duration: Duration::seconds(28_800),
+            screen_share_enabled: true,
+            busy_on_another_call: true,
         }
     }
 }
@@ -153,8 +179,9 @@ impl AppCallingConfig {
     /// `CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS` (3–1000, default 40),
     /// `CALLING_CALL_SETUP_DEADLINE_SECONDS` (3900–86400, default 7200),
     /// `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (60–86400, default 600),
-    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` (true / false, default
-    /// true),
+    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` /
+    /// `CALLING_SCREEN_SHARE_ENABLED` / `CALLING_BUSY_ON_ANOTHER_CALL` (true / false,
+    /// default true),
     /// `CALLING_PARTICIPATION_GRACE_SECONDS` (10–600, default 60),
     /// `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (120–86400, default 600; above the grace),
     /// `CALLING_MAX_CALL_DURATION_SECONDS` (1800–172800, default 28800; above the idle
@@ -232,6 +259,8 @@ impl AppCallingConfig {
             )?),
             new_calls_enabled: switch("CALLING_NEW_CALLS_ENABLED")?,
             app_calling_enabled: switch("CALLING_APP_CALLING_ENABLED")?,
+            screen_share_enabled: switch("CALLING_SCREEN_SHARE_ENABLED")?,
+            busy_on_another_call: switch("CALLING_BUSY_ON_ANOTHER_CALL")?,
             participation_grace: Duration::seconds(number(
                 "CALLING_PARTICIPATION_GRACE_SECONDS",
                 60,
@@ -303,9 +332,66 @@ pub struct AppCallService {
     /// Platform compliance overlay (Part H §78): countries whose paid routes always
     /// require compliance eligibility, whatever the customer policy says.
     pub(crate) compliance_overlay: crate::routing::compliance::ComplianceOverlay,
+    /// `CALLING_PARTNER_PUSH_ENABLED` (ADR 0063, default off): ring offers to partner
+    /// users of EXTERNAL tenants also produce a `platform-principal` push offer.
+    pub(crate) partner_push: bool,
+    /// Media clean-up that runs after a command already answered (C1).
+    pub(crate) background: Arc<Background>,
+}
+
+/// Media clean-up a command started after its transaction committed and does not wait
+/// for (C1: cancel and end answer at once; a LiveKit round trip never delays the reply).
+/// Each task is best effort: a failed clean-up is recorded on the media binding and
+/// retried by reconciliation, exactly as when it ran inline.
+#[derive(Default)]
+pub struct Background {
+    running: std::sync::atomic::AtomicUsize,
+    idle: tokio::sync::Notify,
+}
+
+impl Background {
+    pub(crate) fn spawn<F>(self: &Arc<Self>, task: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        use std::sync::atomic::Ordering;
+        self.running.fetch_add(1, Ordering::SeqCst);
+        let this = self.clone();
+        tokio::spawn(async move {
+            task.await;
+            if this.running.fetch_sub(1, Ordering::SeqCst) == 1 {
+                this.idle.notify_waiters();
+            }
+        });
+    }
+
+    /// Waits until no background clean-up is running (graceful shutdown and tests).
+    pub async fn settled(&self) {
+        use std::sync::atomic::Ordering;
+        loop {
+            let idle = self.idle.notified();
+            tokio::pin!(idle);
+            idle.as_mut().enable();
+            if self.running.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            idle.await;
+        }
+    }
 }
 
 impl AppCallService {
+    /// CF1 on or off (see [`AppCallingConfig::busy_on_another_call`]).
+    pub fn with_busy_on_another_call(mut self, on: bool) -> Self {
+        self.config.busy_on_another_call = on;
+        self
+    }
+
+    /// Waits for the background media clean-up started by earlier commands (C1).
+    pub async fn settle_background(&self) {
+        self.background.settled().await;
+    }
+
     pub fn new(
         calls: Arc<CallService>,
         endpoints: Arc<EndpointService>,
@@ -333,7 +419,15 @@ impl AppCallService {
             capture: Arc::new(enterprise::UnavailableCapture),
             abuse_controls: AbuseControls::default(),
             compliance_overlay: Default::default(),
+            partner_push: false,
+            background: Arc::new(Background::default()),
         }
+    }
+
+    /// `CALLING_PARTNER_PUSH_ENABLED` (default off): see [`partner_recipient`].
+    pub fn with_partner_push(mut self, enabled: bool) -> Self {
+        self.partner_push = enabled;
+        self
     }
 
     /// Uses `controls` as the abuse-control thresholds (default: documented defaults).
@@ -489,7 +583,10 @@ pub struct CommandOutcome {
 #[derive(Default)]
 pub(crate) struct PendingSignals {
     signals: Vec<SignalEnvelope>,
-    pushes: Vec<(Uuid, Value)>,
+    pushes: Vec<PushOffer>,
+    partner_pushes: Vec<PartnerPushOffer>,
+    /// Gap audit C1: rings to cancel (invitations that ended unanswered on their endpoint).
+    cancels: Vec<PushCancel>,
 }
 
 impl PendingSignals {
@@ -512,8 +609,14 @@ impl AppCallService {
                 tracing::warn!(%error, "realtime signal not published (recoverable via API)");
             }
         }
-        for (target, payload) in signals.pushes {
-            self.push.dispatch(target, payload).await;
+        for offer in signals.pushes {
+            self.push.dispatch_offer(offer).await;
+        }
+        for offer in signals.partner_pushes {
+            self.push.dispatch_partner_offer(offer).await;
+        }
+        for cancel in signals.cancels {
+            self.push.dispatch_cancel(cancel).await;
         }
     }
 
@@ -598,26 +701,70 @@ impl AppCallService {
         correlation_id: &str,
     ) -> CallResult<()> {
         let sequence = self.sequence(db, call.id).await?;
-        if kind == SignalType::Incoming {
-            self.push_offer(db, pending, call, invitation).await?;
-        }
-        pending.push(
-            vec![invitation.endpoint_id],
-            signals::build(
-                kind,
-                call,
-                sequence,
-                correlation_id,
-                Some(invitation),
-                Map::new(),
-                self.calls.now(),
-            ),
+        let mut signal = signals::build(
+            kind,
+            call,
+            sequence,
+            correlation_id,
+            Some(invitation),
+            Map::new(),
+            self.calls.now(),
         );
+        if kind == SignalType::Incoming {
+            let caller = caller_display_name(db, call.id).await?;
+            if let Some(name) = &caller {
+                signal["invitation"]["callerDisplayName"] = Value::String(name.clone());
+            }
+            self.push_offer(db, pending, call, invitation, caller.as_deref())
+                .await?;
+        }
+        if ends_ring_unanswered(kind) {
+            self.push_cancel(db, pending, call, invitation).await?;
+        }
+        pending.push(vec![invitation.endpoint_id], signal);
         Ok(())
     }
 }
 
+/// Gap audit C1: the invitation signals that end a ring without it being answered on that
+/// endpoint (answered elsewhere, cancelled — by the caller, the Call's end, a revoked
+/// endpoint or a closed queue / group —, or expired). Accepted and declined come from the
+/// device itself, which stops ringing on its own.
+pub(crate) fn ends_ring_unanswered(kind: SignalType) -> bool {
+    matches!(
+        kind,
+        SignalType::RingCancelled | SignalType::AnsweredElsewhere | SignalType::InvitationExpired
+    )
+}
+
 impl AppCallService {
+    /// Queues the cancellation of an invitation's ring when its endpoint has a push target
+    /// (the transport decides whether the recipient is first-party and dispatches).
+    async fn push_cancel<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        call: &calls::Model,
+        invitation: &call_invitations::Model,
+    ) -> CallResult<()> {
+        let Some(endpoint) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
+            .one(db)
+            .await?
+        else {
+            return Ok(());
+        };
+        let Some(target) = endpoint.push_target_ref else {
+            return Ok(());
+        };
+        let first_party_account = first_party_account(db, &endpoint).await?;
+        pending.cancels.push(PushCancel {
+            push_target_ref: target,
+            call_id: call.id,
+            first_party_account,
+        });
+        Ok(())
+    }
+
     /// Queues the push-ready payload of a new offer when its endpoint has a push target.
     async fn push_offer<C: ConnectionTrait>(
         &self,
@@ -625,26 +772,124 @@ impl AppCallService {
         pending: &mut PendingSignals,
         call: &calls::Model,
         invitation: &call_invitations::Model,
+        caller: Option<&str>,
     ) -> CallResult<()> {
-        let Some(target) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
+        let Some(endpoint) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
             .one(db)
             .await?
-            .and_then(|e| e.push_target_ref)
         else {
             return Ok(());
         };
-        let caller = call_participants::Entity::find()
-            .filter(call_participants::Column::CallId.eq(call.id))
-            .filter(call_participants::Column::Role.eq(ParticipantRole::Initiator))
-            .one(db)
-            .await?
-            .and_then(|p| p.display_name);
-        pending.pushes.push((
-            target,
-            signals::push_payload(call, invitation, caller.as_deref()),
-        ));
+        // ADR 0063: a partner's user is alerted through the Notification Service with
+        // the partner's own keys, whether or not the endpoint registered a push target.
+        if self.partner_push {
+            if let Some(recipient) = partner_recipient(db, &endpoint).await? {
+                pending.partner_pushes.push(PartnerPushOffer {
+                    recipient,
+                    payload: signals::push_payload(call, invitation, caller),
+                    call_id: call.id,
+                });
+            }
+        }
+        let Some(target) = endpoint.push_target_ref else {
+            return Ok(());
+        };
+        let first_party_account = first_party_account(db, &endpoint).await?;
+        pending.pushes.push(PushOffer {
+            push_target_ref: target,
+            payload: signals::push_payload(call, invitation, caller),
+            call_id: call.id,
+            first_party_account,
+        });
         Ok(())
     }
+}
+
+/// N9: the CF Meet account of an endpoint's principal when the recipient is first-party:
+/// an ACTIVE NATIVE_CF_USER whose reference is exactly `cfmeet-user:<uuid>`, in a
+/// FIRST_PARTY tenant. Anything else (customer applications, whose `pushTargetRef` is
+/// their own) is `None` and never reaches the Notification Service.
+pub(crate) async fn first_party_account<C: ConnectionTrait>(
+    db: &C,
+    endpoint: &call_endpoints::Model,
+) -> CallResult<Option<String>> {
+    use crate::domain::{PrincipalKind, PrincipalStatus, TenantClassification};
+    let Some(tenant) = tenants::Entity::find_by_id(endpoint.tenant_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if tenant.classification != TenantClassification::FirstParty {
+        return Ok(None);
+    }
+    let Some(principal) = principals::Entity::find_by_id(endpoint.principal_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let reference = principal.external_reference;
+    let valid = reference
+        .strip_prefix("cfmeet-user:")
+        .and_then(|u| Uuid::parse_str(u).ok())
+        .is_some_and(|u| format!("cfmeet-user:{u}") == reference);
+    Ok((principal.kind == PrincipalKind::NativeCfUser
+        && principal.status == PrincipalStatus::Active
+        && principal.tenant_id == endpoint.tenant_id
+        && valid)
+        .then_some(reference))
+}
+
+/// ADR 0063 (§6 N-P3): the `platform-principal` recipient of an endpoint whose principal
+/// is a partner's user: an ACTIVE EXTERNAL_APPLICATION_PRINCIPAL of an EXTERNAL tenant, in
+/// the endpoint's own scope. Anything else (first-party accounts, other principal kinds)
+/// is `None` and never reaches the partner lane.
+pub(crate) async fn partner_recipient<C: ConnectionTrait>(
+    db: &C,
+    endpoint: &call_endpoints::Model,
+) -> CallResult<Option<PlatformPrincipalRecipient>> {
+    use crate::domain::{PrincipalKind, PrincipalStatus, TenantClassification};
+    let Some(tenant) = tenants::Entity::find_by_id(endpoint.tenant_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if tenant.classification != TenantClassification::External {
+        return Ok(None);
+    }
+    let Some(principal) = principals::Entity::find_by_id(endpoint.principal_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let in_scope = principal.tenant_id == endpoint.tenant_id
+        && principal.application_id == endpoint.application_id
+        && principal.environment_id == endpoint.environment_id;
+    Ok((in_scope
+        && principal.kind == PrincipalKind::ExternalApplicationPrincipal
+        && principal.status == PrincipalStatus::Active)
+        .then_some(PlatformPrincipalRecipient {
+            tenant_id: endpoint.tenant_id,
+            application_id: endpoint.application_id,
+            environment_id: endpoint.environment_id,
+            principal_id: endpoint.principal_id,
+        }))
+}
+
+/// The display name the Call's initiator was created with (shown on incoming calls).
+pub(crate) async fn caller_display_name<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+) -> CallResult<Option<String>> {
+    Ok(call_participants::Entity::find()
+        .filter(call_participants::Column::CallId.eq(call_id))
+        .filter(call_participants::Column::Role.eq(ParticipantRole::Initiator))
+        .one(db)
+        .await?
+        .and_then(|p| p.display_name))
 }
 
 /// Signal kind announcing a Call that reached `state` (terminal / ending / connected …).
@@ -664,4 +909,24 @@ pub(crate) fn state_signal(state: super::state::CallState) -> Option<SignalType>
         Cancelled => SignalType::Cancelled,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod push_cancel_tests {
+    use super::*;
+
+    /// Gap audit C1: exactly the signals that end a ring unanswered on its endpoint cancel
+    /// the ring's push; the device's own answer, refusal and every call-level signal do not.
+    #[test]
+    fn only_unanswered_ring_endings_cancel_the_push() {
+        for kind in SignalType::ALL {
+            let expected = matches!(
+                kind,
+                SignalType::RingCancelled
+                    | SignalType::AnsweredElsewhere
+                    | SignalType::InvitationExpired
+            );
+            assert_eq!(ends_ring_unanswered(*kind), expected, "{kind:?}");
+        }
+    }
 }

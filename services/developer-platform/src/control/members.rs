@@ -257,6 +257,8 @@ pub async fn remove(
     )
     .await?;
     txn.commit().await?;
+    // ADR 0064: a PRIVATE app's allow list follows the workspace membership.
+    crate::apps::registration::resync_tenant(state, tenant_id).await;
     Ok(())
 }
 
@@ -595,6 +597,13 @@ pub async fn accept(
             vec![tenant_id.into(), now.into()],
         ))
         .await?;
+        // ADR 0068 A7: the first-party workspace is now ACTIVE.
+        crate::bridge_events::record(
+            &txn,
+            state.bridge_events,
+            crate::bridge_events::Source::Workspace(tenant_id),
+        )
+        .await?;
     }
     activity::record(
         &txn,
@@ -610,6 +619,8 @@ pub async fn accept(
     .await?;
     let v = member_view(&txn, member_id).await?;
     txn.commit().await?;
+    // ADR 0064: a PRIVATE app's allow list follows the workspace membership.
+    crate::apps::registration::resync_tenant(state, tenant_id).await;
     Ok(v)
 }
 

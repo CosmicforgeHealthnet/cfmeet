@@ -23,6 +23,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Local development only: /dev-gateway/* is forwarded to the real API Gateway, so the
+  // developer console can be tested from localhost without the gateway allowing localhost
+  // (CORS). Point NEXT_PUBLIC_DEVELOPER_API_BASE_URL at http://localhost:3000/dev-gateway.
+  // Never active in production builds.
+  async rewrites() {
+    if (process.env.NODE_ENV !== "development") return [];
+    const target = process.env.DEV_GATEWAY_TARGET || "https://api.cfmeet.com";
+    return [{ source: "/dev-gateway/:path*", destination: `${target}/:path*` }];
+  },
   images: {
     remotePatterns: [
       {

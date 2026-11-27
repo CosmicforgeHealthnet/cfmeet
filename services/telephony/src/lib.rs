@@ -31,6 +31,7 @@ pub mod internal;
 pub mod legs;
 pub mod metrics;
 pub mod middleware;
+pub mod numbering_reports;
 pub mod operator_audit;
 pub mod ports;
 pub mod providers;

@@ -9,7 +9,11 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
 use crate::{
-    control::credential_lifecycle::{self, CredentialLifecycleSettings, SweepReport},
+    control::{
+        credential_lifecycle::{self, CredentialLifecycleSettings, SweepReport},
+        owner_delivery,
+    },
+    notification_publications::{self, NotificationEventSink, PublicationReport},
     platform_access::PlatformAccessPort,
     reference_reconciliation::{self, ReferenceReport},
     webhooks::WebhookService,
@@ -25,6 +29,53 @@ pub struct PeriodicJobs {
     pub reference_reconciliation_interval: Option<Duration>,
     /// DATA-017: ids of each kind verified at Platform Access per report.
     pub reference_reconciliation_remote_limit: u64,
+    /// Notification Service N7 / N11 (None: `CF_NOTIFICATIONS_BASE_URL` unset — nothing is
+    /// enqueued, relayed or maintained).
+    pub notifications: Option<NotificationJobs>,
+    /// P9: bounded retention purge (default here: off; the worker binary reads
+    /// `DEVELOPER_PLATFORM_RETENTION_*`, on by default).
+    pub retention: crate::retention::RetentionSettings,
+    /// ADR 0064 (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`, None: off): the Platform
+    /// Access `APP_GRANT` projection and the app lifecycle events.
+    pub app_grants: Option<AppGrantJobs>,
+    /// ADR 0068 A7 (`CF_ADMIN_BRIDGE_BASE_URL`, None: off): owner events to the admin
+    /// bridge (the worker's own state changes are recorded too, and the outbox is posted).
+    pub bridge_events: Option<BridgeEventJobs>,
+}
+
+/// The admin bridge's events listener.
+#[derive(Clone)]
+pub struct BridgeEventJobs {
+    pub sink: Arc<dyn crate::bridge_events::BridgeEventSink>,
+}
+
+impl std::fmt::Debug for BridgeEventJobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BridgeEventJobs").finish_non_exhaustive()
+    }
+}
+
+impl PeriodicJobs {
+    /// Whether this worker records owner events with its own state changes.
+    pub fn bridge_events(&self) -> crate::bridge_events::BridgeEvents {
+        if self.bridge_events.is_some() {
+            crate::bridge_events::BridgeEvents::ON
+        } else {
+            crate::bridge_events::BridgeEvents::OFF
+        }
+    }
+}
+
+/// The install projection's Platform Access port.
+#[derive(Clone)]
+pub struct AppGrantJobs {
+    pub port: Arc<dyn crate::apps::port::PlatformOAuthPort>,
+}
+
+impl std::fmt::Debug for AppGrantJobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppGrantJobs").finish_non_exhaustive()
+    }
 }
 
 impl Default for PeriodicJobs {
@@ -33,6 +84,234 @@ impl Default for PeriodicJobs {
             credential_lifecycle: CredentialLifecycleSettings::disabled(),
             reference_reconciliation_interval: None,
             reference_reconciliation_remote_limit: 0,
+            notifications: None,
+            retention: crate::retention::RetentionSettings::disabled(),
+            app_grants: None,
+            bridge_events: None,
+        }
+    }
+}
+
+/// The worker's Notification Service jobs: the publication relay (every pass), its
+/// hourly maintenance and, when routed, the credential notice sweep.
+#[derive(Clone)]
+pub struct NotificationJobs {
+    /// I1 of the Notification Service.
+    pub sink: Arc<dyn NotificationEventSink>,
+    /// `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE=notification-service` (default).
+    pub credential_notices: bool,
+}
+
+impl std::fmt::Debug for NotificationJobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NotificationJobs")
+            .field("credential_notices", &self.credential_notices)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Publications relayed per pass.
+pub const NOTIFICATION_BATCH: usize = 500;
+
+/// Notification Service N7 / N11: one credential notice sweep when its interval has
+/// elapsed (`DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_*` settings, its own schedule).
+pub async fn credential_notification_pass(
+    db: &DatabaseConnection,
+    platform: &dyn PlatformAccessPort,
+    settings: &CredentialLifecycleSettings,
+    now: DateTime<Utc>,
+) -> Option<SweepReport> {
+    if !settings.enabled {
+        return None;
+    }
+    let job = credential_lifecycle::NOTIFICATION_JOB;
+    match claim_schedule(db, job, settings.interval, now).await {
+        Ok(true) => {}
+        Ok(false) => return None,
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "credential notice sweep not claimed");
+            return None;
+        }
+    }
+    let result = credential_lifecycle::notification_sweep_once(db, platform, settings, now).await;
+    let outcome = match &result {
+        Ok(r) if r.unavailable > 0 || r.inconsistent > 0 => "ATTENTION",
+        Ok(_) => "SUCCEEDED",
+        Err(_) => "FAILED",
+    };
+    if let Err(e) = complete_schedule(db, job, outcome, Utc::now()).await {
+        tracing::warn!(summary = %crate::db::summarize_db_error(&e), "credential notice sweep outcome not recorded");
+    }
+    match result {
+        Ok(r) => {
+            tracing::info!(
+                environments = r.environments,
+                unavailable = r.unavailable,
+                examined = r.examined,
+                enqueued = r.notified,
+                deduplicated = r.deduplicated,
+                inconsistent = r.inconsistent,
+                "credential notice sweep (Notification Service)"
+            );
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(code = e.0.as_str(), "credential notice sweep failed");
+            None
+        }
+    }
+}
+
+/// Notification Service N7 / N11: one relay pass of the publication outbox, and its
+/// maintenance (expiry, purge) at most hourly across worker instances.
+pub async fn notification_publication_pass(
+    db: &DatabaseConnection,
+    sink: &dyn NotificationEventSink,
+    now: DateTime<Utc>,
+) -> Option<PublicationReport> {
+    if let Ok(true) = claim_schedule(
+        db,
+        notification_publications::MAINTENANCE_JOB,
+        Duration::from_secs(3600),
+        now,
+    )
+    .await
+    {
+        let outcome = match notification_publications::maintain(db, now, 1_000).await {
+            Ok((expired, purged)) => {
+                if expired + purged > 0 {
+                    tracing::info!(expired, purged, "notification publication maintenance");
+                }
+                "SUCCEEDED"
+            }
+            Err(e) => {
+                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "notification publication maintenance failed");
+                "FAILED"
+            }
+        };
+        let _ = complete_schedule(
+            db,
+            notification_publications::MAINTENANCE_JOB,
+            outcome,
+            Utc::now(),
+        )
+        .await;
+    }
+    match notification_publications::relay_due(db, sink, NOTIFICATION_BATCH, now).await {
+        Ok(r) => {
+            if r != PublicationReport::default() {
+                tracing::info!(
+                    acked = r.acked,
+                    retried = r.retried,
+                    dead = r.dead,
+                    skipped = r.skipped,
+                    expired = r.expired,
+                    not_configured = r.not_configured,
+                    "notification publication relay pass"
+                );
+            }
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "notification publication relay pass failed");
+            None
+        }
+    }
+}
+
+/// ADR 0068 A7: one publisher pass of the owner events outbox, and its purge at most
+/// hourly across worker instances.
+pub async fn bridge_event_pass(
+    db: &DatabaseConnection,
+    sink: &dyn crate::bridge_events::BridgeEventSink,
+    now: DateTime<Utc>,
+) -> Option<crate::bridge_events::PublishReport> {
+    use crate::bridge_events as be;
+    if let Ok(true) = claim_schedule(db, be::MAINTENANCE_JOB, Duration::from_secs(3600), now).await
+    {
+        let outcome = match be::purge(db, now, 5_000).await {
+            Ok(purged) => {
+                if purged > 0 {
+                    tracing::info!(purged, "owner events purged");
+                }
+                "SUCCEEDED"
+            }
+            Err(e) => {
+                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner event purge failed");
+                "FAILED"
+            }
+        };
+        let _ = complete_schedule(db, be::MAINTENANCE_JOB, outcome, Utc::now()).await;
+    }
+    match be::publish_due(db, sink, be::BATCH, now).await {
+        Ok(r) => {
+            if r != be::PublishReport::default() {
+                tracing::info!(
+                    sent = r.sent,
+                    retried = r.retried,
+                    dead = r.dead,
+                    expired = r.expired,
+                    "owner events posted to the admin bridge"
+                );
+            }
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner event pass failed");
+            None
+        }
+    }
+}
+
+/// The worker schedule key of the owner delivery maintenance.
+pub const OWNER_DELIVERY_MAINTENANCE_JOB: &str = "owner-deliveries";
+
+/// ADR 0068 A4: one relay pass of the owner-delivered secrets (sealed claim links to the
+/// recipient's own address) and their maintenance at most hourly.
+pub async fn owner_delivery_pass(
+    db: &DatabaseConnection,
+    sink: &dyn NotificationEventSink,
+    now: DateTime<Utc>,
+) -> Option<owner_delivery::DeliveryReport> {
+    if let Ok(true) = claim_schedule(
+        db,
+        OWNER_DELIVERY_MAINTENANCE_JOB,
+        Duration::from_secs(3600),
+        now,
+    )
+    .await
+    {
+        let outcome = match owner_delivery::maintain(db, now, 1_000).await {
+            Ok((expired, purged)) => {
+                if expired + purged > 0 {
+                    tracing::info!(expired, purged, "owner delivery maintenance");
+                }
+                "SUCCEEDED"
+            }
+            Err(e) => {
+                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner delivery maintenance failed");
+                "FAILED"
+            }
+        };
+        let _ = complete_schedule(db, OWNER_DELIVERY_MAINTENANCE_JOB, outcome, Utc::now()).await;
+    }
+    match owner_delivery::relay_due(db, sink, now).await {
+        Ok(r) => {
+            if r != owner_delivery::DeliveryReport::default() {
+                // Counts only: never an address, a token or a link.
+                tracing::info!(
+                    sent = r.sent,
+                    failed = r.failed,
+                    retried = r.retried,
+                    expired = r.expired,
+                    "owner delivery relay pass"
+                );
+            }
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!(summary = %crate::db::summarize_db_error(&e), "owner delivery relay pass failed");
+            None
         }
     }
 }
@@ -297,11 +576,31 @@ pub async fn run_pass_with_jobs(
     if let (Some(w), Some(p)) = (webhooks, platform) {
         credential_lifecycle_pass(w, p, &jobs.credential_lifecycle).await;
     }
+    // Notification Service N7 / N11 (only with CF_NOTIFICATIONS_BASE_URL): credential
+    // notices are enqueued, then every due publication is relayed in the same pass.
+    if let Some(n) = &jobs.notifications {
+        if let (true, Some(p)) = (n.credential_notices, platform) {
+            credential_notification_pass(db, p, &jobs.credential_lifecycle, Utc::now()).await;
+        }
+        notification_publication_pass(db, n.sink.as_ref(), Utc::now()).await;
+        owner_delivery_pass(db, n.sink.as_ref(), Utc::now()).await;
+    }
+    // ADR 0064: the APP_GRANT projection runs before the delivery pass so its lifecycle
+    // events go out in the same pass.
+    if let Some(a) = &jobs.app_grants {
+        crate::apps::installations::sync_pass(db, &a.port, webhooks).await;
+    }
+    // P9: bounded retention purge (at most once per hour across instances).
+    crate::retention::retention_pass(db, &jobs.retention, Utc::now()).await;
     // Section 55: approvals not activated in time.
-    match crate::control::production::expire_due(db).await {
+    match crate::control::production::expire_due(db, jobs.bridge_events()).await {
         Ok(0) => {}
         Ok(n) => tracing::info!(expired = n, "production-access approvals expired"),
         Err(e) => tracing::warn!(error = ?e, "production-access expiry sweep failed"),
+    }
+    // ADR 0068 A7: owner events to the admin bridge.
+    if let Some(b) = &jobs.bridge_events {
+        bridge_event_pass(db, b.sink.as_ref(), Utc::now()).await;
     }
     if let Some(w) = webhooks.filter(|w| w.settings().enabled) {
         let r = w.deliver_due_once(WEBHOOK_BATCH).await?;

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt_0123456789abcdef0123456789abcdef",
+  "eventType": "meeting-service.organization-invitation.email-requested",
+  "eventVersion": 1,
+  "producer": "cfmeet.meeting-service",
+  "occurredAt": "2026-11-15T12:00:00Z",
+  "correlationId": "corr_fedcba9876543210fedcba9876543210",
+  "recipients": [
+    {
+      "ref": "meeting-email-principal:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607"
+    }
+  ],
+  "delivery": {
+    "priority": "NORMAL",
+    "dedupeKey": "meeting-service.organization-invitation.email-requested:6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b",
+    "idempotencyKey": "org-invitation:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607:1"
+  },
+  "route": {
+    "decisionId": "0b9f6c1e-2d3a-4b5c-8d7e-6f5a4b3c2d1e",
+    "routingVersion": 3,
+    "protocol": 1
+  },
+  "data": {
+    "organizationId": "5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+    "invitationId": "5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607"
+  },
+  "sealed": {
+    "kid": "notif-hpke-2026-11",
+    "enc": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "ct": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}

@@ -13,16 +13,21 @@ use utoipa::OpenApi;
         crate::handlers::root::get_app_info,
         crate::handlers::root::health_check,
         // Authentication endpoints
-        crate::handlers::auth::register,
-        crate::handlers::auth::verify_email,
-        crate::handlers::auth::login,
+        crate::handlers::v2::account_phone::request_signin,
+        crate::handlers::v2::account_phone::verify_signin,
+        crate::handlers::v2::account_phone::get_my_phone,
+        crate::handlers::v2::account_phone::request_binding,
+        crate::handlers::v2::account_phone::confirm_binding,
+        crate::handlers::v2::account_phone::update_privacy,
+        crate::handlers::v2::account_phone::remove_phone,
+        crate::handlers::auth::request_otp,
+        crate::handlers::auth::verify_otp,
+        crate::handlers::auth::verify_otp_link,
+        crate::handlers::auth::verify_mfa,
+        crate::handlers::auth::oauth_google_native,
         crate::handlers::auth::refresh_token,
         crate::handlers::auth::logout,
-        crate::handlers::auth::resend_verification_email,
-        crate::handlers::auth::forgot_password,
-        crate::handlers::auth::verify_reset_token,
-        crate::handlers::auth::reset_password,
-        crate::handlers::auth::change_password,
+        crate::handlers::auth::revert_email_change,
         // OAuth endpoints
         crate::handlers::auth::oauth_google_init,
         crate::handlers::auth::oauth_google_callback,
@@ -71,9 +76,30 @@ use utoipa::OpenApi;
         // Admin endpoints
         crate::handlers::admin::list_users,
         crate::handlers::admin::update_user,
+        crate::handlers::admin::change_user_email,
         crate::handlers::admin::list_meetings,
         crate::handlers::admin::list_logs,
         // Phase 2 meeting domain (/api/v2)
+        // Document 4 §3.1: Notification Service user APIs (relay)
+        crate::handlers::v2::notifications::list_my_notifications,
+        crate::handlers::v2::notifications::get_my_notification_unread_count,
+        crate::handlers::v2::notifications::update_my_notification,
+        crate::handlers::v2::notifications::mark_my_notifications_read,
+        crate::handlers::v2::notifications::dismiss_my_notifications,
+        crate::handlers::v2::notifications::get_my_notification_preferences,
+        crate::handlers::v2::notifications::update_my_notification_preferences,
+        crate::handlers::v2::notifications::register_my_push_endpoint,
+        crate::handlers::v2::notifications::remove_my_push_endpoint,
+        // ADR 0064 / 0065: CF Meet Apps
+        crate::handlers::v2::apps::authorize_context,
+        crate::handlers::v2::apps::authorize_decide,
+        crate::handlers::v2::apps::list_my_apps,
+        crate::handlers::v2::apps::revoke_my_app,
+        crate::handlers::v2::apps::list_organization_apps,
+        crate::handlers::v2::apps::revoke_organization_app,
+        crate::handlers::v2::apps::list_conference_apps,
+        crate::handlers::v2::apps::create_app_context,
+        crate::handlers::v2::apps::app_context_keys,
         crate::handlers::v2::spaces::create_meeting_space,
         crate::handlers::v2::spaces::list_meeting_spaces,
         crate::handlers::v2::spaces::get_meeting_space,
@@ -88,6 +114,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::spaces::end_recurrence,
         crate::handlers::v2::members::list_members,
         crate::handlers::v2::members::add_member,
+        crate::handlers::v2::members::add_team_members,
         crate::handlers::v2::members::update_member,
         crate::handlers::v2::members::revoke_member,
         crate::handlers::v2::invitations::create_invitation,
@@ -107,6 +134,11 @@ use utoipa::OpenApi;
         crate::handlers::v2::conferences::end_conference,
         crate::handlers::v2::conferences::cancel_conference,
         crate::handlers::v2::conferences::reschedule_conference,
+        crate::handlers::v2::conferences::extend_conference,
+        crate::handlers::v2::calendar::get_calendar_feed,
+        crate::handlers::v2::calendar::create_calendar_feed,
+        crate::handlers::v2::calendar::delete_calendar_feed,
+        crate::handlers::v2::calendar::read_calendar_feed,
         crate::handlers::v2::conferences::join_conference,
         crate::handlers::v2::conferences::leave_conference,
         crate::handlers::v2::participants::get_me,
@@ -139,6 +171,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::collaboration::list_messages,
         crate::handlers::v2::collaboration::send_message,
         crate::handlers::v2::collaboration::delete_message,
+        crate::handlers::v2::collaboration::edit_message,
         crate::handlers::v2::collaboration::restrict_chat,
         crate::handlers::v2::collaboration::unrestrict_chat,
         crate::handlers::v2::collaboration::send_reaction,
@@ -189,6 +222,8 @@ use utoipa::OpenApi;
         crate::handlers::v2::unified_messaging::directory,
         crate::handlers::v2::unified_messaging::resolve,
         crate::handlers::v2::unified_messaging::principal_names,
+        crate::handlers::v2::unified_messaging::export_deliveries,
+        crate::handlers::v2::unified_messaging::claim_export,
         crate::handlers::v2::unified_messaging::relay_get,
         crate::handlers::v2::unified_messaging::relay_post,
         crate::handlers::v2::unified_messaging::relay_put,
@@ -202,6 +237,11 @@ use utoipa::OpenApi;
         crate::handlers::v2::organizations::create_organization,
         crate::handlers::v2::organizations::update_organization,
         crate::handlers::v2::organizations::list_organization_members,
+        crate::handlers::v2::organizations::list_organization_meeting_spaces,
+        crate::handlers::v2::organizations::export_organization,
+        crate::handlers::v2::organizations::download_organization_export,
+        crate::handlers::v2::organizations::get_organization_meeting_profile_policy,
+        crate::handlers::v2::organizations::put_organization_meeting_profile_policy,
         crate::handlers::v2::organizations::upsert_organization_member,
         crate::handlers::v2::organizations::my_organizations,
         crate::handlers::v2::organizations::create_business_organization,
@@ -214,6 +254,15 @@ use utoipa::OpenApi;
         crate::handlers::v2::organizations::list_organization_invitations,
         crate::handlers::v2::organizations::revoke_organization_invitation,
         crate::handlers::v2::organizations::accept_organization_invitation,
+        crate::handlers::v2::organizations::my_organization_invitations,
+        crate::handlers::v2::organizations::appoint_organization_owner,
+        crate::handlers::v2::organizations::admin_retry_organization_provisioning,
+        crate::handlers::v2::organizations::admin_get_organization_service_binding,
+        crate::handlers::v2::organizations::admin_rotate_organization_service_binding,
+        crate::handlers::v2::organizations::admin_organization_event_delivery,
+        crate::handlers::v2::organizations::admin_replay_organization_events,
+        crate::handlers::v2::organizations::accept_my_organization_invitation,
+        crate::handlers::v2::organizations::decline_my_organization_invitation,
         crate::handlers::v2::organizations::decline_organization_invitation,
         crate::handlers::v2::organizations::suspend_business_organization,
         crate::handlers::v2::organizations::reactivate_business_organization,
@@ -245,13 +294,50 @@ use utoipa::OpenApi;
         crate::handlers::v2::organization_messaging::messaging_patch,
         crate::handlers::v2::organization_messaging::messaging_delete,
         crate::handlers::v2::organization_messaging::messaging_session_token,
+        crate::handlers::v2::organization_messaging::moderation_get,
+        crate::handlers::v2::organization_messaging::moderation_post,
+        crate::handlers::v2::organization_messaging::team_channel,
         crate::handlers::v2::organization_messaging::messaging_resolve_members,
+        crate::handlers::v2::organization_member_calling::endpoints_list,
+        crate::handlers::v2::organization_member_calling::endpoints_register,
+        crate::handlers::v2::organization_member_calling::endpoints_revoke,
+        crate::handlers::v2::organization_member_calling::signaling_credential,
         crate::handlers::v2::account_profile::get_my_profile,
         crate::handlers::v2::account_profile::update_my_profile,
+        crate::handlers::v2::account_profile::upload_my_avatar,
+        crate::handlers::v2::account_profile::remove_my_avatar,
+        crate::handlers::v2::account_profile::get_avatar,
         crate::handlers::v2::account_sessions::list_my_sessions,
         crate::handlers::v2::account_sessions::revoke_my_session,
         crate::handlers::v2::account_sessions::revoke_all_my_sessions,
+        crate::handlers::v2::account_sessions::revoke_other_sessions,
+        crate::handlers::v2::account_sessions::admin_revoke_user_sessions,
+        crate::handlers::v2::account_sessions::admin_identity_duplicates,
+        crate::handlers::v2::account_sessions::admin_enforce_identity_uniqueness,
         crate::handlers::v2::account_sessions::list_account_audit_events,
+        crate::handlers::v2::account_identity::request_step_up,
+        crate::handlers::v2::account_identity::verify_step_up,
+        crate::handlers::v2::account_identity::export_my_data,
+        crate::handlers::v2::account_identity::delete_my_account,
+        crate::handlers::v2::account_identity::get_my_mfa,
+        crate::handlers::v2::account_identity::setup_my_totp,
+        crate::handlers::v2::account_identity::confirm_my_totp,
+        crate::handlers::v2::account_identity::disable_my_mfa,
+        crate::handlers::v2::account_identity::request_email_change,
+        crate::handlers::v2::account_identity::confirm_email_change,
+        crate::handlers::v2::account_devices::get_device_policy,
+        crate::handlers::v2::account_devices::list_devices,
+        crate::handlers::v2::account_devices::declare_device,
+        crate::handlers::v2::account_devices::revoke_device,
+        crate::handlers::v2::account_devices::create_link,
+        crate::handlers::v2::account_devices::list_pending_links,
+        crate::handlers::v2::account_devices::get_link,
+        crate::handlers::v2::account_devices::approve_link,
+        crate::handlers::v2::account_devices::reject_link,
+        crate::handlers::v2::account_devices::send_email_code,
+        crate::handlers::v2::account_devices::complete_link,
+        crate::handlers::v2::account_devices::cancel_link,
+        crate::handlers::v2::account_devices::list_my_security_events,
         // Parts G–I
         crate::handlers::v2::artifacts::start_recording,
         crate::handlers::v2::artifacts::list_recordings,
@@ -262,6 +348,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::artifacts::artifact_access,
         crate::handlers::v2::artifacts::delete_artifact,
         crate::handlers::v2::artifacts::generate_report,
+        crate::handlers::v2::artifacts::export_report,
         crate::handlers::v2::artifacts::conference_attendance,
         crate::handlers::v2::artifacts::consent_requirements,
         crate::handlers::v2::artifacts::record_consents,
@@ -278,6 +365,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::specialized::list_registrations,
         crate::handlers::v2::specialized::get_registration,
         crate::handlers::v2::specialized::cancel_registration,
+        crate::handlers::v2::specialized::cancel_own_registration,
         crate::handlers::v2::specialized::enter_backstage,
         crate::handlers::v2::specialized::leave_backstage,
         crate::handlers::v2::quality::submit_samples,
@@ -285,22 +373,27 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::services::account_phone::PhoneView,
+            crate::services::account_phone::PhoneRequest,
+            crate::services::account_phone::PhoneConfirm,
+            crate::services::account_phone::PhoneChallenge,
+            crate::handlers::v2::account_phone::PhoneBindRequest,
+            crate::handlers::v2::account_phone::PhoneSettings,
+            crate::handlers::v2::account_phone::PhoneRemove,
+            crate::handlers::v2::specialized::CancelOwnRegistrationRequest,
             // Auth schemas
-            crate::dto::RegisterRequest,
-            crate::dto::RegisterResponse,
-            crate::dto::LoginRequest,
+            crate::dto::OtpRequest,
+            crate::dto::OtpVerifyRequest,
+            crate::dto::OtpVerifyLinkRequest,
+            crate::handlers::auth::MfaVerifyRequest,
+            crate::handlers::auth::GoogleNativeRequest,
+            crate::dto::OtpVerifyResponse,
+            crate::dto::EmailChangeRevertRequest,
             crate::dto::LoginResponse,
             crate::dto::UserInfo,
-            crate::dto::VerifyEmailRequest,
             crate::dto::RefreshTokenRequest,
             crate::dto::RefreshTokenResponse,
             crate::dto::MessageResponse,
-            crate::dto::ResendVerificationRequest,
-            crate::dto::ForgotPasswordRequest,
-            crate::dto::VerifyResetTokenRequest,
-            crate::dto::VerifyResetTokenResponse,
-            crate::dto::ResetPasswordRequest,
-            crate::dto::ChangePasswordRequest,
             // API Key schemas
             crate::dto::CreateApiKeyRequest,
             crate::dto::CreateApiKeyResponse,
@@ -359,6 +452,7 @@ use utoipa::OpenApi;
             // Admin schemas
             crate::dto::AdminUserResponse,
             crate::dto::AdminUpdateUserRequest,
+            crate::dto::AdminChangeEmailRequest,
             crate::dto::AdminPaginationMeta,
             crate::dto::AdminUserListResponse,
             crate::dto::AdminUserApiResponse,
@@ -378,8 +472,14 @@ use utoipa::OpenApi;
             crate::dto::v2::ResourceView,
             crate::dto::v2::MeetingSpaceResponse,
             crate::dto::v2::MeetingSpaceListResponse,
+            crate::dto::v2::OrganizationMeetingSpace,
+            crate::dto::v2::OrganizationMeetingSpacePage,
+            crate::dto::v2::OrganizationMeetingProfilePolicy,
+            crate::dto::v2::PutOrganizationMeetingProfilePolicyRequest,
             crate::dto::v2::InstantMeetingResponse,
             crate::dto::v2::AddMemberRequest,
+            crate::dto::v2::AddTeamMembersRequest,
+            crate::dto::v2::AddTeamMembersResponse,
             crate::dto::v2::UpdateMemberRequest,
             crate::dto::v2::MemberResponse,
             crate::dto::v2::MemberListResponse,
@@ -389,6 +489,8 @@ use utoipa::OpenApi;
             crate::dto::v2::ResolveInvitationResponse,
             crate::dto::v2::CreateConferenceRequest,
             crate::dto::v2::RescheduleConferenceRequest,
+            crate::dto::v2::ExtendConferenceRequest,
+            crate::dto::v2::CalendarFeedResponse,
             crate::dto::v2::ListConferencesQuery,
             crate::dto::v2::ConferenceSummary,
             crate::dto::v2::ConferenceResponse,
@@ -471,6 +573,7 @@ use utoipa::OpenApi;
             crate::dto::v2::MessagePage,
             crate::dto::v2::MessageView,
             crate::dto::v2::SendMessageRequest,
+            crate::dto::v2::EditMessageRequest,
             crate::dto::v2::BreakoutRecordingPolicy,
             crate::dto::v2::ChatSendMode,
             crate::dto::v2::CollaborationPolicy,
@@ -545,6 +648,11 @@ use utoipa::OpenApi;
             crate::dto::v2::OrganizationInvitationTokenRequest,
             crate::dto::v2::OrganizationLifecycleRequest,
             crate::dto::v2::OrganizationInvitationList,
+            crate::dto::v2::MyOrganizationInvitationList,
+            crate::dto::v2::AppointOrganizationOwnerRequest,
+            crate::handlers::v2::organizations::ReplayOrganizationEventsRequest,
+            crate::dto::v2::MyOrganizationInvitation,
+            crate::dto::v2::InvitingOrganization,
             crate::dto::v2::OrganizationAuditActor,
             crate::dto::v2::OrganizationAuditEvent,
             crate::dto::v2::OrganizationAuditEventPage,
@@ -586,7 +694,38 @@ use utoipa::OpenApi;
             crate::handlers::v2::account_profile::UpdateAccountProfileRequest,
             crate::handlers::v2::account_sessions::AccountSessionListResponse,
             crate::handlers::v2::account_sessions::AccountSessionRevokeResponse,
+            crate::handlers::v2::account_sessions::AdminRevokeSessionsRequest,
+            crate::services::account_security::IdentityDuplicatesReport,
+            crate::services::account_security::IdentityUniqueness,
             crate::handlers::v2::account_sessions::SecurityEventPage,
+            crate::handlers::v2::account_identity::StepUpRequest,
+            crate::handlers::v2::account_identity::DeleteAccountRequest,
+            crate::handlers::v2::organizations::OrganizationExportDownloadRequest,
+            crate::handlers::v2::account_identity::MfaSetupResponse,
+            crate::handlers::v2::account_identity::MfaConfirmRequest,
+            crate::handlers::v2::account_identity::MfaRecoveryCodes,
+            crate::handlers::v2::account_identity::MfaDisableRequest,
+            crate::handlers::v2::account_identity::StepUpVerifyRequest,
+            crate::handlers::v2::account_identity::CodeSentResponse,
+            crate::handlers::v2::account_identity::StepUpTokenResponse,
+            crate::handlers::v2::account_identity::EmailChangeRequest,
+            crate::handlers::v2::account_identity::EmailChangeConfirmRequest,
+            crate::handlers::v2::account_identity::EmailChangedResponse,
+            crate::services::step_up::StepUpPurpose,
+            crate::handlers::v2::account_devices::DeviceListResponse,
+            crate::handlers::v2::account_devices::PendingLinkListResponse,
+            crate::handlers::v2::account_devices::RevokeDeviceRequest,
+            crate::handlers::v2::account_devices::MySecurityEventPage,
+            crate::services::account_devices::DeviceProof,
+            crate::services::account_devices::DeclareDeviceRequest,
+            crate::services::account_devices::DeviceView,
+            crate::services::account_devices::DevicePolicyView,
+            crate::services::account_devices::DeviceLinkView,
+            crate::services::account_devices::PendingLinkView,
+            crate::services::account_devices::DeviceOutcome,
+            crate::services::account_devices::ProofOnlyRequest,
+            crate::services::account_devices::ApproveLinkRequest,
+            crate::services::account_devices::CompleteLinkRequest,
             crate::domain::OrganizationStatus,
             crate::domain::OrganizationRole,
             crate::domain::OrganizationMemberStatus,
@@ -613,6 +752,7 @@ use utoipa::OpenApi;
             crate::domain::RecurrenceStatus,
             crate::error::ErrorEnvelope,
             crate::error::ErrorBody,
+            crate::validation::ValidationIssue,
             crate::error::ErrorCode,
             crate::services::meeting_permissions::RolePolicy,
             crate::services::meeting_permissions::MediaPermissions,
@@ -680,6 +820,20 @@ use utoipa::OpenApi;
             crate::dto::v2_ghi::ArtifactListResponse,
             crate::dto::v2_ghi::TranscriptionJobListResponse,
             crate::dto::v2_ghi::RegistrationListResponse,
+            crate::dto::apps::AuthorizeDecisionRequest,
+            crate::dto::apps::AuthorizeContextResponse,
+            crate::dto::apps::AuthorizeDecisionResponse,
+            crate::dto::apps::OauthAppSummary,
+            crate::dto::apps::OauthScopeView,
+            crate::dto::apps::OrganizationInstallDecision,
+            crate::dto::apps::ConnectedApp,
+            crate::dto::apps::ConnectedAppList,
+            crate::dto::apps::MeetingSurfaceView,
+            crate::dto::apps::ConferenceApp,
+            crate::dto::apps::ConferenceAppList,
+            crate::dto::apps::AppContextTokenResponse,
+            crate::dto::apps::AppContextJwk,
+            crate::dto::apps::AppContextKeySet,
             // Internal provider-callback / operations schemas (`/internal/*`) are
             // deliberately NOT part of the public consumer contract.
         )
@@ -687,9 +841,11 @@ use utoipa::OpenApi;
     modifiers(&SecurityAddon, &PlatformCredentialAddon, &OptionalBodyAddon),
     tags(
         (name = "General", description = "Application information and health endpoints"),
-        (name = "Authentication", description = "User authentication endpoints"),
+        (name = "Authentication", description = "Passwordless sign-in and sign-up: request a 6-digit code by email (`POST /api/v1/auth/otp/request`), then verify the code or the one-click link from the same email. The first verification of a new address creates the account. Also token refresh, logout, Google sign-in and undoing an email change."),
         (name = "Account profile (v2)", description = "Blueprint Section 9: the signed-in user's account profile (username, display name, avatar reference, time zone, locale, email verification and the canonical account status). The Account is the authority; the Communications profile shows the same display name and avatar."),
+        (name = "Account security (v2)", description = "Step-up confirmation (a code emailed to the account's current address) for sensitive actions, and the secure email change: proof of the current mailbox, a code to the new one, other sessions signed out, and a 7-day undo link sent to the previous address."),
         (name = "Account sessions (v2)", description = "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."),
+        (name = "Account devices (v2)", description = "Multi-device policy: one account identity with one replaceable primary mobile and up to `maxWebDevices` web devices (browser profiles); web-only accounts need no phone. Devices are bound to device-generated Ed25519 keys (proof of possession, single-use nonces). New devices are linked by approval from a trusted device (comparison code) or an email step-up; a new mobile replaces the previous primary mobile atomically without signing out trusted web devices."),
         (name = "API Keys", description = "API key management for third-party integrations.\n\n## Usage\n- Create API keys via authenticated endpoints\n- Use `Api-Key: <key>` header for authentication\n- API keys have usage limits and expiration dates\n- Keys can be revoked at any time\n\n## Notes\n- Full API key is only shown on creation\n- Third-party devs cannot access internal media servers directly\n- Short-lived join tokens required for connecting to RTC infrastructure"),
         (name = "Meetings", description = "Meeting lifecycle management with LiveKit integration"),
         (name = "Participants", description = "Participant management (kick, list)"),
@@ -697,8 +853,9 @@ use utoipa::OpenApi;
         (name = "Waiting Room", description = "Admit/Deny participants from waiting room"),
         (name = "Media Control", description = "Control audio, video, and screen sharing"),
         (name = "Chat", description = "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) → LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"),
-        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"),
+        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs a step-up token for DEACTIVATE_ACCOUNT)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"),
         (name = "Webhooks", description = "**Deprecated** (Blueprint v1.0 Section 16, PLT-003). Legacy per-user meeting webhook registrations.\n\n## Nothing is delivered\nRegistrations are stored, but no event is ever delivered to a registered endpoint: the Meeting Service has no webhook dispatcher. The event types (`meeting_start`, `meeting_end`, `participant_join`, `participant_leave`) are accepted for compatibility only.\n\n## Deprecation\nEvery response carries `Deprecation` and `Sunset` headers. Removal still requires a measured zero-consumer window (register decision D-9).\n\n## Replacement\nUse Developer Platform webhooks (`/v1/environments/{environmentId}/webhooks`): signed delivery, delivery history, replay and secret rotation. Migration guide: `docs/api/legacy-meeting-webhooks-deprecation.md`."),
+        (name = "Notifications (v2)", description = "Document 4 §3.1: the signed-in user's notification inbox, unread count, notification preferences and push endpoints of the unified Notification Service, relayed like the Communications API: the Account session is verified here and the request is forwarded with the server-resolved account. Answers are the Notification Service's own (schemaVersion 1; Retry-After and ETag relayed; never codes, tokens, addresses, push handles, E2EE text or URLs). Answers 503 SERVICE_UNAVAILABLE until the relay is configured."),
         (name = "Meeting Spaces (v2)", description = "Phase 2 persistent meeting definitions. A MeetingSpace is not a live call. Owner is always the authenticated caller; meeting links/codes identify a meeting but never grant membership or roles."),
         (name = "Scheduling (v2)", description = "RFC 5545 recurrence interpreted in the meeting space timezone; bounded, idempotent occurrence materialization."),
         (name = "Conferences (v2)", description = "ConferenceSession lifecycle: CREATED → PREPARING → WAITING → LIVE → ENDING → ENDED (+ CANCELLED / FAILED). ENDED is reached only after provider termination (Part E)."),
@@ -714,7 +871,8 @@ use utoipa::OpenApi;
         (name = "Q&A (v2)", description = "Part F: questions, upvotes and moderation (separate from chat; anonymous identity never projected)."),
         (name = "Realtime (v2)", description = "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."),
         (name = "Waiting Room (v2)", description = "Waiting is a participant admission state. Access policy is always evaluated first."),
-        (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."),
+        (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. The Organizations Service is authoritative for organization data (production since the first activation): these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, teams, policies, ownership transfer, lifecycle, audit, provisioning). A deployment whose Organizations Service is not authoritative answers FEATURE_DISABLED. Organization Calling and Messaging relay allowlisted paths to the Calling and Messaging services, which own their data. The public Swagger selector serves these operations as the dedicated Organizations document."),
+        (name = "Apps (v2)", description = "ADR 0064 / 0065 CF Meet Apps: the OAuth consent relay for https://cfmeet.com/oauth/authorize (the signed-in account approves or denies an app's authorization request; Platform Access is the token authority), the account's connected apps, an organization's installed apps (organization OWNER / ADMIN) and in-meeting apps (apps with a meeting surface installed for the meeting owner or organization, 5-minute Ed25519 app-context tokens and their public keys). Each feature is off unless enabled (FEATURE_DISABLED)."),
         (name = "Compatibility (v2)", description = "Legacy → v2 migration evidence and shadow comparison (platform administrators)."),
         (name = "Recordings (v2)", description = "Part G: composite recording through the provider egress. REQUESTED → RECORDING only on provider evidence; STOPPING → PROCESSING → READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."),
         (name = "Artifacts (v2)", description = "Part G: recordings, transcripts and generated reports. Access is authorized per request and delivered as a short-lived signed URL; storage keys and provider ids are never exposed. Retention and deletion are confirmed against storage."),
@@ -729,7 +887,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.5.0",
+        version = "1.11.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",
@@ -758,6 +916,20 @@ impl utoipa::Modify for SecurityAddon {
                     utoipa::openapi::security::Http::new(
                         utoipa::openapi::security::HttpAuthScheme::Bearer,
                     ),
+                ),
+            );
+            // ADR 0062: a partner user's CF Meet user token (device credential). Accepted
+            // only by the operations that list it (the conference join).
+            components.add_security_scheme(
+                "userToken",
+                utoipa::openapi::security::SecurityScheme::Http(
+                    utoipa::openapi::security::HttpBuilder::new()
+                        .scheme(utoipa::openapi::security::HttpAuthScheme::Bearer)
+                        .bearer_format("cfut")
+                        .description(Some(
+                            "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards.",
+                        ))
+                        .build(),
                 ),
             );
             components.add_security_scheme(
@@ -827,6 +999,20 @@ impl utoipa::Modify for PlatformCredentialAddon {
                         .build(),
                 ),
             );
+            // ADR 0064: an app's OAuth access token for one CF Meet user, accepted by the
+            // API Gateway on the same operations (`OAUTH_ACCESS_TOKEN`).
+            components.add_security_scheme(
+                "oauthAccessToken",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("cfoa_<sbx|test|live>_…")
+                        .description(Some(
+                            "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_…`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused.",
+                        ))
+                        .build(),
+                ),
+            );
         }
         for op in crate::services::platform::operations::OPERATIONS {
             let Some(item) = openapi.paths.paths.get_mut(op.path) else {
@@ -847,6 +1033,12 @@ impl utoipa::Modify for PlatformCredentialAddon {
                 .security
                 .get_or_insert_with(Vec::new)
                 .push(SecurityRequirement::new("platformCredential", [op.scope]));
+            if let Some(oauth_scope) = crate::services::apps::delegated::oauth_scope_of(op.scope) {
+                operation
+                    .security
+                    .get_or_insert_with(Vec::new)
+                    .push(SecurityRequirement::new("oauthAccessToken", [oauth_scope]));
+            }
             operation
                 .extensions
                 .get_or_insert_with(Default::default)
@@ -900,13 +1092,10 @@ macro_rules! public_bundle {
 }
 
 /// (Swagger name, served path, public bundle). The Meeting Service document is generated
-/// at runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 8] = [
-    (
-        "Communications",
-        "/api-docs/communications.json",
-        public_bundle!("communications"),
-    ),
+/// at runtime (it carries the configured server list) and is listed first. ADR 0061: the
+/// Communications Hub is first-party only (`EXCLUDED FIRST_PARTY_COMMUNICATIONS_HUB`), so
+/// its public bundle is empty by design and is not published on the doc host.
+const PEER_DOCS: [(&str, &str, &str); 7] = [
     (
         "Calling",
         "/api-docs/calling.json",
@@ -1035,7 +1224,10 @@ fn swagger_csp() -> String {
 }
 
 fn swagger_config() -> serde_json::Value {
-    let mut urls = vec![serde_json::json!({ "name": "Meetings", "url": "/api-docs/openapi.json" })];
+    let mut urls = vec![
+        serde_json::json!({ "name": "Meetings", "url": "/api-docs/openapi.json" }),
+        serde_json::json!({ "name": "Organizations", "url": ORGANIZATIONS_DOC_PATH }),
+    ];
     urls.extend(
         PEER_DOCS
             .iter()
@@ -1095,7 +1287,7 @@ fn public_doc(service: &str, raw: &str) -> String {
                 }
             }
         }
-        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. Production enrollment remains blocked pending independent assessment. Operator and internal service operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
+        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. In production, personal E2EE runs under the owner's recorded release decision: no independent cryptographic assessment has been performed (NOT_PERFORMED) and the key-transparency log is UNWITNESSED; no certification is claimed. Operator and internal service operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
     }
     // The generated public bundles carry each operation's source tag (and summary) but no
     // top-level `tags` array, so every used tag is declared here; no operation is added or
@@ -1130,6 +1322,222 @@ fn public_doc(service: &str, raw: &str) -> String {
     serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
 }
 
+/// Swagger section of the first-party Organizations routes in the Meeting Service contract.
+const ORGANIZATIONS_TAG: &str = "Organizations (v2)";
+/// Served path of the dedicated Organizations document in the public selector.
+const ORGANIZATIONS_DOC_PATH: &str = "/api-docs/organizations.json";
+
+/// Sections of the dedicated Organizations document, in display order.
+const ORGANIZATIONS_SECTIONS: [(&str, &str); 11] = [
+    ("Organizations", "Create a business organization (the caller becomes OWNER), read and update its profile, and list the organizations the caller verifiably belongs to."),
+    ("Members", "Organization membership: list members, add or change a membership, change a member's role or status, and leave an organization."),
+    ("Invitations", "Invite by email or CF Meet ID, list and revoke invitations; the invitee accepts or declines."),
+    ("Teams", "Teams inside an organization and their members."),
+    ("Policies", "The organization policy, changed with compare-and-swap."),
+    ("Lifecycle", "Ownership transfer, suspension, reactivation and archival (OWNER)."),
+    ("Audit", "An organization's audit history."),
+    ("Provisioning", "An organization's technical provisioning state (service bindings for Calling and Messaging)."),
+    ("Workspaces", "The caller's workspaces (Personal and each organization) and the capabilities the server derives for each."),
+    ("Organization Calling", "Organization Enterprise Calling, relayed to the Calling Service for allowlisted paths. Calling owns the call data."),
+    ("Organization Messaging", "Organization-scope Messaging: session-device tokens, colleague resolution and an allowlisted relay to the Messaging Service, which owns the conversation data."),
+];
+
+/// Section of an Organizations operation in the dedicated document, from its path.
+fn organizations_section(path: &str) -> &'static str {
+    if path.starts_with("/api/v2/me/workspaces") {
+        return "Workspaces";
+    }
+    if path.starts_with("/api/v2/organization-invitations") {
+        return "Invitations";
+    }
+    let rest = path
+        .strip_prefix("/api/v2/organizations/{id}")
+        .unwrap_or_default();
+    let section = |prefix: &str| rest == prefix || rest.starts_with(&format!("{prefix}/"));
+    if section("/members") {
+        "Members"
+    } else if section("/invitations") {
+        "Invitations"
+    } else if section("/teams") {
+        "Teams"
+    } else if section("/policies") {
+        "Policies"
+    } else if section("/calling") {
+        "Organization Calling"
+    } else if section("/messaging") {
+        "Organization Messaging"
+    } else if ["/suspend", "/reactivate", "/archive", "/ownership-transfer"]
+        .iter()
+        .any(|p| section(p))
+    {
+        "Lifecycle"
+    } else if section("/audit-events") {
+        "Audit"
+    } else if section("/provisioning") {
+        "Provisioning"
+    } else {
+        "Organizations"
+    }
+}
+
+fn is_http_method(key: &str) -> bool {
+    matches!(
+        key,
+        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+    )
+}
+
+/// Names of the component schemas `value` references, directly or through other schemas.
+fn referenced_schemas(
+    value: &serde_json::Value,
+    schemas: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::BTreeSet<String> {
+    fn collect(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(name) = map
+                    .get("$ref")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|r| r.strip_prefix("#/components/schemas/"))
+                {
+                    out.push(name.to_owned());
+                }
+                map.values().for_each(|v| collect(v, out));
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|v| collect(v, out)),
+            _ => {}
+        }
+    }
+    let mut pending = Vec::new();
+    collect(value, &mut pending);
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(name) = pending.pop() {
+        if seen.insert(name.clone()) {
+            if let Some(schema) = schemas.get(&name) {
+                collect(schema, &mut pending);
+            }
+        }
+    }
+    seen
+}
+
+/// Splits the filtered public Meetings document in two: the first-party Organizations
+/// operations move, unchanged except for their section, into a dedicated document, and
+/// the Meetings document keeps everything else. Each operation is documented exactly
+/// once; paths, request and response schemas, authentication and servers are unchanged.
+fn split_organizations(meeting_doc: &str) -> (String, String) {
+    let mut meeting: serde_json::Value =
+        serde_json::from_str(meeting_doc).expect("filtered Meetings document is valid JSON");
+    let mut organization_paths = serde_json::Map::new();
+    let paths = meeting["paths"]
+        .as_object_mut()
+        .expect("Meetings document has paths");
+    for (path, item) in paths.iter_mut() {
+        let item = item.as_object_mut().expect("path item is an object");
+        let moved: Vec<String> = item
+            .iter()
+            .filter(|(key, operation)| {
+                is_http_method(key)
+                    && operation["tags"]
+                        .as_array()
+                        .is_some_and(|tags| tags.iter().any(|t| t == ORGANIZATIONS_TAG))
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if moved.is_empty() {
+            continue;
+        }
+        let mut target: serde_json::Map<String, serde_json::Value> = item
+            .iter()
+            .filter(|(key, _)| !is_http_method(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        for method in moved {
+            let mut operation = item.remove(&method).expect("operation listed above");
+            operation["tags"] = serde_json::json!([organizations_section(path)]);
+            target.insert(method, operation);
+        }
+        organization_paths.insert(path.clone(), serde_json::Value::Object(target));
+    }
+    paths.retain(|_, item| {
+        item.as_object()
+            .is_some_and(|i| i.keys().any(|k| is_http_method(k)))
+    });
+    if let Some(tags) = meeting["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"] != ORGANIZATIONS_TAG);
+    }
+    meeting["info"]["description"] = serde_json::json!(format!(
+        "{}\n\nOrganizations, memberships, invitations, teams, policies, workspaces and the \
+         organization Calling and Messaging relays are documented in the Organizations \
+         document of this selector (`{ORGANIZATIONS_DOC_PATH}`).",
+        meeting["info"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .trim_end()
+    ));
+
+    let empty = serde_json::Map::new();
+    let all_schemas = meeting["components"]["schemas"]
+        .as_object()
+        .unwrap_or(&empty);
+    let organization_paths = serde_json::Value::Object(organization_paths);
+    let schemas: serde_json::Map<String, serde_json::Value> =
+        referenced_schemas(&organization_paths, all_schemas)
+            .into_iter()
+            .filter_map(|name| all_schemas.get(&name).map(|s| (name, s.clone())))
+            .collect();
+    let mut components = meeting["components"].clone();
+    components["schemas"] = serde_json::Value::Object(schemas);
+    let mut organizations = serde_json::json!({
+        "openapi": meeting["openapi"],
+        "info": {
+            "title": "CF Meet Organizations API",
+            "version": meeting["info"]["version"],
+            "description": "First-party CF Meet business organizations: organization profile, \
+    membership, invitations, teams, policies, lifecycle (ownership transfer, suspension, \
+    reactivation, archival), audit history, provisioning and workspaces, plus the organization-scoped \
+    Calling and Messaging relays. These are not Developer Platform API workspaces.\n\n\
+    The Organizations Service is authoritative for organization data. The CF Meet API serves these \
+    routes at `/api/v2` and relays them to the Organizations Service with the signed-in user as the \
+    verified acting user; membership is always resolved on the server and clients can never assert it. \
+    Organization Calling and Messaging keep their own data in the Calling and Messaging services and \
+    relay only allowlisted paths.\n\n\
+    Authentication: the CF Meet account bearer session, as for every `/api/v2` route.\n\n\
+    Not in this public document: platform administration (`/api/v2/admin/organizations`) and the \
+    Organizations Service's internal service-to-service API (`/internal/v1`), which are documented only \
+    in the private engineering catalogue.",
+        },
+        "servers": meeting["servers"],
+        "paths": organization_paths,
+        "components": components,
+        "tags": ORGANIZATIONS_SECTIONS
+            .iter()
+            .map(|(name, description)| serde_json::json!({ "name": name, "description": description }))
+            .collect::<Vec<_>>(),
+    });
+    if let Some(security) = meeting.get("security") {
+        organizations["security"] = security.clone();
+    }
+    // Declare only sections that still hold operations (an empty heading would render).
+    let used: std::collections::BTreeSet<String> = organizations["paths"]
+        .as_object()
+        .into_iter()
+        .flat_map(|paths| paths.values())
+        .filter_map(serde_json::Value::as_object)
+        .flat_map(|item| item.values())
+        .filter_map(|operation| operation["tags"].as_array())
+        .flatten()
+        .filter_map(|tag| tag.as_str().map(str::to_owned))
+        .collect();
+    if let Some(tags) = organizations["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"].as_str().is_some_and(|name| used.contains(name)));
+    }
+    (
+        serde_json::to_string(&meeting).expect("Meetings document serializes"),
+        serde_json::to_string(&organizations).expect("Organizations document serializes"),
+    )
+}
+
 fn contract_doc(body: String) -> impl IntoResponse {
     (
         [
@@ -1138,6 +1546,37 @@ fn contract_doc(body: String) -> impl IntoResponse {
         ],
         body,
     )
+}
+
+/// D1: whether Swagger UI and the served OpenAPI documents are mounted. `API_DOCS_ENABLED`
+/// (`true` / `false`) decides when set; otherwise they are served only where the runtime is
+/// explicitly a development or staging one (`APP_ENV` dev / development / local / test, or
+/// `CF_RUNTIME_ENVIRONMENT` local / test / staging) and never in production, where
+/// customer documentation is published through the developer portal (the API Gateway's
+/// public subset) instead. Unknown or missing values count as production (fail closed).
+pub fn docs_enabled_from(get: impl Fn(&str) -> Option<String>) -> bool {
+    let value = |k: &str| {
+        get(k)
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    match value("API_DOCS_ENABLED").as_str() {
+        "true" | "1" | "on" | "yes" => return true,
+        "false" | "0" | "off" | "no" => return false,
+        _ => {}
+    }
+    if value("CF_RUNTIME_ENVIRONMENT") == "production" {
+        return false;
+    }
+    matches!(
+        value("CF_RUNTIME_ENVIRONMENT").as_str(),
+        "local" | "test" | "staging"
+    ) || crate::config::is_development_env(Some(&value("APP_ENV")))
+}
+
+/// [`docs_enabled_from`] over the process environment.
+pub fn docs_enabled() -> bool {
+    docs_enabled_from(|k| std::env::var(k).ok())
 }
 
 /// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
@@ -1161,10 +1600,10 @@ pub fn swagger_router(_server_addr: &str) -> Router {
          `packages/contracts/bundled/public/meetings`).",
         openapi.info.description.as_deref().unwrap_or("").trim_end()
     ));
-    let meeting_doc = public_doc(
+    let (meeting_doc, organizations_doc) = split_organizations(&public_doc(
         "Meetings",
         &openapi.to_json().expect("OpenAPI document serializes"),
-    );
+    ));
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
@@ -1206,6 +1645,13 @@ pub fn swagger_router(_server_addr: &str) -> Router {
                 let doc = meeting_doc.clone();
                 async move { ([(CONTENT_TYPE, "application/json")], doc) }
             }),
+        )
+        .route(
+            ORGANIZATIONS_DOC_PATH,
+            get(move || {
+                let doc = organizations_doc.clone();
+                async move { contract_doc(doc) }
+            }),
         );
     for (name, path, body) in PEER_DOCS {
         let public_body = public_doc(name, body);
@@ -1225,8 +1671,8 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 96;
-    const SERVED_MESSAGING_NATIVE: usize = 71;
+    const SERVED_MESSAGING_OPERATIONS: usize = 107;
+    const SERVED_MESSAGING_NATIVE: usize = 79;
 
     fn peer(name: &str) -> &'static str {
         PEER_DOCS
@@ -1234,6 +1680,49 @@ mod tests {
             .find(|(n, _, _)| *n == name)
             .map(|(_, _, raw)| *raw)
             .unwrap_or_else(|| panic!("no peer document {name}"))
+    }
+
+    #[test]
+    fn docs_are_off_in_production_and_on_for_development_and_staging() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // Production (explicit, or nothing said at all) never serves them.
+        assert!(!docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "production"
+        )])));
+        assert!(!docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("APP_ENV", "dev")
+        ])));
+        assert!(!docs_enabled_from(env(&[])));
+        assert!(!docs_enabled_from(env(&[("APP_ENV", "production")])));
+        // Local and staging keep them.
+        assert!(docs_enabled_from(env(&[("APP_ENV", "dev")])));
+        assert!(docs_enabled_from(env(&[("APP_ENV", "test")])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "staging"
+        )])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "local"
+        )])));
+        // The explicit switch wins either way.
+        assert!(!docs_enabled_from(env(&[
+            ("APP_ENV", "dev"),
+            ("API_DOCS_ENABLED", "false")
+        ])));
+        assert!(docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("API_DOCS_ENABLED", "true")
+        ])));
     }
 
     #[test]
@@ -1267,8 +1756,8 @@ mod tests {
         let router = swagger_router("127.0.0.1:18081");
         for path in [
             "/api-docs/openapi.json",
+            "/api-docs/organizations.json",
             "/api-docs/calling.json",
-            "/api-docs/communications.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
             "/api-docs/sms-gateway.json",
@@ -1287,10 +1776,13 @@ mod tests {
         }
         for forbidden in [
             "/api-docs/platform-access.json",
+            "/api-docs/organizations-internal.json",
             "/api-docs/privacy-relay-internal.json",
             "/api-docs/telephony.json",
             "/api-docs/messaging-internal.json",
             "/api-docs/sms-gateway-internal.json",
+            // ADR 0061: the Communications Hub is first-party only.
+            "/api-docs/communications.json",
         ] {
             let response = router
                 .clone()
@@ -1327,7 +1819,6 @@ mod tests {
     /// Gateway catalogue domain of each served peer document.
     fn catalogue_domain(name: &str) -> &'static str {
         match name {
-            "Communications" => "communications",
             "Calling" => "calling",
             "Numbering / DCNs" => "numbering",
             "Privacy Relay" => "privacy-relay",
@@ -1575,12 +2066,13 @@ mod tests {
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS.len() + 1
+            PEER_DOCS.len() + 2,
+            "Meetings and Organizations plus every peer document"
         );
     }
 
-    /// The Swagger selector offers the six legacy services plus Part VI Developer
-    /// Platform and API Gateway. Every operation of
+    /// The Swagger selector offers Meetings, Organizations, the six legacy services plus
+    /// Part VI Developer Platform and API Gateway. Every operation of
     /// every document it serves sits in a named, declared section (never Swagger's
     /// `default`) with a summary, a description and a unique operationId. Checked on the
     /// bytes the router serves, after public filtering, so neither the contracts nor the
@@ -1611,7 +2103,7 @@ mod tests {
             names,
             [
                 "Meetings",
-                "Communications",
+                "Organizations",
                 "Calling",
                 "Numbering / DCNs",
                 "Privacy Relay",
@@ -1717,6 +2209,118 @@ mod tests {
             "{} Swagger documentation problems:\n{}",
             problems.len(),
             problems.join("\n")
+        );
+    }
+
+    #[tokio::test]
+    async fn organizations_have_their_own_document_and_are_documented_once() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        // Every public first-party Organizations operation of the Meeting Service contract.
+        let contract: serde_json::Value =
+            serde_json::from_str(&ApiDoc::openapi().to_json().unwrap()).unwrap();
+        let expected: std::collections::BTreeSet<(String, String)> = contract["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(path, _)| !path.starts_with("/api/v2/admin/"))
+            .flat_map(|(path, item)| {
+                item.as_object()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, op)| {
+                        op["tags"]
+                            .as_array()
+                            .is_some_and(|t| t.iter().any(|t| t == ORGANIZATIONS_TAG))
+                    })
+                    .map(move |(m, _)| (m.to_uppercase(), path.clone()))
+            })
+            .collect();
+        assert!(
+            expected.len() >= 40,
+            "organizations operations: {}",
+            expected.len()
+        );
+
+        let router = swagger_router("127.0.0.1:18081");
+        let organizations = get_json(&router, ORGANIZATIONS_DOC_PATH).await;
+        let meetings = get_json(&router, "/api-docs/openapi.json").await;
+        assert_eq!(
+            operations(&organizations),
+            expected,
+            "moved exactly the Organizations operations"
+        );
+        assert!(
+            operations(&meetings).is_disjoint(&expected),
+            "an Organizations operation is still in the Meetings document"
+        );
+        assert!(
+            operations(&meetings).len() > 100,
+            "Meetings document kept its operations"
+        );
+        for path in [
+            "/api/v2/organizations",
+            "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}",
+            "/api/v2/organizations/{id}/policies",
+            "/api/v2/me/workspaces",
+            "/api/v2/organizations/{id}/calling/{path}",
+            "/api/v2/organizations/{id}/messaging/session-tokens",
+        ] {
+            assert!(organizations["paths"][path].is_object(), "{path}");
+        }
+        // Platform administration and the internal service API stay private.
+        let paths = organizations["paths"].as_object().unwrap();
+        assert!(paths
+            .keys()
+            .all(|p| !p.starts_with("/api/v2/admin/") && !p.starts_with("/internal/")));
+        assert!(meetings["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"] != ORGANIZATIONS_TAG));
+        // Same server and authentication as the Meetings document; every reference resolves.
+        assert_eq!(organizations["servers"], meetings["servers"]);
+        assert_eq!(
+            organizations["components"]["securitySchemes"],
+            meetings["components"]["securitySchemes"]
+        );
+        let schemas = organizations["components"]["schemas"].as_object().unwrap();
+        for name in referenced_schemas(&organizations["paths"], schemas) {
+            assert!(schemas.contains_key(&name), "unresolved schema {name}");
+        }
+        assert!(
+            schemas.len() < contract["components"]["schemas"].as_object().unwrap().len(),
+            "only the schemas the Organizations operations use"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}/teams/{teamId}/members"),
+            "Teams"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organization-invitations/accept"),
+            "Invitations"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}/archive"),
+            "Lifecycle"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}"),
+            "Organizations"
         );
     }
 

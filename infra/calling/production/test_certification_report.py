@@ -39,6 +39,15 @@ class PublicSurface(unittest.TestCase):
         self.assertEqual(pc.judge_internal(200)[0], 'FAIL')
         self.assertEqual(pc.judge_internal(404)[0], 'PASS')
 
+    def test_anonymous_contract_routes_can_be_public_without_allowing_mixed_or_unknown_auth(self):
+        for auth, expected in [(['ANONYMOUS'], 'PASS'), (['ANONYMOUS', 'PLATFORM_CREDENTIAL'], 'FAIL'),
+                               (['UNKNOWN'], 'FAIL'), (['DEVELOPER_SESSION'], 'FAIL')]:
+            self.assertEqual(pc.judge_public({'pattern': '/v1/oauth/metadata', 'auth': auth}, 200)[0], expected)
+        routes = {r['pattern']: r for r in pc.public_routes(REPO)}
+        for path in ('/v1/app-directory', '/v1/oauth/metadata'):
+            self.assertEqual(routes[path]['auth'], ['ANONYMOUS'])
+            self.assertEqual(pc.judge_public(routes[path], 200)[0], 'PASS')
+
     def test_route_inventories_come_from_the_repository(self):
         public = pc.public_routes(REPO)
         internal = pc.internal_routes(REPO)
@@ -48,18 +57,34 @@ class PublicSurface(unittest.TestCase):
         self.assertTrue(all(r['cls'] in pc.INTERNAL_CLASSES for r in internal))
 
     def test_certify_reports_failures(self):
-        answers = {'/health': (200, {}, '{"status":"healthy"}'), '/api-docs/swagger-config.json': (200, {}, '{"urls":[]}'),
+        # D1: the Meeting Service's documentation is not public in production (404).
+        answers = {'/health': (200, {}, '{"status":"healthy"}'), '/api-docs/swagger-config.json': (404, {}, ''),
+                   '/api-docs/openapi.json': (404, {}, ''), '/swagger-ui/': (200, {}, ''),
                    '/api/v2/me/profile': (401, {}, '')}
 
         def fake(path, method='GET', headers=None, attempts=4, limit=400):
             if method == 'OPTIONS':
-                return 204, {'access-control-allow-origin': pc.WEB_ORIGIN}, ''
+                return 204, {'access-control-allow-origin': headers['Origin']}, ''
             return answers.get(path, (200 if path.startswith('/internal') else 401, {}, ''))
 
         with patch.object(pc, 'request', side_effect=fake), patch.object(pc, 'certificate_days', return_value=60):
             result = pc.certify(REPO, pace=0)
         self.assertTrue(result['failed'])
         self.assertTrue(all(f.startswith('internal ') for f in result['failed']))
+
+    def test_gateway_must_answer_cors_for_the_www_origin(self):
+        def fake(path, method='GET', headers=None, attempts=4, limit=400):
+            if method == 'OPTIONS':
+                # The gateway still allows only the apex origin.
+                return (204, {'access-control-allow-origin': pc.WEB_ORIGIN}, '') if headers['Origin'] == pc.WEB_ORIGIN \
+                    else (403, {}, '')
+            if path in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
+                return 404, {}, ''
+            return (404 if path.startswith('/internal') else 401), {}, ''
+
+        with patch.object(pc, 'request', side_effect=fake), patch.object(pc, 'certificate_days', return_value=60):
+            result = pc.certify(REPO, pace=0)
+        self.assertIn('gateway_cors_preflight_from_www', ' '.join(result['failed']))
 
 
 def sh(cwd, *args):
@@ -175,6 +200,15 @@ class Report(unittest.TestCase):
                 services[:2], None, collected=False, failure='COORDINATED_RELEASE_FAILED: RuntimeError x'), None)
             self.assertEqual(broken['verdict'], 'INCOMPLETE')
             self.assertIn('public certification did not run', broken['failures'])
+            # An unlabelled image (emergency Meeting-only deploy) still yields a serializable
+            # report, grouped under `unlabelled`, and fails its image check.
+            unlabelled = [dict(s) for s in services]
+            unlabelled[0] = dict(unlabelled[0], image={'result': 'FAIL', 'imageRevision': None})
+            result = report.evaluate(self.repo, self.docs, self.write_log(unlabelled, self.platform()), {'failed': []})
+            self.assertIn('unlabelled', result['revisions'])
+            json.dumps(result, indent=1, sort_keys=True, default=str)
+            self.assertEqual(result['verdict'], 'NOT_CERTIFIED')
+            report.render(result, 'https://example.invalid/run')
             services[0]['readiness'] = {'result': 'FAIL', 'status': 503}
             failed = report.evaluate(self.repo, self.docs, self.write_log(services, self.platform()), {'failed': []})
             self.assertEqual(failed['verdict'], 'NOT_CERTIFIED')

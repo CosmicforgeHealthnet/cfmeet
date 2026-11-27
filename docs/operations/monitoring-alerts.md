@@ -1,8 +1,14 @@
 # Monitoring alerts as code (SEC-016)
 
-Status: **rules and routing exist in the repository and are validated in CI. Nothing is
-deployed, and paging is NOT CONFIGURED.** Running Prometheus and Alertmanager, choosing
-a receiver and approving thresholds are owner actions (see the end of this page).
+Status: **rules and routing are validated in CI and DEPLOYED to production** by the
+coordinated release (`release` and `deploy-monitoring` operations,
+`infra/calling/production/monitoring_stack.py`, see
+[Production monitoring stack](#production-monitoring-stack)). Alert delivery is driven by
+the production environment secret `CFMEET_ALERT_WEBHOOK_URL` (and optionally
+`CFMEET_ALERT_SLACK_WEBHOOK_URL`); while neither is set, alerts fire in Alertmanager but
+are not delivered anywhere. Approving the `approval: required` thresholds stays an owner
+action (see the end of this page). Public uptime is also checked every hour by
+[scheduled synthetic checks](#scheduled-synthetic-checks).
 
 ## What exists
 
@@ -10,17 +16,27 @@ a receiver and approving thresholds are owner actions (see the end of this page)
 |---|---|
 | `infra/monitoring/prometheus/rules/meeting-service.rules.yml` | Alerts from [14-operational-runbook.md §84](../phase2-certification/14-operational-runbook.md#alerts-and-severity-84) |
 | `infra/monitoring/prometheus/rules/messaging.rules.yml` | Alerts from [messaging-operations-runbook.md §8 / §9](../architecture/messaging-operations-runbook.md#9-incidents-and-signals-141) |
+| `infra/monitoring/prometheus/rules/notifications.rules.yml` | Notification Service alerts ([runbook](notification-service-runbook.md)) |
+| `infra/monitoring/prometheus/rules/platform-health.rules.yml` | Readiness-probe alerts for the services without metrics, and the Developer Platform worker heartbeat |
+| `infra/monitoring/prometheus/rules/service-scrapes.rules.yml` | Scrape-availability alerts for the other services with a metrics listener |
 | `infra/monitoring/prometheus/tests/*.test.yml` | `promtool test rules` unit tests. Each critical alert has a firing and a non-firing case. |
-| `infra/monitoring/prometheus/prometheus.example.yml` | **Example only.** Shows how the rule files load and how the endpoints are scraped. |
-| `infra/monitoring/alertmanager/alertmanager.yml` | Routes by severity to receivers that are deliberately empty |
+| `infra/monitoring/prometheus/prometheus.example.yml` | Hand-written example of the scrape configuration (the production one is rendered by `monitoring_stack.py`) |
+| `infra/monitoring/alertmanager/alertmanager.yml` | Routes by severity; every integration reads its URL from a mounted secret file |
+| `infra/monitoring/blackbox/blackbox.yml` | Blackbox exporter module for the readiness probes |
+| `infra/monitoring/sql-exporter/*.collector.yml` | Read-only SQL collectors (Developer Platform worker heartbeat) |
+| `infra/calling/production/monitoring_stack.py` (+ `test_monitoring_stack.py`) | Renders and deploys the production stack |
 | `scripts/monitoring/check_alert_rules.py` (+ `test_check_alert_rules.py`) | Repository policy checker, standard library only |
 
 CI runs the `monitoring alert rules` job in `.github/workflows/service-boundaries.yml` on
 every push to `main` / `staging`, on every pull request and on `workflow_dispatch`. It runs:
 the policy checker and its mutation tests; `promtool check rules`; `promtool test rules`;
-`promtool check config` on the example config, which also loads every rule file; and
-`amtool check-config`. Images are pinned by digest: `prom/prometheus:v3.5.0`,
-`prom/alertmanager:v0.28.1`.
+`promtool check config` on the example config, which also loads every rule file;
+`amtool check-config`; and the configuration `monitoring_stack.py` deploys, rendered with
+every optional part (and the Alertmanager variant without receivers), through
+`promtool check config`, `amtool check-config`, `blackbox_exporter --config.check` and
+`sql_exporter -config.check`. Images are pinned by digest and are the ones production runs:
+`prom/prometheus:v3.5.0`, `prom/alertmanager:v0.28.1`, `prom/blackbox-exporter:v0.27.0`,
+`burningalchemist/sql_exporter:0.24.14`.
 
 The policy checker enforces the following:
 
@@ -33,31 +49,100 @@ The policy checker enforces the following:
 - Every metric name in an `expr` is exported by `services/*/src/**/*.rs`. Accepted forms:
   the literal name; a histogram base name (for `_bucket` / `_sum` / `_count` series); or a
   synthesized `cfmeet_rtc|cfmeet_collab|cfmeet_ops_<field>_total` counter whose field is
-  listed in the matching `counters!` block. Prometheus's own `up` is also allowed. Renaming
-  a metric in code therefore fails CI until the rule is updated.
+  listed in the matching `counters!` block. Prometheus's own `up`, the blackbox exporter's
+  `probe_success` and the `metric_name` of a repository SQL collector are also allowed.
+  Renaming a metric in code therefore fails CI until the rule is updated.
 - Every critical alert is exercised by a promtool unit test.
 - The Alertmanager file contains no URL and no literal key, token or password, including
   in comments. Only `<PLACEHOLDER>` values and `*_file` paths are allowed. The repository
   secret scan also passes on it.
 
-## Loading it
+## Production monitoring stack
 
-1. Run Prometheus 3.x. The example uses `http_headers`, which needs 3.x. Copy
-   `prometheus.example.yml` and replace the `.invalid` hostnames with private network
-   names. Keep `rule_files: [rules/*.rules.yml]` relative to the config.
-2. meeting-service `GET /internal/metrics` answers only when the
-   `x-internal-token: $INTERNAL_API_TOKEN` header is present. Without it the endpoint
-   answers 404, which Prometheus reports as `up == 0`. A bearer token does not work.
-   Prometheus sends the header with `http_headers` → `files:`. Mount that file from the
-   secret store; never write the token into the config. Keep the route private.
-3. The messaging metrics are on the separate `MESSAGING_METRICS_ADDRESS` listener (port
-   9197 in production config). That listener has no authentication, so it must never be
-   exposed publicly.
-4. The job names must stay `meeting-service` and `messaging`, because the `up{job=...}`
-   alerts depend on them.
-5. Point `alerting.alertmanagers` at an Alertmanager that runs
-   `infra/monitoring/alertmanager/alertmanager.yml`. Run
-   `promtool check config` / `amtool check-config` before loading.
+`monitoring_stack.py` runs on the VPS after every successful `release` (a monitoring
+failure is reported as `monitoringStack: NOT_UPDATED` and never fails the release) and as
+the separate `deploy-monitoring` operation of `cfmeet-coordinated-release.yml`. The
+workflow ships `infra/monitoring` next to the release module. All containers are on the
+private network `cfmeet-core-private`, publish no port, run as uid 65534 with a read-only
+root filesystem, no capabilities and a memory limit, and are recreated only when their
+rendered configuration or image changes. A resource gate (1 GiB `MemAvailable` margin)
+refuses to create them on a host without room.
+
+| Container | What it does |
+|---|---|
+| `cfmeet-prometheus` | Scrapes only the listeners that exist in the running containers (see [Scrape targets](#scrape-targets)), loads every `rules/*.rules.yml`, sends to `cfmeet-alertmanager`. TSDB in the volume `cfmeet-prometheus-data`, 15 days / 2 GB. |
+| `cfmeet-alertmanager` | `alertmanager.yml` with only the integrations whose secret is set (see [Alert delivery](#alert-delivery)). Joins the egress bridge `cfmeet-monitoring-egress` only when a receiver is configured. |
+| `cfmeet-blackbox` | [Health probes](#health-probes). |
+| `cfmeet-heartbeat-exporter` | [Developer Platform worker heartbeat](#developer-platform-worker-heartbeat). |
+
+The run log records `monitoringTargets` (jobs, probed services, receivers) and
+`monitoringStack` (container changes, readiness, and per-job target health read from
+Prometheus' own target list). The Meeting Service token for `GET /internal/metrics` is
+copied from the running container's `INTERNAL_API_TOKEN` into a file only Prometheus
+mounts; without that variable the `meeting-service` job is not configured. The job
+names stay `meeting-service`, `messaging`, `notifications`, `health-probes`,
+`developer-platform-heartbeat` and the service names below, because the `up{job=...}`
+alerts depend on them (a unit test checks that every job a rule names can be produced).
+
+### Scrape targets
+
+| Job | Target | Configured when |
+|---|---|---|
+| `meeting-service` | `cfmeet-production-backend:8080/internal/metrics` with `x-internal-token` from a file | the container sets `INTERNAL_API_TOKEN` |
+| `messaging` | `cfmeet-messaging` `MESSAGING_METRICS_ADDRESS` (9197) | listener set, not loopback |
+| `notifications` | `cfmeet-notifications:8102/metrics`, `cfmeet-notifications-2:8102/metrics` | the replicas run |
+| `platform-access`, `calling`, `numbering`, `privacy-relay`, `sms-gateway`, `telephony` | the container's `*_METRICS_ADDRESS` listener | listener set, not loopback |
+| `security-scan-gateway` | `cosmicforge-scan-gateway` `SCAN_GATEWAY_METRICS_ADDRESS` (9199) | listener set, not loopback |
+
+API Gateway, Developer Platform and Organizations have no metrics route, and the
+Communications metrics route requires a signed service token, so they are covered by
+[health probes](#health-probes) instead; no endpoint is invented for them.
+`*MetricsUnavailable` (warning, 5 min) fires when a configured listener stops answering.
+Metric thresholds for these services belong in their runbooks first.
+
+### Health probes
+
+Job `health-probes`: the blackbox exporter GETs each running service's own health or
+readiness route (`coordinated_release.SERVICES[...]['health']` on its container port,
+credential-free, 200 expected). `ApiGatewayUnavailable`, `DeveloperPlatformUnavailable`,
+`OrganizationsUnavailable` and `CommunicationsUnavailable` page (critical) after 3 minutes
+of failure; `ServiceHealthProbeFailing` warns for any other service after 5 minutes;
+`HealthProbesUnavailable` warns when the exporter itself does not answer.
+
+Response: check the container (`docker ps`, `docker logs --tail 50 <container>`), its
+`/ready` body (database, migrations), then the dependencies it names. A container that is
+down after a release is restored with the `rollback` operation.
+
+### Developer Platform worker heartbeat
+
+The worker records one row per instance in `devplat_worker_heartbeats` on every pass
+(default every 5 s). `cfmeet-heartbeat-exporter` reads it with the role `cfmeet_monitor`,
+which can only connect to `cfmeet_developer_platform` and `SELECT` that one table
+(`default_transaction_read_only = on`, 5 s statement timeout, 2 connections). Metrics:
+`cfmeet_devplat_worker_heartbeat_age_seconds` (1e9 when no production row exists) and
+`cfmeet_devplat_worker_instances_fresh`.
+
+| Alert | Severity | Condition | Approval |
+|---|---|---|---|
+| DeveloperPlatformWorkerHeartbeatStale | critical | `max(cfmeet_devplat_worker_heartbeat_age_seconds) > 300` for 2 min (60 missed passes) | documented (this page) |
+| DeveloperPlatformWorkerHeartbeatUnreadable | warning | the heartbeat metric is absent for 10 min | documented |
+
+Response: `docker ps -a --filter name=cfmeet-developer-platform-worker`, its logs, and
+its restart count. While it is down, invitation expiry, credential sweeps, reference
+reconciliation and webhook delivery stop; the API keeps serving.
+
+## Scheduled synthetic checks
+
+`.github/workflows/cfmeet-production-synthetic-checks.yml` runs every hour (and on
+dispatch) from a GitHub runner: the read-only public part of `certify`
+(`infra/calling/production/public_certification.py`): `/health`, Swagger and OpenAPI
+documents, CORS preflights from the web origins, TLS certificate lifetime, every public
+GET route of the gateway manifest without credentials and every internal / operator /
+callback GET route on the public host. Unauthenticated GET / OPTIONS / HEAD only; no
+secret, no SSH, no account, no email, no scope grant, and it does not take the production
+deployment lock. A failed check fails the run; the report is in the job summary and the
+artifact. The Developer Platform worker heartbeat has no public endpoint and is covered by
+the alert above, not by this workflow.
 
 ## Alert table
 
@@ -95,6 +180,24 @@ value. In that case the expression holds a starting point, not an approved SLA.
 | MessagingWebhookRelayLagHigh | warning | `max(messaging_webhook_relay_oldest_pending_seconds) > 600` | 10 min | **required** | [§9](../architecture/messaging-operations-runbook.md#9-incidents-and-signals-141) |
 | MessagingMetricsUnavailable | warning | `up{job="messaging"} == 0` | 5 min | **required** | [§9](../architecture/messaging-operations-runbook.md#9-incidents-and-signals-141) |
 
+### organizations (no Prometheus exposition; checked by `verify` and `certify`)
+
+The Organizations outbox holds two kinds of rows (`services/organizations/src/store.rs` `emit`):
+
+* one `cfmeet.reconciliation` **record** per event: event history, never dispatched by design, so it stays `PENDING` with 0 attempts forever. It is **not** a backlog and never a delivery failure;
+* one **consumer** row per subscribed destination (today `cfmeet.meeting-service`, 13 event types), delivered by the worker.
+
+`coordinated_release.event_delivery()` / `classify_event_delivery()` (used by `verify`, `certify` and `activate-org-events`) report counts only, per destination, event type and state, and fail on genuine delivery defects only:
+
+| Check | Fails when |
+|---|---|
+| consumer DEAD | any consumer row is `DEAD` |
+| consumer stalled | a consumer row of a **configured** destination (`ORGANIZATIONS_EVENT_DESTINATIONS`) is `PENDING`/`INFLIGHT` more than 15 minutes after it was written |
+| blocked behind DEAD | a consumer row waits behind a `DEAD` row of the same aggregate (ordered delivery) |
+| record integrity | a consumer row has no reconciliation twin, or a reconciliation record was dispatched or modified |
+
+Rows of a destination that is not configured are reported (`undeliverableUnconfigured`), not failed. The service's own `/ready` reports `outbox.pending` for consumer rows only, `outbox.delivery` (`enabled` / `disabled`) and the configured `outbox.destinations`; the admin API `GET /internal/v1/admin/event-delivery` reports per consumer destination and excludes the record.
+
 ### Runbook conditions that cannot be expressed today
 
 | Condition | Why | What covers it now |
@@ -108,28 +211,30 @@ value. In that case the expression holds a starting point, not an approved SLA.
 | Messaging KT rollback, scanner unavailable, abuse wave, storage drift | Raised as messaging incidents; no dedicated metric | `messaging-admin incidents list` |
 
 Calling, numbering, telephony, privacy-relay, sms-gateway, platform-access and
-security-scan-gateway export metrics too, but their runbooks define no alert conditions.
-No rules exist for them yet. Their owners should add conditions to a runbook first.
+security-scan-gateway export metrics too, but their runbooks define no metric thresholds.
+Only their scrape availability is alerted ([Scrape targets](#scrape-targets)); their
+owners should add conditions to a runbook first.
 
-## Paging status: NOT CONFIGURED
+## Alert delivery
 
-`alertmanager.yml` routes `critical` → `unconfigured-pager`, `warning` →
-`unconfigured-ticket` and `info` → `unconfigured-info`. None of these receivers has an
-integration, so Alertmanager accepts and drops every alert. A critical alert inhibits the
-warning / info notifications of the same `alertname` + `service`.
+`alertmanager.yml` routes `critical` to `pager` (repeat 1 h), `warning` and anything
+without a severity to `operations`, and `info` to `info-only` (no notification). A
+critical alert inhibits the warning / info notifications of the same `alertname` +
+`service`.
 
-To enable paging, the owner must:
+`pager` and `operations` each have two integrations, both reading their URL from a file:
 
-1. Choose the product, for example a paging service, a ticket webhook or email.
-2. Store its credential in the secret store and mount it as a file into the Alertmanager
-   container.
-3. Uncomment the matching template under the receiver and set the `*_file` field to the
-   mounted path. Never put a URL, key or token in the YAML: the policy checker rejects
-   it. If the integration has no `*_file` option, keep that receiver in the deployment's
-   secret configuration, outside this repository.
-4. Prove delivery with a synthetic alert sent to a non-production receiver
-   (`amtool alert add` against a staging Alertmanager). Do not test against real on-call
-   staff or customer channels.
+| Production environment secret | Integration | File on the VPS |
+|---|---|---|
+| `CFMEET_ALERT_WEBHOOK_URL` | `webhook_configs` (Alertmanager webhook JSON) | `/opt/cfmeet-core/secrets/alertmanager-webhook-url` |
+| `CFMEET_ALERT_SLACK_WEBHOOK_URL` | `slack_configs` (Slack-compatible incoming webhook) | `/opt/cfmeet-core/secrets/alertmanager-slack-webhook-url` |
+
+On `release` and `deploy-monitoring` the workflow writes each set secret (https only)
+to its root-only file and removes the file of an unset one; the step never fails the
+operation and never prints a value. `monitoring_stack.py` removes the integration of a
+missing file from the deployed copy, so Alertmanager always starts. No email integration
+is configured. To start delivery, set a secret in the `production` environment and run
+`deploy-monitoring`; to prove delivery use a non-production receiver first.
 
 ## Owner steps to approve thresholds
 
@@ -144,5 +249,5 @@ For every `approval: required` alert (see the tables above):
    promtool compares them exactly. Adjust the firing / non-firing series to the new value.
 5. Push. The `monitoring alert rules` CI job must pass before the change counts.
 
-Deploying Prometheus / Alertmanager is outside the repository's scope. It is a separate
-infrastructure decision; this repository has no running monitoring stack.
+The production stack is deployed by the coordinated release
+([Production monitoring stack](#production-monitoring-stack)).

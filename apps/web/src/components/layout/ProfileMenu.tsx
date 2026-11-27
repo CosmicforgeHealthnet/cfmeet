@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAccountProfile } from "@/hooks/useAccount";
 
 interface ProfileMenuProps {
   expanded: boolean;
@@ -31,9 +32,11 @@ export default function ProfileMenu({
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const { data: user } = useProfile();
-
-  const initials = user?.username
-    ? user.username.slice(0, 2).toUpperCase()
+  const account = useAccountProfile();
+  const shownName = account.data?.effectiveDisplayName || account.data?.displayName || user?.username || "";
+  const photo = account.data?.avatarUrl ?? null;
+  const initials = shownName
+    ? shownName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || shownName.slice(0, 2).toUpperCase()
     : "U";
 
   useEffect(() => {
@@ -72,7 +75,7 @@ export default function ProfileMenu({
         >
           <div className="px-3 py-2 border-b border-border mb-1">
             <p className="font-medium text-sm text-foreground truncate">
-              {user?.username || "User"}
+              {shownName || "User"}
             </p>
             <p className="text-xs text-muted-foreground truncate">
               {user?.email || "user@example.com"}
@@ -84,7 +87,7 @@ export default function ProfileMenu({
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-primary rounded-lg transition-colors text-left"
           >
             <Settings className="w-4 h-4" />
-            My Account
+            Settings
           </button>
 
           <button
@@ -138,21 +141,19 @@ export default function ProfileMenu({
           !expanded && "rounded-full w-10 h-10 p-0 justify-center",
         )}
       >
-        <div className="relative">
-          <Avatar className="w-9 h-9 border border-border shrink-0">
-            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-background rounded-full z-10" />
-        </div>
+        <Avatar className="w-9 h-9 border border-border shrink-0">
+          {photo ? <AvatarImage src={photo} alt="" className="object-cover" /> : null}
+          <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+            {initials}
+          </AvatarFallback>
+        </Avatar>
 
         {expanded && (
           <div className="flex-1 text-left overflow-hidden">
             <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
-              {user?.username || "Profile"}
+              {shownName || "Profile"}
             </p>
-            <p className="text-xs text-muted-foreground truncate">View Profile</p>
+            <p className="text-xs text-muted-foreground truncate">{user?.email || "Settings"}</p>
           </div>
         )}
       </button>

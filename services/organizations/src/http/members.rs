@@ -6,7 +6,7 @@
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use cf_service_auth::InternalPermission;
@@ -16,10 +16,15 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::{authorize, membership_not_found, middleware::Caller, page_limit, parse, respond};
+use super::{
+    admin_bridge::{self, command, BridgeCommand, Outcome, Risk, Subject},
+    authorize, membership_not_found,
+    middleware::Caller,
+    page_limit, parse, respond,
+};
 use crate::{
     db,
-    domain::{can_assign, can_manage_target, Capability, MembershipStatus, Role},
+    domain::{can_assign, can_manage_target, Capability, LifecycleStatus, MembershipStatus, Role},
     error::{ApiError, ApiResult, ErrorCode},
     state::AppState,
     store::{self, Event, MembershipRow, OpContext, OrgRow, MEMBERSHIP_COLUMNS, ORG_COLUMNS},
@@ -55,12 +60,23 @@ pub async fn list(
                 .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
         }
     }
+    page(&state, id, q.cursor, limit).await
+}
+
+/// One page of an organization's non-removed memberships (id order). Callers check
+/// access (and that the organization exists) first.
+pub(super) async fn page(
+    state: &AppState,
+    id: Uuid,
+    cursor: Option<Uuid>,
+    limit: i64,
+) -> ApiResult<Response> {
     let rows: Vec<MembershipRow> = db::all(
         &state.db,
         &format!(
             "SELECT {MEMBERSHIP_COLUMNS} FROM organization_memberships WHERE organization_id = $1 AND status <> 'REMOVED' AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3"
         ),
-        vec![id.into(), q.cursor.into(), (limit + 1).into()],
+        vec![id.into(), cursor.into(), (limit + 1).into()],
     )
     .await?;
     let more = rows.len() as i64 > limit;
@@ -123,6 +139,20 @@ async fn change_membership(
     if status_changed && status == MembershipStatus::Removed {
         // A removed member leaves every team (Section 6: only ACTIVE members are in teams).
         super::teams::end_team_memberships(txn, ctx, now, after.id).await?;
+    }
+    if role_changed || status_changed {
+        // Invitations are only as good as their inviter: a removed, suspended or demoted
+        // member's pending invitations they could no longer issue are revoked.
+        super::invitations::revoke_unbacked(
+            txn,
+            ctx,
+            now,
+            after.organization_id,
+            after.user_id,
+            after.role(),
+            after.status() == MembershipStatus::Active,
+        )
+        .await?;
     }
     let mut version = before.version;
     let status_event = |v: i64| -> Option<Event<'static>> {
@@ -417,4 +447,294 @@ pub async fn transfer_ownership(
     let doc = store::organization_json(&txn, &org, Some(&me)).await?;
     txn.commit().await?;
     Ok(respond(StatusCode::OK, doc))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppointOwnerBody {
+    pub user_id: Uuid,
+    /// Why the operator intervenes (recorded in the audit event; 1–500 characters).
+    pub reason: String,
+    /// The version of the user's current (non-removed) membership, 0 when they have none.
+    /// Required from the admin bridge; checked when given.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
+}
+
+/// The admin bridge's answer for a membership: its status and version.
+pub fn membership_outcome(m: &MembershipRow) -> Outcome {
+    Outcome::new(
+        m.status.clone(),
+        Some(m.version),
+        json!({
+            "organizationId": m.organization_id,
+            "membershipId": m.id,
+            "userId": m.user_id,
+            "role": m.role,
+            "status": m.status,
+            "version": m.version,
+            "updatedAt": store::rfc3339(m.updated_at),
+            "removedAt": m.removed_at.map(store::rfc3339),
+        }),
+    )
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/owners` — operator recovery of an
+/// organization that lost its owner (for example the only owner's account was
+/// deactivated): makes `userId` an ACTIVE OWNER. An existing membership is promoted and
+/// re-activated; otherwise one is created (`joined_via = OPERATOR`). The operator's reason
+/// is audited. Requires `organization.administer`. Archived organizations are refused
+/// (archival is terminal). Idempotent: an ACTIVE OWNER is returned unchanged.
+///
+/// The admin bridge (R3, two people) also sends `Idempotency-Key` and `expectedVersion`
+/// (the user's current membership version, 0 for none) and gets the bridge answer.
+pub async fn admin_appoint_owner(
+    State(state): State<AppState>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let bridge = BridgeCommand::of(&caller, &headers, Risk::R3)?;
+    let (req, _): (AppointOwnerBody, Value) = parse(&body)?;
+    let reason = req.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 500 || reason.chars().any(char::is_control) {
+        return Err(ApiError::validation(
+            "reason must be 1-500 characters without control characters",
+        ));
+    }
+    let expected = match &bridge {
+        Some(_) => Some(admin_bridge::expected_version(req.expected_version, 0)?),
+        None => req.expected_version,
+    };
+    let txn = state.db.begin().await?;
+    if let Some(b) = &bridge {
+        if admin_bridge::replayed(
+            &txn,
+            b,
+            command::OWNERSHIP_RECOVER,
+            Subject::Organization,
+            Some(id),
+        )
+        .await?
+        .is_some()
+        {
+            store::org(&txn, id, false)
+                .await?
+                .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+            let current = store::current_membership(&txn, id, req.user_id, false).await?;
+            txn.commit().await?;
+            return Ok(match current {
+                Some(m) => membership_outcome(&m),
+                None => Outcome::new(
+                    "REMOVED",
+                    None,
+                    json!({ "organizationId": id, "userId": req.user_id }),
+                ),
+            }
+            .response());
+        }
+    }
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let now = db::now(&txn).await?;
+    let ctx = caller.as_operator();
+    let existing = store::current_membership(&txn, id, req.user_id, true).await?;
+    if let Some(v) = expected {
+        admin_bridge::check_version(existing.as_ref().map(|m| m.version).unwrap_or(0), v)?;
+    }
+    let changed = match existing {
+        Some(m) if m.role() == Role::Owner && m.status() == MembershipStatus::Active => None,
+        Some(m) => {
+            let previous = json!({ "role": m.role, "status": m.status });
+            let after = change_membership(
+                &txn,
+                &ctx,
+                now,
+                &m,
+                Role::Owner,
+                MembershipStatus::Active,
+                None,
+            )
+            .await?;
+            Some((after, previous))
+        }
+        None => {
+            let m: MembershipRow = db::one(
+                &txn,
+                &format!(
+                    "INSERT INTO organization_memberships (id, organization_id, user_id, role, status, joined_via, created_by, created_at, updated_at, version) \
+                     VALUES ($1, $2, $3, 'OWNER', 'ACTIVE', 'OPERATOR', $4, $5, $5, 1) RETURNING {MEMBERSHIP_COLUMNS}"
+                ),
+                vec![Uuid::new_v4().into(), id.into(), req.user_id.into(), ctx.user_id.into(), now.into()],
+            )
+            .await?
+            .ok_or(ApiError::new(ErrorCode::ServiceUnavailable))?;
+            store::history(&txn, &ctx, now, None, &m, "CREATED").await?;
+            store::emit_membership_activated(&txn, &ctx, now, &m).await?;
+            Some((m, Value::Null))
+        }
+    };
+    let after = match changed {
+        Some((after, previous)) => {
+            store::audit(
+                &txn,
+                &ctx,
+                now,
+                Some(id),
+                "membership.owner_appointed",
+                "membership",
+                Some(after.id),
+                json!({ "userId": after.user_id, "previous": previous, "reason": reason }),
+            )
+            .await?;
+            after
+        }
+        // Already an ACTIVE OWNER: nothing written (but a bridge command is recorded).
+        None => store::current_membership(&txn, id, req.user_id, false)
+            .await?
+            .ok_or_else(membership_not_found)?,
+    };
+    if let Some(b) = &bridge {
+        let outcome = membership_outcome(&after);
+        admin_bridge::record(
+            &txn,
+            b,
+            command::OWNERSHIP_RECOVER,
+            Subject::Organization,
+            id,
+            Some(id),
+            &outcome,
+            now,
+        )
+        .await?;
+        txn.commit().await?;
+        return Ok(outcome.response());
+    }
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, after.to_json()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdminMemberChangeBody {
+    pub expected_version: Option<i64>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change`
+/// `{expectedVersion, role?, status?}` — the admin bridge's staff change of a membership
+/// (R3, two people; bridge only). Any role or status (`REMOVED` ends the membership and its
+/// team memberships); the last active OWNER is kept (409 `LAST_OWNER`); a removed
+/// membership is not found; an archived organization is refused. Same history, events and
+/// audit (`membership.updated`, actor OPERATOR) as an owner's change.
+pub async fn admin_change_member(
+    State(state): State<AppState>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path((id, membership_id)): Path<(Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let b = BridgeCommand::required(&caller, &headers, Risk::R3)?;
+    let (req, _): (AdminMemberChangeBody, Value) = parse(&body)?;
+    let expected = admin_bridge::expected_version(req.expected_version, 1)?;
+    let new_role = req
+        .role
+        .as_deref()
+        .map(|r| {
+            Role::parse(r).ok_or_else(|| {
+                ApiError::validation("role must be OWNER, ADMIN, MANAGER, MEMBER or GUEST")
+            })
+        })
+        .transpose()?;
+    let new_status = req
+        .status
+        .as_deref()
+        .map(|s| {
+            MembershipStatus::parse(s)
+                .ok_or_else(|| ApiError::validation("status must be ACTIVE, SUSPENDED or REMOVED"))
+        })
+        .transpose()?;
+    if new_role.is_none() && new_status.is_none() {
+        return Err(ApiError::validation("role or status is required"));
+    }
+    let txn = state.db.begin().await?;
+    if admin_bridge::replayed(
+        &txn,
+        &b,
+        command::MEMBER_CHANGE,
+        Subject::Membership,
+        Some(membership_id),
+    )
+    .await?
+    .is_some()
+    {
+        let m = store::membership(&txn, id, membership_id, false)
+            .await?
+            .ok_or_else(membership_not_found)?;
+        txn.commit().await?;
+        return Ok(membership_outcome(&m).response());
+    }
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let target = store::membership(&txn, id, membership_id, true)
+        .await?
+        .filter(|m| m.status() != MembershipStatus::Removed)
+        .ok_or_else(membership_not_found)?;
+    admin_bridge::check_version(target.version, expected)?;
+    let (cur_role, cur_status) = (target.role(), target.status());
+    let role = new_role.unwrap_or(cur_role);
+    let status = new_status.unwrap_or(cur_status);
+    let now = db::now(&txn).await?;
+    let after = if role == cur_role && status == cur_status {
+        target
+    } else {
+        let loses_ownership = cur_role == Role::Owner
+            && cur_status == MembershipStatus::Active
+            && (role != Role::Owner || status != MembershipStatus::Active);
+        if loses_ownership && store::other_active_owners(&txn, id, target.id).await? == 0 {
+            return Err(ApiError::new(ErrorCode::LastOwner));
+        }
+        let ctx = caller.as_operator();
+        let after = change_membership(&txn, &ctx, now, &target, role, status, None).await?;
+        store::audit(
+            &txn,
+            &ctx,
+            now,
+            Some(id),
+            "membership.updated",
+            "membership",
+            Some(after.id),
+            json!({ "userId": after.user_id, "fromRole": target.role, "toRole": after.role, "fromStatus": target.status, "toStatus": after.status }),
+        )
+        .await?;
+        after
+    };
+    let outcome = membership_outcome(&after);
+    admin_bridge::record(
+        &txn,
+        &b,
+        command::MEMBER_CHANGE,
+        Subject::Membership,
+        after.id,
+        Some(id),
+        &outcome,
+        now,
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(outcome.response())
 }

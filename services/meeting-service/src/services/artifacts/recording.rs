@@ -338,6 +338,15 @@ impl RecordingService {
                 "Recording is not permitted by this meeting's policy",
             ));
         }
+        // ADR 0068 A6: the space holder's plan may not include recording (fail open).
+        if crate::services::plan_limits::for_space(&self.core.plan_limits, &c.space)
+            .await
+            .is_some_and(|p| !p.recording_allowed())
+        {
+            return Err(not_allowed(
+                "Recording is not included in this meeting owner's plan",
+            ));
+        }
         let layout = normalize_layout(req.layout.as_deref(), &c.profile.policy.recording.layout)?;
         let idem = match &req.idempotency_key {
             Some(k) if k.trim().is_empty() || k.len() > 128 => {

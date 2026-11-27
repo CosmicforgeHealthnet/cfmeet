@@ -28,7 +28,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
-    authorize, membership_not_found, middleware::Caller, page_limit, parse, respond, Access,
+    admin_bridge::{self, command, BridgeCommand, Outcome, Risk, Subject},
+    authorize, membership_not_found,
+    middleware::Caller,
+    page_limit, parse, respond, Access,
 };
 use crate::{
     db,
@@ -713,12 +716,24 @@ pub async fn list(
         return Err(ApiError::validation("status must be ACTIVE or ARCHIVED"));
     }
     read_access(&state, &caller, id).await?;
+    page(&state, id, status, q.cursor, limit).await
+}
+
+/// One page of an organization's teams in `status` (id order), with active member
+/// counts. Callers check access (and that the organization exists) first.
+pub(super) async fn page(
+    state: &AppState,
+    id: Uuid,
+    status: &str,
+    cursor: Option<Uuid>,
+    limit: i64,
+) -> ApiResult<Response> {
     let rows: Vec<TeamWithCount> = db::all(
         &state.db,
         "SELECT t.id, t.organization_id, t.name, t.description, t.parent_team_id, t.status, t.created_by, t.created_at, t.updated_at, t.archived_at, t.version, \
                 (SELECT count(*) FROM organization_team_members m WHERE m.team_id = t.id AND m.status = 'ACTIVE')::bigint AS member_count \
          FROM organization_teams t WHERE t.organization_id = $1 AND t.status = $2 AND ($3::uuid IS NULL OR t.id > $3) ORDER BY t.id LIMIT $4",
-        vec![id.into(), status.into(), q.cursor.into(), (limit + 1).into()],
+        vec![id.into(), status.into(), cursor.into(), (limit + 1).into()],
     )
     .await?;
     let more = rows.len() as i64 > limit;
@@ -834,8 +849,27 @@ pub async fn update(
     }
     let now = db::now(&txn).await?;
     let ctx = caller.as_user();
+    let after = write_team(&txn, &ctx, now, &t, name, desc, parent, &changed).await?;
+    let n = member_count(&txn, after.id).await?;
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, after.to_json(n)))
+}
+
+/// Stores a team's new name / description / parent (version + 1) with its `team.updated`
+/// event and audit.
+#[allow(clippy::too_many_arguments)]
+async fn write_team(
+    txn: &DatabaseTransaction,
+    ctx: &OpContext,
+    now: DateTime<Utc>,
+    t: &TeamRow,
+    name: String,
+    desc: Option<String>,
+    parent: Option<Uuid>,
+    changed: &[&'static str],
+) -> Result<TeamRow, ApiError> {
     let after: TeamRow = db::one(
-        &txn,
+        txn,
         &format!("UPDATE organization_teams SET name = $2, description = $3, parent_team_id = $4, version = version + 1, updated_at = $5 WHERE id = $1 RETURNING {TEAM_COLUMNS}"),
         vec![t.id.into(), name.into(), desc.into(), parent.into(), now.into()],
     )
@@ -843,8 +877,8 @@ pub async fn update(
     .map_err(name_taken)?
     .ok_or_else(team_not_found)?;
     store::emit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
         after.event(
             "team.updated",
@@ -853,19 +887,17 @@ pub async fn update(
     )
     .await?;
     store::audit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
-        Some(id),
+        Some(t.organization_id),
         "team.updated",
         "team",
         Some(after.id),
         json!({ "changedFields": changed }),
     )
     .await?;
-    let n = member_count(&txn, after.id).await?;
-    txn.commit().await?;
-    Ok(respond(StatusCode::OK, after.to_json(n)))
+    Ok(after)
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -897,10 +929,24 @@ pub async fn archive(
     if t.status == "ARCHIVED" {
         return Ok(respond(StatusCode::OK, t.to_json(0)));
     }
+    let now = db::now(&txn).await?;
+    let after = archive_team(&txn, &caller.as_user(), now, &t).await?;
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, after.to_json(0)))
+}
+
+/// Archives an ACTIVE team (refused while ACTIVE child teams exist): every ACTIVE team
+/// membership ends, version + 1, `team.archived` event and audit.
+async fn archive_team(
+    txn: &DatabaseTransaction,
+    ctx: &OpContext,
+    now: DateTime<Utc>,
+    t: &TeamRow,
+) -> Result<TeamRow, ApiError> {
     let children = db::scalar_i64(
-        &txn,
+        txn,
         "SELECT count(*)::bigint AS n FROM organization_teams WHERE organization_id = $1 AND parent_team_id = $2 AND status = 'ACTIVE'",
-        vec![id.into(), t.id.into()],
+        vec![t.organization_id.into(), t.id.into()],
     )
     .await?;
     if children > 0 {
@@ -908,27 +954,25 @@ pub async fn archive(
             "archive or move the team's child teams first",
         ));
     }
-    let now = db::now(&txn).await?;
-    let ctx = caller.as_user();
     let members: Vec<TeamMemberRow> = db::all(
-        &txn,
+        txn,
         &format!("SELECT {TEAM_MEMBER_COLUMNS} FROM organization_team_members WHERE team_id = $1 AND status = 'ACTIVE' ORDER BY id FOR UPDATE"),
         vec![t.id.into()],
     )
     .await?;
     for m in &members {
-        remove_member(&txn, &ctx, now, m, "TEAM_ARCHIVED").await?;
+        remove_member(txn, ctx, now, m, "TEAM_ARCHIVED").await?;
     }
     let after: TeamRow = db::one(
-        &txn,
+        txn,
         &format!("UPDATE organization_teams SET status = 'ARCHIVED', archived_at = $2, version = version + 1, updated_at = $2 WHERE id = $1 RETURNING {TEAM_COLUMNS}"),
         vec![t.id.into(), now.into()],
     )
     .await?
     .ok_or_else(team_not_found)?;
     store::emit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
         after.event(
             "team.archived",
@@ -937,18 +981,155 @@ pub async fn archive(
     )
     .await?;
     store::audit(
-        &txn,
-        &ctx,
+        txn,
+        ctx,
         now,
-        Some(id),
+        Some(t.organization_id),
         "team.archived",
         "team",
         Some(after.id),
         json!({ "membersRemoved": members.len() }),
     )
     .await?;
+    Ok(after)
+}
+
+/// The admin bridge's answer for a team: its status and version.
+fn team_outcome(t: &TeamRow, member_count: i64) -> Outcome {
+    Outcome::new(
+        t.status.clone(),
+        Some(t.version),
+        json!({
+            "organizationId": t.organization_id,
+            "teamId": t.id,
+            "status": t.status,
+            "version": t.version,
+            "parentTeamId": t.parent_team_id,
+            "memberCount": member_count,
+            "updatedAt": rfc3339(t.updated_at),
+            "archivedAt": t.archived_at.map(rfc3339),
+        }),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdminTeamChangeBody {
+    pub expected_version: Option<i64>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `null` or empty clears it; absent leaves it unchanged.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// `ARCHIVED` archives the team (alone: not combined with name / description).
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/teams/{teamId}/change`
+/// `{expectedVersion, name?, description?, status?}` — the admin bridge's staff change of a
+/// team (R3, two people; bridge only): rename / describe an ACTIVE team, or archive it
+/// (`status: ARCHIVED`; idempotent; refused while ACTIVE child teams exist; every team
+/// membership ends). An archived organization is refused. Same events and audit as an
+/// owner's change (actor OPERATOR).
+pub async fn admin_change_team(
+    State(state): State<AppState>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path((id, team_id)): Path<(Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let b = BridgeCommand::required(&caller, &headers, Risk::R3)?;
+    let (req, raw): (AdminTeamChangeBody, Value) = parse(&body)?;
+    let expected = admin_bridge::expected_version(req.expected_version, 1)?;
+    let describe = raw.get("description").is_some();
+    let archive = match req.status.as_deref() {
+        None => false,
+        Some("ARCHIVED") => true,
+        Some(_) => return Err(ApiError::validation("status must be ARCHIVED")),
+    };
+    if archive && (req.name.is_some() || describe) {
+        return Err(ApiError::validation(
+            "status ARCHIVED is not combined with name or description",
+        ));
+    }
+    if !archive && req.name.is_none() && !describe {
+        return Err(ApiError::validation(
+            "name, description or status is required",
+        ));
+    }
+    let txn = state.db.begin().await?;
+    if admin_bridge::replayed(&txn, &b, command::TEAM_CHANGE, Subject::Team, Some(team_id))
+        .await?
+        .is_some()
+    {
+        let t = team(&txn, id, team_id, false)
+            .await?
+            .ok_or_else(team_not_found)?;
+        let n = member_count(&txn, t.id).await?;
+        txn.commit().await?;
+        return Ok(team_outcome(&t, n).response());
+    }
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let t = team(&txn, id, team_id, true)
+        .await?
+        .ok_or_else(team_not_found)?;
+    admin_bridge::check_version(t.version, expected)?;
+    let now = db::now(&txn).await?;
+    let ctx = caller.as_operator();
+    let after = if archive {
+        if t.status == "ARCHIVED" {
+            t
+        } else {
+            archive_team(&txn, &ctx, now, &t).await?
+        }
+    } else {
+        active(&t)?;
+        let mut changed: Vec<&'static str> = Vec::new();
+        let mut name = t.name.clone();
+        if let Some(n) = &req.name {
+            let n = team_name(n)?;
+            if n != name {
+                name = n;
+                changed.push("name");
+            }
+        }
+        let mut desc = t.description.clone();
+        if describe {
+            let d = description(req.description.as_deref())?;
+            if d != desc {
+                desc = d;
+                changed.push("description");
+            }
+        }
+        if changed.is_empty() {
+            t
+        } else {
+            let parent = t.parent_team_id;
+            write_team(&txn, &ctx, now, &t, name, desc, parent, &changed).await?
+        }
+    };
+    let n = member_count(&txn, after.id).await?;
+    let outcome = team_outcome(&after, n);
+    admin_bridge::record(
+        &txn,
+        &b,
+        command::TEAM_CHANGE,
+        Subject::Team,
+        after.id,
+        Some(id),
+        &outcome,
+        now,
+    )
+    .await?;
     txn.commit().await?;
-    Ok(respond(StatusCode::OK, after.to_json(0)))
+    Ok(outcome.response())
 }
 
 // ---------------------------------------------------------------------------------------

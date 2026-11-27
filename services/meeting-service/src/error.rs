@@ -9,6 +9,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::middleware::request_id::current_request_id;
+use crate::validation::ValidationIssue;
 
 /// Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -77,6 +78,8 @@ pub enum ErrorCode {
     ArtifactDeleted,
     ArtifactAccessDenied,
     ArtifactStorageUnavailable,
+    /// Gap audit M13: no artefact bucket is configured in this deployment.
+    ArtifactStorageNotConfigured,
     ArtifactIntegrityFailed,
     TranscriptionDisabled,
     TranscriptionNotAllowed,
@@ -87,6 +90,8 @@ pub enum ErrorCode {
     IntelligenceProviderUnavailable,
     RegistrationDisabled,
     RegistrationClosed,
+    /// Gap audit M10: the registration capacity is reached.
+    RegistrationFull,
     RegistrationNotFound,
     AdmissionTokenInvalid,
     BackstageAccessDenied,
@@ -158,12 +163,55 @@ pub enum ErrorCode {
     OrganizationCallingDisabled,
     /// Blueprint Section 9: the requested username belongs to another account.
     UsernameTaken,
-    /// Blueprint Sections 2-3 (ACC-026): the action needs the current password or a recent
-    /// sign-in.
+    /// Blueprint Sections 2-3 (ACC-026): the action needs a fresh step-up confirmation (a
+    /// code emailed to the account's address).
     ReauthenticationRequired,
     /// Blueprint Sections 2-3 (ACC-016): the account's email address must be verified first
     /// (only where the deployment enforces verification).
     EmailVerificationRequired,
+    /// Multi-device policy: the device proof (signature, freshness or nonce) is invalid
+    /// or was already used.
+    DeviceProofInvalid,
+    /// Multi-device policy: the account already has the maximum number of active web
+    /// devices (`ACCOUNT_MAX_WEB_DEVICES`); revoke one first.
+    WebDeviceLimitReached,
+    /// Multi-device policy: this sign-in belongs to a new mobile that must complete the
+    /// primary-mobile replacement (approval by a trusted device or email step-up) first.
+    DeviceReplacementPending,
+    /// Multi-device policy: the operation needs a trusted device of this account.
+    DeviceNotTrusted,
+    /// Multi-device policy: this session already belongs to a device, or the session is
+    /// not eligible to declare one (unclassified sign-ins older than the re-auth window).
+    DeviceDeclarationRefused,
+    /// Device declaration enforcement (`ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM`): this
+    /// sign-in never declared its device and its declaration window has passed.
+    DeviceDeclarationRequired,
+    /// Multi-device policy: the device does not exist or is not the caller's.
+    DeviceNotFound,
+    /// Gap audit A1: the sign-in needs the account's second factor (see `mfaTicket`).
+    MfaRequired,
+    /// Gap audit A20: an administrator named an account that does not exist.
+    UserNotFound,
+    /// Gap audit A22: no such (current) avatar image.
+    AvatarNotFound,
+    /// Multi-device policy: the device key is already bound to another live device.
+    DeviceKeyInUse,
+    /// Multi-device policy: the linking challenge does not exist, is not the caller's,
+    /// has expired or is no longer open.
+    DeviceLinkInvalid,
+    /// ADR 0064: the app (or app grant) does not exist for this caller.
+    AppNotFound,
+    /// ADR 0064: Platform Access refused the app's authorization request; the message
+    /// starts with its reason (`INVALID_CLIENT`, `INVALID_REDIRECT_URI`, `INVALID_SCOPE`,
+    /// `PKCE_REQUIRED` or `APP_NOT_AVAILABLE`).
+    OauthRequestInvalid,
+    /// Audit MF2: unknown, replaced or revoked calendar feed token.
+    CalendarFeedNotFound,
+    /// ADR 0068: an owner-delivered export's download link is wrong, used or not the
+    /// caller's.
+    ExportLinkInvalid,
+    /// ADR 0068: an owner-delivered export's download link has expired.
+    ExportLinkExpired,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -233,6 +281,7 @@ impl ErrorCode {
             ErrorCode::ArtifactDeleted => "ARTIFACT_DELETED",
             ErrorCode::ArtifactAccessDenied => "ARTIFACT_ACCESS_DENIED",
             ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
+            ErrorCode::ArtifactStorageNotConfigured => "ARTIFACT_STORAGE_NOT_CONFIGURED",
             ErrorCode::ArtifactIntegrityFailed => "ARTIFACT_INTEGRITY_FAILED",
             ErrorCode::TranscriptionDisabled => "TRANSCRIPTION_DISABLED",
             ErrorCode::TranscriptionNotAllowed => "TRANSCRIPTION_NOT_ALLOWED",
@@ -243,6 +292,7 @@ impl ErrorCode {
             ErrorCode::IntelligenceProviderUnavailable => "INTELLIGENCE_PROVIDER_UNAVAILABLE",
             ErrorCode::RegistrationDisabled => "REGISTRATION_DISABLED",
             ErrorCode::RegistrationClosed => "REGISTRATION_CLOSED",
+            ErrorCode::RegistrationFull => "REGISTRATION_FULL",
             ErrorCode::RegistrationNotFound => "REGISTRATION_NOT_FOUND",
             ErrorCode::AdmissionTokenInvalid => "ADMISSION_TOKEN_INVALID",
             ErrorCode::BackstageAccessDenied => "BACKSTAGE_ACCESS_DENIED",
@@ -279,6 +329,23 @@ impl ErrorCode {
             ErrorCode::UsernameTaken => "USERNAME_TAKEN",
             ErrorCode::ReauthenticationRequired => "REAUTHENTICATION_REQUIRED",
             ErrorCode::EmailVerificationRequired => "EMAIL_VERIFICATION_REQUIRED",
+            ErrorCode::DeviceProofInvalid => "DEVICE_PROOF_INVALID",
+            ErrorCode::WebDeviceLimitReached => "WEB_DEVICE_LIMIT_REACHED",
+            ErrorCode::DeviceReplacementPending => "DEVICE_REPLACEMENT_PENDING",
+            ErrorCode::DeviceNotTrusted => "DEVICE_NOT_TRUSTED",
+            ErrorCode::DeviceDeclarationRefused => "DEVICE_DECLARATION_REFUSED",
+            ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
+            ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
+            ErrorCode::UserNotFound => "USER_NOT_FOUND",
+            ErrorCode::AvatarNotFound => "AVATAR_NOT_FOUND",
+            ErrorCode::MfaRequired => "MFA_REQUIRED",
+            ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
+            ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
+            ErrorCode::AppNotFound => "APP_NOT_FOUND",
+            ErrorCode::OauthRequestInvalid => "OAUTH_REQUEST_INVALID",
+            ErrorCode::CalendarFeedNotFound => "CALENDAR_FEED_NOT_FOUND",
+            ErrorCode::ExportLinkInvalid => "EXPORT_LINK_INVALID",
+            ErrorCode::ExportLinkExpired => "EXPORT_LINK_EXPIRED",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -346,6 +413,7 @@ impl ErrorCode {
             ErrorCode::ArtifactDeleted => StatusCode::GONE,
             ErrorCode::ArtifactAccessDenied => StatusCode::FORBIDDEN,
             ErrorCode::ArtifactStorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::ArtifactStorageNotConfigured => StatusCode::NOT_IMPLEMENTED,
             ErrorCode::ArtifactIntegrityFailed => StatusCode::CONFLICT,
             ErrorCode::TranscriptionDisabled => StatusCode::NOT_FOUND,
             ErrorCode::TranscriptionNotAllowed => StatusCode::FORBIDDEN,
@@ -355,7 +423,7 @@ impl ErrorCode {
             ErrorCode::IntelligenceNotAllowed => StatusCode::FORBIDDEN,
             ErrorCode::IntelligenceProviderUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::RegistrationDisabled => StatusCode::NOT_FOUND,
-            ErrorCode::RegistrationClosed => StatusCode::CONFLICT,
+            ErrorCode::RegistrationClosed | ErrorCode::RegistrationFull => StatusCode::CONFLICT,
             ErrorCode::RegistrationNotFound => StatusCode::NOT_FOUND,
             ErrorCode::AdmissionTokenInvalid => StatusCode::GONE,
             ErrorCode::BackstageAccessDenied => StatusCode::FORBIDDEN,
@@ -391,6 +459,22 @@ impl ErrorCode {
             ErrorCode::OrganizationPolicyRestricted
             | ErrorCode::ReauthenticationRequired
             | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
+            ErrorCode::DeviceProofInvalid | ErrorCode::MfaRequired => StatusCode::UNAUTHORIZED,
+            ErrorCode::DeviceReplacementPending
+            | ErrorCode::DeviceNotTrusted
+            | ErrorCode::DeviceDeclarationRequired => StatusCode::FORBIDDEN,
+            ErrorCode::WebDeviceLimitReached
+            | ErrorCode::DeviceDeclarationRefused
+            | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,
+            ErrorCode::DeviceNotFound | ErrorCode::UserNotFound | ErrorCode::AvatarNotFound => {
+                StatusCode::NOT_FOUND
+            }
+            ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
+            ErrorCode::AppNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::OauthRequestInvalid => StatusCode::BAD_REQUEST,
+            ErrorCode::CalendarFeedNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::ExportLinkInvalid => StatusCode::NOT_FOUND,
+            ErrorCode::ExportLinkExpired => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -416,6 +500,14 @@ pub enum ApiError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// `400 VALIDATION_ERROR` with one structured issue per invalid field (see
+    /// [`crate::validation`]); `message` keeps the historical `field: message` lines.
+    #[error("Validation error: {message}")]
+    InvalidFields {
+        message: String,
+        details: Vec<ValidationIssue>,
+    },
+
     #[error("Conflict: {0}")]
     Conflict(String),
 
@@ -431,6 +523,11 @@ pub enum ApiError {
     /// Phase 2 semantic domain error with a stable public code.
     #[error("{code:?}: {message}")]
     Domain { code: ErrorCode, message: String },
+
+    /// Gap audit A1: `401 MFA_REQUIRED` with the one-time `mfaTicket` that
+    /// `POST /api/v1/auth/mfa/verify` redeems with the second factor.
+    #[error("MFA_REQUIRED")]
+    MfaRequired { ticket: String },
 
     /// `RATE_LIMITED` with retry semantics (`Retry-After` header + body field).
     #[error("RATE_LIMITED: {message}")]
@@ -491,6 +588,30 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if let ApiError::MfaRequired { ticket } = self {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::MfaRequired.as_str(),
+                    "message": "Enter the code from your authenticator app to finish signing in",
+                    "requestId": current_request_id(),
+                    "mfaTicket": ticket,
+                }
+            }));
+            return (StatusCode::UNAUTHORIZED, body).into_response();
+        }
+        if let ApiError::InvalidFields { message, details } = self {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::ValidationError.as_str(),
+                    "message": message,
+                    "requestId": current_request_id(),
+                    "details": details,
+                }
+            }));
+            return (StatusCode::BAD_REQUEST, body).into_response();
+        }
         let (status, error_code, message) = match self {
             ApiError::DatabaseError(e) => {
                 // Never expose SQL text / SeaORM internals / DSNs to clients.
@@ -527,7 +648,11 @@ impl IntoResponse for ApiError {
                 (StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", msg)
             }
             ApiError::Domain { code, message } => (code.status(), code.as_str(), message),
-            ApiError::RateLimited { .. } => unreachable!("handled above"),
+            ApiError::RateLimited { .. }
+            | ApiError::InvalidFields { .. }
+            | ApiError::MfaRequired { .. } => {
+                unreachable!("handled above")
+            }
         };
 
         let body = Json(json!({
@@ -579,6 +704,11 @@ pub struct ErrorBody {
     /// Present on `RATE_LIMITED` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_seconds: Option<u64>,
+    /// Present on `VALIDATION_ERROR` when the request body failed field validation: one
+    /// entry per problem, naming the public JSON field (`message` still summarises them
+    /// as `field: message` lines for older clients).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Vec<ValidationIssue>>,
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -614,6 +744,34 @@ mod tests {
             assert!(v["error"].as_object().unwrap().contains_key("requestId"));
             assert_eq!(v["error"].as_object().unwrap().len(), 3, "{v}");
         }
+    }
+
+    #[tokio::test]
+    async fn field_validation_errors_list_details_and_keep_the_message() {
+        let (status, _, v) = render(ApiError::InvalidFields {
+            message: "password: Too weak".into(),
+            details: vec![ValidationIssue {
+                field: Some("password".into()),
+                code: "password_strength".into(),
+                message: "Too weak".into(),
+            }],
+        })
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(v["success"], false);
+        assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(v["error"]["message"], "password: Too weak");
+        assert!(v["error"].as_object().unwrap().contains_key("requestId"));
+        assert_eq!(
+            v["error"]["details"],
+            serde_json::json!([{"field": "password", "code": "password_strength", "message": "Too weak"}])
+        );
+
+        // Plain validation errors keep the historical three-key body.
+        let (status, _, v) = render(ApiError::ValidationError("bad".into())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(v["error"].as_object().unwrap().len(), 3, "{v}");
     }
 
     #[tokio::test]
@@ -675,6 +833,22 @@ mod tests {
             ErrorCode::TeamNotFound,
             ErrorCode::TeamArchived,
             ErrorCode::TeamNameTaken,
+            ErrorCode::DeviceProofInvalid,
+            ErrorCode::WebDeviceLimitReached,
+            ErrorCode::DeviceReplacementPending,
+            ErrorCode::DeviceNotTrusted,
+            ErrorCode::DeviceDeclarationRefused,
+            ErrorCode::DeviceDeclarationRequired,
+            ErrorCode::DeviceNotFound,
+            ErrorCode::DeviceKeyInUse,
+            ErrorCode::DeviceLinkInvalid,
+            ErrorCode::AppNotFound,
+            ErrorCode::OauthRequestInvalid,
+            ErrorCode::CalendarFeedNotFound,
+            ErrorCode::ExportLinkInvalid,
+            ErrorCode::ExportLinkExpired,
+            ErrorCode::UserNotFound,
+            ErrorCode::MfaRequired,
         ];
         for c in all {
             let s = c.as_str();

@@ -9,6 +9,7 @@ import { conferenceListQueryOptions } from "@/hooks/v2/useConferences";
 import { conferencePermission } from "@/lib/meeting-scheduling";
 import { Button } from "@/components/ui/button";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
+import { NiceSelect } from "@/components/ui/nice-select";
 import ConferencesPanel, { ConferenceRow } from "./ConferencesPanel";
 
 export default function ConferencesContent() {
@@ -28,7 +29,8 @@ export default function ConferencesContent() {
   return <div className="space-y-6 px-4 py-6 sm:p-8 md:p-10"><header><h1 className="text-2xl font-bold">Conferences</h1><p className="mt-1 text-sm text-muted-foreground">Scheduled, live and past sessions. Each conference has its own participants, admission and lifecycle.</p></header>
     {spaces.isLoading && <p role="status">Loading your conferences…</p>}
     {spaces.isError && <RequestError error={spaces.error} retry={() => void spaces.refetch()} />}
-    {spaces.isSuccess && <><label className="grid max-w-lg gap-2 text-sm font-medium">Meeting space<select className="h-10 rounded-md border border-input bg-background px-3" value={selected} onChange={event => setSelection(event.target.value)}><option value="">All meeting spaces</option>{items.map(item => <option key={item.id} value={item.id}>{item.title || item.meetingCode}{item.status === "ARCHIVED" ? " (archived)" : ""}</option>)}</select></label>
+    {spaces.isSuccess && <><NiceSelect label="Meeting space" className="max-w-lg" value={selected} onChange={setSelection}
+        options={[{ value: "", label: "All meeting spaces" }, ...items.map(item => ({ value: item.id, label: item.title || item.meetingCode, hint: item.status === "ARCHIVED" ? "Archived" : undefined }))]} />
       <p className="text-sm text-muted-foreground">Choose a meeting space to schedule a conference or filter its session history.</p>
       {selected ? space ? <ConferencesPanel key={space.id} space={space} /> : <p role="alert" className="text-sm text-destructive">This meeting space is unavailable or you no longer belong to it.</p> : <>
         {queries.some(query => query.isLoading) && <p role="status">Loading conference sessions…</p>}

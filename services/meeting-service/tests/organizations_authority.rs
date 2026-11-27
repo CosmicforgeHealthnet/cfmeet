@@ -410,6 +410,16 @@ async fn fake_handler(
             ok(json!({ "membership": member_doc(Uuid::new_v4(), Uuid::new_v4(), "MEMBER") }))
         }
         ("POST", ["organization-invitations", "decline"]) => ok(json!({ "status": "DECLINED" })),
+        ("GET", ["organization-invitations", "mine"]) => ok(json!({ "items": [] })),
+        ("POST", ["organization-invitations", _, "accept"]) => {
+            ok(member_doc(Uuid::new_v4(), Uuid::new_v4(), "MEMBER"))
+        }
+        ("POST", ["organization-invitations", _, "decline"]) => ok(json!({ "status": "DECLINED" })),
+        ("POST", ["admin", "organizations", o, "owners"]) => ok(member_doc(
+            id(o),
+            id(body["userId"].as_str().unwrap()),
+            "OWNER",
+        )),
         ("POST", ["organizations", o, action @ ("suspend" | "reactivate" | "archive")]) => {
             let status = match *action {
                 "suspend" => "SUSPENDED",
@@ -816,6 +826,16 @@ fn first_party_routes(o: Uuid, m: Uuid, i: Uuid) -> Vec<(Method, String, Option<
             Method::POST,
             "/api/v2/organization-invitations/decline".into(),
             Some(json!({ "token": "orginv_fake_token" })),
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/organization-invitations/{i}/accept"),
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/organization-invitations/{i}/decline"),
+            Some(json!({})),
         ),
         (
             Method::POST,
@@ -2635,6 +2655,8 @@ struct PeerState {
     calling_answer: Mutex<Option<(u16, Value)>>,
     /// Scripted Platform Access answer for principal ensure.
     ensure_answer: Mutex<Option<(u16, Value)>>,
+    /// The organization environment's Messaging application policy version (0 = never set).
+    policy_version: Mutex<i64>,
 }
 
 struct Peers {
@@ -2642,10 +2664,10 @@ struct Peers {
     state: Arc<PeerState>,
 }
 
-fn peer_verifier(jwk: &PublicJwk, receiver: &str, permission: &str) -> ServiceTokenVerifier {
+fn peer_verifier(jwk: &PublicJwk, receiver: &str, permissions: &[&str]) -> ServiceTokenVerifier {
     let bundle = json!({ "bundle_version": 1, "receiver": receiver, "runtime_environment": "test",
         "trusted_issuers": [{ "issuer": "cfmeet.meeting-service", "audience": receiver,
-            "runtime_environment": "test", "keys": [jwk], "permissions": [permission] }]});
+            "runtime_environment": "test", "keys": [jwk], "permissions": permissions }]});
     let policy = TrustPolicy::from_json(
         &bundle.to_string(),
         &ServiceId::parse(receiver).unwrap(),
@@ -2665,7 +2687,21 @@ async fn peer_handler(
     let path = uri.path().to_string();
     let to_platform_access = path.starts_with("/internal/v1/principals/");
     let to_messaging = path.starts_with("/internal/v1/delegated/");
-    let (verifier, permission) = if to_platform_access {
+    // Gap audit G6 / G7: organization moderation and team channels.
+    let to_governance = path.starts_with("/internal/v1/organization-moderation/")
+        || path == "/internal/v1/team-channels";
+    // Gap audit G3: organization members' own calling presence and extension offboarding.
+    let to_members = path.starts_with("/internal/v1/organization-members/");
+    let (verifier, permission) = if to_members {
+        (
+            &state.calling,
+            if path.ends_with("/extension-status") {
+                InternalPermission::CallingOrganizationMemberOffboard
+            } else {
+                InternalPermission::CallingOrganizationMemberAct
+            },
+        )
+    } else if to_platform_access {
         (
             &state.platform_access,
             InternalPermission::PlatformPrincipalEnsure,
@@ -2674,6 +2710,11 @@ async fn peer_handler(
         (
             &state.messaging,
             InternalPermission::MessagingApplicationDelegate,
+        )
+    } else if to_governance {
+        (
+            &state.messaging,
+            InternalPermission::MessagingOrganizationGovern,
         )
     } else {
         (
@@ -2741,6 +2782,20 @@ async fn peer_handler(
     if let Some((status, doc)) = state.calling_answer.lock().unwrap().clone() {
         return (StatusCode::from_u16(status).unwrap(), Json(doc)).into_response();
     }
+    if to_messaging && path == "/internal/v1/delegated/v1/messaging/policy" {
+        let mut version = state.policy_version.lock().unwrap();
+        if method == Method::PUT {
+            if body["expectedVersion"].as_i64() != Some(*version) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(envelope("POLICY_VERSION_CONFLICT")),
+                )
+                    .into_response();
+            }
+            *version += 1;
+        }
+        return Json(json!({ "version": *version, "policy": {}, "effective": {} })).into_response();
+    }
     match method.as_str() {
         "POST" => (
             StatusCode::CREATED,
@@ -2758,19 +2813,31 @@ impl Peers {
             calling: peer_verifier(
                 &jwk,
                 "cfmeet.calling",
-                "calling-request.act-for-organization",
+                &[
+                    "calling-request.act-for-organization",
+                    "calling-organization-member.act",
+                    "calling-organization-member.offboard",
+                ],
             ),
             platform_access: peer_verifier(
                 &jwk,
                 "cfmeet.platform-access",
-                "platform-principal.ensure",
+                &["platform-principal.ensure"],
             ),
-            messaging: peer_verifier(&jwk, "cfmeet.messaging", "messaging-application.delegate"),
+            messaging: peer_verifier(
+                &jwk,
+                "cfmeet.messaging",
+                &[
+                    "messaging-application.delegate",
+                    "messaging-organization.govern",
+                ],
+            ),
             records: Mutex::new(vec![]),
             rejected: Mutex::new(0),
             principal: Uuid::new_v4(),
             calling_answer: Mutex::new(None),
             ensure_answer: Mutex::new(None),
+            policy_version: Mutex::new(0),
         });
         let router = Router::new()
             .fallback(peer_handler)
@@ -2793,6 +2860,14 @@ impl Peers {
         self.records()
             .into_iter()
             .filter(|r| !r.path.starts_with("/internal/"))
+            .collect()
+    }
+
+    /// Gap audit G3: what reached Calling's organization member routes.
+    fn member_records(&self) -> Vec<PeerRecord> {
+        self.records()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/internal/v1/organization-members/"))
             .collect()
     }
 }
@@ -3253,6 +3328,267 @@ async fn s12_organization_calling_is_disabled_by_default() {
     );
 }
 
+impl CallingWorld {
+    async fn member_calling(
+        &self,
+        method: Method,
+        user: &User,
+        rest: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.app
+            .call(
+                method,
+                &format!("/api/v2/organizations/{}/member-calling/{rest}", self.org),
+                Auth::Bearer(&user.token),
+                body,
+            )
+            .await
+    }
+}
+
+/// Gap audit G3: a MEMBER (no administrative capability) registers, lists and revokes
+/// their own endpoints and obtains signaling credentials in the organization's OWN Calling
+/// scope, as their organization principal, with the organization's credential named for
+/// Calling to re-verify — never a principal from the request.
+#[tokio::test]
+async fn g3_members_get_their_own_calling_endpoint_and_signaling_in_the_organization_scope() {
+    let w = some!(calling_world(true).await);
+    let endpoint = Uuid::new_v4();
+    let device = json!({ "endpointKey": "member-web-1", "endpointKind": "WEB",
+                         "capabilities": { "audio": true, "video": true } });
+    let (s, v) = w
+        .member_calling(Method::POST, &w.member, "endpoints", Some(device.clone()))
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::GET,
+            &w.member,
+            "endpoints?includeRevoked=true",
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(json!({ "endpointId": endpoint })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::DELETE,
+            &w.member,
+            &format!("endpoints/{endpoint}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::CREATED,
+        "the fake answers every POST with 201: {v}"
+    );
+
+    let records = w.peers.member_records();
+    let calls: Vec<(String, String, Option<String>, Value)> = records
+        .iter()
+        .map(|r| {
+            (
+                r.method.clone(),
+                r.path.clone(),
+                r.query.clone(),
+                r.body.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        vec![
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/endpoints".into(),
+                None,
+                device
+            ),
+            (
+                "GET".into(),
+                "/internal/v1/organization-members/endpoints".into(),
+                Some("includeRevoked=true".into()),
+                Value::Null
+            ),
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/signaling-credentials".into(),
+                None,
+                json!({ "endpointId": endpoint })
+            ),
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/endpoints/revoke".into(),
+                None,
+                json!({ "endpointId": endpoint })
+            ),
+        ]
+    );
+    for r in &records {
+        // The organization's own scope, its Calling credential (id only) and the member's
+        // organization principal — never a customer credential header.
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(
+            (r.service_account, r.credential),
+            (w.binding.0, Some(w.binding.1))
+        );
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+        assert!(!r.authorization);
+    }
+    // The administration relay was not used, and no administrative capability is needed.
+    assert!(w.peers.calling_records().is_empty());
+}
+
+#[tokio::test]
+async fn g3_member_calling_is_gated_by_organizations_and_fails_closed() {
+    let w = some!(calling_world(true).await);
+    let forwarded = |w: &CallingWorld| w.peers.member_records().len();
+    let body = json!({ "endpointId": Uuid::new_v4() });
+    // Bad bodies and ids never reach Calling.
+    for (method, rest, b) in [
+        (
+            Method::POST,
+            "signaling-credentials",
+            Some(json!({ "endpointId": "x" })),
+        ),
+        (
+            Method::POST,
+            "signaling-credentials",
+            Some(json!({ "endpointId": Uuid::new_v4(), "principalId": Uuid::new_v4() })),
+        ),
+        (Method::POST, "endpoints", Some(json!([1, 2]))),
+        (Method::GET, "endpoints?principalId=x", None),
+    ] {
+        let (s, v) = w.member_calling(method, &w.member, rest, b).await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
+            "{rest}: {v}"
+        );
+    }
+    let (s, v) = w
+        .member_calling(Method::DELETE, &w.member, "endpoints/not-a-uuid", None)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    // A suspended member, a suspended organization, an outsider, Calling turned off by
+    // policy: refused by Organizations, nothing forwarded.
+    w.fake
+        .set_membership_status(w.member.id, w.org, "SUSPENDED");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(body.clone()),
+        )
+        .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s} {v}"
+    );
+    w.fake.set_membership_status(w.member.id, w.org, "ACTIVE");
+    w.fake.set_org_status(w.org, "SUSPENDED");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(body.clone()),
+        )
+        .await;
+    assert!(s.is_client_error(), "{s} {v}");
+    w.fake.set_org_status(w.org, "ACTIVE");
+    let outsider = w.app.user("g3-outsider").await;
+    let (s, v) = w
+        .member_calling(Method::GET, &outsider, "endpoints", None)
+        .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s} {v}"
+    );
+    w.fake.set_policy(
+        w.org,
+        json!({ "revision": 2, "features": { "meetings": true, "messaging": true, "calling": false },
+                "restrict": {} }),
+    );
+    let (s, v) = w
+        .member_calling(Method::GET, &w.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+    w.fake.set_policy(w.org, default_policy());
+    // No Calling binding yet.
+    w.bind(false);
+    let (s, v) = w
+        .member_calling(Method::GET, &w.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    w.bind(true);
+    assert_eq!(forwarded(&w), 0, "nothing refused ever reached Calling");
+    // Calling refusing the Meeting Service (trust bundle grant, credential) or failing.
+    for status in [401, 403, 500, 503] {
+        *w.peers.state.calling_answer.lock().unwrap() =
+            Some((status, envelope("INTERNAL_PERMISSION_DENIED")));
+        let (s, v) = w
+            .member_calling(Method::GET, &w.member, "endpoints", None)
+            .await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            "calling {status}: {v}"
+        );
+    }
+    // Calling's own answers (e.g. another member's endpoint) are relayed.
+    *w.peers.state.calling_answer.lock().unwrap() = Some((404, envelope("NOT_FOUND")));
+    let (s, v) = w
+        .member_calling(Method::POST, &w.member, "signaling-credentials", Some(body))
+        .await;
+    assert_eq!((s, code(&v)), (StatusCode::NOT_FOUND, "NOT_FOUND"), "{v}");
+    *w.peers.state.calling_answer.lock().unwrap() = None;
+    // Unauthenticated, and disabled by default.
+    let (s, v) = w
+        .app
+        .get(
+            format!("/api/v2/organizations/{}/member-calling/endpoints", w.org),
+            Auth::None,
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
+    );
+    let off = some!(calling_world(false).await);
+    let (s, v) = off
+        .member_calling(Method::GET, &off.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    assert!(off.peers.records().is_empty());
+}
+
 /// Blueprint Section 11: an organization invitation email is delivered by the account
 /// relay from the Organizations Service's authoritative answer. `sendEmail` never reaches
 /// the Organizations contract, the link carries the token in the URL fragment, and the
@@ -3452,7 +3788,27 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
         )
         .await;
     assert_eq!(s, StatusCode::CREATED, "{v}");
-    let calls = w.messaging_records();
+    // ADR 0058 A2: on first use the never-set organization Messaging policy receives the
+    // first-party MANAGED baseline exactly once (application authority: the binding's
+    // service account, no acting principal), then it is cached.
+    let (policy, calls): (Vec<_>, Vec<_>) = w
+        .messaging_records()
+        .into_iter()
+        .partition(|r| r.path == "/internal/v1/delegated/v1/messaging/policy");
+    assert_eq!(
+        policy.iter().map(|r| r.method.as_str()).collect::<Vec<_>>(),
+        ["GET", "PUT"]
+    );
+    for r in &policy {
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(r.principal, None);
+    }
+    assert_eq!(
+        policy[1].body,
+        backend::services::organization_calling::first_party_messaging_baseline()
+    );
+    assert_eq!(*w.peers.state.policy_version.lock().unwrap(), 1);
     assert_eq!(
         calls
             .iter()
@@ -3647,6 +4003,177 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
             session.session_id
         ))
     );
+}
+
+/// Gap audit G6 / G7: organization moderation and team channels reach Messaging's
+/// organization-governance surface in the ORGANIZATION's scope, only for members holding
+/// the Organizations capability, with the moderator as the signed initiating principal.
+#[tokio::test]
+async fn organization_moderation_and_team_channels_need_the_organization_capability() {
+    if !require_test_redis() {
+        return;
+    }
+    let w = some!(messaging_world(true).await);
+    let governance = |w: &CallingWorld| {
+        w.peers
+            .records()
+            .into_iter()
+            .filter(|r| {
+                r.path.starts_with("/internal/v1/organization-moderation/")
+                    || r.path == "/internal/v1/team-channels"
+            })
+            .collect::<Vec<_>>()
+    };
+    let moderation = format!("/api/v2/organizations/{}/messaging/moderation", w.org);
+    // A MEMBER does not hold messaging.organization.moderate: refused before Messaging.
+    let (s, v) = w
+        .app
+        .call(
+            Method::GET,
+            &format!("{moderation}/reports"),
+            Auth::Bearer(&w.member.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert!(governance(&w).is_empty());
+    // The OWNER lists reports and applies an action, as their organization principal.
+    let (s, v) = w
+        .app
+        .call(
+            Method::GET,
+            &format!("{moderation}/reports?status=OPEN"),
+            Auth::Bearer(&w.owner.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let action = json!({ "kind": "REMOVE_MESSAGE", "conversationId": Uuid::new_v4(),
+                         "messageId": Uuid::new_v4(), "reason": "SPAM" });
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &format!("{moderation}/moderation/actions"),
+            Auth::Bearer(&w.owner.token),
+            Some(action.clone()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let calls = governance(&w);
+    assert_eq!(
+        calls
+            .iter()
+            .map(|r| (r.method.as_str(), r.path.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "GET",
+                "/internal/v1/organization-moderation/v1/messaging/reports"
+            ),
+            (
+                "POST",
+                "/internal/v1/organization-moderation/v1/messaging/moderation/actions"
+            )
+        ]
+    );
+    for r in &calls {
+        assert!(!r.authorization);
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+    }
+    assert_eq!(calls[0].query.as_deref(), Some("status=OPEN"));
+    assert_eq!(calls[1].body, action);
+    // Outside the allowlist, or an unknown query parameter: never forwarded.
+    for (path, status) in [
+        ("admin/policies", StatusCode::NOT_FOUND),
+        ("reports/not-a-uuid", StatusCode::NOT_FOUND),
+        ("reports?bogus=1", StatusCode::BAD_REQUEST),
+    ] {
+        let (s, v) = w
+            .app
+            .call(
+                Method::GET,
+                &format!("{moderation}/{path}"),
+                Auth::Bearer(&w.owner.token),
+                None,
+            )
+            .await;
+        assert_eq!(s, status, "{path}: {v}");
+    }
+    assert_eq!(governance(&w).len(), 2);
+
+    // Team channel: the team snapshot read from Organizations, mapped to principals.
+    let team = Uuid::new_v4();
+    w.fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{}/teams/{team}/members", w.org),
+        200,
+        json!({ "items": [
+            { "id": Uuid::new_v4(), "teamId": team, "userId": w.owner.id, "role": "MEMBER", "status": "ACTIVE", "version": 1 },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": w.member.id, "role": "MEMBER", "status": "ACTIVE", "version": 1 }
+        ], "nextCursor": null }),
+    );
+    let channel = format!(
+        "/api/v2/organizations/{}/teams/{team}/messaging-channel",
+        w.org
+    );
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.member.token),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "a MEMBER cannot manage teams: {v}"
+    );
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "title": "Ward 7 team" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let sync = governance(&w).pop().unwrap();
+    assert_eq!(
+        (sync.method.as_str(), sync.path.as_str()),
+        ("PUT", "/internal/v1/team-channels")
+    );
+    assert_eq!(sync.environment, w.triple.2);
+    assert_eq!(sync.principal, None, "the snapshot is the authority");
+    assert_eq!(
+        sync.body["teamRef"],
+        json!(format!("organization:{}:team:{team}", w.org))
+    );
+    assert_eq!(
+        sync.body["ownerPrincipalId"],
+        json!(w.peers.state.principal)
+    );
+    assert_eq!(sync.body["title"], "Ward 7 team");
+    assert_eq!(sync.body["memberPrincipalIds"].as_array().unwrap().len(), 2);
+    assert!(sync.body["sourceVersion"].as_i64().unwrap() > 0);
+    let (s, _) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "members": [] })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -4434,8 +4961,8 @@ async fn session3_invitations_by_email_or_cf_meet_id_never_disclose_the_invitee(
     assert!(v.get("email").is_none());
     assert_eq!(
         fake.last("POST", &internal).body,
-        json!({ "email": target.email.to_lowercase(), "role": "MEMBER", "inviteeHint": "CF Meet ID cfm-target" }),
-        "Organizations receives the verified-email address and the non-disclosing hint"
+        json!({ "email": target.email.to_lowercase(), "role": "MEMBER", "inviteeHint": "CF Meet ID cfm-target", "inviteeUserId": target.id }),
+        "Organizations receives the verified-email address, the non-disclosing hint and the resolved account"
     );
     let asked = seen.lock().unwrap().last().cloned().unwrap();
     assert_eq!(asked["cfMeetId"], "cfm-target");
@@ -4484,4 +5011,738 @@ async fn session3_invitations_by_email_or_cf_meet_id_never_disclose_the_invitee(
         "{s}"
     );
     assert_eq!(seen.lock().unwrap().len(), lookups);
+}
+
+#[tokio::test]
+async fn gap_my_invitations_relay_and_admin_owner_recovery() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let user = app.user("my-invitations").await;
+    let admin = app.admin("owner-recovery").await;
+    let org = fake.add_org("recovery-acme", &[(user.id, "MEMBER")]);
+
+    // The signed-in account's own pending invitations, read as that account.
+    let (s, v) = app
+        .call(
+            Method::GET,
+            "/api/v2/me/organization-invitations",
+            Auth::Bearer(&user.token),
+            None,
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    let r = fake.last("GET", "/internal/v1/organization-invitations/mine");
+    assert_eq!(r.acting_user, Some(user.id.to_string()));
+
+    // A client can never name the invitee account itself.
+    let (s, v) = app
+        .post(
+            format!("/api/v2/organizations/{org}/invitations"),
+            Auth::Bearer(&user.token),
+            json!({ "email": "x@example.com", "role": "MEMBER", "inviteeUserId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+
+    // Owner recovery is for platform administrators only, with a reason.
+    let path = format!("/api/v2/admin/organizations/{org}/owners");
+    let body = json!({ "userId": user.id, "reason": "owner account deactivated" });
+    let (s, _) = app
+        .call(
+            Method::POST,
+            &path,
+            Auth::Bearer(&user.token),
+            Some(body.clone()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, v) = app
+        .call(
+            Method::POST,
+            &path,
+            Auth::Bearer(&admin.token),
+            Some(body.clone()),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    assert_eq!(v["role"], "OWNER");
+    let r = fake.last(
+        "POST",
+        &format!("/internal/v1/admin/organizations/{org}/owners"),
+    );
+    assert_eq!(r.body, body);
+    assert_eq!(r.acting_user, Some(admin.id.to_string()));
+}
+
+#[tokio::test]
+async fn gap_an_ex_member_keeps_no_owner_control_of_organization_spaces() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g4-owner").await;
+    let employee = app.user("g4-employee").await;
+    let org = fake.add_org("g4-acme", &[(owner.id, "OWNER"), (employee.id, "MEMBER")]);
+    let (s, v) = create_org_space(
+        &app,
+        &employee,
+        org,
+        json!({ "title": "Weekly", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let space = uuid(&v["id"]);
+    let personal = app
+        .create_space(&employee, json!({ "title": "Mine" }))
+        .await;
+    let patch = |who: &User, id: Uuid, version: i64, title: &str| {
+        let (app, token, title) = (&app, who.token.clone(), title.to_string());
+        async move {
+            app.call(
+                Method::PATCH,
+                &format!("/api/v2/meeting-spaces/{id}"),
+                Auth::Bearer(&token),
+                Some(json!({ "version": version, "title": title })),
+            )
+            .await
+        }
+    };
+    let (s, v) = patch(
+        &employee,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Weekly (edited)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // The employee leaves the organization: their ownership of its space ends with it.
+    fake.set_memberships(employee.id, vec![]);
+    let (s, e) = patch(
+        &employee,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Still mine?",
+    )
+    .await;
+    assert_eq!(
+        (s, code(&e)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{e}"
+    );
+    // Their personal meetings are untouched...
+    let (s, p) = patch(
+        &employee,
+        uuid(&personal["id"]),
+        personal["version"].as_i64().unwrap(),
+        "Mine (edited)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    // ...and the organization's managers keep oversight of the space.
+    let (s, m) = patch(
+        &owner,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Weekly (owner)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{m}");
+}
+
+/// Gap audit G10: platform administrators reach provisioning retry, service bindings
+/// (read / rotate) and organization event delivery (status / replay) through the API;
+/// everyone else is refused before Organizations is called.
+#[tokio::test]
+async fn gap_operator_routes_reach_organizations_for_platform_admins_only() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let user = app.user("not-operator").await;
+    let admin = app.admin("operator").await;
+    let org = fake.add_org("operator-acme", &[(user.id, "OWNER")]);
+    let ok = json!({ "schemaVersion": 1, "ok": true });
+    let calls = [
+        (
+            Method::POST,
+            format!("/api/v2/admin/organizations/{org}/provisioning/retry"),
+            format!("/internal/v1/admin/organizations/{org}/provisioning/retry"),
+            None,
+        ),
+        (
+            Method::GET,
+            format!("/api/v2/admin/organizations/{org}/service-bindings/calling"),
+            format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/calling"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/admin/organizations/{org}/service-bindings/messaging/rotate"),
+            format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/messaging/rotate"),
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v2/admin/organization-event-delivery".to_string(),
+            "/internal/v1/admin/event-delivery".to_string(),
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v2/admin/organization-event-delivery/replay".to_string(),
+            "/internal/v1/admin/event-delivery/replay".to_string(),
+            Some(json!({ "destination": "cfmeet.meeting-service", "eventIds": [] })),
+        ),
+    ];
+    for (method, public, internal, body) in calls {
+        fake.script(method.as_str(), &internal, 200, ok.clone());
+        let body = body.or(if method == Method::POST {
+            Some(json!({}))
+        } else {
+            None
+        });
+        let (s, _) = app
+            .call(
+                method.clone(),
+                &public,
+                Auth::Bearer(&user.token),
+                body.clone(),
+            )
+            .await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{public}");
+        let (s, v) = app
+            .call(method.clone(), &public, Auth::Bearer(&admin.token), body)
+            .await;
+        assert_eq!(s, StatusCode::OK, "{public}: {v}");
+        let r = fake.last(method.as_str(), &internal);
+        assert_eq!(r.acting_user, Some(admin.id.to_string()), "{public}");
+    }
+    // Only Calling and Messaging bindings exist.
+    let (s, _) = app
+        .call(
+            Method::GET,
+            &format!("/api/v2/admin/organizations/{org}/service-bindings/hub"),
+            Auth::Bearer(&admin.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Search reaches the operator list.
+    let (s, _) = app
+        .call(
+            Method::GET,
+            "/api/v2/admin/organizations?q=acme",
+            Auth::Bearer(&admin.token),
+            None,
+        )
+        .await;
+    assert!(s.is_success());
+    let r = fake.last("GET", "/internal/v1/admin/organizations");
+    assert!(
+        r.query.as_deref().unwrap_or_default().contains("q=acme"),
+        "{:?}",
+        r.query
+    );
+}
+
+/// Gap audit G18: PATCH names the member by user id (as PUT does) or by membership id.
+#[tokio::test]
+async fn gap_membership_patch_accepts_the_members_user_id() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("patch-owner").await;
+    let member = app.user("patch-member").await;
+    let org = fake.add_org("patch-acme", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let membership = fake.state.members.lock().unwrap()[&org]
+        .iter()
+        .find(|m| m["userId"] == json!(member.id))
+        .unwrap()["id"]
+        .clone();
+    let (s, v) = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v2/organizations/{org}/members/{}", member.id),
+            Auth::Bearer(&owner.token),
+            Some(json!({ "role": "MANAGER", "expectedVersion": 1 })),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    let r = fake.last(
+        "PATCH",
+        &format!(
+            "/internal/v1/organizations/{org}/members/{}",
+            membership.as_str().unwrap()
+        ),
+    );
+    assert_eq!(r.acting_user, Some(owner.id.to_string()));
+}
+
+/// Gap audit G13: an organization's managers list all of its meeting spaces, INVITE_ONLY
+/// and healthcare ones included (governance fields only), page by page; members,
+/// outsiders and other organizations' admins cannot.
+#[tokio::test]
+async fn g13_managers_list_every_organization_meeting_space() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let admin = app.user("g13-admin").await;
+    let employee = app.user("g13-employee").await;
+    let outsider = app.user("g13-outsider").await;
+    let rival = app.user("g13-rival").await;
+    let org = fake.add_org("g13", &[(admin.id, "ADMIN"), (employee.id, "MEMBER")]);
+    let _other = fake.add_org("g13-rival", &[(rival.id, "ADMIN")]);
+    let mut ids = vec![];
+    for body in [
+        json!({ "title": "Board", "accessPolicy": "INVITE_ONLY" }),
+        json!({ "title": "Clinic", "meetingType": "HEALTHCARE", "securityProfile": "HEALTHCARE", "accessPolicy": "HEALTHCARE_APPOINTMENT", "accessConfig": { "appointmentRef": "A-1" } }),
+        json!({ "title": "All hands", "accessPolicy": "ORGANIZATION_ONLY" }),
+    ] {
+        let (s, v) = create_org_space(&app, &employee, org, body).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        ids.push(v["id"].as_str().unwrap().to_string());
+    }
+    let uri = |q: &str| format!("/api/v2/organizations/{org}/meeting-spaces{q}");
+    let mut seen = vec![];
+    let mut after = String::new();
+    loop {
+        let (s, v) = app
+            .get(uri(&format!("?limit=2{after}")), Auth::Bearer(&admin.token))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        for item in v["items"].as_array().unwrap() {
+            assert!(item.get("passcode").is_none());
+            seen.push(item["id"].as_str().unwrap().to_string());
+        }
+        match v["nextCursor"].as_str() {
+            Some(n) => after = format!("&after={n}"),
+            None => break,
+        }
+    }
+    seen.sort();
+    ids.sort();
+    assert_eq!(seen, ids);
+    for who in [&employee, &outsider, &rival] {
+        let (s, v) = app.get(uri(""), Auth::Bearer(&who.token)).await;
+        assert!(
+            s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+            "{s} {v}"
+        );
+    }
+}
+
+/// Gap audit G17: the organization's meeting profile policy has a write path; its values
+/// become ceilings for the organization's meeting spaces. Members cannot change it and
+/// invalid policies are refused.
+#[tokio::test]
+async fn g17_organization_meeting_profile_policy_is_managed_and_enforced() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g17-owner").await;
+    let member = app.user("g17-member").await;
+    let org = fake.add_org("g17", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let uri = format!("/api/v2/organizations/{org}/meeting-profile-policy");
+    let (s, v) = app.get(&uri, Auth::Bearer(&owner.token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["policy"], json!({}));
+    let put = |who: &User, policy: Value| {
+        let (app, token, uri) = (&app, who.token.clone(), uri.clone());
+        async move {
+            app.call(
+                Method::PUT,
+                &uri,
+                Auth::Bearer(&token),
+                Some(json!({ "policy": policy })),
+            )
+            .await
+        }
+    };
+    let (s, _) = put(&member, json!({ "recording": { "allowed": false } })).await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+    let (s, _) = put(&owner, json!({ "recording": { "retentionDays": 0 } })).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = put(&owner, json!({ "nonsense": true })).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = put(&owner, json!({ "recording": { "allowed": false } })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["policy"]["recording"]["allowed"], false);
+
+    // A space of the organization resolves with the ceiling.
+    let (s, space) = create_org_space(
+        &app,
+        &member,
+        org,
+        json!({ "title": "Sync", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{space}");
+    let (s, p) = app
+        .get(
+            format!(
+                "/api/v2/meeting-spaces/{}/profile-policy",
+                space["id"].as_str().unwrap()
+            ),
+            Auth::Bearer(&member.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(
+        p["effective"]["policy"]["recording"]["allowed"], false,
+        "{p}"
+    );
+}
+
+/// Gap audit G7: a team of the organization is added to an organization meeting space in
+/// one call; team members who cannot be members are skipped, and a team Organizations
+/// does not show the caller is relayed as its refusal.
+#[tokio::test]
+async fn g7_a_team_is_added_to_an_organization_meeting() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g7-owner").await;
+    let a = app.user("g7-a").await;
+    let b = app.user("g7-b").await;
+    let org = fake.add_org(
+        "g7",
+        &[(owner.id, "OWNER"), (a.id, "MEMBER"), (b.id, "MEMBER")],
+    );
+    let (s, space) = create_org_space(
+        &app,
+        &owner,
+        org,
+        json!({ "title": "Ward round", "accessPolicy": "INVITE_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{space}");
+    let sid = space["id"].as_str().unwrap().to_string();
+    let team = Uuid::new_v4();
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/members"),
+        200,
+        json!({ "items": [
+            { "id": Uuid::new_v4(), "teamId": team, "userId": a.id, "role": "TEAM_MEMBER", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": b.id, "role": "TEAM_MEMBER", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": owner.id, "role": "TEAM_LEAD", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": Uuid::new_v4(), "role": "TEAM_MEMBER", "status": "ACTIVE" }
+        ], "nextCursor": null }),
+    );
+    let uri = format!("/api/v2/meeting-spaces/{sid}/members/team");
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["added"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(v["skipped"], 2);
+    let sent = fake.last(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/members"),
+    );
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+    // Again: everyone is already a member.
+    let (_, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(v["added"].as_array().unwrap().len(), 0, "{v}");
+    // A team Organizations does not know is relayed as its refusal.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": Uuid::new_v4(), "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert!(s.is_client_error(), "{s}");
+    // A plain member cannot manage the meeting's members.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&a.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+/// Gap audit G11: the organization export is relayed for the verified acting user.
+#[tokio::test]
+async fn g11_the_organization_export_is_relayed_for_the_owner() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g11-owner").await;
+    let org = fake.add_org("g11", &[(owner.id, "OWNER")]);
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/export"),
+        200,
+        json!({ "schemaVersion": 1, "organization": { "id": org }, "memberships": [] }),
+    );
+    let (s, v) = app
+        .get(
+            format!("/api/v2/organizations/{org}/export"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["schemaVersion"], 1);
+    let sent = fake.last("GET", &format!("/internal/v1/organizations/{org}/export"));
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+}
+
+/// ADR 0068: an owner-delivered organization export is downloaded once by the signed-in
+/// OWNER; the token travels only in the body to Organizations, with the verified acting user.
+#[tokio::test]
+async fn an_owner_delivered_organization_export_is_relayed_for_the_signed_in_owner() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("export-owner").await;
+    let org = fake.add_org("exported", &[(owner.id, "OWNER")]);
+    let export = Uuid::new_v4();
+    let path = format!("/internal/v1/organizations/{org}/exports/{export}/download");
+    fake.script(
+        "POST",
+        &path,
+        200,
+        json!({ "schemaVersion": 1, "organization": { "id": org } }),
+    );
+    let token = "tok_0123456789abcdefABCDEF";
+    let uri = format!("/api/v2/organizations/{org}/exports/{export}/download");
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["schemaVersion"], 1);
+    let sent = fake.last("POST", &path);
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+    assert_eq!(sent.body, json!({ "token": token }));
+    // A malformed token or an unknown field is refused here; no sign-in is refused.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "token": "short" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "token": token, "userId": owner.id }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app.post(&uri, Auth::None, json!({ "token": token })).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Organizations' refusal is relayed.
+    fake.script(
+        "POST",
+        &path,
+        404,
+        json!({ "error": { "code": "EXPORT_LINK_INVALID", "message": "invalid" } }),
+    );
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    assert_eq!(v["error"]["code"], "EXPORT_LINK_INVALID");
+    fake.script(
+        "POST",
+        &path,
+        410,
+        json!({ "error": { "code": "EXPORT_LINK_EXPIRED", "message": "expired" } }),
+    );
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), json!({ "token": token }))
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::GONE, Some("EXPORT_LINK_EXPIRED"))
+    );
+}
+
+/// Team chats follow their team: `team.member_added` / `team.member_removed` /
+/// `team.archived` from Organizations re-run the chat sync as the manager who created it.
+#[tokio::test]
+async fn team_chats_follow_team_membership_events() {
+    use backend::services::{organization_events, team_channels};
+    if !require_test_redis() {
+        return;
+    }
+    let w = some!(messaging_world(true).await);
+    let state = &w.app.state;
+    let relay = state.meeting.core.organization_calling.clone().unwrap();
+    let authority = state.meeting.core.organization_authority.clone().unwrap();
+    let team = Uuid::new_v4();
+    let members_path = format!("/internal/v1/organizations/{}/teams/{team}/members", w.org);
+    let members = |users: &[Uuid]| {
+        json!({ "items": users.iter().map(|u| json!({ "id": Uuid::new_v4(), "teamId": team,
+            "userId": u, "role": "MEMBER", "status": "ACTIVE", "version": 1 })).collect::<Vec<_>>(),
+            "nextCursor": null })
+    };
+    let syncs = |w: &CallingWorld| {
+        w.peers
+            .records()
+            .into_iter()
+            .filter(|r| r.path == "/internal/v1/team-channels")
+            .collect::<Vec<_>>()
+    };
+    let deliver = |event_type: &str, payload: Value, version: i64| {
+        let envelope = organization_events::Envelope {
+            event_id: Uuid::new_v4(),
+            event_type: event_type.into(),
+            schema_version: 1,
+            organization_id: w.org,
+            aggregate_type: "team_member".into(),
+            aggregate_id: Uuid::new_v4(),
+            aggregate_version: version,
+            payload,
+        };
+        async move {
+            let effect = organization_events::effect_of(&envelope).unwrap();
+            let digest = organization_events::digest(
+                &json!({ "eventId": envelope.event_id, "type": envelope.event_type, "payload": envelope.payload }),
+            );
+            organization_events::apply(state, &envelope, &effect, &digest)
+                .await
+                .unwrap()
+        }
+    };
+    let pass = || async {
+        team_channels::run_once(&state.db, &relay, &authority, 20)
+            .await
+            .unwrap()
+    };
+
+    // An event for a team without a chat is only recorded; nothing is synced.
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 1 }),
+        1,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Recorded");
+    assert_eq!(pass().await, team_channels::TeamChannelPass::default());
+    assert!(syncs(&w).is_empty());
+
+    // The owner creates the team chat with just themselves in the team.
+    w.fake
+        .script("GET", &members_path, 200, members(&[w.owner.id]));
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &format!(
+                "/api/v2/organizations/{}/teams/{team}/messaging-channel",
+                w.org
+            ),
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "title": "Night shift" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(syncs(&w).len(), 1);
+    assert_eq!(
+        syncs(&w)[0].body["memberPrincipalIds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The member joins the team: the chat follows without anyone pressing "Team chat".
+    w.fake.script(
+        "GET",
+        &members_path,
+        200,
+        members(&[w.owner.id, w.member.id]),
+    );
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 2 }),
+        2,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Applied");
+    let p = pass().await;
+    assert_eq!((p.synced, p.retried, p.stopped), (1, 0, 0));
+    let sync = syncs(&w).pop().unwrap();
+    assert_eq!(sync.body["memberPrincipalIds"].as_array().unwrap().len(), 2);
+    assert_eq!(sync.body["title"], "Night shift");
+    assert_eq!(
+        sync.body["ownerPrincipalId"],
+        json!(w.peers.state.principal)
+    );
+    // Settled: a second pass does nothing.
+    assert_eq!(pass().await, team_channels::TeamChannelPass::default());
+    assert_eq!(syncs(&w).len(), 2);
+
+    // The member leaves the team.
+    w.fake
+        .script("GET", &members_path, 200, members(&[w.owner.id]));
+    deliver(
+        "team.member_removed",
+        json!({ "teamId": team, "userId": w.member.id, "reason": "REMOVED", "teamMemberVersion": 3 }),
+        3,
+    )
+    .await;
+    assert_eq!(pass().await.synced, 1);
+    assert_eq!(
+        syncs(&w).pop().unwrap().body["memberPrincipalIds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The team is archived: the chat loses its team members and stops following.
+    deliver(
+        "team.archived",
+        json!({ "teamId": team, "teamVersion": 4 }),
+        4,
+    )
+    .await;
+    assert_eq!(pass().await.synced, 1);
+    let sync = syncs(&w).pop().unwrap();
+    assert!(sync.body["memberPrincipalIds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let row = state
+        .db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT state, sync_due FROM organization_team_channels WHERE organization_id = $1 AND team_id = $2",
+            vec![w.org.into(), team.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<String>("", "state").unwrap(), "ARCHIVED");
+    assert!(!row.try_get::<bool>("", "sync_due").unwrap());
+    // Later team events no longer touch an archived team's chat.
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 5 }),
+        5,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Recorded");
+    assert_eq!(syncs(&w).len(), 4);
 }

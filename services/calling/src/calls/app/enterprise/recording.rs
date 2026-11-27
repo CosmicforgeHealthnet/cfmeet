@@ -15,6 +15,15 @@
 //! worker: ended Calls, deadlines, lost captures, AUTO starts, retention, deletion
 //! ```
 //!
+//! Joining a recorded Call: a participant whose session starts while a recording runs
+//! (an answered transfer, a rejoin) is given the notice at once (`call.recording_started`
+//! with `lateJoin`, `participantId` and `consentRequired`). When the recording policy
+//! requires that participant's consent (ALL_PARTICIPANTS, or OTHER_PARTICIPANTS and it is
+//! not the requester) and it has not GRANTED it for this Call, it has
+//! [`LATE_JOIN_CONSENT_GRACE_SECONDS`] to do so; a DECLINED, or no grant by then, stops
+//! the recording (CONSENT_WITHDRAWN) exactly like a withdrawal by a participant the
+//! recording was authorized with.
+//!
 //! The kill switch (`CALL_RECORDING_ENABLED`) refuses NEW recordings only; stopping,
 //! finalizing and deleting are never blocked. Audio never passes through logs or metrics.
 
@@ -53,6 +62,10 @@ use super::{
     orphans::ArtifactKind,
     voicemail::{CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia},
 };
+
+/// How long a participant who joined a recorded Call has to grant its consent when the
+/// policy requires it (afterwards the recording stops, CONSENT_WITHDRAWN).
+pub const LATE_JOIN_CONSENT_GRACE_SECONDS: i64 = 60;
 
 /// How long a finished recording may take to be delivered before it is FAILED.
 const DELIVERY_WINDOW_MINUTES: i64 = 30;
@@ -192,6 +205,38 @@ async fn recording_by_id<C: ConnectionTrait>(
     .await?)
 }
 
+/// Whether the consent of `participant` (not part of the recording's authorization: it
+/// joined afterwards) is required by the recording's policy.
+async fn late_consent_required<C: ConnectionTrait>(
+    db: &C,
+    recording: &RecordingRow,
+    policy: &PolicyRow,
+    participant: Uuid,
+) -> CallResult<bool> {
+    let row = db
+        .query_one(stmt(
+            "SELECT a.required_participant_ids, a.actor_principal_id, p.principal_id \
+               FROM call_recording_authorizations a, call_participants p \
+              WHERE a.id = $1 AND p.id = $2",
+            vec![recording.authorization_id.into(), participant.into()],
+        ))
+        .await?;
+    let Some(row) = row else {
+        return Ok(false);
+    };
+    let required: Vec<Uuid> = row.try_get_by_index(0)?;
+    let actor: Option<Uuid> = row.try_get_by_index(1)?;
+    let principal: Uuid = row.try_get_by_index(2)?;
+    if required.contains(&participant) {
+        return Ok(false);
+    }
+    Ok(match policy.consent_participants() {
+        ConsentParticipants::Nobody => false,
+        ConsentParticipants::AllParticipants => true,
+        ConsentParticipants::OtherParticipants => actor != Some(principal),
+    })
+}
+
 fn enterprise_error(e: crate::enterprise::EnterpriseError) -> CallError {
     super::enterprise_error(e)
 }
@@ -287,9 +332,12 @@ impl AppCallService {
                     .await?
                     .map(|r| r.try_get_by_index(0))
                     .transpose()?;
-                if required.unwrap_or_default().contains(&participant.id)
-                    && active.state != "STOPPING"
-                {
+                let policy = config::policy_row(&txn, scope, active.policy_id, false)
+                    .await
+                    .map_err(enterprise_error)?;
+                let relied_on = required.unwrap_or_default().contains(&participant.id)
+                    || late_consent_required(&txn, &active, &policy, participant.id).await?;
+                if relied_on && active.state != "STOPPING" {
                     let cmd = CallCommandContext::customer(ctx);
                     self.stop_in(
                         &txn,
@@ -322,6 +370,67 @@ impl AppCallService {
             decision: row.decision,
             recorded_at: crate::enterprise::time(row.recorded_at),
         })
+    }
+
+    /// A participant's session started while the Call may be recorded (an answered
+    /// transfer, a rejoin): the recording notice reaches it now, with whether its consent
+    /// is still required. Best effort after the joining command committed (a failure is
+    /// logged; the consent deadline is enforced by the recording worker regardless).
+    pub(crate) async fn recording_notice_on_join(&self, call_id: Uuid, participant_id: Uuid) {
+        if let Err(error) = self.recording_join(call_id, participant_id).await {
+            tracing::warn!(%call_id, %error, "recording notice on join not delivered");
+        }
+    }
+
+    async fn recording_join(&self, call_id: Uuid, participant_id: Uuid) -> CallResult<()> {
+        let Some(active) = active_recording(self.db(), call_id, false).await? else {
+            return Ok(());
+        };
+        if !matches!(active.state.as_str(), "STARTING" | "RECORDING") {
+            return Ok(());
+        }
+        let Some(call) = calls::Entity::find_by_id(call_id).one(self.db()).await? else {
+            return Ok(());
+        };
+        let policy = config::policy_row(self.db(), scope_of(&call), active.policy_id, false)
+            .await
+            .map_err(enterprise_error)?;
+        let required = late_consent_required(self.db(), &active, &policy, participant_id).await?;
+        let granted = latest_consents(self.db(), call_id)
+            .await?
+            .into_iter()
+            .any(|c| c.participant_id == participant_id && c.decision == "GRANTED");
+        let mut notice = Map::new();
+        notice.insert("recordingId".into(), json!(active.id));
+        notice.insert("noticeRequired".into(), json!(policy.notice_required));
+        notice.insert("participantId".into(), json!(participant_id));
+        notice.insert("lateJoin".into(), json!(true));
+        notice.insert("consentRequired".into(), json!(required && !granted));
+        let mut pending = PendingSignals::default();
+        self.call_signal(
+            self.db(),
+            &mut pending,
+            SignalType::RecordingStarted,
+            &call,
+            system_cmd(&call).correlation_id().as_str(),
+            notice,
+        )
+        .await?;
+        self.publish(pending).await;
+        crate::metrics::inc(
+            "calling_enterprise_recording_late_joins_total",
+            &[(
+                "status",
+                if !required {
+                    "NOT_REQUIRED"
+                } else if granted {
+                    "GRANTED"
+                } else {
+                    "PENDING"
+                },
+            )],
+        );
+        Ok(())
     }
 
     async fn scoped_call<C: ConnectionTrait>(
@@ -598,7 +707,10 @@ impl AppCallService {
         if !self.enterprise_flags.call_recording {
             return Ok(out);
         }
-        if context_of(txn, call.id).await?.is_none() {
+        if context_of(txn, call.id)
+            .await?
+            .is_none_or(|c| c.entry_extension_id.is_none())
+        {
             out.capture = Err("NOT_AN_ENTERPRISE_CALL");
             return Ok(out);
         }
@@ -1195,6 +1307,12 @@ impl AppCallService {
                 now,
             )
             .await?;
+        // Roadmap N7: `calling.recording.ready` to the principals who took part in the
+        // Call (CF Meet accounts only), atomic with READY.
+        if self.calls.config().notification_publications {
+            crate::notification_publications::enqueue_recording_ready(&txn, &call, recording_id)
+                .await?;
+        }
         self.calls
             .record_artifact_usage_in(
                 &txn,
@@ -1347,6 +1465,41 @@ impl AppCallService {
                 out.0 += 1;
             }
         }
+        // A participant who joined a recorded Call without granting the consent its policy
+        // requires, once the grace passed: the recording stops (CONSENT_WITHDRAWN).
+        let unconsented: Vec<(Uuid, Uuid)> = self
+            .db()
+            .query_all(stmt(
+                "SELECT r.id, r.call_id FROM call_recordings r \
+                   JOIN call_recording_policies p ON p.id = r.policy_id \
+                   JOIN call_recording_authorizations a ON a.id = r.authorization_id \
+                  WHERE r.state IN ('STARTING', 'RECORDING') AND p.consent_participants <> 'NONE' \
+                    AND EXISTS (SELECT 1 FROM call_participants cp \
+                         WHERE cp.call_id = r.call_id AND cp.ended_at IS NULL \
+                           AND NOT (cp.id = ANY (a.required_participant_ids)) \
+                           AND NOT (p.consent_participants = 'OTHER_PARTICIPANTS' \
+                                    AND cp.principal_id IS NOT DISTINCT FROM a.actor_principal_id) \
+                           AND EXISTS (SELECT 1 FROM call_sessions s WHERE s.participant_id = cp.id \
+                                 AND s.state <> 'ENDED' AND s.created_at >= r.started_at \
+                                 AND s.created_at <= $1) \
+                           AND COALESCE((SELECT k.decision FROM call_recording_consents k \
+                                 WHERE k.call_id = r.call_id AND k.participant_id = cp.id \
+                                 ORDER BY k.seq DESC LIMIT 1), '') <> 'GRANTED') \
+                  ORDER BY r.started_at LIMIT $2",
+                vec![
+                    (now - Duration::seconds(LATE_JOIN_CONSENT_GRACE_SECONDS)).into(),
+                    (limit as i64).into(),
+                ],
+            ))
+            .await?
+            .into_iter()
+            .map(|r| Ok((r.try_get_by_index(0)?, r.try_get_by_index(1)?)))
+            .collect::<Result<_, sea_orm::DbErr>>()?;
+        for (id, call_id) in unconsented {
+            if self.system_stop(call_id, id, "CONSENT_WITHDRAWN").await? {
+                out.0 += 1;
+            }
+        }
         // Lost captures (nothing delivered long after the deadline).
         let lost: Vec<Uuid> = self
             .db()
@@ -1374,6 +1527,7 @@ impl AppCallService {
                 .query_all(stmt(
                     "SELECT c.id FROM calls c \
                        JOIN enterprise_call_contexts x ON x.call_id = c.id \
+                         AND x.entry_extension_id IS NOT NULL \
                        JOIN call_recording_policies p ON p.tenant_id = c.tenant_id \
                          AND p.application_id = c.application_id AND p.environment_id = c.environment_id \
                          AND p.is_default AND p.status = 'ACTIVE' AND p.mode = 'AUTO_WHEN_AUTHORIZED' \

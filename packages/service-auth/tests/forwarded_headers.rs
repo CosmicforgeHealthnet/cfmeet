@@ -1,5 +1,6 @@
-//! A first-party backend may forward an end user's `Idempotency-Key` on an internal call,
-//! and nothing else: authorization / identity headers cannot be forwarded or overridden.
+//! A first-party backend may forward an end user's `Idempotency-Key` (and, for Partner Users,
+//! the forwarded partner credential id) on an internal call, and nothing else:
+//! authorization / identity headers cannot be forwarded or overridden.
 #![cfg(feature = "client")]
 
 mod common;
@@ -74,6 +75,35 @@ async fn the_idempotency_key_is_forwarded_alongside_the_service_token() {
     let raw = server.join().unwrap().to_ascii_lowercase();
     assert!(raw.contains("idempotency-key: web-7c1f2d9e"), "{raw}");
     assert!(raw.contains("cf-service-authorization: bearer "), "{raw}");
+}
+
+/// Partner Users (ADR 0062): the Developer Platform names the gateway-forwarded credential
+/// to Platform Access. Without this header every `/v1/users` call is refused with
+/// DELEGATED_CONTEXT_REQUIRED (the first production activation proved it).
+#[tokio::test]
+async fn the_forwarded_partner_credential_id_is_forwarded() {
+    let (url, server) = one_shot();
+    let c = client(&url);
+    let r = c
+        .exchange_json_query_with_headers::<serde_json::Value>(
+            &OutboundServiceRequest::new_operation(ServiceId::messaging()),
+            Method::POST,
+            "/internal/v1/end-users",
+            &[],
+            &[(
+                "CF-Forwarded-Credential-Id",
+                "4b8f2c1e-0d6a-4f3b-9a51-7c2e8d9f0a13",
+            )],
+            Some(&serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let raw = server.join().unwrap().to_ascii_lowercase();
+    assert!(
+        raw.contains("cf-forwarded-credential-id: 4b8f2c1e-0d6a-4f3b-9a51-7c2e8d9f0a13"),
+        "{raw}"
+    );
 }
 
 #[tokio::test]

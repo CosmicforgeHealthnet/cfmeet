@@ -32,10 +32,18 @@
 //!   and trust Meeting Service's key with the new grant.
 //!
 //! Scope: the organization's Enterprise administration surface (the routes the web
-//! adapter gates with `CALLING_ADMIN_PRINCIPAL_IDS`). Personal calls keep the governed
+//! adapter gates with `CALLING_ADMIN_PRINCIPAL_IDS`), plus (gap audit G3) each member's
+//! OWN endpoints and signaling credentials ([`OrganizationCalling::member_calling`], Calling
+//! `calling-organization-member.act`) and the offboarding of the extensions routed to a
+//! removed member ([`OrganizationCalling::set_member_extension_status`],
+//! `calling-organization-member.offboard`). Personal calls keep the governed
 //! personal scope (ADR 0056 §4). Nothing here weakens PRIVATE_E2EE or touches Messaging.
 
-use std::{sync::Arc, sync::LazyLock, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock, Mutex},
+    time::Duration,
+};
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method};
 use cf_service_auth::{
@@ -260,6 +268,10 @@ pub struct OrganizationCalling {
     /// Organization-scope Messaging (final closure); `None` when `CF_MESSAGING_BASE_URL`
     /// is not configured (the organization Messaging relay then answers not set up).
     messaging: Option<url::Url>,
+    /// Organization environments (with their mapping version) whose Messaging policy is
+    /// known to be set (the first-party baseline applied here, or a policy someone else
+    /// set). Process-local cache only: a restart re-reads, never re-writes, a set policy.
+    messaging_policy_ready: Mutex<HashSet<(Uuid, i64)>>,
 }
 
 impl std::fmt::Debug for OrganizationCalling {
@@ -320,6 +332,7 @@ impl OrganizationCalling {
             calling,
             platform_access,
             messaging: None,
+            messaging_policy_ready: Mutex::new(HashSet::new()),
         })
     }
 
@@ -538,6 +551,81 @@ impl OrganizationCalling {
         }
     }
 
+    /// Gap audit G3: applies the member's organization status to the Enterprise Calling
+    /// extensions routed to their organization principal (Calling
+    /// `POST /internal/v1/organization-members/extension-status`, permission
+    /// `calling-organization-member.offboard`, signed with the organization's delegated
+    /// context). `SUSPENDED` disables them; `ACTIVE` restores exactly the ones disabled
+    /// that way. 429 / 5xx / transport failures are retried; any other refusal (the grant
+    /// missing from Calling's trust bundle, a Calling without the route) is permanent and
+    /// reported until an operator fixes it.
+    pub async fn set_member_extension_status(
+        &self,
+        scope: &crate::services::organization_access::ScopeEnvironment,
+        principal_id: Uuid,
+        status: &str,
+    ) -> Result<(), crate::services::organization_access::PortError> {
+        use crate::services::organization_access::PortError;
+        let context = DelegatedPlatformContext::new(
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            ApplicationEnvironmentKind::Production,
+            scope.service_account_id,
+        );
+        let status = if status == "ACTIVE" {
+            "ACTIVE"
+        } else {
+            "SUSPENDED"
+        };
+        let (code, value) = self
+            .exchange(
+                ServiceId::calling(),
+                &self.calling,
+                Method::POST,
+                "/internal/v1/organization-members/extension-status",
+                &[],
+                None,
+                Some(&json!({ "principalId": principal_id, "status": status })),
+                context,
+            )
+            .await
+            .map_err(|why| PortError {
+                class: format!("CALLING_{}", why.to_ascii_uppercase().replace(' ', "_")),
+                permanent: false,
+            })?;
+        match code {
+            200..=299 => {
+                let changed =
+                    ["disabled", "restored", "notRestored"].map(|k| value[k].as_u64().unwrap_or(0));
+                if changed.iter().any(|n| *n > 0) {
+                    tracing::info!(
+                        organization_id = %scope.organization_id,
+                        disabled = changed[0],
+                        restored = changed[1],
+                        not_restored = changed[2],
+                        "organization member extensions brought in line"
+                    );
+                }
+                Ok(())
+            }
+            429 | 500..=599 => Err(PortError {
+                class: format!("CALLING_{code}"),
+                permanent: false,
+            }),
+            _ => Err(PortError {
+                class: format!(
+                    "CALLING_REFUSED_{}",
+                    value["error"]["code"].as_str().unwrap_or("UNKNOWN")
+                )
+                .chars()
+                .take(64)
+                .collect(),
+                permanent: true,
+            }),
+        }
+    }
+
     /// The member's NATIVE_CF_USER principal in the organization's environment (created
     /// on first use through Platform Access; cached in `communication_principal_links`,
     /// which is keyed by environment, so a personal-scope principal is never reused).
@@ -741,23 +829,41 @@ impl OrganizationCalling {
                 "Your session cannot be verified right now; retry shortly",
             ));
         }
+        self.messaging_scope_for(db, authority, &ActingUser::of(user), organization)
+            .await
+    }
+
+    /// [`Self::messaging_scope`] for an acting user resolved elsewhere (a signed-in
+    /// caller, or the stored manager of a team chat in the background).
+    async fn messaging_scope_for(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+    ) -> ApiResult<(
+        url::Url,
+        ResolvedOrganizationScope,
+        CallingServiceBinding,
+        Uuid,
+        Uuid,
+    )> {
         let Some(messaging) = self.messaging.clone() else {
             return Err(messaging_not_set_up());
         };
-        let acting = ActingUser::of(user);
         // Membership, organization status and policy (`features.messaging`) are decided by
         // Organizations on every request: a removed or suspended member, or a suspended
         // organization, is refused here before anything reaches Messaging.
         workspaces::require_organization_capability(
             authority,
-            &acting,
+            acting,
             organization,
             OrganizationFeature::Messaging,
             None,
         )
         .await?;
         let scope = authority
-            .resolve_scope(organization, &acting)
+            .resolve_scope(organization, acting)
             .await
             .map_err(|e| match e {
                 AuthorityError::Refused(reply) => relayed_error(&reply),
@@ -766,10 +872,111 @@ impl OrganizationCalling {
         let Some(binding) = scope.messaging else {
             return Err(messaging_not_set_up());
         };
+        self.ensure_messaging_policy(&messaging, &scope, binding)
+            .await;
         let principal = self
-            .principal_for(db, &scope, binding, user.user_id)
+            .principal_for(db, &scope, binding, acting.user_id())
             .await?;
-        Ok((messaging, scope, binding, principal, user.user_id))
+        Ok((messaging, scope, binding, principal, acting.user_id()))
+    }
+
+    /// ADR 0058 Amendment A2: an automatically provisioned organization environment starts
+    /// with Messaging's platform defaults, under which MANAGED conversations are not
+    /// available. On first use the Meeting Service (which already holds the delegated
+    /// application authority over the organization's environment) applies the first-party
+    /// baseline: GROUP and DIRECT conversations MANAGED only, attachments on (Messaging's
+    /// managed scan stays required). It is applied ONLY when the environment's application
+    /// policy was never set (version 0, optimistic `expectedVersion: 0`), so a policy an
+    /// operator or administrator set is never overwritten, and PRIVATE_E2EE is never
+    /// enabled here. Best effort: a failure is logged and retried on the next request;
+    /// Messaging itself still enforces whatever policy is in effect.
+    async fn ensure_messaging_policy(
+        &self,
+        messaging: &url::Url,
+        scope: &ResolvedOrganizationScope,
+        binding: CallingServiceBinding,
+    ) {
+        let key = (scope.environment_id, scope.mapping_version);
+        if self
+            .messaging_policy_ready
+            .lock()
+            .map(|ready| ready.contains(&key))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        const PATH: &str = "/internal/v1/delegated/v1/messaging/policy";
+        let read = || {
+            self.exchange(
+                ServiceId::messaging(),
+                messaging,
+                Method::GET,
+                PATH,
+                &[],
+                None,
+                None,
+                Self::scope_context(scope, binding),
+            )
+        };
+        let mut set = false;
+        for _ in 0..2 {
+            let version = match read().await {
+                Ok((200, v)) => v.get("version").and_then(Value::as_i64),
+                _ => None,
+            };
+            match version {
+                Some(0) => {}
+                Some(_) => {
+                    set = true;
+                    break;
+                }
+                None => break,
+            }
+            match self
+                .exchange(
+                    ServiceId::messaging(),
+                    messaging,
+                    Method::PUT,
+                    PATH,
+                    &[],
+                    None,
+                    Some(&first_party_messaging_baseline()),
+                    Self::scope_context(scope, binding),
+                )
+                .await
+            {
+                Ok((200, _)) => {
+                    tracing::info!(
+                        organization_id = %scope.organization_id,
+                        "organization Messaging policy baseline applied"
+                    );
+                    set = true;
+                    break;
+                }
+                // Someone set it concurrently: read again (never overwrite).
+                Ok((409, _)) => continue,
+                Ok((status, _)) => {
+                    tracing::warn!(
+                        organization_id = %scope.organization_id,
+                        status,
+                        "Messaging refused the organization policy baseline"
+                    );
+                    break;
+                }
+                Err(why) => {
+                    tracing::warn!(
+                        error = why,
+                        "organization Messaging policy baseline not applied"
+                    );
+                    break;
+                }
+            }
+        }
+        if set {
+            if let Ok(mut ready) = self.messaging_policy_ready.lock() {
+                ready.insert(key);
+            }
+        }
     }
 
     /// Relays one allowlisted Messaging client operation in the organization's OWN scope
@@ -936,11 +1143,393 @@ impl OrganizationCalling {
     }
 }
 
+/// Gap audit G3: one operation on a member's OWN calling presence in the organization's
+/// scope (Calling `calling-organization-member.act`).
+#[derive(Debug, Clone)]
+pub enum MemberCallingOperation {
+    /// The member's endpoints (`includeRevoked`).
+    ListEndpoints { include_revoked: bool },
+    /// Register (or refresh) one endpoint: Calling's `RegisterEndpointRequest` without
+    /// `principalId` (the member's organization principal is always the one acted for).
+    RegisterEndpoint(Value),
+    /// Revoke one of the member's endpoints.
+    RevokeEndpoint(Uuid),
+    /// Mint a signaling credential for one of the member's ACTIVE endpoints.
+    SignalingCredential(Uuid),
+}
+
+impl OrganizationCalling {
+    /// Gap audit G3: a member's own endpoint and signaling credentials in the
+    /// organization's OWN Calling scope, acting as the member's organization principal —
+    /// the same gate as the member Messaging relay: a verified registered member of an
+    /// ACTIVE organization whose policy allows Calling (`features.calling`, decided by the
+    /// Organizations Service on every request; no administrative capability), the
+    /// organization's verified scope with its Calling binding, and the member's
+    /// NATIVE_CF_USER principal there. Calling re-verifies the organization's credential
+    /// live and acts for that principal only. A removed or suspended member is refused
+    /// here by Organizations and, independently, by Calling once the offboarding worker
+    /// suspended the principal.
+    pub async fn member_calling(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        operation: MemberCallingOperation,
+    ) -> ApiResult<(u16, Value)> {
+        let user = actor.require_registered()?;
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let acting = ActingUser::of(user);
+        workspaces::require_organization_capability(
+            authority,
+            &acting,
+            organization,
+            OrganizationFeature::Calling,
+            None,
+        )
+        .await?;
+        let scope = authority
+            .resolve_scope(organization, &acting)
+            .await
+            .map_err(|e| match e {
+                AuthorityError::Refused(reply) => relayed_error(&reply),
+                AuthorityError::Unavailable(_) => unavailable(),
+            })?;
+        let Some(binding) = scope.calling else {
+            return Err(not_set_up());
+        };
+        let principal = self
+            .principal_for(db, &scope, binding, user.user_id)
+            .await?;
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_credential(binding.credential_id)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        const BASE: &str = "/internal/v1/organization-members";
+        let (method, path, query, body) = match operation {
+            MemberCallingOperation::ListEndpoints { include_revoked } => (
+                Method::GET,
+                format!("{BASE}/endpoints"),
+                if include_revoked {
+                    vec![("includeRevoked".to_string(), "true".to_string())]
+                } else {
+                    vec![]
+                },
+                None,
+            ),
+            MemberCallingOperation::RegisterEndpoint(body) => (
+                Method::POST,
+                format!("{BASE}/endpoints"),
+                vec![],
+                Some(body),
+            ),
+            MemberCallingOperation::RevokeEndpoint(endpoint) => (
+                Method::POST,
+                format!("{BASE}/endpoints/revoke"),
+                vec![],
+                Some(json!({ "endpointId": endpoint })),
+            ),
+            MemberCallingOperation::SignalingCredential(endpoint) => (
+                Method::POST,
+                format!("{BASE}/signaling-credentials"),
+                vec![],
+                Some(json!({ "endpointId": endpoint })),
+            ),
+        };
+        let (status, value) = self
+            .exchange(
+                ServiceId::calling(),
+                &self.calling,
+                method,
+                &path,
+                &query,
+                None,
+                body.as_ref(),
+                context,
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(
+                    error = why,
+                    "Calling unavailable for an organization member request"
+                );
+                calling_unavailable()
+            })?;
+        match status {
+            // Calling did not accept the Meeting Service's request (the trust bundle lacks
+            // `calling-organization-member.act`, or Platform Access no longer authenticates
+            // the organization's credential). Never shown as the caller's own failure.
+            401 | 403 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    status,
+                    "Calling refused the organization member request (trust bundle grant or credential binding)"
+                );
+                Err(calling_unavailable())
+            }
+            s if s >= 500 => Err(calling_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+}
+
+/// Gap audit G6: the organization capability organization moderation needs (OWNER /
+/// ADMIN by default, decided by the Organizations Service).
+pub const MESSAGING_ORGANIZATION_MODERATE: &str = "messaging.organization.moderate";
+/// Gap audit G7: the organization capability that creates / resyncs team channels.
+pub const ORGANIZATION_TEAMS_MANAGE: &str = "organization.teams.manage";
+
+/// The organization moderation operations (paths under Messaging's `v1/messaging/`).
+fn moderation_route(method: &Method, path: &str) -> Option<&'static [&'static str]> {
+    const LIST: &[&str] = &["status", "limit"];
+    const LIMIT: &[&str] = &["limit"];
+    let segments: Vec<&str> = path.split('/').collect();
+    match (method, segments.as_slice()) {
+        (&Method::GET, ["reports"]) => Some(LIST),
+        (&Method::GET, ["reports", id]) if Uuid::try_parse(id).is_ok() => Some(&[]),
+        (&Method::GET, ["moderation", "actions"]) => Some(LIMIT),
+        (&Method::POST, ["moderation", "actions"]) => Some(&[]),
+        _ => None,
+    }
+}
+
+impl OrganizationCalling {
+    /// Gap audit G6: relays one organization moderation request (list reports, read a
+    /// report, list / apply moderation actions) into the organization's OWN Messaging
+    /// scope. Organizations decides, on every request, that the caller is an active member
+    /// of an active organization whose policy allows Messaging AND holds
+    /// `messaging.organization.moderate`. Messaging serves it with its ordinary moderation
+    /// handlers (one moderation path) and records the caller's organization principal as
+    /// the moderator on report views, actions and audit entries.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn messaging_moderation(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        method: Method,
+        path: &str,
+        query: Vec<(String, String)>,
+        body: Option<Value>,
+    ) -> ApiResult<(u16, Value)> {
+        let Some(allowed) = moderation_route(&method, path) else {
+            return Err(ApiError::domain(
+                ErrorCode::EndpointNotFound,
+                "No such organization moderation operation",
+            ));
+        };
+        let mut seen = HashSet::new();
+        for (k, _) in &query {
+            if !allowed.contains(&k.as_str()) || !seen.insert(k.clone()) {
+                return Err(ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "Unsupported or repeated query parameter",
+                ));
+            }
+        }
+        let user = actor.require_registered()?;
+        workspaces::require_organization_capability(
+            authority,
+            &ActingUser::of(user),
+            organization,
+            OrganizationFeature::Messaging,
+            Some(MESSAGING_ORGANIZATION_MODERATE),
+        )
+        .await?;
+        let (messaging, scope, binding, principal, _) = self
+            .messaging_scope(db, authority, actor, organization)
+            .await?;
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        let body = match method {
+            Method::GET => None,
+            _ => Some(body.unwrap_or_else(|| json!({}))),
+        };
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                method,
+                &format!("/internal/v1/organization-moderation/v1/messaging/{path}"),
+                &query,
+                None,
+                body.as_ref(),
+                context,
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(
+                    error = why,
+                    "Messaging unavailable for an organization moderation request"
+                );
+                messaging_unavailable()
+            })?;
+        match status {
+            // The trust bundle lacks messaging-organization.govern, or the binding is no
+            // longer valid: never shown as the caller's own authentication.
+            401 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    "Messaging refused the organization moderation relay (trust bundle or binding)"
+                );
+                Err(messaging_unavailable())
+            }
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+
+    /// Gap audit G7: creates or resynchronizes the team channel of an organization team
+    /// from a snapshot of the team's ACTIVE members (read from Organizations for the
+    /// caller, who needs `organization.teams.manage`), each mapped to their principal in
+    /// the organization's Messaging scope. The caller owns a newly created channel.
+    /// Organizations does not deliver team membership events to the Meeting Service, so
+    /// the channel follows the team when this is called again (an explicit resync).
+    pub async fn messaging_team_channel(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        team: Uuid,
+        title: Option<String>,
+    ) -> ApiResult<(u16, Value)> {
+        let user = actor.require_registered()?;
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let (status, value) = self
+            .team_channel_sync(
+                db,
+                authority,
+                &ActingUser::of(user),
+                organization,
+                team,
+                title.clone(),
+                false,
+            )
+            .await?;
+        if (200..300).contains(&status) {
+            // The chat now follows its team: team events make it due for a resync, run
+            // as this manager (see `crate::services::team_channels`).
+            crate::services::team_channels::remember(
+                db,
+                organization,
+                team,
+                user.user_id,
+                title.as_deref(),
+            )
+            .await?;
+        }
+        Ok((status, value))
+    }
+
+    /// The team chat sync itself, for `acting` (who must hold
+    /// `organization.teams.manage`): the team's ACTIVE members (none once the team is
+    /// archived) become the chat's team members in Messaging.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn team_channel_sync(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+        team: Uuid,
+        title: Option<String>,
+        archived: bool,
+    ) -> ApiResult<(u16, Value)> {
+        workspaces::require_organization_capability(
+            authority,
+            acting,
+            organization,
+            OrganizationFeature::Messaging,
+            Some(ORGANIZATION_TEAMS_MANAGE),
+        )
+        .await?;
+        let (messaging, scope, binding, owner, _) = self
+            .messaging_scope_for(db, authority, acting, organization)
+            .await?;
+        let users = if archived {
+            Vec::new()
+        } else {
+            authority
+                .team_member_users(organization, team, acting)
+                .await
+                .map_err(|e| match e {
+                    AuthorityError::Refused(reply) => relayed_error(&reply),
+                    AuthorityError::Unavailable(_) => unavailable(),
+                })?
+        };
+        let mut members = Vec::with_capacity(users.len());
+        let mut seen = HashSet::new();
+        for u in users.into_iter().filter(|u| seen.insert(*u)) {
+            members.push(self.principal_for(db, &scope, binding, u).await?);
+        }
+        let mut body = json!({
+            "teamRef": format!("organization:{organization}:team:{team}"),
+            "ownerPrincipalId": owner,
+            "memberPrincipalIds": members,
+            "sourceVersion": chrono::Utc::now().timestamp_millis(),
+        });
+        if let Some(t) = title {
+            body["title"] = json!(t);
+        }
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                Method::PUT,
+                "/internal/v1/team-channels",
+                &[],
+                None,
+                Some(&body),
+                Self::scope_context(&scope, binding),
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(error = why, "Messaging unavailable for a team channel");
+                messaging_unavailable()
+            })?;
+        match status {
+            401 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    "Messaging refused the team channel sync (trust bundle or binding)"
+                );
+                Err(messaging_unavailable())
+            }
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+}
+
 fn messaging_unavailable() -> ApiError {
     ApiError::domain(
         ErrorCode::ServiceUnavailable,
         "Messaging is temporarily unavailable; retry later",
     )
+}
+
+/// The first-party baseline of an organization environment's Messaging policy (only ever
+/// applied over a never-set policy, `expectedVersion: 0`).
+pub fn first_party_messaging_baseline() -> Value {
+    let managed = json!({ "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" });
+    json!({
+        "expectedVersion": 0,
+        "policy": {
+            "contexts": { "GROUP": managed, "DIRECT": managed },
+            "attachments": { "enabled": true }
+        }
+    })
 }
 
 fn messaging_not_set_up() -> ApiError {
@@ -977,6 +1566,22 @@ mod tests {
     use super::*;
 
     const ID: &str = "0b5f8c9e-2a4d-4c1e-9f3a-7d6b5e4c3a21";
+
+    #[test]
+    fn messaging_baseline_is_managed_only_and_never_overwrites() {
+        let b = first_party_messaging_baseline();
+        // Optimistic concurrency on a never-set policy only.
+        assert_eq!(b["expectedVersion"], 0);
+        for ctx in ["GROUP", "DIRECT"] {
+            assert_eq!(
+                b["policy"]["contexts"][ctx]["allowedProfiles"],
+                json!(["MANAGED"])
+            );
+            assert_eq!(b["policy"]["contexts"][ctx]["defaultProfile"], "MANAGED");
+        }
+        assert!(!b.to_string().contains("PRIVATE_E2EE"));
+        assert_eq!(b["policy"]["attachments"]["enabled"], true);
+    }
 
     #[test]
     fn mode_defaults_to_the_shared_path() {

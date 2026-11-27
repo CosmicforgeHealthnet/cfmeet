@@ -949,3 +949,71 @@ async fn e2e18_join_end_race() {
     );
     assert_eq!(app.scalar(&format!("SELECT count(*) FROM outbox_events WHERE conference_id='{cid}' AND event_type='rtc.room_terminate_requested'")).await, 1);
 }
+
+/// Gap audit M6: a waiting guest who leaves withdraws their knock, and knocks that waited
+/// past the TTL leave the queue (scheduler), so the host's waiting room never fills with
+/// abandoned entries.
+#[tokio::test]
+async fn gap_waiting_entries_are_withdrawn_on_leave_and_expire() {
+    let app = app!();
+    let host = app.user("host").await;
+    let (_, cid) = app
+        .live_conference(
+            &host,
+            json!({ "title": "Clinic", "accessPolicy": "PUBLIC", "waitingRoomPolicy": "GUESTS_ONLY" }),
+        )
+        .await;
+    let knock = |name: &'static str| {
+        let app = &app;
+        async move {
+            let (s, v) = app
+                .join(cid, Auth::None, json!({ "displayName": name }))
+                .await;
+            assert_eq!(s, StatusCode::OK, "{v}");
+            assert_eq!(v["participant"]["admissionState"], "WAITING");
+            (
+                uuid(&v["participant"]["id"]),
+                v["participantToken"].as_str().unwrap().to_string(),
+            )
+        }
+    };
+    // Withdrawn by leaving.
+    let (pid, token) = knock("Guest One").await;
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/leave"),
+            Auth::Participant(&token),
+            json!({}),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_participants WHERE id='{pid}' AND admission_state='DENIED' AND denial_reason_code='WITHDRAWN'")).await,
+        1
+    );
+    // Expired after the TTL.
+    let (stale, _) = knock("Guest Two").await;
+    let (fresh, _) = knock("Guest Three").await;
+    sea_orm::ConnectionTrait::execute_unprepared(
+        &app.db.conn,
+        &format!(
+            "UPDATE conference_participants SET requested_at = now() - interval '2 hours' WHERE id='{stale}'"
+        ),
+    )
+    .await
+    .unwrap();
+    let tick = backend::workers::ConferenceScheduler::new(app.state.meeting.clone())
+        .tick(Utc::now())
+        .await
+        .unwrap();
+    assert!(tick.waiting_expired >= 1, "{tick:?}");
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_participants WHERE id='{stale}' AND admission_state='DENIED' AND denial_reason_code='WAITING_EXPIRED'")).await,
+        1
+    );
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_participants WHERE id='{fresh}' AND admission_state='WAITING'")).await,
+        1,
+        "a recent knock keeps waiting"
+    );
+}

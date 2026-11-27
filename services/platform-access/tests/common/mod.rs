@@ -25,7 +25,9 @@ use cf_service_auth::{
 use chrono::{DateTime, Utc};
 use http_body_util::BodyExt;
 use platform_access::{
-    config::{service_auth::ServiceAuthRuntime, CredentialPolicy},
+    config::{
+        platform_build::PlatformBuildConfig, service_auth::ServiceAuthRuntime, CredentialPolicy,
+    },
     domain::{EnvironmentKind, ManualClock},
     http,
     identity::{
@@ -241,6 +243,8 @@ pub struct Peers {
     pub gateway: Arc<ServiceTokenSigner>,
     /// Blueprint Section 7: the Organizations Service (FIRST_PARTY organization scopes).
     pub organizations: Arc<ServiceTokenSigner>,
+    /// ADR 0068: the admin bridge (operator reads with HQ attribution).
+    pub bridge: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but signing with a key the bundle does not list.
@@ -272,20 +276,48 @@ pub const CALLING_PERMISSIONS: &[&str] = &[
     "platform-principal.register",
     "platform-identity.read",
 ];
-/// Part V B: what Messaging's grant in Platform Access's trust bundle holds.
+/// Part V B: what Messaging's grant in Platform Access's trust bundle holds (+ ADR 0062:
+/// user-token verification and allowed websites).
 pub const MESSAGING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
     "platform-identity.read",
+    "platform-user-token.verify",
+    "platform-environment-origins.read",
 ];
 /// Part V H §104: the Meeting Service (first-party login authority) ensures the
-/// principals of the accounts it authenticated (nothing else).
-pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
-/// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity.
-pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] =
-    &["platform-identity.read", "platform-identity.delegate"];
-/// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes.
-pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &["platform-identity.provision-first-party"];
+/// principals of the accounts it authenticated (+ ADR 0062: partner meeting principals and
+/// user-token verification).
+pub const MEETING_PERMISSIONS: &[&str] = &[
+    "platform-principal.ensure",
+    "platform-principal.ensure-meeting-platform",
+    "platform-user-token.verify",
+    // ADR 0064: CF Meet Apps authorization.
+    "platform-oauth.authorize",
+];
+/// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity
+/// (+ ADR 0062: the partner Users API).
+pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] = &[
+    "platform-identity.read",
+    "platform-identity.delegate",
+    "platform-end-users.delegate",
+    // ADR 0064: OAuth client profiles and the token endpoint backend.
+    "platform-oauth.manage",
+    "platform-oauth.token",
+];
+/// Part VI §51: the API Gateway authenticates credentials (+ ADR 0062: user tokens and
+/// allowed websites).
+pub const GATEWAY_PERMISSIONS: &[&str] = &[
+    "platform-credential.authenticate",
+    "platform-user-token.verify",
+    "platform-environment-origins.read",
+];
+/// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes
+/// and (Amendment A2) the Calling / Messaging bindings inside them.
+pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &[
+    "platform-identity.provision-first-party",
+    "platform-identity.bind-organization-services",
+];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -293,6 +325,11 @@ pub const NUMBERING_PERMISSIONS: &[&str] = &[
 ];
 
 pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
+    service_auth_with(ORGANIZATIONS_PERMISSIONS)
+}
+
+/// [`service_auth`] with a different grant for the Organizations identity.
+pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRuntime, Peers) {
     let env = RuntimeEnvironment::Test;
     let clock = cf_service_auth::ManualClock::new(SERVICE_T0);
     let shared: cf_service_auth::SharedClock = Arc::new(clock.clone());
@@ -305,6 +342,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let developer_platform = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let organizations = key("organizations-test-1");
+    let bridge = key("admin-bridge-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
@@ -337,16 +375,21 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                 (
                     cf_service_auth::services::API_GATEWAY,
                     vec![gateway.public_jwk()],
-                    &["platform-credential.authenticate"],
+                    GATEWAY_PERMISSIONS,
                 ),
                 (
                     cf_service_auth::services::ORGANIZATIONS,
                     vec![organizations.public_jwk()],
-                    ORGANIZATIONS_PERMISSIONS,
+                    organizations_permissions,
                 ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
                     vec![operator.public_jwk()],
+                    &["platform-identity.administer"],
+                ),
+                (
+                    cf_service_auth::services::ADMIN_BRIDGE,
+                    vec![bridge.public_jwk()],
                     &["platform-identity.administer"],
                 ),
             ],
@@ -379,6 +422,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
         developer_platform: signer(ServiceId::developer_platform(), developer_platform),
         gateway: signer(ServiceId::api_gateway(), gateway),
         organizations: signer(ServiceId::organizations(), organizations),
+        bridge: signer(ServiceId::admin_bridge(), bridge),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         clock,
@@ -418,8 +462,47 @@ impl Harness {
         Some(Self::on(Arc::new(db), ring))
     }
 
+    /// A harness with the ADR 0062 feature configuration `build`.
+    pub async fn with_build(build: PlatformBuildConfig) -> Option<Self> {
+        let db = TestDb::new().await?;
+        Some(Self::on_with_build(
+            Arc::new(db),
+            keyring(TEST_PEPPER),
+            service_auth(),
+            build,
+        ))
+    }
+
+    /// A harness whose Organizations identity holds only `permissions`.
+    pub async fn with_organizations_permissions(permissions: &[&str]) -> Option<Self> {
+        let db = TestDb::new().await?;
+        Some(Self::on_with(
+            Arc::new(db),
+            keyring(TEST_PEPPER),
+            service_auth_with(permissions),
+        ))
+    }
+
     /// Another deployment over the same database (e.g. a different keyring).
     pub fn on(db: Arc<TestDb>, ring: VerifierKeyring) -> Self {
+        Self::on_with(db, ring, service_auth())
+    }
+
+    fn on_with(db: Arc<TestDb>, ring: VerifierKeyring, auth: (ServiceAuthRuntime, Peers)) -> Self {
+        Self::on_with_build(db, ring, auth, PlatformBuildConfig::default())
+    }
+
+    /// Another deployment over the same database with another feature configuration.
+    pub fn on_build(db: Arc<TestDb>, build: PlatformBuildConfig) -> Self {
+        Self::on_with_build(db, keyring(TEST_PEPPER), service_auth(), build)
+    }
+
+    fn on_with_build(
+        db: Arc<TestDb>,
+        ring: VerifierKeyring,
+        (service_auth, peers): (ServiceAuthRuntime, Peers),
+        build: PlatformBuildConfig,
+    ) -> Self {
         let clock = ManualClock::new(t0());
         let ring = Arc::new(ring);
         let registry = Arc::new(ScopeRegistry::standard());
@@ -432,8 +515,7 @@ impl Harness {
         );
         let authenticator =
             CredentialAuthenticator::new(db.conn.clone(), ring, registry, Arc::new(clock.clone()));
-        let (service_auth, peers) = service_auth();
-        let state = AppState::new(platform, authenticator, service_auth);
+        let state = AppState::new(platform, authenticator, service_auth).with_build(build);
         let app = http::app(state.clone());
         Self {
             db,
@@ -478,6 +560,22 @@ impl Harness {
         delegated: Option<DelegatedPlatformContext>,
         operator: Option<&str>,
     ) -> Reply {
+        self.call_with_headers(signer, method, path, body, delegated, operator, &[])
+            .await
+    }
+
+    /// [`Harness::call`] with extra request headers.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn call_with_headers(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        delegated: Option<DelegatedPlatformContext>,
+        operator: Option<&str>,
+        extra: &[(&str, String)],
+    ) -> Reply {
         let mut outbound = OutboundServiceRequest::new_operation(ServiceId::platform_access());
         if let Some(ctx) = delegated {
             outbound = outbound.with_delegated_context(ctx);
@@ -489,6 +587,9 @@ impl Harness {
         }
         if let Some(op) = operator {
             builder = builder.header("x-cf-operator", op);
+        }
+        for (name, value) in extra {
+            builder = builder.header(*name, value.as_str());
         }
         let request = match body {
             Some(b) => builder

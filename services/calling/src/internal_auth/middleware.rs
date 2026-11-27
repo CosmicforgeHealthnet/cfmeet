@@ -87,6 +87,43 @@ pub async fn require_internal_service(
         .await;
     match verified {
         Ok(ctx) => {
+            // ADR 0068: operator attribution (`X-CF-Operator` and the approval headers) is
+            // accepted only from the admin bridge and refused on every route from anyone
+            // else; malformed, incomplete or self-approved attribution is refused too.
+            let attribution = cf_service_auth::OperatorAttribution::from_headers(
+                ctx.authenticated_service(),
+                request.headers(),
+            );
+            match attribution {
+                Ok(Some(a)) => {
+                    request
+                        .extensions_mut()
+                        .insert(crate::operator_reads::BridgeOperator(a));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        caller = %ctx.authenticated_service(),
+                        error = %e,
+                        method = %request.method(),
+                        path = %request.uri().path(),
+                        "operator attribution refused"
+                    );
+                    let context = RequestContext {
+                        request_id: ctx.request_id().clone(),
+                        correlation_id: ctx.correlation_id().clone(),
+                    };
+                    let request_id = context.request_id.clone();
+                    let mut response = scoped(context, async {
+                        CallingError::InternalPermissionDenied.into_response()
+                    })
+                    .await;
+                    if let Ok(value) = HeaderValue::from_str(request_id.as_str()) {
+                        response.headers_mut().insert(headers::REQUEST_ID, value);
+                    }
+                    return response;
+                }
+            }
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),
                 correlation_id: ctx.correlation_id().clone(),

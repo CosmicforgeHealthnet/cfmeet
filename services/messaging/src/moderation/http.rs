@@ -5,20 +5,29 @@
 //! | `POST /v1/conversations/{id}/reports` (acting member) | `messages.send` |
 //! | `GET /v1/messaging/reports`, `GET /v1/messaging/reports/{reportId}` (administration) | `moderation.manage` |
 //! | `GET` / `POST /v1/messaging/moderation/actions` (administration) | `moderation.manage` |
+//!
+//! The administration routes are also served, unchanged, under
+//! `/internal/v1/organization-moderation/v1/messaging/...` for an organization moderator
+//! relayed by the Meeting Service (gap audit G6,
+//! [`crate::http::middleware::require_organization_moderation`]); the moderator's
+//! principal is then recorded on report views and actions.
 
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use uuid::Uuid;
 
 use super::{actions, reports};
 use crate::{
     compliance::http::administration,
-    http::{error::ApiError, middleware::CustomerCaller},
+    http::{
+        error::ApiError,
+        middleware::{CustomerCaller, OrganizationModerator},
+    },
     messages::http::acting_with,
     state::AppState,
 };
@@ -63,23 +72,27 @@ async fn list_reports(
 async fn get_report(
     State(state): State<AppState>,
     caller: CustomerCaller,
+    moderator: Option<Extension<OrganizationModerator>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = administration(&caller, &headers, MODERATION_MANAGE)?;
-    Ok(Json(reports::get(&state, ctx, id).await?))
+    let moderator = moderator.map(|Extension(m)| m.0);
+    Ok(Json(reports::get(&state, ctx, id, moderator).await?))
 }
 
 async fn act(
     State(state): State<AppState>,
     caller: CustomerCaller,
+    moderator: Option<Extension<OrganizationModerator>>,
     headers: HeaderMap,
     Json(body): Json<actions::ActionRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = administration(&caller, &headers, MODERATION_MANAGE)?;
+    let moderator = moderator.map(|Extension(m)| m.0);
     Ok((
         StatusCode::CREATED,
-        Json(actions::apply(&state, ctx, body).await?),
+        Json(actions::apply(&state, ctx, body, moderator).await?),
     ))
 }
 

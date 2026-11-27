@@ -128,9 +128,32 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
+            messaging_migration::SendPolicyProjectionMigrator::up(&tmpl, None)
+                .await
+                .expect("send policy projection migrations apply");
             messaging_migration::Migrator::up(&tmpl, None)
                 .await
                 .expect("migrations apply");
+            // The independently versioned routing fence history (Document 4 §9): every
+            // test runs with its legacy guard trigger installed, in LEGACY_ONLY (a no-op).
+            messaging_migration::NotificationFenceMigrator::up(&tmpl, None)
+                .await
+                .expect("routing fence migrations apply");
+            messaging_migration::GapClosureMigrator::up(&tmpl, None)
+                .await
+                .expect("gap-closure migrations apply");
+            messaging_migration::MlsJoinMigrator::up(&tmpl, None)
+                .await
+                .expect("MLS self-join migrations apply");
+            messaging_migration::MemberNotificationsMigrator::up(&tmpl, None)
+                .await
+                .expect("member-notification migrations apply");
+            messaging_migration::ChatControlsMigrator::up(&tmpl, None)
+                .await
+                .expect("chat-controls migrations apply");
+            messaging_migration::AdminOperationsMigrator::up(&tmpl, None)
+                .await
+                .expect("admin-operations migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -277,6 +300,10 @@ impl CustomerAuthority for FakeAuthority {
 pub struct FakePrincipals {
     pub known: StdMutex<HashMap<(Uuid, Uuid), PrincipalStatus>>,
     pub down: StdMutex<bool>,
+    /// ADR 0064 app bots: (environment, principal) -> app id (`app:<appId>`).
+    pub bots: StdMutex<HashMap<(Uuid, Uuid), Uuid>>,
+    /// CF Meet account principals: (environment, principal) -> `cfmeet-user:<account>`.
+    pub native: StdMutex<HashMap<(Uuid, Uuid), String>>,
 }
 
 #[async_trait]
@@ -296,6 +323,50 @@ impl PrincipalDirectory for FakePrincipals {
             .get(&(scope.environment_id, principal_id))
             .cloned()
             .unwrap_or(PrincipalStatus::NotFound))
+    }
+
+    async fn native_user_references(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<HashMap<Uuid, String>, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self.known.lock().unwrap();
+        let native = self.native.lock().unwrap();
+        Ok(principals
+            .iter()
+            .filter(|p| {
+                matches!(known.get(&(scope.environment_id, **p)),
+                    Some(PrincipalStatus::Active { kind }) if kind == "NATIVE_CF_USER")
+            })
+            .filter_map(|p| {
+                native
+                    .get(&(scope.environment_id, *p))
+                    .map(|r| (*p, r.clone()))
+            })
+            .collect())
+    }
+
+    async fn application_bots(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<HashMap<Uuid, Uuid>, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self.known.lock().unwrap();
+        let bots = self.bots.lock().unwrap();
+        Ok(principals
+            .iter()
+            .filter(|p| {
+                matches!(known.get(&(scope.environment_id, **p)),
+                    Some(PrincipalStatus::Active { kind }) if kind == "BOT_OR_SERVICE")
+            })
+            .filter_map(|p| bots.get(&(scope.environment_id, *p)).map(|a| (*p, *a)))
+            .collect())
     }
 }
 
@@ -328,6 +399,26 @@ pub struct Peers {
     pub rogue_gateway: Arc<ServiceTokenSigner>,
     /// The Communications Hub, trusted with `messaging-communications.read` / `.apply`.
     pub communications: Arc<ServiceTokenSigner>,
+    /// The Notification Service, trusted with `messaging-wakeups.authorize` (X3).
+    pub notifications: Arc<ServiceTokenSigner>,
+    /// The HQ admin bridge (ADR 0068), trusted with `messaging-firstparty.administer` only.
+    pub admin_bridge: Arc<ServiceTokenSigner>,
+}
+
+/// The admin bridge's permissions in Messaging's bundle (ADR 0068).
+pub const ADMIN_BRIDGE_PERMISSIONS: &[&str] = &["messaging-firstparty.administer"];
+
+fn admin_bridge_key() -> &'static ServiceSigningKey {
+    static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| key("admin-bridge-test-1"))
+}
+
+/// The Notification Service's permissions in Messaging's bundle.
+pub const NOTIFICATIONS_PERMISSIONS: &[&str] = &["messaging-wakeups.authorize"];
+
+fn notifications_key() -> &'static ServiceSigningKey {
+    static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| key("notifications-test-1"))
 }
 
 /// The API Gateway's permissions in Messaging's bundle.
@@ -349,8 +440,13 @@ fn communications_key() -> &'static ServiceSigningKey {
     KEY.get_or_init(|| key("communications-test-1"))
 }
 
-pub const MEETING_PERMISSIONS: &[&str] =
-    &["messaging-application.delegate", "messaging-meeting.sync"];
+pub const MEETING_PERMISSIONS: &[&str] = &[
+    "messaging-application.delegate",
+    "messaging-meeting.sync",
+    "messaging-organization.govern",
+    // ADR 0062 §8 partner meeting chat (engaged only with the partner flag on).
+    "messaging-meeting.sync-platform",
+];
 
 fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {
     static KEYS: std::sync::OnceLock<(ServiceSigningKey, ServiceSigningKey, ServiceSigningKey)> =
@@ -385,6 +481,8 @@ pub fn peers() -> Peers {
         gateway: signer(ServiceId::api_gateway(), gateway_key()),
         rogue_gateway: signer(ServiceId::api_gateway(), &key("api-gateway-rogue-1")),
         communications: signer(ServiceId::communications(), communications_key()),
+        notifications: signer(ServiceId::notifications(), notifications_key()),
+        admin_bridge: signer(ServiceId::admin_bridge(), admin_bridge_key()),
     }
 }
 
@@ -414,6 +512,8 @@ pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
             issuer(cf_service_auth::services::SMS_GATEWAY, s, &["messaging-sms-bridge.deliver"]),
             issuer(cf_service_auth::services::API_GATEWAY, gateway_key(), GATEWAY_PERMISSIONS),
             issuer(cf_service_auth::services::COMMUNICATIONS, communications_key(), COMMUNICATIONS_PERMISSIONS),
+            issuer(cf_service_auth::services::NOTIFICATIONS, notifications_key(), NOTIFICATIONS_PERMISSIONS),
+            issuer(cf_service_auth::services::ADMIN_BRIDGE, admin_bridge_key(), ADMIN_BRIDGE_PERMISSIONS),
         ],
     })
     .to_string();
@@ -548,6 +648,7 @@ impl Harness {
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
             personal_session_issued_at: None,
             principal_restriction: None,
+            oauth: None,
         };
         self.register_token(context)
     }

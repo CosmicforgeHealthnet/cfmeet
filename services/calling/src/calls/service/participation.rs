@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter,
-    QueryOrder, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseTransaction,
+    EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 
 use super::{data, text, CallService, EventDraft};
@@ -645,6 +645,22 @@ impl CallService {
             at,
         )
         .await?;
+        // C6: a presenter whose last live session ended stops presenting.
+        let live = call_sessions::Entity::find()
+            .filter(call_sessions::Column::ParticipantId.eq(session.participant_id))
+            .filter(call_sessions::Column::State.ne(SessionState::Ended))
+            .one(txn)
+            .await?;
+        if live.is_none() {
+            self.clear_screen_share_in(
+                txn,
+                cmd,
+                call,
+                Some(session.participant_id),
+                "PRESENTER_LEFT",
+            )
+            .await?;
+        }
         Ok(session)
     }
 }
@@ -696,4 +712,44 @@ async fn close_open_interval(
     active.disconnected_at = Set(Some(at));
     active.disconnect_reason = Set(Some(reason));
     Ok(Some(active.update(txn).await?))
+}
+
+/// C4: the Call's effective host participant. Among the active participants, those still
+/// present (a session that has not ended) come first; then the participant the role was
+/// transferred to, else the initiator, else the longest-standing one (`calls::app::host`).
+/// So a host who left (their sessions removed) hands the role to someone still present
+/// and takes it back on rejoining.
+pub(crate) async fn effective_host_in<C: ConnectionTrait>(
+    db: &C,
+    call_id: uuid::Uuid,
+) -> CallResult<Option<uuid::Uuid>> {
+    Ok(db
+        .query_one(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "SELECT p.id FROM call_participants p WHERE p.call_id = $1 AND p.ended_at IS NULL \
+              ORDER BY EXISTS (SELECT 1 FROM call_sessions s WHERE s.participant_id = p.id \
+                                 AND s.state <> 'ENDED') DESC, \
+                       p.is_host DESC, (p.role = 'INITIATOR') DESC, p.created_at, p.id LIMIT 1",
+            vec![call_id.into()],
+        ))
+        .await?
+        .map(|r| r.try_get_by_index::<uuid::Uuid>(0))
+        .transpose()?)
+}
+
+/// Participants the host muted (C4).
+pub(crate) async fn host_muted_in<C: ConnectionTrait>(
+    db: &C,
+    call_id: uuid::Uuid,
+) -> CallResult<Vec<uuid::Uuid>> {
+    db.query_all(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "SELECT participant_id FROM call_participant_media_permissions \
+          WHERE call_id = $1 AND host_muted_at IS NOT NULL ORDER BY participant_id",
+        vec![call_id.into()],
+    ))
+    .await?
+    .into_iter()
+    .map(|r| r.try_get_by_index::<uuid::Uuid>(0).map_err(Into::into))
+    .collect()
 }

@@ -8,3 +8,21 @@ export function messagingApiUrls(configured = "http://localhost:8080/api/v1") {
   }
   return { v1: `${url.origin}/api/v1`, v2: `${url.origin}/api/v2` };
 }
+
+/**
+ * Browser-reachable Messaging realtime origin: NEXT_PUBLIC_MESSAGING_URL when set, else the
+ * origin of the Meeting API URL (production serves /v1/realtime on the API origin). Local
+ * development without an explicit URL keeps live updates off (the services run on
+ * separate ports), as before. Only https origins (or explicit local http) are used.
+ */
+export function messagingRealtimeOrigin(configured?: string | null, apiUrl?: string | null): string {
+  const explicit = (configured ?? "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  try {
+    const url = new URL((apiUrl ?? "").trim());
+    if (url.protocol !== "https:" || url.username || url.password) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}

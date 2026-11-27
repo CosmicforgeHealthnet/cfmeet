@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destination",
+        "requested_event_count",
+        "replayed_count"
+      ],
+      "properties": {
+        "destination": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "requested_event_count": {
+          "type": "integer"
+        },
+        "replayed_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "description": "The resource after organizations.events.replay; status: REPLAYED."
+    }
+  }
+}

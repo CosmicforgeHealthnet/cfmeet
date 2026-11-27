@@ -1,0 +1,694 @@
+//! Account and meeting reads through the full chain (real mTLS, signed HQ request) against
+//! a fake Meeting Service that records every call: paths, query mapping (search term,
+//! window, cursors), the operator attribution, strict translation, code normalization and
+//! minimization. The fake owner deliberately leaks fields (email, labels, keys, secrets,
+//! IP addresses, guest identities, audit metadata) that must never reach HQ.
+
+mod common;
+
+use std::sync::{Arc, Mutex};
+
+use admin_bridge::{
+    contract::model::Owner,
+    owners::{OwnerError, OwnerPort},
+};
+use async_trait::async_trait;
+use common::*;
+use serde_json::{json, Value};
+
+const USER: &str = "0b7e7f0e-2b9c-4c8e-9d7a-1f2e3d4c5b6a";
+const ID: &str = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+const T0: &str = "2026-11-01T10:00:00.123456+00:00";
+const EMAIL: &str = "ada.lovelace@example.com";
+const LEAKS: &[&str] = &[
+    EMAIL,
+    "Chrome on my laptop",
+    "deadbeef-key",
+    "JBSWY3DPEHPK3PXP",
+    "203.0.113.9",
+    "guest-token",
+    "secret-meta",
+];
+
+/// (owner, path, query, operator) of one owner call.
+type Recorded = (Owner, String, Vec<(String, String)>, String);
+
+#[derive(Default)]
+struct FakeMeetingService {
+    calls: Mutex<Vec<Recorded>>,
+}
+
+fn page(items: Vec<Value>, next: Value) -> Value {
+    json!({"items": items, "nextCursor": next})
+}
+
+fn user_row() -> Value {
+    json!({"userId": USER, "username": "ada", "displayName": "Ada Lovelace", "role": "admin",
+           "status": "pending_verification", "createdAt": T0, "lastLoginAt": null, "email": EMAIL,
+           "version": 7})
+}
+
+fn conference_row() -> Value {
+    json!({"conferenceId": ID, "spaceId": USER, "title": "Weekly sync", "kind": "SCHEDULED", "status": "LIVE",
+           "scheduledStartAt": T0, "scheduledEndAt": null, "startedAt": T0, "endedAt": null,
+           "terminationReason": null, "locked": false, "recordingState": "idle", "transcriptionState": "idle",
+           "participantsAdmitted": 3, "participantsTotal": 4, "createdAt": T0, "version": 2,
+           "rtcRoomName": "secret-meta"})
+}
+
+#[async_trait]
+impl OwnerPort for FakeMeetingService {
+    async fn read(
+        &self,
+        owner: Owner,
+        path: &str,
+        query: &[(&str, String)],
+        operator: &str,
+    ) -> Result<Value, OwnerError> {
+        self.calls.lock().unwrap().push((
+            owner,
+            path.to_string(),
+            query
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            operator.to_string(),
+        ));
+        let p = path.trim_start_matches("/internal/v1/operator");
+        Ok(match p {
+            "/accounts/users" => page(vec![user_row()], json!(USER)),
+            x if x == format!("/accounts/users/{USER}") => {
+                let mut u = user_row();
+                u["emailMasked"] = json!("a***@e***.com");
+                u["emailVerified"] = json!(true);
+                u["authType"] = json!("local");
+                u["locale"] = json!("en");
+                u["timezone"] = json!("Africa/Lagos");
+                u["passwordHash"] = json!("deadbeef-key");
+                u
+            }
+            x if x.ends_with("/sessions") => page(
+                vec![
+                    json!({"sessionId": ID, "authMethod": "PASSWORD", "authenticatedAt": T0, "createdAt": T0,
+                    "lastRefreshedAt": null, "expiresAt": T0, "revokedAt": null, "revokeReason": null,
+                    "clientLabel": "Chrome on my laptop", "ipAddress": "203.0.113.9"}),
+                ],
+                Value::Null,
+            ),
+            x if x.ends_with("/devices") => page(
+                vec![
+                    json!({"deviceId": ID, "deviceClass": "MOBILE", "platform": "IOS", "trust": "TRUSTED",
+                    "trustedVia": "BOOTSTRAP", "trustedAt": T0, "state": "ACTIVE", "createdAt": T0, "lastSeenAt": T0,
+                    "revokedAt": null, "revokeReason": null, "publicKey": "deadbeef-key", "label": "Chrome on my laptop"}),
+                ],
+                Value::Null,
+            ),
+            x if x.ends_with("/mfa") => {
+                json!({"userId": USER, "totp": {"state": "ENABLED", "enrolledAt": T0,
+                "confirmedAt": T0, "secret": "JBSWY3DPEHPK3PXP"}, "recoveryCodesRemaining": 8})
+            }
+            x if x.ends_with("/security-events") => page(
+                vec![
+                    json!({"eventId": ID, "sequence": 41, "eventType": "SIGN_IN", "outcome": "SUCCESS",
+                    "actorKind": "USER", "actorUserId": USER, "sessionId": ID, "occurredAt": T0,
+                    "detail": {"ip": "203.0.113.9"}}),
+                ],
+                json!("41"),
+            ),
+            "/meetings/spaces" => page(
+                vec![
+                    json!({"spaceId": USER, "meetingCode": "abc-defg-hij", "title": "Weekly sync",
+                    "meetingType": "STANDARD", "status": "ACTIVE", "ownerUserId": USER, "organizationId": null,
+                    "createdAt": T0, "updatedAt": T0, "archivedAt": null, "version": 1, "passcodeHash": "deadbeef-key"}),
+                ],
+                Value::Null,
+            ),
+            "/meetings/conferences" | "/meetings/live" => page(vec![conference_row()], Value::Null),
+            x if x == format!("/meetings/conferences/{ID}") => conference_row(),
+            x if x.ends_with("/participants") => page(
+                vec![
+                    json!({"participantId": ID, "identityType": "user", "userId": USER, "displayName": "Ada",
+                    "role": "host", "admissionState": "ADMITTED", "requestedAt": T0, "admittedAt": T0,
+                    "removedAt": null, "bannedAt": null, "guestIdentity": "guest-token"}),
+                ],
+                Value::Null,
+            ),
+            "/meetings/audit-events" => page(
+                vec![
+                    json!({"eventId": ID, "spaceId": USER, "conferenceId": ID, "actorType": "PARTICIPANT",
+                    "action": "SCREEN_SHARE_STOP", "targetType": "PARTICIPANT", "occurredAt": T0,
+                    "metadata": {"note": "secret-meta"}, "actorRef": "guest-token"}),
+                ],
+                json!("1795000000000000.6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"),
+            ),
+            "/accounts/duplicates" => json!({
+                "email": {"enforced": false, "duplicateGroups": [[USER, ID]], "value": EMAIL},
+                "username": {"enforced": true, "duplicateGroups": []}}),
+            "/accounts/test-accounts" => page(
+                vec![
+                    json!({"emailMasked": "r***@e***.com", "registered": true, "userId": USER,
+                    "accountStatus": "active", "role": "user", "code": "secret-meta"}),
+                ],
+                json!("50"),
+            ),
+            x if x == format!("/meetings/conferences/{ID}/health") => json!({
+                "conferenceId": ID, "meetingSpaceId": USER, "lifecycleState": "live",
+                "healthState": "HEALTHY", "evaluatedAt": T0, "rtcRoomName": "secret-meta"}),
+            "/meetings/webinars" => page(
+                vec![
+                    json!({"spaceId": USER, "meetingCode": "web-inar-one", "meetingType": "WEBINAR",
+                        "status": "ACTIVE", "ownerUserId": USER, "organizationId": null, "registrationsActive": 12,
+                        "registrationsCancelled": 1, "createdAt": "2026-11-05T09:00:00Z", "version": 3}),
+                    json!({"spaceId": ID, "meetingCode": "old-webi-nar", "meetingType": "TOWN_HALL",
+                        "status": "ACTIVE", "ownerUserId": null, "organizationId": null, "registrationsActive": 0,
+                        "registrationsCancelled": 0, "createdAt": "2026-10-01T09:00:00Z", "version": 1}),
+                ],
+                json!(ID),
+            ),
+            x if x == format!("/meetings/webinars/{USER}/registrations") => page(
+                vec![
+                    json!({"registrationId": ID, "spaceId": USER, "conferenceId": null, "status": "registered",
+                    "userId": USER, "createdAt": T0, "cancelledAt": null, "registrantEmail": EMAIL}),
+                ],
+                Value::Null,
+            ),
+            "/meetings/chat-migration" => json!({"state": "SHADOW_VALIDATION", "version": 4,
+                "changedAt": T0, "pendingMirror": 0, "pendingRollbackCopies": 0, "pendingSessionRevocations": 2,
+                "linkedConferences": 9, "changedBy": "guest-token",
+                "latestParityRun": {"parityRunId": ID, "status": "PASSED", "startedAt": T0, "finishedAt": T0,
+                    "conferencesChecked": 9, "messagesChecked": 120, "mismatches": 0}}),
+            x if x == format!("/meetings/conferences/{ID}/recordings")
+                || x == format!("/meetings/conferences/{ID}/transcripts") =>
+            {
+                page(
+                    vec![
+                        json!({"artifactId": USER, "conferenceId": ID, "spaceId": USER,
+                        "artifactStatus": "available", "sizeBytes": 2048, "createdAt": T0, "availableAt": T0,
+                        "retentionAt": null, "deleteRequestedAt": null, "deletedAt": null, "version": 3,
+                        "objectKey": "secret-meta"}),
+                    ],
+                    json!(USER),
+                )
+            }
+            x if x == format!("/meetings/email-deliveries/{ID}") => json!({
+                "id": ID, "category": "meeting_invite", "status": "delivered", "provider": "resend",
+                "attempts": 1, "lastErrorClass": null, "lastErrorStatus": null, "createdAt": T0,
+                "acceptedAt": T0, "deliveredAt": T0, "recipient": EMAIL}),
+            "/meetings/critical-lane" => json!({"fallbackKey": true, "pending": 2, "dead": 0,
+                "leasedUncompletedDecisions": [ID]}),
+            _ => return Err(OwnerError::NotFound),
+        })
+    }
+}
+
+async fn harness() -> (Harness, Arc<FakeMeetingService>) {
+    let fake = Arc::new(FakeMeetingService::default());
+    let h = start(Options {
+        owners: Some(fake.clone()),
+        switches_all_on: true,
+        ..Default::default()
+    })
+    .await;
+    (h, fake)
+}
+
+fn last(fake: &FakeMeetingService) -> Recorded {
+    fake.calls
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("an owner call")
+}
+
+fn assert_no_leaks(v: &Value) {
+    let text = v.to_string();
+    for leak in LEAKS {
+        assert!(!text.contains(leak), "{leak} must never reach HQ: {text}");
+    }
+}
+
+fn window() -> String {
+    "&start=2026-11-01T00:00:00Z&end=2026-11-10T00:00:00Z".into()
+}
+
+#[tokio::test]
+async fn meetings_user_search_never_returns_an_address() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/accounts/users",
+        &format!("{}&limit=10&q=ada", scoped("support-review")),
+        "accounts.users.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (owner, path, query, operator) = last(&fake);
+    assert_eq!(
+        (owner, path.as_str(), operator.as_str()),
+        (
+            Owner::MeetingService,
+            "/internal/v1/operator/accounts/users",
+            "hq:staff-0001"
+        )
+    );
+    assert_eq!(
+        query,
+        vec![("q".into(), "ada".into()), ("limit".into(), "10".into())]
+    );
+    let u = &v["result"]["items"][0];
+    assert_eq!(
+        (u["role"].as_str(), u["status"].as_str()),
+        (Some("ADMIN"), Some("PENDING_VERIFICATION")),
+        "codes are upper-cased"
+    );
+    assert_eq!(v["result"]["next_cursor"], USER);
+    assert_no_leaks(&v);
+}
+
+#[tokio::test]
+async fn meetings_user_detail_masks_the_address() {
+    let (h, fake) = harness().await;
+    let c = call(
+        &format!("/accounts/users/{USER}"),
+        &scoped("support-review"),
+        "accounts.users.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last(&fake).1,
+        format!("/internal/v1/operator/accounts/users/{USER}")
+    );
+    let r = &v["result"];
+    assert_eq!(r["email_masked"], "a***@e***.com");
+    assert_eq!(r["auth_type"], "LOCAL");
+    // The account version the account commands act on.
+    assert_eq!(r["version"], 7);
+    assert_no_leaks(&v);
+    // a malformed id names nothing and never reaches the owner
+    let calls = fake.calls.lock().unwrap().len();
+    let bad = call(
+        "/accounts/users/not-a-uuid",
+        &scoped("support-review"),
+        "accounts.users.read",
+        &["cfmeet.support"],
+    );
+    assert!(matches!(
+        code(&send(&h, &bad).await.1),
+        "CAPABILITY_NOT_FOUND" | "RESOURCE_NOT_FOUND"
+    ));
+    assert_eq!(fake.calls.lock().unwrap().len(), calls);
+}
+
+#[tokio::test]
+async fn meetings_account_lists_translate_strictly() {
+    let (h, fake) = harness().await;
+    for (suffix, perm) in [
+        ("sessions", "accounts.sessions.read"),
+        ("devices", "accounts.devices.read"),
+    ] {
+        let c = call(
+            &format!("/accounts/users/{USER}/{suffix}"),
+            &format!("{}&limit=5", scoped("support-review")),
+            perm,
+            &["cfmeet.support"],
+        );
+        let (status, v) = send(&h, &c).await;
+        assert_eq!(status, 200, "{suffix}: {v}");
+        assert_eq!(
+            last(&fake).1,
+            format!("/internal/v1/operator/accounts/users/{USER}/{suffix}")
+        );
+        assert_eq!(v["result"]["items"].as_array().unwrap().len(), 1);
+        assert_no_leaks(&v);
+    }
+    // a non-uuid cursor is the caller's error, never sent
+    let bad = call(
+        &format!("/accounts/users/{USER}/sessions"),
+        &format!("{}&cursor=abc", scoped("support-review")),
+        "accounts.sessions.read",
+        &["cfmeet.support"],
+    );
+    assert_eq!(code(&send(&h, &bad).await.1), "QUERY_INVALID");
+}
+
+#[tokio::test]
+async fn meetings_mfa_reports_state_only() {
+    let (h, _) = harness().await;
+    let c = call(
+        &format!("/accounts/users/{USER}/mfa"),
+        &scoped("support-review"),
+        "accounts.mfa.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["result"]["totp_state"], "ENABLED");
+    assert_eq!(v["result"]["recovery_codes_remaining"], 8);
+    assert_no_leaks(&v);
+}
+
+#[tokio::test]
+async fn meetings_security_history_maps_window_and_sequence_cursor() {
+    let (h, fake) = harness().await;
+    let c = call(
+        &format!("/accounts/users/{USER}/security-history"),
+        &format!("{}&limit=5&cursor=42{}", scoped("support-review"), window()),
+        "accounts.security-history.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last(&fake);
+    assert_eq!(
+        path,
+        format!("/internal/v1/operator/accounts/users/{USER}/security-events")
+    );
+    let q: Vec<(&str, &str)> = query
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(
+        q,
+        [
+            ("since", "2026-11-01T00:00:00Z"),
+            ("until", "2026-11-10T00:00:00Z"),
+            ("limit", "5"),
+            ("cursor", "42")
+        ]
+    );
+    assert_eq!(v["result"]["next_cursor"], "41");
+    assert_no_leaks(&v);
+}
+
+#[tokio::test]
+async fn meetings_space_and_meeting_search() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/meetings/spaces",
+        &format!("{}&q=weekly", scoped("support-review")),
+        "meetings.spaces.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(last(&fake).1, "/internal/v1/operator/meetings/spaces");
+    assert_eq!(v["result"]["items"][0]["meeting_code"], "abc-defg-hij");
+    assert_no_leaks(&v);
+    let c = call(
+        "/meetings/meetings",
+        &format!("{}&q=weekly", scoped("support-review")),
+        "meetings.meetings.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(last(&fake).1, "/internal/v1/operator/meetings/conferences");
+    let m = &v["result"]["items"][0];
+    assert_eq!(
+        (m["meeting_id"].as_str(), m["recording_state"].as_str()),
+        (Some(ID), Some("IDLE"))
+    );
+    assert_no_leaks(&v);
+}
+
+#[tokio::test]
+async fn meetings_detail_and_participants() {
+    let (h, fake) = harness().await;
+    let c = call(
+        &format!("/meetings/meetings/{ID}"),
+        &scoped("support-review"),
+        "meetings.meetings.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["result"]["participants_admitted"], 3);
+    assert_no_leaks(&v);
+    let c = call(
+        &format!("/meetings/meetings/{ID}/participants"),
+        &scoped("support-review"),
+        "meetings.participants.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last(&fake).1,
+        format!("/internal/v1/operator/meetings/conferences/{ID}/participants")
+    );
+    let p = &v["result"]["items"][0];
+    assert_eq!(
+        (p["identity_type"].as_str(), p["role"].as_str()),
+        (Some("USER"), Some("HOST"))
+    );
+    assert_no_leaks(&v);
+    // a meeting id that is not a UUID names nothing, no owner call
+    let calls = fake.calls.lock().unwrap().len();
+    let bad = call(
+        "/meetings/meetings/abc-defg",
+        &scoped("support-review"),
+        "meetings.meetings.read",
+        &["cfmeet.support"],
+    );
+    assert_eq!(code(&send(&h, &bad).await.1), "RESOURCE_NOT_FOUND");
+    assert_eq!(fake.calls.lock().unwrap().len(), calls);
+}
+
+#[tokio::test]
+async fn meetings_live_list() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/meetings/live",
+        &scoped("ops-incident"),
+        "meetings.live.read",
+        &["cfmeet.platform_ops"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(last(&fake).1, "/internal/v1/operator/meetings/live");
+    assert_eq!(v["result"]["items"][0]["status"], "LIVE");
+}
+
+#[tokio::test]
+async fn meetings_audit_maps_window_and_time_cursor() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/meetings/audit",
+        &format!(
+            "{}&cursor=1795000000000001.{ID}{}",
+            scoped("ops-incident"),
+            window()
+        ),
+        "meetings.audit.read",
+        &["cfmeet.platform_ops"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last(&fake);
+    assert_eq!(path, "/internal/v1/operator/meetings/audit-events");
+    assert!(query.iter().any(|(k, v)| k == "cursor" && v.ends_with(ID)));
+    assert_eq!(v["result"]["items"][0]["action"], "SCREEN_SHARE_STOP");
+    assert_no_leaks(&v);
+    let bad = call(
+        "/meetings/audit",
+        &format!("{}&cursor=12345{}", scoped("ops-incident"), window()),
+        "meetings.audit.read",
+        &["cfmeet.platform_ops"],
+    );
+    assert_eq!(code(&send(&h, &bad).await.1), "QUERY_INVALID");
+}
+
+#[tokio::test]
+async fn meetings_operator_reads_translate_strictly() {
+    let (h, fake) = harness().await;
+    let mut n = 0;
+    let mut get = |path: String, query: String, perm: &'static str, role: &'static str| {
+        n += 1;
+        let mut c = call(&path, &query, perm, &[role]);
+        c.sub = format!("staff-{:04}", 500 + n);
+        c
+    };
+    let c = get(
+        "/accounts/duplicates".into(),
+        scoped("support-review"),
+        "accounts.duplicates.read",
+        "cfmeet.support",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(last(&fake).1, "/internal/v1/operator/accounts/duplicates");
+    let r = &v["result"];
+    assert_eq!(
+        r["email_uniqueness"]["duplicate_groups"],
+        json!([[USER, ID]])
+    );
+    assert_eq!(r["username_uniqueness"]["enforced"], true);
+    assert_no_leaks(&v);
+
+    let c = get(
+        "/accounts/test-accounts".into(),
+        format!("{}&limit=50&cursor=50", scoped("support-review")),
+        "accounts.test-accounts.read",
+        "cfmeet.support",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last(&fake);
+    assert_eq!(path, "/internal/v1/operator/accounts/test-accounts");
+    assert_eq!(
+        query,
+        vec![
+            ("limit".into(), "50".into()),
+            ("cursor".into(), "50".into())
+        ]
+    );
+    let t = &v["result"]["items"][0];
+    assert_eq!(
+        (t["email_masked"].clone(), t["account_status"].clone()),
+        (json!("r***@e***.com"), json!("ACTIVE"))
+    );
+    assert_no_leaks(&v);
+
+    let c = get(
+        format!("/meetings/live/{ID}/health"),
+        scoped("ops-incident"),
+        "meetings.live-health.read",
+        "cfmeet.platform_ops",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last(&fake).1,
+        format!("/internal/v1/operator/meetings/conferences/{ID}/health")
+    );
+    assert_eq!(v["result"]["lifecycle_state"], "LIVE");
+    assert_no_leaks(&v);
+
+    let c = get(
+        format!("/meetings/webinars/{USER}/registrations"),
+        scoped("support-review"),
+        "meetings.webinar-registrations.read",
+        "cfmeet.support",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["result"]["items"][0]["status"], "REGISTERED");
+    assert_no_leaks(&v);
+
+    let c = get(
+        "/meetings/chat-migration".into(),
+        scoped("ops-incident"),
+        "meetings.chat-migration.read",
+        "cfmeet.platform_ops",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let r = &v["result"];
+    assert_eq!(
+        (r["version"].clone(), r["linked_meetings"].clone()),
+        (json!(4), json!(9))
+    );
+    assert_eq!(r["latest_parity_run"]["messages_checked"], 120);
+    assert_no_leaks(&v);
+
+    let c = get(
+        "/meetings/critical-lane".into(),
+        scoped("ops-incident"),
+        "meetings.critical-lane.read",
+        "cfmeet.platform_ops",
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["result"]["leased_uncompleted_decisions"], json!([ID]));
+
+    // A single answer takes no cursor.
+    let c = get(
+        "/accounts/duplicates".into(),
+        format!("{}&cursor=50", scoped("support-review")),
+        "accounts.duplicates.read",
+        "cfmeet.support",
+    );
+    assert_eq!(code(&send(&h, &c).await.1), "QUERY_INVALID");
+}
+
+#[tokio::test]
+async fn meetings_webinars_keep_the_window() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/meetings/webinars",
+        &format!("{}&limit=20{}", scoped("support-review"), window()),
+        "meetings.webinars.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last(&fake);
+    assert_eq!(path, "/internal/v1/operator/meetings/webinars");
+    assert_eq!(query, vec![("limit".to_string(), "20".to_string())]);
+    let items = v["result"]["items"].as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        1,
+        "the webinar created before the window is dropped"
+    );
+    assert_eq!(items[0]["registrations_active"], 12);
+    assert_eq!(v["result"]["next_cursor"], ID, "paging continues");
+}
+
+#[tokio::test]
+async fn meetings_artifacts_and_deliveries_by_id() {
+    let (h, fake) = harness().await;
+    for (suffix, perm) in [
+        ("recordings", "meetings.meeting-recordings.read"),
+        ("transcripts", "meetings.meeting-transcripts.read"),
+    ] {
+        let c = call(
+            &format!("/meetings/meetings/{ID}/{suffix}"),
+            &format!("{}&limit=10&cursor={USER}", scoped("privacy-request")),
+            perm,
+            &["cfmeet.trust_safety"],
+        );
+        let (status, v) = send(&h, &c).await;
+        assert_eq!(status, 200, "{suffix}: {v}");
+        let (_, path, query, _) = last(&fake);
+        assert_eq!(
+            path,
+            format!("/internal/v1/operator/meetings/conferences/{ID}/{suffix}")
+        );
+        assert_eq!(
+            query,
+            vec![
+                ("limit".into(), "10".into()),
+                ("cursor".into(), USER.into())
+            ]
+        );
+        let a = &v["result"]["items"][0];
+        assert_eq!(
+            (a["version"].clone(), a["artifact_state"].clone()),
+            (json!(3), json!("AVAILABLE"))
+        );
+        assert_no_leaks(&v);
+    }
+    let c = call(
+        &format!("/meetings/email-deliveries/{ID}"),
+        &scoped("ops-incident"),
+        "meetings.email-deliveries.read",
+        &["cfmeet.platform_ops"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last(&fake).1,
+        format!("/internal/v1/operator/meetings/email-deliveries/{ID}")
+    );
+    let r = &v["result"];
+    assert_eq!(
+        (r["category"].clone(), r["status"].clone()),
+        (json!("MEETING_INVITE"), json!("DELIVERED"))
+    );
+    assert_eq!(r["provider"], "resend");
+    assert_no_leaks(&v);
+}

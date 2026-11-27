@@ -31,6 +31,7 @@ from pathlib import Path
 HOST = 'api.cfmeet.com'
 PUBLIC = 'https://' + HOST
 WEB_ORIGIN = 'https://cfmeet.com'
+WWW_ORIGIN = 'https://www.cfmeet.com'
 PLACEHOLDER = '00000000-0000-4000-8000-00000000c0de'
 # Must match coordinated_release.GATEWAY_PREFIXES (asserted by the tests).
 GATEWAY_PREFIXES = ('/v1/commercial-plans', '/v1/developer-platform', '/v1/environments', '/v1/invitations',
@@ -100,7 +101,7 @@ def judge_public(route, status):
     outcome = classify(status)
     if outcome in ('ERROR', 'NO_RESPONSE'):
         return 'FAIL', outcome
-    if outcome == 'OPEN' and route.get('auth'):
+    if outcome == 'OPEN' and route.get('auth') and route['auth'] != ['ANONYMOUS']:
         return 'FAIL', 'authenticated route answered without credentials'
     if in_gateway_family(route['pattern']) and outcome == 'NOT_ROUTED':
         return 'FAIL', 'activated gateway family route is not routed'
@@ -150,20 +151,23 @@ def infrastructure():
     checks = {}
     status, _, body = request('/health')
     checks['health'] = dict(status=status, result='PASS' if status == 200 and '"healthy"' in body else 'FAIL')
-    status, _, body = request('/api-docs/swagger-config.json', limit=65536)
-    checks['swagger_config'] = dict(status=status, result='PASS' if status == 200 else 'FAIL')
-    try:
-        urls = [u['url'] for u in json.loads(body).get('urls', []) if u.get('url', '').startswith('/')]
-    except ValueError:
-        urls = []
-    for url in urls:
+    # D1: the Meeting Service's Swagger UI and OpenAPI documents are not public in
+    # production (the developer portal publishes the customer documentation).
+    for url in ('/api-docs/swagger-config.json', '/api-docs/openapi.json'):
         status, _, _ = request(url)
-        checks['openapi ' + url] = dict(status=status, result='PASS' if status == 200 else 'FAIL')
+        checks['docs_not_public ' + url] = dict(status=status, result='PASS' if status == 404 else 'FAIL')
     status, headers, _ = request('/api/v2/me/profile', 'OPTIONS', {
         'Origin': WEB_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
     allowed = headers.get('access-control-allow-origin')
     checks['cors_preflight_from_web'] = dict(status=status, allowOrigin=allowed,
                                              result='PASS' if status < 400 and allowed in (WEB_ORIGIN, '*') else 'FAIL')
+    # The web app is served from www.cfmeet.com (cfmeet.com redirects there): the Developer
+    # Portal calls the API Gateway from that origin.
+    status, headers, _ = request('/v1/developer-platform/context', 'OPTIONS', {
+        'Origin': WWW_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
+    allowed = headers.get('access-control-allow-origin')
+    checks['gateway_cors_preflight_from_www'] = dict(status=status, allowOrigin=allowed,
+                                                     result='PASS' if status < 400 and allowed == WWW_ORIGIN else 'FAIL')
     status, _, body = request('/api/v2/me/profile')
     checks['user_api_requires_session'] = dict(status=status, result='PASS' if status == 401 else 'FAIL')
     try:

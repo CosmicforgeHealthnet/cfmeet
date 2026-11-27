@@ -20,7 +20,9 @@ use super::service::{self, CreateRequest, ListQuery, PatchRequest, PolicyUpdate,
 use crate::{
     http::{
         error::{ApiError, ErrorCode},
-        middleware::{acting_header, require_acting, verify_principal, CustomerCaller},
+        middleware::{
+            acting_header, require_acting, verify_principal, CustomerCaller, PartnerSessionDevice,
+        },
     },
     state::AppState,
 };
@@ -90,6 +92,18 @@ async fn create(
     .await?;
     let body: CreateRequest = serde_json::from_value(body)
         .map_err(|_| ApiError::validation("invalid conversation request"))?;
+    // Team channels (gap audit G7) are created only from an Organizations team snapshot.
+    if ctx.first_party
+        && body
+            .context
+            .as_ref()
+            .is_some_and(|c| c.namespace == crate::integrations::team_channels::NAMESPACE)
+    {
+        return Err(ApiError::reason(
+            ErrorCode::ValidationError,
+            "CONTEXT_NAMESPACE_RESERVED",
+        ));
+    }
     let created = service::create(&state, ctx, &acting, body, &key).await?;
     Ok((
         StatusCode::from_u16(created.status).unwrap_or(StatusCode::OK),
@@ -100,9 +114,12 @@ async fn create(
 async fn list(
     State(state): State<AppState>,
     caller: CustomerCaller,
+    partner: Option<axum::Extension<PartnerSessionDevice>>,
     headers: HeaderMap,
-    Query(q): Query<ListQuery>,
+    Query(mut q): Query<ListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Partner session devices and CF Meet Apps (OAuth credentials) see MANAGED only.
+    q.managed_only = partner.is_some() || caller.context().oauth.is_some();
     let reader = reader(&state, &caller, &headers).await?;
     Ok(Json(
         service::list(&state, caller.context(), &reader, q).await?,

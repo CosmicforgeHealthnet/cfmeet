@@ -1,3 +1,4 @@
+pub mod admin_events;
 pub mod api;
 pub mod auth;
 pub mod calls;
@@ -12,11 +13,17 @@ pub mod internal;
 pub mod invites;
 pub mod meetings;
 pub mod model;
+pub mod notification_publications;
+pub mod operator;
+pub mod operator_commands;
 pub mod owners;
 pub mod policy;
+pub mod preference_authority;
 pub mod preferences;
+pub mod privacy;
 pub mod profiles;
 pub mod relationships;
+pub mod restrictions;
 pub mod store;
 pub mod sync;
 

@@ -24,6 +24,12 @@
 //!
 //! Enabling session devices (`MESSAGING_SESSION_DEVICES_ENABLED`) is independent of, and
 //! never implies, E2EE device registration, which production keeps refusing.
+//!
+//! ADR 0062: a session device is bound either to a first-party account session
+//! (`binding_kind = ACCOUNT_SESSION`, everything above, unchanged) or to a partner user's
+//! CF Meet user token (`PLATFORM_USER_TOKEN`, [`crate::partner`]): the same MANAGED-only
+//! identity, issued by `POST /v1/messaging/user-sessions`, usable on a closed REST
+//! allowlist as well, and ended with its minting credential.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{FromQueryResult, TransactionTrait};
@@ -54,8 +60,13 @@ pub const E2EE_DEVICE: &str = "E2EE_DEVICE";
 pub const CAPABILITIES: &[&str] = &["REALTIME_MANAGED"];
 /// A session device lives at most this long (a client then creates a new one).
 pub const MAX_LIFETIME_HOURS: i64 = 24;
+/// `binding_kind` of a first-party relay's session device (bound to an account session).
+pub const ACCOUNT_SESSION: &str = "ACCOUNT_SESSION";
+/// `binding_kind` of a partner session device exchanged from a CF Meet user token
+/// (ADR 0062; [`crate::partner`]).
+pub const PLATFORM_USER_TOKEN: &str = "PLATFORM_USER_TOKEN";
 
-fn valid_reference(r: &str) -> bool {
+pub(crate) fn valid_reference(r: &str) -> bool {
     r.len() == 64 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
@@ -302,20 +313,78 @@ pub async fn revoke(
                     vec![
                         ctx2.scope.environment_id.into(),
                         principal.into(),
-                        request.account_session_ref.into(),
+                        request.account_session_ref.clone().into(),
                         now.into(),
                     ],
                 )
                 .await?;
                 let ids: Vec<Uuid> = devices.iter().map(|d| d.id).collect();
                 let sessions = revoke_device_sessions(txn, &ctx2, principal, &ids, now).await?;
-                Ok(json!({ "revokedSessionDevices": ids.len(), "revokedSessions": sessions }))
+                // Gap audit A11: client sessions of real devices issued for this account
+                // session end with it; the account's other sign-ins keep theirs.
+                let bound = revoke_bound_sessions(
+                    txn,
+                    &ctx2,
+                    principal,
+                    &request.account_session_ref,
+                    now,
+                )
+                .await?;
+                Ok(json!({
+                    "revokedSessionDevices": ids.len(),
+                    "revokedSessions": sessions + bound,
+                }))
             })
         })
         .await
         .map_err(Error::from)?;
     state.realtime.outbox_wakeup.notify_one();
     Ok(result)
+}
+
+/// Gap audit A11: revokes the ACTIVE client sessions issued for one account session (by
+/// its opaque reference) and queues the events that close their connections.
+async fn revoke_bound_sessions<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    principal: Uuid,
+    reference: &str,
+    now: DateTime<Utc>,
+) -> Result<usize> {
+    #[derive(FromQueryResult)]
+    struct Id {
+        id: Uuid,
+    }
+    let revoked: Vec<Id> = db::all(
+        txn,
+        "UPDATE messaging_client_sessions SET status = 'REVOKED', revoked_at = $4, revoked_reason = 'ACCOUNT_SESSION_ENDED' \
+         WHERE environment_id = $1 AND principal_id = $2 AND account_session_sha256 = $3 AND status = 'ACTIVE' \
+         RETURNING id",
+        vec![
+            ctx.scope.environment_id.into(),
+            principal.into(),
+            reference.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    let request_ctx = request_context();
+    for r in &revoked {
+        outbox::enqueue(
+            txn,
+            NewEvent {
+                event_type: "messaging.client-session.revoked",
+                aggregate_type: "CLIENT_SESSION",
+                aggregate_id: r.id,
+                scope: scope_of(ctx),
+                payload: json!({ "session_id": r.id, "principal_id": principal }),
+            },
+            &request_ctx,
+            now,
+        )
+        .await?;
+    }
+    Ok(revoked.len())
 }
 
 /// Revokes every ACTIVE client session of the given session devices and queues the
@@ -359,6 +428,42 @@ pub(crate) async fn revoke_device_sessions<C: sea_orm::ConnectionTrait>(
         .await?;
     }
     Ok(revoked.len())
+}
+
+/// A usable session device: how it is bound, and (partner devices) its minting
+/// credential.
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct ActiveDevice {
+    pub binding_kind: String,
+    pub minting_credential_id: Option<Uuid>,
+}
+
+impl ActiveDevice {
+    pub fn is_partner(&self) -> bool {
+        self.binding_kind == PLATFORM_USER_TOKEN
+    }
+}
+
+/// The session device if it is ACTIVE and unexpired (whatever the feature switches).
+pub async fn active_device<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    device_id: Uuid,
+    principal_id: Uuid,
+    environment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Option<ActiveDevice>> {
+    Ok(db::one(
+        db,
+        "SELECT binding_kind, minting_credential_id FROM messaging_session_devices \
+          WHERE id = $1 AND principal_id = $2 AND environment_id = $3 AND status = 'ACTIVE' AND expires_at > $4",
+        vec![
+            device_id.into(),
+            principal_id.into(),
+            environment_id.into(),
+            now.into(),
+        ],
+    )
+    .await?)
 }
 
 /// Whether a session device is still usable (ACTIVE, unexpired, the feature on).

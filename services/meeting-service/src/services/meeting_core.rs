@@ -181,6 +181,8 @@ pub struct DomainCore {
     pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
     /// Part V H: Unified Messaging integration (`None` = legacy chat only).
     pub unified: Option<Arc<crate::services::unified_messaging::UnifiedMessaging>>,
+    /// ADR 0068 A6: CF Meet user plan limits (`None` = enforcement off, today's limits only).
+    pub plan_limits: Option<Arc<crate::services::plan_limits::PlanEnforcement>>,
 }
 
 pub type Core = Arc<DomainCore>;
@@ -412,11 +414,33 @@ pub async fn actor_space_role<C: ConnectionTrait>(
     actor: &ActorContext,
 ) -> ApiResult<Option<(Role, RoleSource)>> {
     match &actor.kind {
-        ActorKind::RegisteredUser(r) => space_role(conn, space, r).await,
+        ActorKind::RegisteredUser(r) => {
+            let role = space_role(conn, space, r).await?;
+            Ok(organization_bound(
+                space,
+                &actor.verified_organizations,
+                role,
+            ))
+        }
         ActorKind::Platform(p) if platform_owns(space, p) => {
             Ok(Some((Role::Owner, RoleSource::Owner)))
         }
         _ => Ok(None),
+    }
+}
+
+/// An organization space's ownership lasts only while its owner is a verified member of
+/// that organization: someone who left or was removed keeps no owner control of the spaces
+/// they created there (the organization's managers can reassign them). A space membership
+/// role (an invited co-host, for example) is unaffected: it was granted explicitly.
+pub fn organization_bound(
+    space: &meeting_spaces::Model,
+    verified_organizations: &[Uuid],
+    role: Option<(Role, RoleSource)>,
+) -> Option<(Role, RoleSource)> {
+    match (role, space.organization_id) {
+        (Some((_, RoleSource::Owner)), Some(org)) if !verified_organizations.contains(&org) => None,
+        (role, _) => role,
     }
 }
 
@@ -472,6 +496,27 @@ pub async fn own_participant<C: ConnectionTrait>(
         }
         ActorKind::ParticipantCredential(c) => {
             participant_by_credential(conn, conference_id, c, for_update).await
+        }
+        // ADR 0062: a partner user's ONE participant per conference (re-joins reuse it).
+        ActorKind::PlatformUser(u) => {
+            let Some(row) = conn
+                .query_one(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DbBackend::Postgres,
+                    "SELECT participant_id FROM meeting_platform_participants \
+                     WHERE conference_id = $1 AND principal_id = $2",
+                    [conference_id.into(), u.principal_id().into()],
+                ))
+                .await?
+            else {
+                return Ok(None);
+            };
+            let participant_id: Uuid = row.try_get_by_index(0)?;
+            let mut q = conference_participants::Entity::find_by_id(participant_id)
+                .filter(conference_participants::Column::ConferenceId.eq(conference_id));
+            if for_update {
+                q = q.lock(LockType::Update);
+            }
+            Ok(q.one(conn).await?)
         }
         _ => Ok(None),
     }

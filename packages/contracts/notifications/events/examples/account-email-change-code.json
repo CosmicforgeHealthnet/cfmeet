@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt_0123456789abcdef0123456789abcdef",
+  "eventType": "account.email-change-code.requested",
+  "eventVersion": 1,
+  "producer": "cfmeet.meeting-service",
+  "occurredAt": "2026-11-15T12:00:00Z",
+  "correlationId": "corr_fedcba9876543210fedcba9876543210",
+  "recipients": [
+    {
+      "ref": "meeting-email-principal:7c3e9a51-2b4d-8e6f-9a1b-3c5d7e9f1a2b"
+    }
+  ],
+  "delivery": {
+    "priority": "CRITICAL",
+    "dedupeKey": "otp:emailchange:3f2a:1",
+    "idempotencyKey": "otp:emailchange:3f2a:1",
+    "expiresAt": "2026-11-15T12:10:00Z"
+  },
+  "route": {
+    "decisionId": "0b9f6c1e-2d3a-4b5c-8d7e-6f5a4b3c2d1e",
+    "routingVersion": 3,
+    "protocol": 1
+  },
+  "data": {
+    "ttlMinutes": 10
+  },
+  "subject": {
+    "kind": "ACCOUNT",
+    "id": "5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+    "version": 3
+  },
+  "sealed": {
+    "kid": "notif-hpke-2026-11",
+    "enc": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "ct": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}

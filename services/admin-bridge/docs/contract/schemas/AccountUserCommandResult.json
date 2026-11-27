@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id",
+        "account_status",
+        "role",
+        "email_verified",
+        "open_sessions",
+        "mfa_enabled"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "account_status": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "email_verified": {
+          "type": "boolean"
+        },
+        "open_sessions": {
+          "type": "integer"
+        },
+        "mfa_enabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "The resource after accounts.user.delete; status: DELETED."
+    }
+  }
+}

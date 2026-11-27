@@ -24,6 +24,7 @@ use crate::{
     models::{conference_sessions, meeting_members, meeting_spaces, users},
     services::{
         actor::ActorContext,
+        admin_operations::{self, BridgeCommand},
         collaboration::policy::CollaborationPolicyPatch,
         conference::{insert_conference, NewConference},
         meeting_core::{
@@ -682,6 +683,89 @@ impl MeetingSpaceService {
     /// MTG-018: a constant number of queries (spaces, memberships, canonical conferences)
     /// for any page. `page = None` keeps the legacy complete list; `Some((cursor, limit))`
     /// returns one page and the next cursor.
+    /// Gap audit G13: every meeting space of `organization` (INVITE_ONLY, healthcare and
+    /// high-security ones included), newest first, for a caller the Organizations Service
+    /// grants `meetings.organization.manage` there now. Governance fields only. Outside
+    /// authoritative mode this is FEATURE_DISABLED; Organizations unreachable is 503.
+    pub async fn list_for_organization(
+        &self,
+        actor: &ActorContext,
+        organization: Uuid,
+        q: &crate::dto::v2::OrganizationMeetingSpacesQuery,
+    ) -> ApiResult<crate::dto::v2::OrganizationMeetingSpacePage> {
+        use crate::dto::v2::{OrganizationMeetingSpace, OrganizationMeetingSpacePage};
+        let authority = crate::services::organization_policy::authoritative(&self.core)
+            .ok_or_else(|| {
+                ApiError::domain(
+                    ErrorCode::FeatureDisabled,
+                    "Organization oversight needs the Organizations Service",
+                )
+            })?;
+        let user = actor
+            .registered()
+            .ok_or_else(|| permission_denied("Sign in to oversee organization meetings"))?;
+        crate::services::workspaces::require_organization_capability(
+            authority,
+            &crate::services::organizations_authority::ActingUser::of(user),
+            organization,
+            crate::services::workspaces::OrganizationFeature::Meetings,
+            Some(MEETINGS_ORGANIZATION_MANAGE),
+        )
+        .await?;
+        let limit = q.limit.unwrap_or(50).clamp(1, 200);
+        let mut find = meeting_spaces::Entity::find()
+            .filter(meeting_spaces::Column::OrganizationId.eq(organization))
+            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted));
+        if !q.include_archived.unwrap_or(false) {
+            find = find.filter(meeting_spaces::Column::Status.ne(SpaceStatus::Archived));
+        }
+        if let Some(after) = q.after {
+            let cursor = meeting_spaces::Entity::find_by_id(after)
+                .filter(meeting_spaces::Column::OrganizationId.eq(organization))
+                .one(&self.core.db)
+                .await?
+                .ok_or_else(|| validation("after is not a meeting space of this organization"))?;
+            find = find.filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::CreatedAt.lt(cursor.created_at))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(meeting_spaces::Column::CreatedAt.eq(cursor.created_at))
+                            .add(meeting_spaces::Column::Id.lt(cursor.id)),
+                    ),
+            );
+        }
+        let rows = find
+            .order_by_desc(meeting_spaces::Column::CreatedAt)
+            .order_by_desc(meeting_spaces::Column::Id)
+            .limit(limit + 1)
+            .all(&self.core.db)
+            .await?;
+        let more = rows.len() as u64 > limit;
+        let items: Vec<OrganizationMeetingSpace> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|s| OrganizationMeetingSpace {
+                id: s.id,
+                title: s.title,
+                owner_user_id: s.owner_user_id,
+                meeting_type: s.meeting_type,
+                access_policy: s.access_policy,
+                security_profile: s.security_profile,
+                status: s.status,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+                archived_at: s.archived_at,
+            })
+            .collect();
+        let next_cursor = if more {
+            items.last().map(|i| i.id)
+        } else {
+            None
+        };
+        Ok(OrganizationMeetingSpacePage { items, next_cursor })
+    }
+
     pub async fn list_for_actor(
         &self,
         ctx: &ActorContext,
@@ -712,12 +796,18 @@ impl MeetingSpaceService {
             None
         } else {
             let actor = ctx.require_registered()?;
-            let member_spaces = meeting_members::Entity::find()
+            let mut member_spaces = meeting_members::Entity::find()
                 .select_only()
                 .column(meeting_members::Column::MeetingSpaceId)
                 .filter(meeting_members::Column::UserId.eq(actor.user_id))
-                .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
-                .into_query();
+                .filter(meeting_members::Column::Status.eq(MemberStatus::Active));
+            // ADR 0064: an app acting for the user reads only meetings the user owns or
+            // hosts (HOST / CO_HOST).
+            if actor.delegation.is_some() {
+                member_spaces = member_spaces
+                    .filter(meeting_members::Column::Role.is_in([Role::Host, Role::CoHost]));
+            }
+            let member_spaces = member_spaces.into_query();
             q = q.filter(
                 sea_orm::Condition::any()
                     .add(meeting_spaces::Column::OwnerUserId.eq(actor.user_id))
@@ -1038,7 +1128,19 @@ impl MeetingSpaceService {
         let updated = am.update(&txn).await?;
 
         if timezone_changed {
+            // Gap audit M3: attendees of the moved occurrences are told.
+            let upcoming =
+                crate::services::notifications::upcoming_occurrences(&txn, updated.id, Utc::now())
+                    .await?;
             recurrence::follow_space_timezone(&txn, &updated, &self.core.config).await?;
+            crate::services::notifications::announce_series_change(
+                &txn,
+                &self.core.config.notifications,
+                updated.id,
+                &upcoming,
+                ctx.user_id(),
+            )
+            .await?;
         }
 
         let audit_actor = AuditActor::from(ctx);
@@ -1094,11 +1196,29 @@ impl MeetingSpaceService {
         id: Uuid,
         version: Option<i32>,
     ) -> ApiResult<meeting_spaces::Model> {
-        let platform_admin = match ctx.platform() {
-            Some(_) => false,
-            None => ctx.require_registered()?.platform_admin,
+        self.archive_with(ctx, id, version, None).await
+    }
+
+    /// [`Self::archive`], or (ADR 0068, `meetings.space.archive`) the same archive by an
+    /// HQ staff member through the admin bridge (`operator`): authorized like a platform
+    /// administrator, locked at HQ's expected version, audited as the operator, and
+    /// recorded in the archive's transaction (`meeting_admin_operations`, `ARCHIVED`).
+    pub async fn archive_with(
+        &self,
+        ctx: &ActorContext,
+        id: Uuid,
+        version: Option<i32>,
+        operator: Option<&BridgeCommand>,
+    ) -> ApiResult<meeting_spaces::Model> {
+        let platform_admin = match (operator, ctx.platform()) {
+            (Some(_), _) => true,
+            (None, Some(_)) => false,
+            (None, None) => ctx.require_registered()?.platform_admin,
         };
         let txn = self.core.db.begin().await?;
+        if let Some(cmd) = operator {
+            admin_operations::claim(&txn, cmd).await?;
+        }
         let space = lock_space(&txn, id).await?;
         if !platform_admin {
             self.require_space_permission(&txn, &space, ctx, SpacePermission::Archive)
@@ -1112,7 +1232,13 @@ impl MeetingSpaceService {
                 ));
             }
         }
-        let audit_actor = AuditActor::from(ctx);
+        if let Some(cmd) = operator {
+            admin_operations::check_version(cmd, space.version as i64)?;
+        }
+        let audit_actor = match operator {
+            Some(cmd) => operator_actor(cmd),
+            None => AuditActor::from(ctx),
+        };
         let reason = if platform_admin {
             TerminationReason::Admin
         } else {
@@ -1123,6 +1249,17 @@ impl MeetingSpaceService {
             let ended = conferences
                 .end_live_for_archive(&txn, id, &audit_actor, reason)
                 .await?;
+            if let Some(cmd) = operator {
+                admin_operations::record(
+                    &txn,
+                    cmd,
+                    admin_operations::subject::MEETING_SPACE,
+                    id,
+                    "ARCHIVED",
+                    Some(space.version as i64),
+                )
+                .await?;
+            }
             txn.commit().await?;
             if !ended.is_empty() {
                 crate::services::ops_metrics::add(
@@ -1141,7 +1278,17 @@ impl MeetingSpaceService {
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
         // No new occurrences: end the series and cancel unstarted future occurrences.
+        let upcoming = crate::services::notifications::upcoming_occurrences(&txn, id, now).await?;
         let cancelled = recurrence::stop_series_for_archive(&txn, id, now).await?;
+        // Gap audit M3: the next occurrences' attendees are told.
+        crate::services::notifications::announce_series_change(
+            &txn,
+            &self.core.config.notifications,
+            id,
+            &upcoming,
+            ctx.user_id(),
+        )
+        .await?;
         let ended = conferences
             .end_live_for_archive(&txn, id, &audit_actor, reason)
             .await?;
@@ -1173,6 +1320,17 @@ impl MeetingSpaceService {
             },
         )
         .await?;
+        if let Some(cmd) = operator {
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::MEETING_SPACE,
+                id,
+                "ARCHIVED",
+                Some(updated.version as i64),
+            )
+            .await?;
+        }
         txn.commit().await?;
         if !ended.is_empty() {
             crate::services::ops_metrics::add(
@@ -1257,10 +1415,33 @@ impl MeetingSpaceService {
         id: Uuid,
         req: OwnerTransferRequest,
     ) -> ApiResult<meeting_spaces::Model> {
-        let actor = ctx.require_registered()?;
+        self.transfer_owner_with(ctx, id, req, None).await
+    }
+
+    /// [`Self::transfer_owner`], or (ADR 0068, `meetings.space.transfer`) the same transfer
+    /// by an HQ staff member through the admin bridge (`operator`, whose expected version is
+    /// `req.version`): authorized like a platform administrator, audited as the operator and
+    /// recorded in the transfer's transaction (`meeting_admin_operations`, `TRANSFERRED`).
+    pub async fn transfer_owner_with(
+        &self,
+        ctx: &ActorContext,
+        id: Uuid,
+        req: OwnerTransferRequest,
+        operator: Option<&BridgeCommand>,
+    ) -> ApiResult<meeting_spaces::Model> {
+        let (platform_admin, actor_user) = match operator {
+            Some(_) => (true, None),
+            None => {
+                let actor = ctx.require_registered()?;
+                (actor.platform_admin, Some(actor.user_id))
+            }
+        };
         let txn = self.core.db.begin().await?;
+        if let Some(cmd) = operator {
+            admin_operations::claim(&txn, cmd).await?;
+        }
         let space = lock_space(&txn, id).await?;
-        if !actor.platform_admin {
+        if !platform_admin {
             self.require_space_permission(&txn, &space, ctx, SpacePermission::TransferOwnership)
                 .await?;
         }
@@ -1272,10 +1453,14 @@ impl MeetingSpaceService {
             ));
         };
         if space.version != req.version {
-            return Err(ApiError::domain(
-                ErrorCode::MeetingVersionConflict,
-                "Meeting was modified",
-            ));
+            // The bridge's expected version is `req.version`; its conflict code is the
+            // bridge contract's.
+            let code = if operator.is_some() {
+                ErrorCode::VersionConflict
+            } else {
+                ErrorCode::MeetingVersionConflict
+            };
+            return Err(ApiError::domain(code, "Meeting was modified"));
         }
         if space.status != SpaceStatus::Active {
             return Err(state_conflict(
@@ -1320,7 +1505,7 @@ impl MeetingSpaceService {
                 user_id: Set(Some(previous_owner)),
                 role: Set(Role::Host),
                 status: Set(MemberStatus::Active),
-                created_by: Set(Some(actor.user_id)),
+                created_by: Set(actor_user),
                 created_at: Set(now),
                 updated_at: Set(now),
                 revoked_at: Set(None),
@@ -1335,7 +1520,10 @@ impl MeetingSpaceService {
         am.version = Set(space.version + 1);
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
-        let audit_actor = AuditActor::from(ctx);
+        let audit_actor = match operator {
+            Some(cmd) => operator_actor(cmd),
+            None => AuditActor::from(ctx),
+        };
         audit(
             &txn,
             &audit_actor,
@@ -1364,8 +1552,27 @@ impl MeetingSpaceService {
             },
         )
         .await?;
+        if let Some(cmd) = operator {
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::MEETING_SPACE,
+                id,
+                "TRANSFERRED",
+                Some(updated.version as i64),
+            )
+            .await?;
+        }
         txn.commit().await?;
         Ok(updated)
+    }
+}
+
+/// The audit actor of an HQ staff member acting through the admin bridge (ADR 0068).
+pub fn operator_actor(cmd: &BridgeCommand) -> AuditActor {
+    AuditActor {
+        actor_type: "OPERATOR".into(),
+        actor_ref: Some(cmd.operator().to_string()),
     }
 }
 

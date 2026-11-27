@@ -1,0 +1,30 @@
+# SQL exporter collector: Developer Platform worker heartbeat (backend gap audit P4).
+#
+# The worker (services/developer-platform/src/worker.rs heartbeat_once) upserts one row per
+# instance into devplat_worker_heartbeats on every pass (default every 5 s). Nothing in the
+# service exposes it, so cfmeet-heartbeat-exporter reads it with the read-only role
+# cfmeet_monitor (SELECT on this one table, default_transaction_read_only=on), provisioned
+# by infra/calling/production/monitoring_stack.py. Alerts:
+# infra/monitoring/prometheus/rules/platform-health.rules.yml.
+#
+# With no production row at all the age is reported as 1e9 seconds, so a worker that never
+# started is stale too.
+
+collector_name: developer_platform_worker
+metrics:
+  - metric_name: cfmeet_devplat_worker_heartbeat_age_seconds
+    type: gauge
+    help: 'Seconds since the newest heartbeat of any production Developer Platform worker instance.'
+    values: [age_seconds]
+    query: |
+      SELECT COALESCE(EXTRACT(EPOCH FROM now() - max(last_seen_at)), 1e9)::float8 AS age_seconds
+      FROM devplat_worker_heartbeats
+      WHERE runtime_environment = 'production'
+  - metric_name: cfmeet_devplat_worker_instances_fresh
+    type: gauge
+    help: 'Production Developer Platform worker instances with a heartbeat in the last 5 minutes.'
+    values: [instances]
+    query: |
+      SELECT count(*)::float8 AS instances
+      FROM devplat_worker_heartbeats
+      WHERE runtime_environment = 'production' AND last_seen_at > now() - interval '5 minutes'

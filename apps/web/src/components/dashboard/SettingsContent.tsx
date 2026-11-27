@@ -1,80 +1,177 @@
 "use client";
 
-import { useState } from "react";
-import ApiKeysContent from "./ApiKeysContent";
-import WebhooksContent from "./WebhooksContent";
+import { Suspense } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, BellRing, ChevronRight, KeyRound, Laptop, Monitor, Moon, Palette, ShieldCheck, Sun, UserRound, Webhook } from "lucide-react";
+import { useTheme } from "next-themes";
+import ChatSettings from "@/components/account/ChatSettings";
 import AccountProfileSettings from "@/components/account/AccountProfileSettings";
 import AccountSecuritySettings from "@/components/account/AccountSecuritySettings";
-import { User, Key, Webhook, Lock } from "lucide-react";
+import LinkedDevices from "@/components/account/LinkedDevices";
+import { useAccountProfile } from "@/hooks/useAccount";
+import { useHubProfile } from "@/hooks/v2/useCommunications";
+import ApiKeysContent from "./ApiKeysContent";
+import WebhooksContent from "./WebhooksContent";
 import { cn } from "@/lib/utils";
 
+type Tab = "profile" | "security" | "devices" | "chats" | "appearance" | "api-keys" | "webhooks";
+/** `desktopOnly`: on a phone the profile card at the top is the way in (no second "Profile" row). */
+type Item = { id: Tab; label: string; hint: string; icon: typeof UserRound; tint: string; desktopOnly?: boolean };
+
+const GROUPS: { title: string; items: Item[] }[] = [
+  {
+    title: "Account",
+    items: [
+      { id: "profile", label: "Profile", hint: "Photo, name, email, your data", icon: UserRound, tint: "bg-[#006BFF]", desktopOnly: true },
+      { id: "security", label: "Privacy & security", hint: "Two-step sign-in, where you're signed in", icon: ShieldCheck, tint: "bg-emerald-600" },
+      { id: "devices", label: "Linked devices", hint: "Browsers and phones on your account", icon: Laptop, tint: "bg-violet-600" },
+    ],
+  },
+  {
+    title: "App",
+    items: [
+      { id: "chats", label: "Chats & notifications", hint: "Alerts, storage, backup", icon: BellRing, tint: "bg-rose-500" },
+      { id: "appearance", label: "Appearance", hint: "Light, dark or match this device", icon: Palette, tint: "bg-amber-500" },
+    ],
+  },
+  {
+    // Retired integrations: kept reachable so people can revoke what they still have.
+    title: "Retired",
+    items: [
+      { id: "api-keys", label: "Old API keys", hint: "Revoke keys you no longer use", icon: KeyRound, tint: "bg-slate-500" },
+      { id: "webhooks", label: "Old webhooks", hint: "Remove old webhook endpoints", icon: Webhook, tint: "bg-slate-500" },
+    ],
+  },
+];
+const ALL = GROUPS.flatMap((g) => g.items);
+
 export default function SettingsContent() {
-  const [activeTab, setActiveTab] = useState<"profile" | "security" | "api-keys" | "webhooks">("profile");
+  return <Suspense fallback={null}><Settings /></Suspense>;
+}
+
+/**
+ * Settings (WhatsApp pattern). Phone: the list, then one section full screen with a back arrow.
+ * Computer: the list on the left, the open section on the right. `?tab=` names the section, so
+ * links (e.g. "?tab=security" from the new sign-in email) and the back button work.
+ */
+function Settings() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const requested = params.get("tab");
+  const tab = ALL.find((t) => t.id === requested)?.id ?? null;
+  const open = (id: Tab | null) => router.push(id ? `${pathname}?tab=${id}` : pathname, { scroll: false });
+  const current = ALL.find((t) => t.id === (tab ?? "profile"))!;
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground text-muted-foreground">
-          Manage your account settings and preferences.
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-6xl lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:gap-8 lg:px-8 lg:py-8">
+      {/* The list: the whole screen on a phone until a section is opened. */}
+      <aside className={cn("px-4 pb-10 pt-5 lg:sticky lg:top-6 lg:block lg:self-start lg:p-0", tab && "hidden")}>
+        <h1 className="mb-4 text-[28px] font-bold tracking-tight">Settings</h1>
+        <div className="lg:hidden"><ProfileCard onOpen={() => open("profile")} /></div>
+        {GROUPS.map((group) => (
+          <section key={group.title} className="mt-6">
+            <p className="mb-1.5 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.title}</p>
+            <ul className="overflow-hidden rounded-2xl border border-border bg-card">
+              {group.items.map(({ id, label, hint, icon: Icon, tint, desktopOnly }) => {
+                const active = (tab ?? "profile") === id;
+                return (
+                  <li key={id} className={cn("border-t border-border first:border-t-0", desktopOnly && "hidden lg:block", desktopOnly && "[&+li]:border-t-0 lg:[&+li]:border-t")}>
+                    <button type="button" onClick={() => open(id)} aria-current={active ? "page" : undefined}
+                      className={cn("flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-muted/60", active && "lg:bg-primary/5")}>
+                      <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-xl text-white", tint)}><Icon className="size-[18px]" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className={cn("block text-[15px] font-medium", active && "lg:text-primary")}>{label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+                      </span>
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground lg:hidden" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </aside>
 
-      <div className="flex border-b border-border overflow-x-auto">
-        <button
-          onClick={() => setActiveTab("profile")}
-          className={cn(
-            "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-            activeTab === "profile"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-muted-foreground",
-          )}
-        >
-          <User className="w-4 h-4" />
-          Profile
-        </button>
-        <button
-          onClick={() => setActiveTab("security")}
-          className={cn(
-            "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-            activeTab === "security"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-muted-foreground",
-          )}
-        >
-          <Lock className="w-4 h-4" />
-          Security
-        </button>
-        <button
-          onClick={() => setActiveTab("api-keys")}
-          className={cn(
-            "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-            activeTab === "api-keys"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-muted-foreground",
-          )}
-        >
-          <Key className="w-4 h-4" />
-          Legacy API Keys
-        </button>
-        <button
-          onClick={() => setActiveTab("webhooks")}
-          className={cn(
-            "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-            activeTab === "webhooks"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-muted-foreground",
-          )}
-        >
-          <Webhook className="w-4 h-4" />
-          Legacy Webhooks
-        </button>
-      </div>
-
-      {activeTab === "profile" && <AccountProfileSettings />}
-      {activeTab === "security" && <AccountSecuritySettings />}
-      {activeTab === "api-keys" && <ApiKeysContent />}
-      {activeTab === "webhooks" && <WebhooksContent />}
+      {/* The open section: full screen on a phone (with a back arrow), the right column on a computer. */}
+      <main className={cn("min-w-0", !tab && "hidden lg:block")}>
+        <div className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/95 px-2 backdrop-blur lg:static lg:h-auto lg:border-0 lg:bg-transparent lg:px-0 lg:pb-5">
+          <button type="button" onClick={() => open(null)} aria-label="Back to settings" className="flex size-10 items-center justify-center rounded-full hover:bg-muted lg:hidden"><ArrowLeft className="size-5" /></button>
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold lg:text-2xl lg:font-bold lg:tracking-tight">{current.label}</h2>
+            <p className="hidden text-sm text-muted-foreground lg:block">{current.hint}</p>
+          </div>
+        </div>
+        <div className="mx-auto max-w-3xl px-4 pb-24 pt-4 lg:mx-0 lg:px-0 lg:pt-0">
+          {current.id === "profile" && <AccountProfileSettings />}
+          {current.id === "security" && <AccountSecuritySettings />}
+          {current.id === "devices" && <LinkedDevices />}
+          {current.id === "chats" && <ChatSettings />}
+          {current.id === "appearance" && <Appearance />}
+          {current.id === "api-keys" && <ApiKeysContent />}
+          {current.id === "webhooks" && <WebhooksContent />}
+        </div>
+      </main>
     </div>
+  );
+}
+
+/** Your photo, name and CF Meet ID at the top of the list (WhatsApp's profile row). */
+function ProfileCard({ onOpen }: { onOpen: () => void }) {
+  const account = useAccountProfile();
+  const hub = useHubProfile();
+  const name = account.data?.effectiveDisplayName || account.data?.displayName || account.data?.username || "Your profile";
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?";
+  const sub = hub.data?.cfMeetId ?? account.data?.email ?? "";
+  return (
+    <button type="button" onClick={onOpen}
+      className="flex w-full items-center gap-4 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/60">
+      {account.data?.avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={account.data.avatarUrl} alt="" className="size-16 shrink-0 rounded-full object-cover" />
+      ) : (
+        <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xl font-semibold text-primary">{account.isPending ? "" : initials}</span>
+      )}
+      <span className="min-w-0 flex-1">
+        {account.isPending ? <span className="block h-4 w-32 animate-pulse rounded bg-muted" /> : <span className="block truncate text-lg font-semibold">{name}</span>}
+        <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{sub}</span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+const THEMES = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "Same as device", icon: Monitor },
+] as const;
+
+/** Theme: three cards with a small preview of each. */
+function Appearance() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+      <h3 className="text-base font-semibold">Theme</h3>
+      <p className="mt-0.5 text-sm text-muted-foreground">Choose how CF Meet looks on this device.</p>
+      <div role="radiogroup" aria-label="Theme" className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+        {THEMES.map(({ value, label, icon: Icon }) => {
+          const on = (theme ?? "system") === value;
+          return (
+            <button key={value} type="button" role="radio" aria-checked={on} onClick={() => setTheme(value)}
+              className={cn("flex flex-col items-center gap-2 rounded-2xl border-2 p-2 pb-3 text-sm font-medium transition-colors", on ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/60")}>
+              <span aria-hidden className={cn("flex h-16 w-full flex-col gap-1.5 overflow-hidden rounded-xl p-2",
+                value === "light" ? "bg-[#F4F6FA]" : value === "dark" ? "bg-[#16181D]" : "bg-gradient-to-r from-[#F4F6FA] from-50% to-[#16181D] to-50%")}>
+                <span className="h-2 w-3/5 rounded-full bg-[#006BFF]/70" />
+                <span className={cn("h-2 w-4/5 rounded-full", value === "dark" ? "bg-white/20" : "bg-black/10")} />
+                <span className={cn("h-2 w-2/5 rounded-full", value === "dark" ? "bg-white/20" : "bg-black/10")} />
+              </span>
+              <span className="flex items-center gap-1.5"><Icon className="size-4" />{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

@@ -24,11 +24,17 @@
 //! * Caching ([`cache`]): positive authentications may be reused for READ routes for at
 //!   most `MESSAGING_AUTH_CACHE_TTL_SECONDS`, flushed on any identity change-feed entry
 //!   and disabled while the feed is unreadable. Mutations always authenticate afresh.
+//! * CF Meet Apps (ADR 0064, integrate contract §2 / §7): Platform Access also
+//!   authenticates OAuth access (`cfoa_`) and bot (`cfob_`) tokens and reports
+//!   `credentialKind` (`OAUTH_ACCESS` | `OAUTH_BOT`), `appId` and `grantId`
+//!   ([`OAuthCredential`], parsed tolerantly: absent = an ordinary credential; an
+//!   `OAUTH_*` kind without well-formed ids = a malformed chain, fail closed).
 
 pub mod cache;
 
 use std::{collections::BTreeSet, sync::Arc};
 
+use axum::http::Method;
 use cf_service_auth::{
     client::{InternalCallError, InternalResponse, InternalServiceClient},
     services, CorrelationId, OutboundServiceRequest, ServiceId,
@@ -93,6 +99,81 @@ impl OwnerScope {
     }
 }
 
+/// How an OAuth credential acts (integrate contract §0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthKind {
+    /// `OAUTH_ACCESS` (`cfoa_`): an app acting for the granting CF Meet user.
+    Access,
+    /// `OAUTH_BOT` (`cfob_`): an app's organization bot principal.
+    Bot,
+}
+
+impl OAuthKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OAuthKind::Access => "OAUTH_ACCESS",
+            OAuthKind::Bot => "OAUTH_BOT",
+        }
+    }
+}
+
+/// OAuth facts that name an `OAUTH_*` kind but are not well formed (fail closed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MalformedOAuth;
+
+/// The CF Meet App an authenticated credential belongs to (ADR 0064): the credential's
+/// kind, the app (OAuth `client_id` = the app's application id) and the grant
+/// (installation). Taken ONLY from Platform Access's authentication answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OAuthCredential {
+    pub kind: OAuthKind,
+    pub app_id: Uuid,
+    pub grant_id: Uuid,
+}
+
+impl OAuthCredential {
+    /// Reads the OAuth facts of an authentication answer. Platform Access may report them
+    /// on the authority chain (`credentialKind`, `appId`, `grantId`), in a nested `oauth`
+    /// object, or beside the chain in the response: the first place that names a
+    /// `credentialKind` wins. `Ok(None)`: an ordinary credential (no kind, or a non-OAuth
+    /// kind). `Err`: an `OAUTH_*` kind that is unknown or lacks well-formed ids
+    /// (fail closed).
+    pub fn parse(places: &[&Value]) -> Result<Option<Self>, MalformedOAuth> {
+        for place in places {
+            // On the object itself `credentialKind`; in a nested `oauth` object also `kind`.
+            let nested = &place["oauth"];
+            let candidates = [
+                (*place, place.get("credentialKind")),
+                (
+                    nested,
+                    nested.get("credentialKind").or_else(|| nested.get("kind")),
+                ),
+            ];
+            for (v, kind) in candidates {
+                let Some(kind) = kind else { continue };
+                let kind = match kind.as_str().ok_or(MalformedOAuth)? {
+                    "OAUTH_ACCESS" => OAuthKind::Access,
+                    "OAUTH_BOT" => OAuthKind::Bot,
+                    k if k.starts_with("OAUTH_") => return Err(MalformedOAuth),
+                    _ => return Ok(None),
+                };
+                let id = |name: &str| {
+                    v.get(name)
+                        .and_then(Value::as_str)
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .ok_or(MalformedOAuth)
+                };
+                return Ok(Some(Self {
+                    kind,
+                    app_id: id("appId")?,
+                    grant_id: id("grantId")?,
+                }));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// The trusted context of an authenticated customer request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedContext {
@@ -106,6 +187,9 @@ pub struct TrustedContext {
     pub scopes: BTreeSet<String>,
     /// `Some`: the credential may act only for these principals.
     pub principal_restriction: Option<BTreeSet<Uuid>>,
+    /// `Some`: a CF Meet App's OAuth credential (ADR 0064; only with
+    /// `MESSAGING_APPS_ENABLED`, refused otherwise).
+    pub oauth: Option<OAuthCredential>,
 }
 
 impl TrustedContext {
@@ -132,6 +216,26 @@ impl TrustedContext {
             && ctx.application_environment_id() == own.application_environment_id()
             && ctx.application_environment_kind() == own.application_environment_kind()
             && ctx.initiating_service_account_id() == own.initiating_service_account_id()
+    }
+
+    /// The single principal an OAuth credential is restricted to (`None` when the
+    /// restriction is absent or does not name exactly one principal).
+    pub fn oauth_principal(&self) -> Option<Uuid> {
+        match self.principal_restriction.as_ref() {
+            Some(allowed) if allowed.len() == 1 => allowed.iter().next().copied(),
+            _ => None,
+        }
+    }
+
+    /// Parses Platform Access's `AuthenticateResponse` body (`outcome` AUTHENTICATED):
+    /// the authority chain, and the OAuth facts wherever Platform Access reports them.
+    pub fn from_response(body: &Value) -> Option<Self> {
+        let authority = body.get("authority")?;
+        let mut ctx = Self::from_authority(authority)?;
+        if ctx.oauth.is_none() {
+            ctx.oauth = OAuthCredential::parse(&[body]).ok()?;
+        }
+        Some(ctx)
     }
 
     /// Parses Platform Access's `AuthorityChain` (contract `cfmeet.platform-access.identity`).
@@ -174,6 +278,7 @@ impl TrustedContext {
             full_authority: authority.get("authorityMode")?.as_str()? == "FULL",
             scopes,
             principal_restriction,
+            oauth: OAuthCredential::parse(&[authority]).ok()?,
         })
     }
 }
@@ -252,6 +357,7 @@ impl TrustedContext {
             full_authority,
             scopes: DELEGATED_SCOPES.iter().map(|s| s.to_string()).collect(),
             principal_restriction: None,
+            oauth: None,
         }
     }
 }
@@ -323,9 +429,7 @@ fn authentication_outcome(
         .json()
         .map_err(|_| AuthorityUnavailable("malformed authentication response".into()))?;
     match body.get("outcome").and_then(Value::as_str) {
-        Some("AUTHENTICATED") => body
-            .get("authority")
-            .and_then(TrustedContext::from_authority)
+        Some("AUTHENTICATED") => TrustedContext::from_response(&body)
             .map(|c| Authentication::Authenticated(Box::new(c)))
             .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
         Some("REJECTED") => Ok(Authentication::Rejected {
@@ -408,7 +512,12 @@ impl PlatformAccessAuthority {
             .with_delegated_context(ctx.clone());
         let response = self
             .client
-            .get(&request, "/internal/v1/identity/context")
+            .exchange_json(
+                &request,
+                Method::GET,
+                "/internal/v1/identity/context",
+                None::<&Value>,
+            )
             .await
             .map_err(unavailable)?;
         match response.status() {
@@ -475,7 +584,41 @@ pub trait PrincipalDirectory: Send + Sync {
         scope: &OwnerScope,
         principal_id: Uuid,
     ) -> Result<PrincipalStatus, AuthorityUnavailable>;
+
+    /// The external reference of each of `principals` that is an ACTIVE NATIVE_CF_USER of
+    /// `scope` (a CF Meet account principal: `cfmeet-user:<account id>`, set by the
+    /// account authority). Principals of any other kind, inactive or unknown, are absent.
+    /// Callers still validate the reference's shape. Default: none known.
+    async fn native_user_references(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        Ok(std::collections::HashMap::new())
+    }
+
+    /// ADR 0064: the app of each of `principals` that is an ACTIVE `BOT_OR_SERVICE`
+    /// principal of `scope` whose external reference is `app:<appId>` (a CF Meet App's
+    /// organization bot). Every other principal is absent. Default: none known.
+    async fn application_bots(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Uuid>, AuthorityUnavailable> {
+        Ok(std::collections::HashMap::new())
+    }
 }
+
+/// The app id of a bot principal's external reference `app:<uuid>` (canonical form).
+pub fn application_bot_reference(reference: &str) -> Option<Uuid> {
+    let id = reference.strip_prefix("app:")?;
+    Uuid::parse_str(id)
+        .ok()
+        .filter(|u| u.hyphenated().to_string() == id)
+}
+
+/// Most principals in one Platform Access resolution request.
+pub const RESOLVE_BATCH: usize = 50;
 
 /// Platform Access (`POST /internal/v1/principals/resolve`, `platform-principal.resolve`,
 /// signed delegated context of the trusted scope).
@@ -541,6 +684,98 @@ impl PrincipalDirectory for PlatformAccessPrincipals {
             _ => Err(AuthorityUnavailable("unknown resolution outcome".into())),
         }
     }
+
+    async fn native_user_references(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        self.active_references(scope, principals, "NATIVE_CF_USER")
+            .await
+    }
+
+    async fn application_bots(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Uuid>, AuthorityUnavailable> {
+        Ok(self
+            .active_references(scope, principals, "BOT_OR_SERVICE")
+            .await?
+            .into_iter()
+            .filter_map(|(p, reference)| application_bot_reference(&reference).map(|app| (p, app)))
+            .collect())
+    }
+}
+
+impl PlatformAccessPrincipals {
+    /// The external reference of each of `principals` that is an ACTIVE principal of
+    /// `kind` in `scope` (batched resolution; defence in depth on every answer).
+    async fn active_references(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+        kind: &str,
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        let mut out = std::collections::HashMap::new();
+        let environment = scope.environment_id.to_string();
+        for batch in principals.chunks(RESOLVE_BATCH) {
+            let request = OutboundServiceRequest::new_operation(platform_access())
+                .with_delegated_context(scope.delegated());
+            let references: Vec<Value> =
+                batch.iter().map(|p| json!({ "principalId": p })).collect();
+            let response = self
+                .client
+                .post_json(
+                    &request,
+                    "/internal/v1/principals/resolve",
+                    &json!({ "references": references }),
+                )
+                .await
+                .map_err(unavailable)?;
+            if response.status() != 200 {
+                return Err(AuthorityUnavailable(format!(
+                    "HTTP {} {}",
+                    response.status(),
+                    response.error_code().unwrap_or_default()
+                )));
+            }
+            let body: Value = response
+                .json()
+                .map_err(|_| AuthorityUnavailable("malformed resolution response".into()))?;
+            let results = body["results"]
+                .as_array()
+                .filter(|r| r.len() == batch.len())
+                .ok_or_else(|| AuthorityUnavailable("malformed resolution response".into()))?;
+            for (asked, result) in batch.iter().zip(results) {
+                match result["outcome"].as_str() {
+                    Some("RESOLVED") => {
+                        // Defence in depth, as in `resolve`.
+                        let p = &result["principal"];
+                        if p["id"].as_str() != Some(asked.to_string().as_str())
+                            || p["environmentId"].as_str() != Some(environment.as_str())
+                        {
+                            return Err(AuthorityUnavailable(
+                                "inconsistent principal resolution".into(),
+                            ));
+                        }
+                        if let (Some(k), Some("ACTIVE"), Some(reference)) = (
+                            p["kind"].as_str(),
+                            p["status"].as_str(),
+                            p["externalReference"].as_str(),
+                        ) {
+                            if k == kind {
+                                out.insert(*asked, reference.chars().take(255).collect());
+                            }
+                        }
+                    }
+                    Some("INACTIVE" | "NOT_FOUND" | "INVALID_REFERENCE") => {}
+                    _ => return Err(AuthorityUnavailable("unknown resolution outcome".into())),
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// An authority / directory that is not configured: everything fails closed.
@@ -562,6 +797,26 @@ impl PrincipalDirectory for Unconfigured {
         _scope: &OwnerScope,
         _principal_id: Uuid,
     ) -> Result<PrincipalStatus, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no principal directory is configured".into(),
+        ))
+    }
+
+    async fn native_user_references(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no principal directory is configured".into(),
+        ))
+    }
+
+    async fn application_bots(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Uuid>, AuthorityUnavailable> {
         Err(AuthorityUnavailable(
             "no principal directory is configured".into(),
         ))
@@ -615,6 +870,77 @@ mod tests {
             TrustedContext::from_authority(&chain("TEST", "FULL", json!(["not-a-uuid"]))).is_none()
         );
         assert!(TrustedContext::from_authority(&chain("TEST", "FULL", json!("*"))).is_none());
+    }
+
+    #[test]
+    fn oauth_credentials_are_parsed_tolerantly_and_fail_closed() {
+        let (app, grant) = (Uuid::new_v4(), Uuid::new_v4());
+        // Absent: an ordinary credential (today's chains are unchanged).
+        let plain = TrustedContext::from_authority(&chain("TEST", "FULL", Value::Null)).unwrap();
+        assert_eq!(plain.oauth, None);
+        // On the chain.
+        let mut c = chain("TEST", "FULL", json!([Uuid::new_v4()]));
+        c["credentialKind"] = json!("OAUTH_ACCESS");
+        c["appId"] = json!(app);
+        c["grantId"] = json!(grant);
+        let ctx = TrustedContext::from_authority(&c).unwrap();
+        assert_eq!(
+            ctx.oauth,
+            Some(OAuthCredential {
+                kind: OAuthKind::Access,
+                app_id: app,
+                grant_id: grant
+            })
+        );
+        assert!(ctx.oauth_principal().is_some());
+        // Beside the chain in the response, or nested.
+        let body = json!({ "outcome": "AUTHENTICATED", "authority": chain("TEST", "FULL", json!([])),
+            "credentialKind": "OAUTH_BOT", "appId": app, "grantId": grant });
+        let ctx = TrustedContext::from_response(&body).unwrap();
+        assert_eq!(ctx.oauth.unwrap().kind, OAuthKind::Bot);
+        assert_eq!(
+            ctx.oauth_principal(),
+            None,
+            "an empty restriction names nobody"
+        );
+        let mut nested = chain("TEST", "FULL", Value::Null);
+        nested["oauth"] = json!({ "kind": "OAUTH_BOT", "appId": app, "grantId": grant });
+        assert!(TrustedContext::from_authority(&nested)
+            .unwrap()
+            .oauth
+            .is_some());
+        // A non-OAuth kind is an ordinary credential.
+        let mut key = chain("TEST", "FULL", Value::Null);
+        key["credentialKind"] = json!("API_KEY");
+        assert_eq!(TrustedContext::from_authority(&key).unwrap().oauth, None);
+        // Malformed OAuth facts fail closed.
+        for bad in [
+            json!({ "credentialKind": "OAUTH_ACCESS", "appId": app }),
+            json!({ "credentialKind": "OAUTH_ACCESS", "appId": "x", "grantId": grant }),
+            json!({ "credentialKind": "OAUTH_REFRESH", "appId": app, "grantId": grant }),
+            json!({ "credentialKind": 7 }),
+        ] {
+            let mut c = chain("TEST", "FULL", Value::Null);
+            for (k, v) in bad.as_object().unwrap() {
+                c[k] = v.clone();
+            }
+            assert!(TrustedContext::from_authority(&c).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn application_bot_references_are_canonical() {
+        let app = Uuid::new_v4();
+        assert_eq!(application_bot_reference(&format!("app:{app}")), Some(app));
+        assert_eq!(
+            application_bot_reference(&format!("app:{}", app.simple())),
+            None
+        );
+        assert_eq!(application_bot_reference("cfmeet:meeting-system"), None);
+        assert_eq!(
+            application_bot_reference(&format!("cfmeet-user:{app}")),
+            None
+        );
     }
 
     #[test]

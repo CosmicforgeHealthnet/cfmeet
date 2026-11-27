@@ -20,13 +20,16 @@ export type StoredRecord = {
   error?: string;
   transferred?: boolean;
   payload?:
-    | { t: "text"; text: string }
-    | { t: "file"; caption: string | null; attachmentId: string | null; name: string | null; mediaType: string | null };
+    | { t: "text"; text: string; preview?: LinkPreview }
+    | { t: "file"; caption: string | null; attachmentId: string | null; name: string | null; mediaType: string | null }
+    | RichPayload;
   fileName?: string;
   mediaType?: string;
   size?: number;
   attachmentId?: string | null;
 };
+
+import type { LinkPreview, RichPayload } from "./rich-content";
 
 export type DeviceStatus =
   | { status: "NONE" | "LOCKED" | "CLOSED" }

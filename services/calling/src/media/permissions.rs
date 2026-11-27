@@ -5,14 +5,18 @@
 //! (`call_participant_media_permissions`), the Call's kind and the Call's state. A client
 //! can never ask for a permission: there is no input type carrying one.
 //!
-//! * Defaults (policy `APP_MEDIA_V1`): VOICE — publish audio, subscribe; VIDEO — publish
-//!   audio and video, subscribe. Data publishing is off by default (least privilege).
+//! * Defaults (policy `APP_MEDIA_V2`): VOICE — publish audio, subscribe; VIDEO — publish
+//!   audio and video, subscribe. Admitted app participants may publish data for local
+//!   recording consent and notices. Join-only credentials and public bridges still cannot.
 //! * A VOICE Call never grants video publishing, whatever is persisted (clamped here and
 //!   refused by a database CHECK).
 //! * HOLD (§62, ADR 0008): while the Call is HELD — or TRANSFERRING out of a held Call —
 //!   nobody publishes audio or video; subscriptions and data stay as authorized, room
 //!   membership is preserved. RESUME re-derives the effective permissions from the
 //!   persisted authorized ones, so anything revoked in between stays revoked.
+//! * Screen sharing (C6): only the Call's current presenter (server-side presenter state,
+//!   one per Call) holds `can_share_screen` — the provider grant of the screen sources.
+//!   HOLD masks it like audio / video; terminal states grant nothing.
 //! * Join credentials carry NO media permission at all ([`MediaPermissions::NONE`]): the
 //!   server grants the effective permissions to a provider connection only after it has
 //!   verified that the connection belongs to a current, authorized session generation.
@@ -22,7 +26,7 @@ use serde::Serialize;
 use crate::calls::{kinds::CallKind, state::CallState};
 
 /// Version of the application media permission policy.
-pub const MEDIA_POLICY_VERSION: &str = "APP_MEDIA_V1";
+pub const MEDIA_POLICY_VERSION: &str = "APP_MEDIA_V2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +35,9 @@ pub struct MediaPermissions {
     pub can_publish_video: bool,
     pub can_publish_data: bool,
     pub can_subscribe: bool,
+    /// The provider grant includes the screen sources (screen video + screen audio): only
+    /// for the Call's current presenter (C6).
+    pub can_share_screen: bool,
 }
 
 impl MediaPermissions {
@@ -41,6 +48,7 @@ impl MediaPermissions {
         can_publish_video: false,
         can_publish_data: false,
         can_subscribe: false,
+        can_share_screen: false,
     };
 
     /// Policy defaults for a Call kind.
@@ -49,14 +57,16 @@ impl MediaPermissions {
             CallKind::Voice => MediaPermissions {
                 can_publish_audio: true,
                 can_publish_video: false,
-                can_publish_data: false,
+                can_publish_data: true,
                 can_subscribe: true,
+                can_share_screen: false,
             },
             CallKind::Video => MediaPermissions {
                 can_publish_audio: true,
                 can_publish_video: true,
-                can_publish_data: false,
+                can_publish_data: true,
                 can_subscribe: true,
+                can_share_screen: false,
             },
         }
     }
@@ -69,11 +79,13 @@ impl MediaPermissions {
         }
     }
 
-    /// The hold mask: no audio / video publishing; subscription and data unchanged.
+    /// The hold mask: no audio / video / screen publishing; subscription and data
+    /// unchanged.
     pub fn held(self) -> Self {
         MediaPermissions {
             can_publish_audio: false,
             can_publish_video: false,
+            can_share_screen: false,
             ..self
         }
     }
@@ -110,6 +122,7 @@ impl MediaPermissions {
             && (!self.can_publish_video || other.can_publish_video)
             && (!self.can_publish_data || other.can_publish_data)
             && (!self.can_subscribe || other.can_subscribe)
+            && (!self.can_share_screen || other.can_share_screen)
     }
 }
 
@@ -134,6 +147,10 @@ mod tests {
     fn voice_never_publishes_video() {
         let voice = MediaPermissions::default_for(CallKind::Voice);
         assert!(voice.can_publish_audio && voice.can_subscribe && !voice.can_publish_video);
+        assert!(
+            voice.can_publish_data,
+            "admitted app sessions carry local recording consent"
+        );
         let forced = MediaPermissions {
             can_publish_video: true,
             ..voice
@@ -183,6 +200,33 @@ mod tests {
             assert!(MediaPermissions::effective(voice, CallKind::Voice, state, false).is_none());
             assert!(!media_state(state));
         }
+    }
+
+    #[test]
+    fn hold_and_termination_mask_screen_sharing() {
+        let presenting = MediaPermissions {
+            can_share_screen: true,
+            ..MediaPermissions::default_for(CallKind::Voice)
+        };
+        for kind in [CallKind::Voice, CallKind::Video] {
+            assert!(
+                MediaPermissions::effective(presenting, kind, CallState::Connected, false)
+                    .can_share_screen
+            );
+            assert!(
+                !MediaPermissions::effective(presenting, kind, CallState::Held, false)
+                    .can_share_screen
+            );
+            assert!(
+                !MediaPermissions::effective(presenting, kind, CallState::Transferring, true)
+                    .can_share_screen
+            );
+            assert!(
+                MediaPermissions::effective(presenting, kind, CallState::Ended, false).is_none()
+            );
+        }
+        assert!(!MediaPermissions::default_for(CallKind::Video).can_share_screen);
+        assert!(!presenting.within(&MediaPermissions::default_for(CallKind::Video)));
     }
 
     #[test]

@@ -204,9 +204,12 @@ pub async fn canonical_conference<C: ConnectionTrait>(
         .remove(&space_id))
 }
 
-/// Expire stale occurrences: unstarted v2 occurrences whose start window closed become
-/// CANCELLED (`cancelled_by = system:expired`), one `conference.cancelled` event each.
-/// Multi-worker safe (`FOR UPDATE SKIP LOCKED`), bounded per call.
+/// Expire stale occurrences: unstarted v2 occurrences (CREATED, and PREPARING / WAITING
+/// ones that were prepared but never started) whose start window closed become CANCELLED
+/// (`cancelled_by = system:expired`), one `conference.cancelled` event each; an occurrence
+/// that already holds a provider room also gets the room's termination command, so a
+/// prepared-but-abandoned occurrence never keeps a room. Multi-worker safe
+/// (`FOR UPDATE SKIP LOCKED`), bounded per call.
 pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     now: DateTime<Utc>,
@@ -215,7 +218,7 @@ pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
     let sql = format!(
         r#"WITH due AS (
              SELECT c.id FROM conference_sessions c JOIN meeting_spaces s ON s.id = c.meeting_space_id
-              WHERE c.status = 'CREATED' AND c.origin = 'V2'
+              WHERE c.status IN ('CREATED', 'PREPARING', 'WAITING') AND c.origin = 'V2'
                 AND c.scheduled_start_at IS NOT NULL AND c.scheduled_start_at < $1
                 AND NOT {open}
               ORDER BY c.scheduled_start_at
@@ -246,6 +249,13 @@ pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
             ),
         )
         .await?;
+        if c.rtc_room_ready_at.is_some() {
+            emit(
+                &txn,
+                crate::services::conference::ConferenceService::terminate_command(c),
+            )
+            .await?;
+        }
     }
     txn.commit().await?;
     Ok(expired.len() as u64)
@@ -1027,6 +1037,8 @@ impl CalendarService {
             recurrence_id: None,
             created: Some(conference.created_at),
             last_modified: conference.updated_at,
+            organizer: None,
+            attendees: vec![],
         };
         Ok(ics::render(
             &IcsCalendar {
@@ -1034,6 +1046,7 @@ impl CalendarService {
                 name: None,
                 events: vec![event],
                 timezone_until: None,
+                method: ics::IcsMethod::Publish,
             },
             Utc::now(),
         ))
@@ -1099,6 +1112,8 @@ impl CalendarService {
                         recurrence_id: None,
                         created: Some(rule.created_at),
                         last_modified: rule.updated_at,
+                        organizer: None,
+                        attendees: vec![],
                     };
                     let mut overrides = vec![];
                     for e in &exceptions {
@@ -1123,6 +1138,8 @@ impl CalendarService {
                                     recurrence_id: Some(original),
                                     created: Some(e.created_at),
                                     last_modified: e.updated_at,
+                                    organizer: None,
+                                    attendees: vec![],
                                 });
                             }
                         }
@@ -1167,6 +1184,8 @@ impl CalendarService {
                 recurrence_id: None,
                 created: Some(c.created_at),
                 last_modified: c.updated_at,
+                organizer: None,
+                attendees: vec![],
             });
         }
         let name = (!title_restricted(&space) || access.full).then(|| space.title.clone());
@@ -1176,6 +1195,7 @@ impl CalendarService {
                 name,
                 events,
                 timezone_until,
+                method: ics::IcsMethod::Publish,
             },
             now,
         ))

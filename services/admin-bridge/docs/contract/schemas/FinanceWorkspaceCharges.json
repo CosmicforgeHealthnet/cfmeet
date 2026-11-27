@@ -1,0 +1,59 @@
+{
+  "description": "The estimated charges of one workspace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_id",
+    "lines",
+    "total_minor"
+  ],
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "lines": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "description": "One priced usage type: quantities and the amount in minor units.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "usage_type",
+          "quantity",
+          "included_quantity",
+          "billable_quantity",
+          "amount_minor"
+        ],
+        "properties": {
+          "usage_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "included_quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "billable_quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "total_minor": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

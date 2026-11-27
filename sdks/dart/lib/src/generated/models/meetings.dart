@@ -99,6 +99,52 @@ class AddMemberRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Gap audit G7: add every active member of one of the space's organization teams.
+class AddTeamMembersRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddTeamMembersRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddTeamMembersRequest.create({required Role role, required String teamId}) =>
+      AddTeamMembersRequest.fromJson(<String, Object?>{
+        'role': role,
+        'teamId': teamId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Role get role => json['role']! as String;
+
+  String get teamId => json['teamId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of adding a team (gap audit G7).
+class AddTeamMembersResponse {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddTeamMembersResponse.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddTeamMembersResponse.create({required List<MemberResponse> added, required int skipped}) =>
+      AddTeamMembersResponse.fromJson(<String, Object?>{
+        'added': added.map((e) => e.toJson()).toList(),
+        'skipped': skipped,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Members added now.
+  List<MemberResponse> get added => (json['added']! as List<Object?>).map((e) => MemberResponse.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Team members skipped: already members, the owner, you, or not an active account.
+  int get skipped => (json['skipped']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// One of: WAITING, ADMITTED, DENIED, REMOVED, BANNED.
 typedef AdmissionState = String;
 
@@ -757,12 +803,14 @@ class BreakoutView {
   const BreakoutView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory BreakoutView.create({int? capacity, String? closedAt, String? closingAt, required String conferenceId, required String id, required String name, String? openedAt, required int participantCount, List<String>? participantIds, required int position, required String recordingPolicy, required BreakoutStatus status, required int version}) =>
+  factory BreakoutView.create({int? capacity, String? closedAt, String? closingAt, required String conferenceId, int? durationSeconds, String? endsAt, required String id, required String name, String? openedAt, required int participantCount, List<String>? participantIds, required int position, required String recordingPolicy, required BreakoutStatus status, required int version}) =>
       BreakoutView.fromJson(<String, Object?>{
         if (capacity != null) 'capacity': capacity,
         if (closedAt != null) 'closedAt': closedAt,
         if (closingAt != null) 'closingAt': closingAt,
         'conferenceId': conferenceId,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
+        if (endsAt != null) 'endsAt': endsAt,
         'id': id,
         'name': name,
         if (openedAt != null) 'openedAt': openedAt,
@@ -784,6 +832,11 @@ class BreakoutView {
   String? get closingAt => json['closingAt'] as String?;
 
   String get conferenceId => json['conferenceId']! as String;
+
+  /// Gap audit M17: timed rooms only — the length set at creation, and once open, when the room closes by itself.
+  int? get durationSeconds => (json['durationSeconds'] as num?)?.toInt();
+
+  String? get endsAt => json['endsAt'] as String?;
 
   String get id => json['id']! as String;
 
@@ -830,6 +883,26 @@ class BulkAdmissionResponse {
 
   /// Already in the requested state (idempotent retry).
   List<String> get unchanged => (json['unchanged']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// `POST /api/v2/registrations/cancel` request: the registration's admission token.
+class CancelOwnRegistrationRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CancelOwnRegistrationRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CancelOwnRegistrationRequest.create({required String token}) =>
+      CancelOwnRegistrationRequest.fromJson(<String, Object?>{
+        'token': token,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The admission token returned when registering (`reg_…`).
+  String get token => json['token']! as String;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1502,12 +1575,14 @@ class CreateBreakoutsRequest {
   const CreateBreakoutsRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateBreakoutsRequest.create({int? capacity, int? count, List<String>? names, BreakoutRecordingPolicy? recordingPolicy}) =>
+  factory CreateBreakoutsRequest.create({int? capacity, int? count, int? durationSeconds, List<String>? names, BreakoutRecordingPolicy? recordingPolicy, int? warningSeconds}) =>
       CreateBreakoutsRequest.fromJson(<String, Object?>{
         if (capacity != null) 'capacity': capacity,
         if (count != null) 'count': count,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
         if (names != null) 'names': names,
         if (recordingPolicy != null) 'recordingPolicy': recordingPolicy,
+        if (warningSeconds != null) 'warningSeconds': warningSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -1518,10 +1593,16 @@ class CreateBreakoutsRequest {
   /// Number of automatically numbered rooms ("Room N").
   int? get count => (json['count'] as num?)?.toInt();
 
+  /// Gap audit M17: timed rooms. Once opened, a room closes by itself after this many seconds (60-14400), with a `warningSeconds` countdown first.
+  int? get durationSeconds => (json['durationSeconds'] as num?)?.toInt();
+
   /// Named rooms. Mutually exclusive with `count`.
   List<String>? get names => json['names'] == null ? null : (json['names']! as List<Object?>).map((e) => e! as String).toList();
 
   BreakoutRecordingPolicy? get recordingPolicy => json['recordingPolicy'] as String?;
+
+  /// Countdown before a timed room closes (0-600, default 60).
+  int? get warningSeconds => (json['warningSeconds'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -1812,6 +1893,25 @@ class DuplicateMeetingSpaceRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Gap audit M17: the new text of an edited message.
+class EditMessageRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const EditMessageRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory EditMessageRequest.create({required String body}) =>
+      EditMessageRequest.fromJson(<String, Object?>{
+        'body': body,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get body => json['body']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// What happened to a requested invitation email.
 ///
 /// One of: DISABLED, ACCEPTED, FAILED.
@@ -1822,9 +1922,10 @@ class ErrorBody {
   const ErrorBody.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ErrorBody.create({required ErrorCode code, required String message, String? requestId, int? retryAfterSeconds}) =>
+  factory ErrorBody.create({required ErrorCode code, List<ValidationIssue>? details, required String message, String? requestId, int? retryAfterSeconds}) =>
       ErrorBody.fromJson(<String, Object?>{
         'code': code,
+        if (details != null) 'details': details.map((e) => e.toJson()).toList(),
         'message': message,
         if (requestId != null) 'requestId': requestId,
         if (retryAfterSeconds != null) 'retryAfterSeconds': retryAfterSeconds,
@@ -1834,6 +1935,9 @@ class ErrorBody {
   final Map<String, Object?> json;
 
   ErrorCode get code => json['code']! as String;
+
+  /// Present on `VALIDATION_ERROR` when the request body failed field validation: one entry per problem, naming the public JSON field (`message` still summarises them as `field: message` lines for older clients).
+  List<ValidationIssue>? get details => json['details'] == null ? null : (json['details']! as List<Object?>).map((e) => ValidationIssue.fromJson(e! as Map<String, Object?>)).toList();
 
   /// Safe, human-readable message (never SQL, provider bodies, secrets or paths).
   String get message => json['message']! as String;
@@ -1926,6 +2030,26 @@ class ExportProfile {
   bool get pollReportAllowed => json['pollReportAllowed']! as bool;
 
   int get retentionDays => (json['retentionDays']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// MF1: extend a live conference's scheduled end.
+class ExtendConferenceRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ExtendConferenceRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ExtendConferenceRequest.create({required int minutes}) =>
+      ExtendConferenceRequest.fromJson(<String, Object?>{
+        'minutes': minutes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Minutes added to the scheduled end (or to now, when the scheduled end has already passed and the meeting is in its grace period): 1 to 240.
+  int get minutes => (json['minutes']! as num).toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -2787,13 +2911,14 @@ class MessageView {
   const MessageView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MessageView.create({String? body, String? breakoutId, required String conferenceId, required String createdAt, required bool deleted, required String id, required MessageKind kind, String? recipientParticipantId, required String senderDisplayName, required String senderParticipantId}) =>
+  factory MessageView.create({String? body, String? breakoutId, required String conferenceId, required String createdAt, required bool deleted, String? editedAt, required String id, required MessageKind kind, String? recipientParticipantId, required String senderDisplayName, required String senderParticipantId}) =>
       MessageView.fromJson(<String, Object?>{
         if (body != null) 'body': body,
         if (breakoutId != null) 'breakoutId': breakoutId,
         'conferenceId': conferenceId,
         'createdAt': createdAt,
         'deleted': deleted,
+        if (editedAt != null) 'editedAt': editedAt,
         'id': id,
         'kind': kind,
         if (recipientParticipantId != null) 'recipientParticipantId': recipientParticipantId,
@@ -2814,6 +2939,9 @@ class MessageView {
   String get createdAt => json['createdAt']! as String;
 
   bool get deleted => json['deleted']! as bool;
+
+  /// Gap audit M17: when the sender last edited the message (`null`: never edited).
+  String? get editedAt => json['editedAt'] as String?;
 
   String get id => json['id']! as String;
 
@@ -4517,11 +4645,12 @@ class RegistrationCreated {
   const RegistrationCreated.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationCreated.create({String? admissionToken, String? conferenceId, required bool created, required String expiresAt, required String meetingSpaceId, required String registrationId}) =>
+  factory RegistrationCreated.create({String? admissionToken, String? conferenceId, required bool created, EmailDelivery? emailDelivery, required String expiresAt, required String meetingSpaceId, required String registrationId}) =>
       RegistrationCreated.fromJson(<String, Object?>{
         if (admissionToken != null) 'admissionToken': admissionToken,
         if (conferenceId != null) 'conferenceId': conferenceId,
         'created': created,
+        if (emailDelivery != null) 'emailDelivery': emailDelivery,
         'expiresAt': expiresAt,
         'meetingSpaceId': meetingSpaceId,
         'registrationId': registrationId,
@@ -4530,12 +4659,14 @@ class RegistrationCreated {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  /// Opaque admission token (shown once; only its hash is stored). Absent for an idempotent repeat.
+  /// Opaque admission token (only its hash is stored). An idempotent repeat (same `idempotencyKey` and request) returns the same token while the registration is active (audit M10); absent once it was cancelled or revoked.
   String? get admissionToken => json['admissionToken'] as String?;
 
   String? get conferenceId => json['conferenceId'] as String?;
 
   bool get created => json['created']! as bool;
+
+  EmailDelivery? get emailDelivery => json['emailDelivery'] as String?;
 
   String get expiresAt => json['expiresAt']! as String;
 
@@ -4551,13 +4682,17 @@ class RegistrationListResponse {
   const RegistrationListResponse.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationListResponse.create({required List<RegistrationView> registrations}) =>
+  factory RegistrationListResponse.create({String? nextCursor, required List<RegistrationView> registrations}) =>
       RegistrationListResponse.fromJson(<String, Object?>{
+        if (nextCursor != null) 'nextCursor': nextCursor,
         'registrations': registrations.map((e) => e.toJson()).toList(),
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Pass as `after` to get the next page; `null` on the last page.
+  String? get nextCursor => json['nextCursor'] as String?;
 
   List<RegistrationView> get registrations => (json['registrations']! as List<Object?>).map((e) => RegistrationView.fromJson(e! as Map<String, Object?>)).toList();
 
@@ -4569,9 +4704,12 @@ class RegistrationProfile {
   const RegistrationProfile.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationProfile.create({required List<CustomRegistrationField> customFields, required FieldRequirement email, required bool enabled, required FieldRequirement organization, required int tokenMaxUses, required int tokenTtlHours}) =>
+  factory RegistrationProfile.create({int? capacity, int? closesMinutesBeforeStart, required List<CustomRegistrationField> customFields, String? deadline, required FieldRequirement email, required bool enabled, required FieldRequirement organization, required int tokenMaxUses, required int tokenTtlHours}) =>
       RegistrationProfile.fromJson(<String, Object?>{
+        if (capacity != null) 'capacity': capacity,
+        if (closesMinutesBeforeStart != null) 'closesMinutesBeforeStart': closesMinutesBeforeStart,
         'customFields': customFields.map((e) => e.toJson()).toList(),
+        if (deadline != null) 'deadline': deadline,
         'email': email,
         'enabled': enabled,
         'organization': organization,
@@ -4582,7 +4720,16 @@ class RegistrationProfile {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// Gap audit M10: most active registrations accepted (per occurrence, or for the whole series); 0 = no limit. At most 100000.
+  int? get capacity => (json['capacity'] as num?)?.toInt();
+
+  /// Gap audit M10: registration closes this many minutes before the occurrence's scheduled start (0 = open until the occurrence ends).
+  int? get closesMinutesBeforeStart => (json['closesMinutesBeforeStart'] as num?)?.toInt();
+
   List<CustomRegistrationField> get customFields => (json['customFields']! as List<Object?>).map((e) => CustomRegistrationField.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Gap audit M10: registration closes at this time, whatever the occurrence.
+  String? get deadline => json['deadline'] as String?;
 
   FieldRequirement get email => json['email']! as String;
 
@@ -5584,6 +5731,34 @@ class UpdateMemberRequest {
   Role get role => json['role']! as String;
 
   int get version => (json['version']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// One request-validation problem.
+class ValidationIssue {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ValidationIssue.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ValidationIssue.create({required String code, required String? field, required String message}) =>
+      ValidationIssue.fromJson(<String, Object?>{
+        'code': code,
+        'field': field,
+        'message': message,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Stable, machine-readable rule code, e.g. `length`, `email`, `regex`, `range`.
+  String get code => json['code']! as String;
+
+  /// Public JSON path of the offending field, as sent by the client (honours the request's serde naming), e.g. `email`, `displayName`, `items(0).email`. `null` when the problem concerns the request as a whole.
+  String? get field => json['field'] as String?;
+
+  /// Safe, human-readable message for this field.
+  String get message => json['message']! as String;
 
   Map<String, Object?> toJson() => json;
 }

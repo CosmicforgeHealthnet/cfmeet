@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.5.0";
+export const CONTRACT_VERSION = "1.11.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -100,6 +100,30 @@ export interface AddOrganizationTeamMemberRequest {
   userId?: string | null;
 }
 
+/** Gap audit G7: add every active member of one of the space's organization teams. */
+export interface AddTeamMembersRequest {
+  role: Role;
+  teamId: string;
+}
+
+/** Result of adding a team (gap audit G7). */
+export interface AddTeamMembersResponse {
+  /** Members added now. */
+  added: Array<MemberResponse>;
+  /** Team members skipped: already members, the owner, you, or not an active account. */
+  skipped: number;
+}
+
+/**
+ * Support-assisted email change (admin only): the owner lost access to the old address
+ * and was verified by support outside the product.
+ */
+export interface AdminChangeEmailRequest {
+  new_email: string;
+  /** Why and how the owner was verified (recorded in the security audit). */
+  reason: string;
+}
+
 /** Paginated response for admin logs */
 export interface AdminLogListResponse {
   data: Array<AdminLogResponse>;
@@ -147,6 +171,12 @@ export interface AdminPaginationMeta {
   page: number;
   total: number;
   total_pages: number;
+}
+
+
+export interface AdminRevokeSessionsRequest {
+  /** Why the sessions are ended (1-500 characters; recorded in the security audit). */
+  reason: string;
 }
 
 /** Request to update a user (admin only) */
@@ -318,6 +348,47 @@ export interface ApiKeyResponse {
   used_count: number;
 }
 
+
+export interface AppContextJwk {
+  alg: string;
+  crv: string;
+  kid: string;
+  kty: string;
+  use: string;
+  x: string;
+}
+
+/** JWKS of the app-context signing keys. */
+export interface AppContextKeySet {
+  keys: Array<AppContextJwk>;
+}
+
+
+export interface AppContextTokenResponse {
+  /** Ed25519 JWS (verify with `GET /api/v2/app-context-keys`). */
+  contextToken: string;
+  /** Seconds (300). */
+  expiresIn: number;
+}
+
+/** `POST /api/v2/admin/organizations/{id}/owners` (platform administrators). */
+export interface AppointOrganizationOwnerRequest {
+  /**
+   * Why the administrator intervenes (1–500 characters; recorded in the organization's
+   * audit history).
+   */
+  reason: string;
+  /** The account that becomes an ACTIVE OWNER. */
+  userId: string;
+}
+
+
+export interface ApproveLinkRequest {
+  /** The 6-digit code shown on the new device (typed or scanned from its QR code). */
+  comparisonCode: string;
+  proof: DeviceProof;
+}
+
 /** `POST /api/v2/organizations/{id}/teams/{teamId}/archive`. */
 export interface ArchiveOrganizationTeamRequest {
   /** Optional team `version` the archive is based on. */
@@ -435,6 +506,43 @@ export interface AuditProfile {
   enhanced: boolean;
 }
 
+/** Consent data for the consent page. */
+export interface AuthorizeContextResponse {
+  app: OauthAppSummary;
+  organizationId?: string | null;
+  organizationInstall?: OrganizationInstallDecision | null;
+  /** The redirect URI Platform Access validated (exactly the requested one). */
+  redirectUri: string;
+  scopes: Array<OauthScopeView>;
+  state?: string | null;
+  /** `USER` or `ORGANIZATION`. */
+  target: string;
+}
+
+/** `POST /api/v2/oauth/authorize/approve`. */
+export interface AuthorizeDecisionRequest {
+  clientId: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  /** `APPROVE` or `DENY`. */
+  decision: string;
+  /** `organization` for a workspace install; absent or `user` for a personal install. */
+  install?: string | null;
+  organizationId?: string | null;
+  redirectUri: string;
+  scope: string;
+  state?: string | null;
+}
+
+
+export interface AuthorizeDecisionResponse {
+  /**
+   * Where the browser goes next: `redirect_uri?code=…&state=…` on approval,
+   * `redirect_uri?error=access_denied&state=…` on denial.
+   */
+  redirectTo: string;
+}
+
 
 export interface BackfillReportResponse {
   conferenceParticipantRowsFromLegacy: number;
@@ -515,6 +623,12 @@ export interface BreakoutView {
   closedAt?: string | null;
   closingAt?: string | null;
   conferenceId: string;
+  /**
+   * Gap audit M17: timed rooms only — the length set at creation, and once open, when
+   * the room closes by itself.
+   */
+  durationSeconds?: number | null;
+  endsAt?: string | null;
   id: string;
   name: string;
   openedAt?: string | null;
@@ -590,11 +704,26 @@ export interface BusinessOrganizationPage {
   nextCursor?: string | null;
 }
 
+/** Audit MF2: the caller's private calendar feed (webcal / ICS subscription). */
+export interface CalendarFeedResponse {
+  /** A feed exists (its URL works until it is replaced or deleted). */
+  active: boolean;
+  createdAt?: string | null;
+  lastUsedAt?: string | null;
+  /**
+   * The feed path relative to the API origin (`/api/v2/calendar-feeds/<token>.ics`), only
+   * when the feed is created. Subscribe to `https://<api host><path>` (or the same with
+   * `webcal://`).
+   */
+  path?: string | null;
+  /** The feed token, returned only when the feed is created (only its hash is stored). */
+  token?: string | null;
+}
 
-export interface ChangePasswordRequest {
-  confirm_password: string;
-  current_password: string;
-  new_password: string;
+/** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
+export interface CancelOwnRegistrationRequest {
+  /** The admission token returned when registering (`reg_…`). */
+  token: string;
 }
 
 
@@ -643,6 +772,13 @@ export interface CloseBreakoutRequest {
 export interface CloseBreakoutsResponse {
   breakouts: Array<BreakoutView>;
   providerEnforcement: ProviderEnforcement;
+}
+
+
+export interface CodeSentResponse {
+  /** How long the emailed code stays valid. */
+  expiresInSecs: number;
+  message: string;
 }
 
 /** Complete effective collaboration policy of a conference. */
@@ -727,11 +863,34 @@ export interface CollaborationStateResponse {
 }
 
 
+export interface CompleteLinkRequest {
+  /** Required only for the email step-up (6 digits from the email). */
+  emailCode?: string | null;
+  proof: DeviceProof;
+}
+
+
 export interface ConferenceActionResponse {
   /** False when the request was an idempotent no-op (e.g. already LIVE). */
   changed: boolean;
   conference: ConferenceResponse;
   providerEnforcement: ProviderEnforcement;
+}
+
+/** An app with a meeting surface installed for the meeting's owner or organization. */
+export interface ConferenceApp {
+  appId: string;
+  developerName?: string | null;
+  /** `OWNER` (the meeting owner's personal install) or `ORGANIZATION`. */
+  installedFor: string;
+  logoUrl?: string | null;
+  name?: string | null;
+  surface: MeetingSurfaceView;
+}
+
+
+export interface ConferenceAppList {
+  items: Array<ConferenceApp>;
 }
 
 
@@ -796,6 +955,28 @@ export interface ConferenceSummary {
   scheduledStartAt?: string | null;
   startedAt?: string | null;
   status: ConferenceStatus;
+}
+
+/** One installed app (a grant). */
+export interface ConnectedApp {
+  appId: string;
+  createdAt?: string | null;
+  developerName?: string | null;
+  grantId: string;
+  /** Whether the app has an in-meeting panel. */
+  hasMeetingSurface: boolean;
+  logoUrl?: string | null;
+  name?: string | null;
+  organizationId?: string | null;
+  scopes: Array<string>;
+  status: string;
+  /** `USER` or `ORGANIZATION`. */
+  target: string;
+}
+
+
+export interface ConnectedAppList {
+  items: Array<ConnectedApp>;
 }
 
 
@@ -866,9 +1047,16 @@ export interface CreateBreakoutsRequest {
   capacity?: number | null;
   /** Number of automatically numbered rooms ("Room N"). */
   count?: number | null;
+  /**
+   * Gap audit M17: timed rooms. Once opened, a room closes by itself after this many
+   * seconds (60-14400), with a `warningSeconds` countdown first.
+   */
+  durationSeconds?: number | null;
   /** Named rooms. Mutually exclusive with `count`. */
   names?: Array<string> | null;
   recordingPolicy?: BreakoutRecordingPolicy | null;
+  /** Countdown before a timed room closes (0-600, default 60). */
+  warningSeconds?: number | null;
 }
 
 /** `POST /api/v2/organizations`. */
@@ -1060,11 +1248,40 @@ export interface DataSharingProfile {
 /** Optional body of POST /api/v1/users/me/deactivate (ACC-026). */
 export interface DeactivateAccountRequest {
   /**
-   * The account's current password. Required unless the caller signed in within the
-   * re-authentication window (default 10 minutes); accounts without a password (Google
-   * sign-in) re-authenticate by signing in again.
+   * Single-use token from `POST /api/v2/me/step-up/verify` with purpose
+   * `DEACTIVATE_ACCOUNT` (a code emailed to the account's address).
    */
-  current_password?: string | null;
+  step_up_token?: string | null;
+}
+
+/**
+ * `POST /api/v2/me/devices/current` body. Proof purpose `DECLARE`, context = this
+ * sign-in's `sessionId` (from `GET /api/v2/me/sessions`, `current: true`).
+ */
+export interface DeclareDeviceRequest {
+  /** `WEB` or `MOBILE`. */
+  deviceClass: string;
+  /**
+   * Random id generated once per installation / browser profile and kept with the key
+   * (16-128 characters of `[A-Za-z0-9_-]`). Never derived from hardware identifiers.
+   */
+  installationId: string;
+  /** Optional user-visible name (1-80 characters, no control characters). */
+  label?: string | null;
+  /** `WEB` (with `WEB`), `IOS` or `ANDROID` (with `MOBILE`). */
+  platform: string;
+  proof: DeviceProof;
+  /**
+   * Ed25519 public key, base64url (32 bytes), generated on the device; the private key
+   * never leaves it (non-extractable Web Crypto key / platform keystore).
+   */
+  publicKey: string;
+}
+
+/** Gap audit A2: the confirmation of an account deletion. */
+export interface DeleteAccountRequest {
+  /** A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`). */
+  stepUpToken: string;
 }
 
 
@@ -1093,9 +1310,157 @@ export interface DetailedParticipantResponse {
   user_id?: string | null;
 }
 
+/** A linking challenge created by a new device. */
+export interface DeviceLinkView {
+  /**
+   * Shown ONLY to the requesting device (and in its QR payload); a trusted device must
+   * type or scan it to approve. Never listed to other devices.
+   */
+  comparisonCode?: string | null;
+  createdAt: string;
+  deviceClass: string;
+  /** The requesting (new) device. */
+  deviceId: string;
+  expiresAt: string;
+  label?: string | null;
+  linkId: string;
+  /** `DEVICE_APPROVAL` or `EMAIL_STEP_UP` once approved. */
+  method?: string | null;
+  platform: string;
+  /**
+   * `cfmeet-device-link:v1:{linkId}:{comparisonCode}` for an optional QR code (requesting
+   * device only). A copy of it is useless without a trusted device's key and session.
+   */
+  qrPayload?: string | null;
+  /** `PENDING`, `APPROVED`, `COMPLETED`, `CANCELLED`, `EXPIRED` or `REJECTED`. */
+  status: string;
+}
+
+
+export interface DeviceListResponse {
+  devices: Array<DeviceView>;
+}
+
+/** Result of a completed link or declaration. */
+export interface DeviceOutcome {
+  device: DeviceView;
+  /** Sign-ins ended by this operation (replaced mobile, superseded sign-ins). */
+  endedSessions: number;
+  /** The primary mobile this completion replaced (revoked), if any. */
+  replacedDeviceId?: string | null;
+}
+
+/** The account's device policy and state. */
+export interface DevicePolicyView {
+  /** `WEB_ONLY`, `MOBILE_PRIMARY` or `DEVICE_REPLACEMENT_PENDING` (a new mobile waits). */
+  accountState: string;
+  activeWebDevices: number;
+  /** The current sign-in: its device (absent while unclassified). */
+  currentDeviceId?: string | null;
+  /**
+   * `UNCLASSIFIED` (sign-in has declared no device), `TRUSTED`, `UNTRUSTED` or
+   * `REPLACEMENT_PENDING`.
+   */
+  currentDeviceStatus: string;
+  /** Personal E2EE device enrollment needs a trusted device. */
+  e2eeRequiresTrustedDevice: boolean;
+  linkTtlSecs: number;
+  /**
+   * Ways a new device can be approved: `DEVICE_APPROVAL` (when a trusted device exists)
+   * and `EMAIL_STEP_UP` (when enabled).
+   */
+  linkingMethods: Array<string>;
+  /** Always 1: at most one primary mobile. */
+  maxPrimaryMobiles: number;
+  maxWebDevices: number;
+  pendingMobileDeviceIds: Array<string>;
+  primaryMobileDeviceId?: string | null;
+  proofWindowSecs: number;
+  trustedDevices: number;
+}
+
+/**
+ * Proof of possession of a device key: an Ed25519 signature (base64url, 64 bytes) over
+ * `cfmeet-account-device-proof:v1\n{purpose}\n{keyThumbprint}\n{context}\n{issuedAt}\n{nonce}`
+ * where `keyThumbprint` is the lowercase hex SHA-256 of the 32-byte public key and the
+ * context is defined per operation (see each endpoint). `issuedAt` is Unix seconds
+ * (accepted within the policy window); `nonce` is 16-64 random bytes, base64url, never
+ * reused.
+ */
+export interface DeviceProof {
+  issuedAt: number;
+  nonce: string;
+  signature: string;
+}
+
+/** One logical device as shown to its owner. */
+export interface DeviceView {
+  createdAt: string;
+  /** True when the request was made from this device. */
+  current: boolean;
+  /** `WEB` or `MOBILE`. */
+  deviceClass: string;
+  deviceId: string;
+  /** Lowercase hex SHA-256 of the device public key (compare across devices). */
+  keyThumbprint: string;
+  label?: string | null;
+  lastSeenAt: string;
+  /** Open sign-ins of this device (normally 1). */
+  openSessions: number;
+  /** `WEB`, `IOS` or `ANDROID`. */
+  platform: string;
+  /** True for the account's ACTIVE mobile. */
+  primary: boolean;
+  promotedAt?: string | null;
+  replacedByDeviceId?: string | null;
+  revokeReason?: string | null;
+  revokedAt?: string | null;
+  /** `ACTIVE`, `REPLACEMENT_PENDING` or `REVOKED`. */
+  state: string;
+  /** `TRUSTED` or `UNTRUSTED`. */
+  trust: string;
+  trustedAt?: string | null;
+  /**
+   * `BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,
+   * ADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
+   */
+  trustedVia?: string | null;
+}
+
 
 export interface DuplicateMeetingSpaceRequest {
   title?: string | null;
+}
+
+/** Gap audit M17: the new text of an edited message. */
+export interface EditMessageRequest {
+  body: string;
+}
+
+
+export interface EmailChangeConfirmRequest {
+  /** The 6-digit code emailed to the NEW address. */
+  code: string;
+  newEmail: string;
+}
+
+
+export interface EmailChangeRequest {
+  newEmail: string;
+  /** From `POST /api/v2/me/step-up/verify` with purpose `CHANGE_EMAIL`. */
+  stepUpToken: string;
+}
+
+/** Undo a self-service email change with the token mailed to the previous address. */
+export interface EmailChangeRevertRequest {
+  token: string;
+}
+
+
+export interface EmailChangedResponse {
+  email: string;
+  /** Other sessions were signed out; this one stays signed in. */
+  otherSessionsEnded: boolean;
 }
 
 /** What happened to a requested invitation email. */
@@ -1115,6 +1480,12 @@ export interface EndMeetingResponse {
 
 export interface ErrorBody {
   code: ErrorCode;
+  /**
+   * Present on `VALIDATION_ERROR` when the request body failed field validation: one
+   * entry per problem, naming the public JSON field (`message` still summarises them
+   * as `field: message` lines for older clients).
+   */
+  details?: Array<ValidationIssue> | null;
   /** Safe, human-readable message (never SQL, provider bodies, secrets or paths). */
   message: string;
   /** Server-generated correlation ID (also in the `x-request-id` response header). */
@@ -1124,7 +1495,7 @@ export interface ErrorBody {
 }
 
 /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "APP_NOT_FOUND" | "OAUTH_REQUEST_INVALID" | "CALENDAR_FEED_NOT_FOUND" | "EXPORT_LINK_INVALID" | "EXPORT_LINK_EXPIRED" | "DATABASE_ERROR" | "INTERNAL_ERROR";
 
 /** OpenAPI description of the public error envelope. */
 export interface ErrorEnvelope {
@@ -1150,6 +1521,15 @@ export interface ExportProfile {
   retentionDays: number;
 }
 
+/** MF1: extend a live conference's scheduled end. */
+export interface ExtendConferenceRequest {
+  /**
+   * Minutes added to the scheduled end (or to now, when the scheduled end has already
+   * passed and the meeting is in its grace period): 1 to 240.
+   */
+  minutes: number;
+}
+
 
 export type FailureCategoryDto = "PERMISSION_DENIED" | "PROVIDER_UNAVAILABLE" | "TRANSPORT" | "UNKNOWN";
 
@@ -1158,11 +1538,6 @@ export type FailureKind = "AUDIO_PUBLISH" | "VIDEO_PUBLISH" | "SCREEN_SHARE_PUBL
 
 
 export type FieldRequirement = "REQUIRED" | "OPTIONAL" | "DISABLED";
-
-
-export interface ForgotPasswordRequest {
-  email: string;
-}
 
 
 export interface GenerateReportRequest {
@@ -1177,6 +1552,14 @@ export interface GoogleExchangeRequest {
   exchange_code: string;
 }
 
+/** Gap audit A4: a native Google ID token. */
+export interface GoogleNativeRequest {
+  /** The ID token returned by the Google Sign-In SDK. */
+  idToken: string;
+  /** The nonce the token was requested with, if any. */
+  nonce?: string | null;
+}
+
 
 export interface HandRaiseResponse {
   changed: boolean;
@@ -1185,8 +1568,22 @@ export interface HandRaiseResponse {
   raisedAt?: string | null;
 }
 
+/** Gap audit A17: the case-insensitive uniqueness report. */
+export interface IdentityDuplicatesReport {
+  email: IdentityUniqueness;
+  username: IdentityUniqueness;
+}
+
 
 export type IdentityType = "REGISTERED_USER" | "INVITED_EXTERNAL" | "GUEST" | "PHONE" | "SERVICE" | "BOT";
+
+/** Gap audit A17: case-insensitive uniqueness of one identity field. */
+export interface IdentityUniqueness {
+  /** Accounts that differ only by case, grouped (at most 100 groups); empty when none. */
+  duplicateGroups: Array<Array<string>>;
+  /** True when the database enforces it (the unique index exists). */
+  enforced: boolean;
+}
 
 /** API response wrapper for instant meeting */
 export interface InstantMeetingApiResponse {
@@ -1242,6 +1639,13 @@ export interface InvitationResponse {
 
 
 export type InvitationStatus = "ACTIVE" | "REVOKED";
+
+/** The organization an invitation for the signed-in account comes from. */
+export interface InvitingOrganization {
+  id: string;
+  name: string;
+  slug: string;
+}
 
 
 export interface JoinConferenceRequest {
@@ -1389,13 +1793,7 @@ export interface ListMeetingSpacesQuery {
   limit?: number | null;
 }
 
-
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-
+/** Tokens and account of a completed sign-in. */
 export interface LoginResponse {
   access_token: string;
   refresh_token: string;
@@ -1561,6 +1959,14 @@ export interface MeetingSpaceResponse {
 }
 
 
+export interface MeetingSurfaceView {
+  /** Origins the panel's messaging bridge accepts. */
+  origins: Array<string>;
+  /** The iframe URL (`https://`). */
+  url: string;
+}
+
+
 export type MeetingType = "STANDARD" | "HEALTHCARE" | "WEBINAR" | "TOWN_HALL" | "TRAINING";
 
 
@@ -1621,11 +2027,45 @@ export interface MessageView {
   conferenceId: string;
   createdAt: string;
   deleted: boolean;
+  /** Gap audit M17: when the sender last edited the message (`null`: never edited). */
+  editedAt?: string | null;
   id: string;
   kind: MessageKind;
   recipientParticipantId?: string | null;
   senderDisplayName: string;
   senderParticipantId: string;
+}
+
+/** Gap audit A1: a code from the authenticator app. */
+export interface MfaConfirmRequest {
+  code: string;
+}
+
+/** Gap audit A1: the confirmation of turning two-step sign-in off. */
+export interface MfaDisableRequest {
+  /** A step-up token for purpose `DISABLE_MFA`. */
+  stepUpToken: string;
+}
+
+/** Gap audit A1: the recovery codes (shown once). */
+export interface MfaRecoveryCodes {
+  recoveryCodes: Array<string>;
+}
+
+/** Gap audit A1: the authenticator enrolment secret (shown once). */
+export interface MfaSetupResponse {
+  /** The `otpauth://` URI to show as a QR code. */
+  otpauthUri: string;
+  /** The base32 secret for manual entry. */
+  secret: string;
+}
+
+/** Gap audit A1: the second factor of a parked sign-in. */
+export interface MfaVerifyRequest {
+  /** A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`). */
+  code: string;
+  /** The `mfaTicket` of the `401 MFA_REQUIRED` answer. */
+  mfaTicket: string;
 }
 
 
@@ -1688,6 +2128,26 @@ export interface MyCollaborationState {
   videoLocked: boolean;
 }
 
+/** A pending invitation addressed to the signed-in account. */
+export interface MyOrganizationInvitation {
+  createdAt: string;
+  expiresAt: string;
+  id: string;
+  invitedBy?: string | null;
+  inviteeEmailHint: string;
+  organization?: InvitingOrganization | null;
+  organizationId: string;
+  /** The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST. */
+  role: string;
+  /** Always PENDING in this list. */
+  status: string;
+}
+
+/** Pending invitations addressed to the signed-in account (newest first, at most 100). */
+export interface MyOrganizationInvitationList {
+  items: Array<MyOrganizationInvitation>;
+}
+
 
 export interface MyOrganizationResponse {
   organization: OrganizationResponse;
@@ -1700,7 +2160,32 @@ export interface MyOrganizationResponse {
 }
 
 
+export interface MySecurityEventPage {
+  events: Array<SecurityEventRecord>;
+  nextCursor?: number | null;
+}
+
+
 export type NetworkType = "WIFI" | "CELLULAR" | "ETHERNET" | "UNKNOWN";
+
+
+export interface OauthAppSummary {
+  clientId: string;
+  developerName?: string | null;
+  /** `PRIVATE` or `PUBLIC`. */
+  distribution?: string | null;
+  name: string;
+  /** `DRAFT`, `APPROVED`, `PUBLISHED` (or `SUSPENDED`, never authorizable). */
+  status?: string | null;
+}
+
+
+export interface OauthScopeView {
+  description?: string | null;
+  name: string;
+  /** `user` or `bot`. */
+  who?: string | null;
+}
 
 /** Who performed an audited organization change. */
 export interface OrganizationAuditActor {
@@ -1737,6 +2222,19 @@ export interface OrganizationAuditEventPage {
   nextCursor?: number | null;
 }
 
+/** ADR 0068: the single-use token of an organization export's emailed link. */
+export interface OrganizationExportDownloadRequest {
+  /** The `token` of the download link (from the link's fragment; never logged or stored). */
+  token: string;
+}
+
+/** The organization's install decision for a workspace install (Organizations policy). */
+export interface OrganizationInstallDecision {
+  allowed: boolean;
+  /** `NOT_A_MEMBER`, `ROLE_REQUIRED`, `NOT_ALLOWLISTED` or `ORGANIZATION_NOT_READY`. */
+  reason?: string | null;
+}
+
 /** An organization invitation. The raw `token` is returned once, at creation only. */
 export interface OrganizationInvitation {
   createdAt: string;
@@ -1766,6 +2264,8 @@ export interface OrganizationInvitation {
 export interface OrganizationInvitationList {
   /** Invitations (masked invitee email; never a token). */
   items: Array<OrganizationInvitation>;
+  /** The cursor of the next page; absent or null on the last page. */
+  nextCursor?: string | null;
 }
 
 /** `POST /api/v2/organization-invitations/accept` and `/decline`. */
@@ -1793,6 +2293,40 @@ export interface OrganizationLegalRegistration {
 export interface OrganizationLifecycleRequest {
   /** Optional organization `version` the change is based on. */
   expectedVersion?: number | null;
+}
+
+/**
+ * Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the
+ * same shape as a space override; every value set binds the organization's spaces.
+ */
+export interface OrganizationMeetingProfilePolicy {
+  organizationId: string;
+  policy: Record<string, unknown>;
+}
+
+/**
+ * Gap audit G13: one meeting space of an organization, as its managers oversee it
+ * (whatever its access policy or security profile). Governance fields only: no
+ * passcode, invitation, participant or content data.
+ */
+export interface OrganizationMeetingSpace {
+  accessPolicy: AccessPolicy;
+  archivedAt?: string | null;
+  createdAt: string;
+  id: string;
+  meetingType: MeetingType;
+  ownerUserId?: string | null;
+  securityProfile: SecurityProfile;
+  status: SpaceStatus;
+  title: string;
+  updatedAt: string;
+}
+
+/** `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13). */
+export interface OrganizationMeetingSpacePage {
+  items: Array<OrganizationMeetingSpace>;
+  /** Pass as `after` for the next page; `null` on the last page. */
+  nextCursor?: string | null;
 }
 
 
@@ -2074,6 +2608,35 @@ export interface OrganizationViewer {
   status: string;
 }
 
+/** Start a passwordless sign-in (or sign-up): a one-time code is emailed. */
+export interface OtpRequest {
+  email: string;
+}
+
+/**
+ * Finish a passwordless sign-in with the magic link from the same email (the email
+ * address and token both come from the link).
+ */
+export interface OtpVerifyLinkRequest {
+  email: string;
+  token: string;
+}
+
+/** Finish a passwordless sign-in with the emailed 6-digit code. */
+export interface OtpVerifyRequest {
+  code: string;
+  email: string;
+}
+
+/** A completed passwordless sign-in. */
+export interface OtpVerifyResponse {
+  access_token: string;
+  /** True when this sign-in created the account (first sign-in with this address). */
+  is_new_account: boolean;
+  refresh_token: string;
+  user: UserInfo;
+}
+
 
 export interface OwnerTransferRequest {
   newOwnerUserId: string;
@@ -2134,12 +2697,64 @@ export interface ParticipantsListResponse {
   success: boolean;
 }
 
+
+export interface PendingLinkListResponse {
+  links: Array<PendingLinkView>;
+}
+
+/** A pending link as listed to a trusted device (no comparison code). */
+export type PendingLinkView = (DeviceLinkView & {
+  /** Thumbprint of the requesting device's key (part of the approval proof context). */
+  keyThumbprint: string;
+});
+
+
+export interface PhoneBindRequest {
+  phoneNumber: string;
+  stepUpToken: string;
+}
+
+
+export interface PhoneChallenge {
+  challengeId: string;
+  expiresInSecs: number;
+  message: string;
+}
+
+
+export interface PhoneConfirm {
+  challengeId: string;
+  code: string;
+}
+
+
+export interface PhoneRemove {
+  stepUpToken: string;
+}
+
+
+export interface PhoneRequest {
+  phoneNumber: string;
+}
+
+
+export interface PhoneSettings {
+  discoverable: boolean;
+}
+
 /**
  * Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or
  * verification provider is approved, and never required.
  */
 export interface PhoneVerificationStatus {
   required: boolean;
+  status: string;
+}
+
+
+export interface PhoneView {
+  discoverable: boolean;
+  phoneNumber?: string | null;
   status: string;
 }
 
@@ -2403,6 +3018,11 @@ export interface ProfilePolicyUpdateRequest {
 }
 
 
+export interface ProofOnlyRequest {
+  proof: DeviceProof;
+}
+
+
 export type ProviderDispatch = "DISPATCHED" | "PENDING_RETRY" | "NOT_REQUIRED";
 
 /** Provider enforcement state for operations whose media effect is Part E. */
@@ -2429,6 +3049,12 @@ export interface PublicMeetingInfoResponse {
   start_time: string;
   status: string;
   title: string;
+}
+
+/** Replace the organization layer (gap audit G17). */
+export interface PutOrganizationMeetingProfilePolicyRequest {
+  /** Sparse profile policy, e.g. `{"recording": {"allowed": false}}`; `{}` clears it. */
+  policy: Record<string, unknown>;
 }
 
 
@@ -2659,6 +3285,7 @@ export type RecurrenceStatus = "ACTIVE" | "ENDED";
 
 
 export interface RefreshTokenRequest {
+  device_proof?: DeviceProof | null;
   refresh_token: string;
 }
 
@@ -2669,34 +3296,16 @@ export interface RefreshTokenResponse {
 }
 
 
-export interface RegisterRequest {
-  confirm_password: string;
-  email: string;
-  password: string;
-  username: string;
-}
-
-
-export interface RegisterResponse {
-  email: string;
-  role: string;
-  /**
-   * `pending_verification` (spelled `pendingverification` until
-   * `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
-   */
-  status: string;
-  user_id: string;
-}
-
-
 export interface RegistrationCreated {
   /**
-   * Opaque admission token (shown once; only its hash is stored). Absent for an
-   * idempotent repeat.
+   * Opaque admission token (only its hash is stored). An idempotent repeat (same
+   * `idempotencyKey` and request) returns the same token while the registration is
+   * active (audit M10); absent once it was cancelled or revoked.
    */
   admissionToken?: string | null;
   conferenceId?: string | null;
   created: boolean;
+  emailDelivery?: EmailDelivery | null;
   expiresAt: string;
   meetingSpaceId: string;
   registrationId: string;
@@ -2704,12 +3313,26 @@ export interface RegistrationCreated {
 
 
 export interface RegistrationListResponse {
+  /** Pass as `after` to get the next page; `null` on the last page. */
+  nextCursor?: string | null;
   registrations: Array<RegistrationView>;
 }
 
 
 export interface RegistrationProfile {
+  /**
+   * Gap audit M10: most active registrations accepted (per occurrence, or for the
+   * whole series); 0 = no limit. At most 100000.
+   */
+  capacity?: number;
+  /**
+   * Gap audit M10: registration closes this many minutes before the occurrence's
+   * scheduled start (0 = open until the occurrence ends).
+   */
+  closesMinutesBeforeStart?: number;
   customFields: Array<CustomRegistrationField>;
+  /** Gap audit M10: registration closes at this time, whatever the occurrence. */
+  deadline?: string | null;
   email: FieldRequirement;
   enabled: boolean;
   organization: FieldRequirement;
@@ -2748,6 +3371,14 @@ export interface RemoveParticipantRequest {
   reason?: string | null;
 }
 
+/** Gap audit G10: which dead-lettered organization events to replay. */
+export interface ReplayOrganizationEventsRequest {
+  /** One consumer's dead letters only (for example `cfmeet.meeting-service`). */
+  destination?: string | null;
+  /** Only these events (at most 500); empty: every dead letter (of the destination). */
+  eventIds?: Array<string>;
+}
+
 
 export interface RescheduleConferenceRequest {
   /**
@@ -2759,19 +3390,6 @@ export interface RescheduleConferenceRequest {
   scheduledStartAt: string;
   /** Optional optimistic-concurrency guard: the conference `version` last read. */
   version?: number | null;
-}
-
-
-export interface ResendVerificationRequest {
-  email: string;
-}
-
-
-export interface ResetPasswordRequest {
-  confirm_password: string;
-  email: string;
-  new_password: string;
-  token: string;
 }
 
 
@@ -2813,6 +3431,11 @@ export type ResultsVisibility = "HOST_ONLY" | "AFTER_VOTE" | "AFTER_CLOSE";
 export interface RevokeApiKeyResponse {
   message: string;
   success: boolean;
+}
+
+
+export interface RevokeDeviceRequest {
+  proof?: DeviceProof | null;
 }
 
 
@@ -2941,7 +3564,10 @@ export interface SendMessageRequest {
 
 /** One account session as shown to its owner. */
 export interface SessionRecord {
-  /** PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward). */
+  /**
+   * EMAIL_OTP, GOOGLE, PASSWORD (historical) or LEGACY_REFRESH (a pre-session sign-in
+   * carried forward).
+   */
   authMethod: string;
   authenticatedAt: string;
   /** Shortened User-Agent of the client that signed in. */
@@ -2949,6 +3575,11 @@ export interface SessionRecord {
   createdAt: string;
   /** True for the session the request was made with. */
   current: boolean;
+  /**
+   * The linked device this sign-in belongs to (`GET /api/v2/me/devices`); absent for
+   * unclassified sign-ins.
+   */
+  deviceId?: string | null;
   endReason?: string | null;
   endedAt?: string | null;
   /** The session ends here at the latest, whatever the refresh activity. */
@@ -3035,6 +3666,28 @@ export interface StartTranscriptionRequest {
   mode?: TranscriptionModeDto | null;
   /** POST_MEETING: the READY recording to transcribe. */
   sourceRecordingId?: string | null;
+}
+
+/** What the confirmation is for; a token for one purpose never authorizes another. */
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA" | "MANAGE_PHONE";
+
+
+export interface StepUpRequest {
+  purpose: StepUpPurpose;
+}
+
+
+export interface StepUpTokenResponse {
+  expiresInSecs: number;
+  /** Single-use token for the purpose, bound to this session. Send it with the action. */
+  stepUpToken: string;
+}
+
+
+export interface StepUpVerifyRequest {
+  /** The 6-digit code emailed to the account's current address. */
+  code: string;
+  purpose: StepUpPurpose;
 }
 
 
@@ -3313,22 +3966,21 @@ export interface UserMeResponse {
   username: string;
 }
 
-
-export interface VerifyEmailRequest {
-  email: string;
-  token: string;
-}
-
-
-export interface VerifyResetTokenRequest {
-  email: string;
-  token: string;
-}
-
-
-export interface VerifyResetTokenResponse {
+/** One request-validation problem. */
+export interface ValidationIssue {
+  /**
+   * Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,
+   * `range`.
+   */
+  code: string;
+  /**
+   * Public JSON path of the offending field, as sent by the client (honours the
+   * request's serde naming), e.g. `email`, `displayName`, `items[0].email`.
+   * `null` when the problem concerns the request as a whole.
+   */
+  field: string | null;
+  /** Safe, human-readable message for this field. */
   message: string;
-  valid: boolean;
 }
 
 
@@ -3531,11 +4183,18 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/pin": "v2_unpin_question",
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/vote": "v2_unvote_question",
   "DELETE /api/v2/conferences/{id}/spotlights/{participantId}": "v2_remove_spotlight",
+  "DELETE /api/v2/me/apps/{grantId}": "v2_revoke_my_app",
+  "DELETE /api/v2/me/avatar": "v2_remove_my_avatar",
+  "DELETE /api/v2/me/calendar-feed": "v2_delete_calendar_feed",
+  "DELETE /api/v2/me/phone": "v2_remove_phone",
   "DELETE /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_revoke_member",
   "DELETE /api/v2/meeting-spaces/{id}/recurrence": "v2_end_recurrence",
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
+  "DELETE /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_remove",
+  "DELETE /api/v2/organizations/{id}/apps/{grantId}": "v2_revoke_organization_app",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
+  "DELETE /api/v2/organizations/{id}/member-calling/endpoints/{endpointId}": "v2_organization_member_calling_endpoints_revoke",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
   "DELETE /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_remove_organization_team_member",
   "GET /": "get_app_info",
@@ -3557,8 +4216,15 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/admin/audit-events": "v2_admin_list_account_audit_events",
   "GET /api/v2/admin/chat-migration": "v2_chat_migration_status",
   "GET /api/v2/admin/compat/legacy-meetings/{id}/shadow": "v2_shadow_compare",
+  "GET /api/v2/admin/identity-duplicates": "v2_admin_identity_duplicates",
+  "GET /api/v2/admin/organization-event-delivery": "v2_admin_organization_event_delivery",
   "GET /api/v2/admin/organizations": "v2_admin_list_organizations",
+  "GET /api/v2/admin/organizations/{id}/service-bindings/{service}": "v2_admin_get_organization_service_binding",
+  "GET /api/v2/app-context-keys": "v2_app_context_keys",
+  "GET /api/v2/avatars/{avatarId}": "v2_get_avatar",
+  "GET /api/v2/calendar-feeds/{file}": "v2_read_calendar_feed",
   "GET /api/v2/conferences/{id}": "v2_get_conference",
+  "GET /api/v2/conferences/{id}/apps": "v2_list_conference_apps",
   "GET /api/v2/conferences/{id}/artifacts": "v2_list_artifacts",
   "GET /api/v2/conferences/{id}/artifacts/{artifactId}": "v2_get_artifact",
   "GET /api/v2/conferences/{id}/attendance": "v2_conference_attendance",
@@ -3567,6 +4233,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/collaboration": "v2_collaboration_state",
   "GET /api/v2/conferences/{id}/consents/requirements": "v2_consent_requirements",
   "GET /api/v2/conferences/{id}/events": "v2_replay_events",
+  "GET /api/v2/conferences/{id}/exports/{artifactType}": "v2_export_report",
   "GET /api/v2/conferences/{id}/hand-raise": "v2_raised_hands",
   "GET /api/v2/conferences/{id}/messages": "v2_list_messages",
   "GET /api/v2/conferences/{id}/participants": "v2_list_participants",
@@ -3583,9 +4250,20 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/transcripts": "v2_list_transcripts",
   "GET /api/v2/conferences/{id}/transcripts/{artifactId}": "v2_get_transcript",
   "GET /api/v2/conferences/{id}/waiting-room": "v2_get_waiting_room",
+  "GET /api/v2/me/apps": "v2_list_my_apps",
+  "GET /api/v2/me/calendar-feed": "v2_get_calendar_feed",
   "GET /api/v2/me/conferences": "v2_my_conferences",
+  "GET /api/v2/me/data-export": "v2_export_my_data",
+  "GET /api/v2/me/device-links": "v2_list_pending_device_links",
+  "GET /api/v2/me/device-links/{linkId}": "v2_get_device_link",
+  "GET /api/v2/me/device-policy": "v2_get_my_device_policy",
+  "GET /api/v2/me/devices": "v2_list_my_devices",
+  "GET /api/v2/me/mfa": "v2_get_my_mfa",
+  "GET /api/v2/me/organization-invitations": "v2_my_organization_invitations",
   "GET /api/v2/me/organizations": "v2_my_organizations",
+  "GET /api/v2/me/phone": "v2_get_my_phone",
   "GET /api/v2/me/profile": "v2_get_my_profile",
+  "GET /api/v2/me/security-events": "v2_list_my_security_events",
   "GET /api/v2/me/sessions": "v2_list_my_sessions",
   "GET /api/v2/me/workspaces": "v2_my_workspaces",
   "GET /api/v2/me/workspaces/{workspaceId}/capabilities": "v2_my_workspace_capabilities",
@@ -3601,13 +4279,24 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/meeting-spaces/{id}/registrations": "v2_list_registrations",
   "GET /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_get_registration",
   "GET /api/v2/messaging/directory": "v2_messaging_directory",
+  "GET /api/v2/messaging/export-deliveries": "v2_messaging_export_deliveries",
   "GET /api/v2/messaging/me": "v2_messaging_me",
   "GET /api/v2/messaging/relay/{path}": "v2_messaging_relay_get",
+  "GET /api/v2/notifications": "v2_notifications_list",
+  "GET /api/v2/notifications/preferences": "v2_notifications_preferences_get",
+  "GET /api/v2/notifications/unread-count": "v2_notifications_unread_count",
+  "GET /api/v2/oauth/authorize/context": "v2_oauth_authorize_context",
   "GET /api/v2/organizations/{id}": "v2_get_business_organization",
+  "GET /api/v2/organizations/{id}/apps": "v2_list_organization_apps",
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
+  "GET /api/v2/organizations/{id}/export": "v2_export_organization",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
+  "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
+  "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
+  "GET /api/v2/organizations/{id}/member-calling/endpoints": "v2_organization_member_calling_endpoints_list",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
+  "GET /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_get",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
   "GET /api/v2/organizations/{id}/policies": "v2_get_organization_policy",
   "GET /api/v2/organizations/{id}/provisioning": "v2_get_organization_provisioning",
@@ -3617,6 +4306,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/resolve/{identifier}": "v2_resolve_identifier",
   "GET /health": "health_check",
   "PATCH /api/v1/admin/users/{id}": "update_user",
+  "PATCH /api/v1/admin/users/{id}/email": "change_user_email",
   "PATCH /api/v1/participants/{participant_id}/audio": "update_audio",
   "PATCH /api/v1/participants/{participant_id}/video": "update_video",
   "PATCH /api/v1/users/me": "update_current_user",
@@ -3625,12 +4315,15 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/conferences/{id}/breakouts/{breakoutId}/assignments": "v2_patch_breakout_assignments",
   "PATCH /api/v2/conferences/{id}/chat-policy": "v2_update_chat_policy",
   "PATCH /api/v2/conferences/{id}/collaboration-policy": "v2_update_collaboration_policy",
+  "PATCH /api/v2/conferences/{id}/messages/{messageId}": "v2_edit_message",
   "PATCH /api/v2/conferences/{id}/participants/{participantId}/role": "v2_change_role",
+  "PATCH /api/v2/me/phone": "v2_update_phone_privacy",
   "PATCH /api/v2/me/profile": "v2_update_my_profile",
   "PATCH /api/v2/meeting-spaces/{id}": "v2_update_meeting_space",
   "PATCH /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_update_member",
   "PATCH /api/v2/meeting-spaces/{id}/profile-policy": "v2_update_profile_policy",
   "PATCH /api/v2/messaging/relay/{path}": "v2_messaging_relay_patch",
+  "PATCH /api/v2/notifications/{notificationId}": "v2_notifications_update",
   "PATCH /api/v2/organizations/{id}": "v2_update_business_organization",
   "PATCH /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_patch",
   "PATCH /api/v2/organizations/{id}/members/{userId}": "v2_update_organization_membership",
@@ -3641,17 +4334,17 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v1/api-keys": "create_api_key",
   "POST /api/v1/api/meetings": "api_create_meeting",
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
-  "POST /api/v1/auth/change-password": "change_password",
-  "POST /api/v1/auth/forgot-password": "forgot_password",
-  "POST /api/v1/auth/login": "login",
+  "POST /api/v1/auth/email-change/revert": "revert_email_change",
   "POST /api/v1/auth/logout": "logout",
+  "POST /api/v1/auth/mfa/verify": "verify_mfa",
   "POST /api/v1/auth/oauth/google/exchange": "oauth_google_exchange",
+  "POST /api/v1/auth/oauth/google/native": "oauth_google_native",
+  "POST /api/v1/auth/otp/request": "request_otp",
+  "POST /api/v1/auth/otp/verify": "verify_otp",
+  "POST /api/v1/auth/otp/verify-link": "verify_otp_link",
+  "POST /api/v1/auth/phone/request": "request_phone_otp",
+  "POST /api/v1/auth/phone/verify": "verify_phone_otp",
   "POST /api/v1/auth/refresh": "refresh_token",
-  "POST /api/v1/auth/register": "register",
-  "POST /api/v1/auth/resend-verification": "resend_verification_email",
-  "POST /api/v1/auth/reset-password": "reset_password",
-  "POST /api/v1/auth/verify-email": "verify_email",
-  "POST /api/v1/auth/verify-reset-token": "verify_reset_token",
   "POST /api/v1/meetings": "create_meeting",
   "POST /api/v1/meetings/instant": "create_instant_meeting",
   "POST /api/v1/meetings/join/{meeting_identifier}": "join_meeting_by_identifier",
@@ -3668,7 +4361,14 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/admin/chat-migration/parity-runs": "v2_chat_migration_parity",
   "POST /api/v2/admin/chat-migration/transitions": "v2_chat_migration_transition",
   "POST /api/v2/admin/compat/backfill": "v2_run_backfill",
+  "POST /api/v2/admin/identity-duplicates/enforce": "v2_admin_identity_duplicates_enforce",
+  "POST /api/v2/admin/organization-event-delivery/replay": "v2_admin_replay_organization_events",
   "POST /api/v2/admin/organizations": "v2_create_organization",
+  "POST /api/v2/admin/organizations/{id}/owners": "v2_appoint_organization_owner",
+  "POST /api/v2/admin/organizations/{id}/provisioning/retry": "v2_admin_retry_organization_provisioning",
+  "POST /api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": "v2_admin_rotate_organization_service_binding",
+  "POST /api/v2/admin/users/{userId}/sessions/revoke": "v2_admin_revoke_user_sessions",
+  "POST /api/v2/conferences/{id}/apps/{appId}/context": "v2_create_app_context",
   "POST /api/v2/conferences/{id}/artifacts/reports": "v2_generate_report",
   "POST /api/v2/conferences/{id}/artifacts/{artifactId}/access": "v2_artifact_access",
   "POST /api/v2/conferences/{id}/backstage": "v2_enter_backstage",
@@ -3686,6 +4386,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/consents": "v2_record_consents",
   "POST /api/v2/conferences/{id}/consents/{consentType}/withdraw": "v2_withdraw_consent",
   "POST /api/v2/conferences/{id}/end": "v2_end_conference",
+  "POST /api/v2/conferences/{id}/extend": "v2_extend_conference",
   "POST /api/v2/conferences/{id}/hand-raise": "v2_raise_hand",
   "POST /api/v2/conferences/{id}/intelligence/requests": "v2_request_intelligence",
   "POST /api/v2/conferences/{id}/join": "v2_join_conference",
@@ -3731,8 +4432,28 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/waiting-room/deny": "v2_deny",
   "POST /api/v2/instant-meetings": "v2_create_instant_meeting",
   "POST /api/v2/invitations/{token}/resolve": "v2_resolve_invitation",
+  "POST /api/v2/me/account/delete": "v2_delete_my_account",
+  "POST /api/v2/me/calendar-feed": "v2_create_calendar_feed",
+  "POST /api/v2/me/device-links": "v2_create_device_link",
+  "POST /api/v2/me/device-links/{linkId}/approve": "v2_approve_device_link",
+  "POST /api/v2/me/device-links/{linkId}/cancel": "v2_cancel_device_link",
+  "POST /api/v2/me/device-links/{linkId}/complete": "v2_complete_device_link",
+  "POST /api/v2/me/device-links/{linkId}/email-code": "v2_send_device_link_email_code",
+  "POST /api/v2/me/device-links/{linkId}/reject": "v2_reject_device_link",
+  "POST /api/v2/me/devices/current": "v2_declare_my_device",
+  "POST /api/v2/me/devices/{deviceId}/revoke": "v2_revoke_my_device",
+  "POST /api/v2/me/email/change/request": "v2_request_email_change",
+  "POST /api/v2/me/email/change/verify": "v2_confirm_email_change",
+  "POST /api/v2/me/mfa/disable": "v2_disable_my_mfa",
+  "POST /api/v2/me/mfa/totp/confirm": "v2_confirm_my_totp",
+  "POST /api/v2/me/mfa/totp/setup": "v2_setup_my_totp",
+  "POST /api/v2/me/phone/confirm": "v2_confirm_phone_binding",
+  "POST /api/v2/me/phone/verification": "v2_request_phone_binding",
   "POST /api/v2/me/sessions/revoke-all": "v2_revoke_all_my_sessions",
+  "POST /api/v2/me/sessions/revoke-others": "v2_revoke_other_account_sessions",
   "POST /api/v2/me/sessions/{sessionId}/revoke": "v2_revoke_my_session",
+  "POST /api/v2/me/step-up/request": "v2_request_step_up",
+  "POST /api/v2/me/step-up/verify": "v2_verify_step_up",
   "POST /api/v2/meeting-spaces": "v2_create_meeting_space",
   "POST /api/v2/meeting-spaces/{id}/archive": "v2_archive_meeting_space",
   "POST /api/v2/meeting-spaces/{id}/conferences": "v2_create_conference",
@@ -3740,6 +4461,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/meeting-spaces/{id}/invitations": "v2_create_invitation",
   "POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke": "v2_revoke_invitation",
   "POST /api/v2/meeting-spaces/{id}/members": "v2_add_member",
+  "POST /api/v2/meeting-spaces/{id}/members/team": "v2_add_team_members",
   "POST /api/v2/meeting-spaces/{id}/owner-transfer": "v2_transfer_owner",
   "POST /api/v2/meeting-spaces/{id}/registrations": "v2_register",
   "POST /api/v2/messaging/client-sessions/revoke-all": "v2_messaging_revoke_all_sessions",
@@ -3749,18 +4471,28 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/messaging/devices/{deviceId}/key-packages": "v2_messaging_publish_key_packages",
   "POST /api/v2/messaging/devices/{deviceId}/revoke": "v2_messaging_revoke_device",
   "POST /api/v2/messaging/directory/resolve": "v2_messaging_directory_resolve",
+  "POST /api/v2/messaging/exports/{exportId}/claim": "v2_messaging_claim_export",
   "POST /api/v2/messaging/principals/names": "v2_messaging_principal_names",
   "POST /api/v2/messaging/relay/{path}": "v2_messaging_relay_post",
   "POST /api/v2/messaging/session-tokens": "v2_messaging_session_token",
+  "POST /api/v2/notifications/dismiss": "v2_notifications_dismiss",
+  "POST /api/v2/notifications/read": "v2_notifications_mark_read",
+  "POST /api/v2/oauth/authorize/approve": "v2_oauth_authorize_decide",
   "POST /api/v2/organization-invitations/accept": "v2_accept_organization_invitation",
   "POST /api/v2/organization-invitations/decline": "v2_decline_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/accept": "v2_accept_my_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/decline": "v2_decline_my_organization_invitation",
   "POST /api/v2/organizations": "v2_create_business_organization",
   "POST /api/v2/organizations/{id}/archive": "v2_archive_business_organization",
   "POST /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_post",
+  "POST /api/v2/organizations/{id}/exports/{exportId}/download": "v2_download_organization_export",
   "POST /api/v2/organizations/{id}/invitations": "v2_create_organization_invitation",
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
+  "POST /api/v2/organizations/{id}/member-calling/endpoints": "v2_organization_member_calling_endpoints_register",
+  "POST /api/v2/organizations/{id}/member-calling/signaling-credentials": "v2_organization_member_calling_signaling_credential",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
   "POST /api/v2/organizations/{id}/messaging/members/resolve": "v2_organization_messaging_resolve_members",
+  "POST /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_post",
   "POST /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_post",
   "POST /api/v2/organizations/{id}/messaging/session-tokens": "v2_organization_messaging_session_token",
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",
@@ -3769,13 +4501,19 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/teams": "v2_create_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/archive": "v2_archive_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/members": "v2_add_organization_team_member",
+  "POST /api/v2/registrations/cancel": "v2_cancel_own_registration",
   "PUT /api/v1/meetings/{id}": "update_meeting",
+  "PUT /api/v2/me/avatar": "v2_upload_my_avatar",
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
   "PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_set_recurrence_exception",
   "PUT /api/v2/messaging/relay/{path}": "v2_messaging_relay_put",
+  "PUT /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_register",
+  "PUT /api/v2/notifications/preferences": "v2_notifications_preferences_update",
   "PUT /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_put",
+  "PUT /api/v2/organizations/{id}/meeting-profile-policy": "v2_put_organization_meeting_profile_policy",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
+  "PUT /api/v2/organizations/{id}/teams/{teamId}/messaging-channel": "v2_organization_team_messaging_channel",
 } as const;
 
 export type ContractOperation = keyof typeof CONTRACT_OPERATIONS;

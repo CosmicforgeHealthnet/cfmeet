@@ -21,6 +21,11 @@ doctest = false
 name = "cfmeet-cert-stack"
 path = "src/bin/cfmeet-cert-stack.rs"
 
+# Production multi-device personal E2EE acceptance (real OpenMLS clients, public API only).
+[[bin]]
+name = "cfmeet-e2ee-acceptance"
+path = "src/bin/cfmeet-e2ee-acceptance.rs"
+
 [features]
 personal-communications-e2e = []
 
@@ -51,4 +56,7 @@ anyhow = "1.0"
 base64 = "0.22"
 hex = "0.4"
 rand = "0.8"
+# Account device keys (multi-device policy): proof of possession for linked devices.
+ed25519-dalek = "2"
+sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

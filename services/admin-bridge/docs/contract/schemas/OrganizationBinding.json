@@ -1,0 +1,52 @@
+{
+  "description": "One automatic or operator service binding of the organization's primary scope. Service account and credential ids are not relayed; no secret is ever held by the owner response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "service",
+    "source",
+    "version",
+    "verified_at",
+    "credential_expires_at",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "service": {
+      "enum": [
+        "calling",
+        "messaging"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "credential_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

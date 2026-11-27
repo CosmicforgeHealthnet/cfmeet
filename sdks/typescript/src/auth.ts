@@ -7,11 +7,18 @@
 // | participantToken      | PARTICIPANT_TOKEN                   | X-Participant-Token: <token>              |
 // | clientToken           | CLIENT_TOKEN                        | Authorization: CF-Client-Token <token>    |
 // | signalingCredential   | SIGNALING_CREDENTIAL                | Authorization: Bearer cfsig_...           |
+// | userToken             | USER_TOKEN                          | Authorization: Bearer cfut_<env>_<JWS>    |
+//
+// A user token (ADR 0062) is a DEVICE credential: the partner's server mints it for one
+// of its users and the device obtains it through `tokenProvider`. The SDK caches it,
+// asks again ~60 s before `exp` and after a 401 USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED /
+// AUTHENTICATION_FAILED (the request is then retried once).
 //
 // A platform credential (cfmk_...) is a MACHINE credential: server-side only. The SDK
 // refuses it in a browser-like runtime unless the loudly-named escape hatch is set.
 
 import { CfMeetConfigurationError } from './errors.js';
+import { USER_TOKEN_PREFIX, UserTokenCache, isUserToken } from './user-token.js';
 
 /** A token, or a function returning a fresh one (called for every request / reconnect). */
 export type TokenSource = string | (() => string | Promise<string>);
@@ -21,7 +28,23 @@ export type CfMeetAuth =
   | { readonly type: 'userSession'; readonly token: TokenSource }
   | { readonly type: 'participantToken'; readonly token: TokenSource }
   | { readonly type: 'clientToken'; readonly token: TokenSource }
-  | { readonly type: 'signalingCredential'; readonly credential: TokenSource };
+  | { readonly type: 'signalingCredential'; readonly credential: TokenSource }
+  | UserTokenAuth;
+
+/** A CF Meet user token (`cfut_...`), obtained from the partner's server by `tokenProvider`. */
+export interface UserTokenAuth {
+  readonly type: 'userToken';
+  /**
+   * Returns a fresh user token from YOUR server (which mints it with
+   * `POST /v1/users/tokens`). Called on first use, ~60 s before the cached token's `exp`
+   * and after the token is refused; concurrent callers share one call.
+   */
+  readonly tokenProvider: () => string | Promise<string>;
+  /** Ask for a new token this long before `exp` (default 60). */
+  readonly refreshBeforeExpirySeconds?: number;
+  /** Clock (ms since the epoch; default Date.now), injectable for tests. */
+  readonly now?: () => number;
+}
 
 export type AuthType = CfMeetAuth['type'];
 
@@ -32,6 +55,7 @@ export const AUTH_MODES: Readonly<Record<AuthType, readonly string[]>> = {
   participantToken: ['PARTICIPANT_TOKEN'],
   clientToken: ['CLIENT_TOKEN'],
   signalingCredential: ['SIGNALING_CREDENTIAL'],
+  userToken: ['USER_TOKEN'],
 };
 
 export const PLATFORM_CREDENTIAL_PREFIX = 'cfmk_';
@@ -60,8 +84,29 @@ export function assertPlatformCredentialAllowed(allow: boolean): void {
   }
 }
 
+const userTokenCaches = new WeakMap<UserTokenAuth, UserTokenCache>();
+
+/** The token cache of a userToken auth object (one per object, shared by every client using it). */
+export function userTokenCache(auth: UserTokenAuth): UserTokenCache {
+  let c = userTokenCaches.get(auth);
+  if (!c) {
+    c = new UserTokenCache(auth.tokenProvider, { refreshBeforeExpirySeconds: auth.refreshBeforeExpirySeconds, now: auth.now });
+    userTokenCaches.set(auth, c);
+  }
+  return c;
+}
+
 function source(auth: CfMeetAuth): TokenSource {
-  return auth.type === 'platformCredential' || auth.type === 'signalingCredential' ? auth.credential : auth.token;
+  switch (auth.type) {
+    case 'platformCredential':
+    case 'signalingCredential':
+      return auth.credential;
+    case 'userToken':
+      if (typeof auth.tokenProvider !== 'function') return undefined as unknown as TokenSource;
+      return () => userTokenCache(auth).get();
+    default:
+      return auth.token;
+  }
 }
 
 /** Static checks at client construction. */
@@ -74,6 +119,7 @@ export function validateAuth(auth: CfMeetAuth, allowPlatformInBrowser: boolean):
     throw new CfMeetConfigurationError(`auth ${auth.type}: a token string or a token provider function is required`);
   }
   if (auth.type === 'platformCredential') assertPlatformCredentialAllowed(allowPlatformInBrowser);
+  if (auth.type === 'userToken') userTokenCache(auth); // checks the options once
   if (typeof s === 'string') checkToken(auth.type, s, allowPlatformInBrowser);
 }
 
@@ -88,6 +134,9 @@ function checkToken(type: AuthType, token: string, allowPlatformInBrowser: boole
     );
   }
   if (machine) assertPlatformCredentialAllowed(allowPlatformInBrowser);
+  if (type === 'userToken' && !isUserToken(token)) {
+    throw new CfMeetConfigurationError(`auth userToken: not a CF Meet user token (expected ${USER_TOKEN_PREFIX}<sbx|test|live>_<JWS>)`);
+  }
 }
 
 /** Resolves the token (calling a provider) and returns the headers that carry it. */

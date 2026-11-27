@@ -46,7 +46,8 @@ from `https://cfmeet.com`, internal routes not public, provider features off).
 | Production API | `https://api.cfmeet.com` |
 | Swagger UI (all public contracts) | `https://api.cfmeet.com/swagger-ui/` |
 | Swagger index | `https://api.cfmeet.com/api-docs/swagger-config.json` |
-| Meetings / accounts / organizations relay | `/api-docs/openapi.json` (1.5.0, 188 paths) |
+| Meetings / accounts | `/api-docs/openapi.json` |
+| Organizations (organizations, members, invitations, teams, policies, workspaces, organization Calling and Messaging relays) | `/api-docs/organizations.json`; same `/api/v2` URLs as before |
 | Communications Hub | `/api-docs/communications.json` (1.3.0) |
 | Calling | `/api-docs/calling.json` (1.16.0) |
 | Messaging | `/api-docs/messaging.json` (1.16.0) |
@@ -254,7 +255,7 @@ must handle beyond the generic ones in §8.
 | Screen | Endpoints | Specific errors |
 |---|---|---|
 | Workspace switcher | `GET /api/v2/me/workspaces`, `GET …/{workspaceId}/capabilities` | 503 when Organizations is unavailable (show retry; never assume allowed) |
-| Create organization | `POST /api/v2/organizations` | `FEATURE_DISABLED` before the owner cutover (§10) |
+| Create organization | `POST /api/v2/organizations` | active in production (Organizations is authoritative); `FEATURE_DISABLED` only on a deployment that is not authoritative |
 | Organization profile | `GET`/`PATCH /api/v2/organizations/{id}` | 403, 409 |
 | Members / invitations | `GET …/members`, `PUT`/`PATCH …/members/{userId}`, `POST …/members/me/leave`, `GET`/`POST …/invitations`, `POST …/invitations/{invitationId}/revoke`; invitee: `POST /api/v2/organization-invitations/accept|decline` | email-bound invitations: accept with the invited account |
 | Teams | `GET`/`POST …/teams`, `GET`/`PATCH …/teams/{teamId}`, `POST …/archive`, team members CRUD | 403 `PERMISSION_DENIED` |
@@ -406,7 +407,7 @@ per environment):
 
 | Flag | Effect when off |
 |---|---|
-| `ORGANIZATIONS_AUTHORITY_MODE` (`legacy` → `shadow` → `authoritative`) | first-party organization routes answer `FEATURE_DISABLED`; workspaces come from the legacy directory |
+| `ORGANIZATIONS_AUTHORITY_MODE` (`legacy` → `shadow` → `authoritative`; production: `authoritative`) | when not authoritative: first-party organization routes answer `FEATURE_DISABLED`; workspaces come from the legacy directory |
 | `ORGANIZATION_EVENTS_ENABLED` | organization offboarding fan-out off |
 | `ORGANIZATION_CALLING_SCOPE` / organization Calling binding | Enterprise Calling relay answers `ORGANIZATION_CALLING_DISABLED` |
 | Organization Messaging binding | organization Messaging relay refuses (`PROVISIONING_PENDING` / disabled) |

@@ -1,0 +1,208 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Messaging — Notification Service owner API",
+    "version": "1.0.0",
+    "description": "X3 authorizeWakeups (blueprint Document 4 §3.4): Messaging remains the authority for membership, devices and E2EE; it authorizes every wake-up. Frozen by roadmap N1; implemented in N6. Grantable to cfmeet.notifications only. Never content."
+  },
+  "paths": {
+    "/internal/v1/notifications/wakeups/authorize": {
+      "post": {
+        "operationId": "authorizeWakeups",
+        "summary": "Authorize message wake-ups (X3)",
+        "description": "For (conversationId, eventSequence, senderPrincipal): the entitled principals — ACTIVE member, history window, not the sender, DIRECT block check, conversation ACTIVE — with mentionsRecipient for MANAGED. Port of the push.rs entitlement logic, exposed instead of executed locally.",
+        "tags": [
+          "Notification owner"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-wakeups.authorize",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "conversationId",
+                  "eventSequence",
+                  "senderPrincipal"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "eventSequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "senderPrincipal": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "recheckPrincipals": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "description": "Dispatch-time recheck of previously entitled principals."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entitled principals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "conversationActive",
+                    "securityProfile",
+                    "conversationKind",
+                    "entitled"
+                  ],
+                  "properties": {
+                    "conversationActive": {
+                      "type": "boolean"
+                    },
+                    "securityProfile": {
+                      "type": "string",
+                      "enum": [
+                        "PRIVATE_E2EE",
+                        "MANAGED"
+                      ]
+                    },
+                    "conversationKind": {
+                      "type": "string",
+                      "enum": [
+                        "DIRECT",
+                        "GROUP"
+                      ]
+                    },
+                    "entitled": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "principal",
+                          "mentionsRecipient"
+                        ],
+                        "properties": {
+                          "principal": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "accountRef": {
+                            "anyOf": [
+                              {
+                                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "mentionsRecipient": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (conversation or event).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (FORBIDDEN): the issuer does not hold the permission in the receiver's trust bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer EdDSA service token from packages/service-auth; audience cfmeet.messaging; issuer must be cfmeet.notifications holding the stated permission in the receiver's trust bundle."
+      }
+    }
+  }
+}
