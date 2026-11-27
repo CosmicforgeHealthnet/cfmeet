@@ -1,126 +1,101 @@
 /**
- * TEMPORARY TRANSPORT — swap point for the Messaging-backed upload API.
+ * The publishing queue's transport over the Messaging-backed Status API (ADR 0069), through
+ * `social.service.ts` (Meeting Service relay → Messaging):
  *
- * Adapts today's Meeting Service status API (`/social/media`, its chunks and `complete`,
- * `/social/status`, the feed) to the queue's `StatusTransport`. The integration step replaces
- * this file (or the `createSocialTransport()` call in client.ts) with a transport over the new
- * `social.service.ts` API; nothing else in the queue changes.
+ *  - listParts: `storedParts` asks the server which parts it already holds (resume after reload).
+ *  - idempotentCreate: the queue's key is sent as `Idempotency-Key`; a retried create (within
+ *    24 h) answers the original status.
+ *  - cancelUpload: discards the unfinished upload and its stored bytes on the server.
+ *  - groupId / sequence are sent, so a group shows in order even if created out of order.
  *
- * Where today's API lacks a capability the adapter degrades safely, and says so in
- * `capabilities`:
- *  - DEGRADED listParts: there is no "which parts do you have" call. After a reload the queue
- *    trusts the parts it recorded (a re-sent piece replaces the stored one, so that is safe); if
- *    `complete` then reports missing pieces (400) or the upload is gone (404) the upload is
- *    restarted — that upload only.
- *  - DEGRADED idempotentCreate: POST /social/status takes no idempotency key. After an
- *    ambiguous create failure the queue calls `findCreatedStatus`, which looks for a matching
- *    status (same media id / range, or same text) in the feed's `mine` list before re-creating.
- *  - DEGRADED cancelUpload: there is no endpoint to discard an unfinished upload; it is left to
- *    expire server-side (it is never visible to anyone: statuses only reference complete media).
- *  - groupId / sequence are not sent (today's API would reject unknown fields); the queue's own
- *    ordering guarantees the order.
+ * Parts go straight to protected object storage with per-part signed uploads; a status can only
+ * be created from COMPLETE media of the caller, so nothing pending is ever visible to anyone.
  */
-import axios from "axios";
-import apiV2 from "@/services/v2/api";
-import { socialService, type CreateStatus, type MediaView } from "@/services/v2/social.service";
+import { socialService, type CreateStatus } from "@/services/v2/social.service";
 import { transportError } from "./queue";
 import type { StatusCreateRequest, StatusTransport, TransportError } from "./types";
 
-const id = (s: string) => encodeURIComponent(s);
+function statusOf(e: unknown): number | undefined {
+  const err = e as { response?: { status?: number }; status?: number };
+  return err?.response?.status ?? err?.status;
+}
 
 function messageOf(e: unknown): string | undefined {
   const data = (e as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data;
-  return data?.error?.message ?? data?.message;
+  return data?.error?.message ?? data?.message ?? undefined;
 }
 
-/** Axios error → the queue's error kinds. `phase` decides what 400/404/409 mean. */
+/** Service error → the queue's error kinds. `phase` decides what 400/404/409 mean. */
 function mapError(e: unknown, phase: "start" | "part" | "complete" | "create" | "read"): TransportError {
-  if (axios.isCancel(e) || (e as { name?: string })?.name === "CanceledError" || (e as { name?: string })?.name === "AbortError") {
+  if ((e as { name?: string })?.name === "AbortError" || (e as { name?: string })?.name === "CanceledError") {
     return transportError("aborted", "Cancelled");
   }
-  const status = (e as { response?: { status?: number } })?.response?.status;
+  const status = statusOf(e);
   const message = messageOf(e) ?? "Failed to upload";
   if (status === undefined || status === 0 || status === 408) return transportError("network", "No connection", status);
-  if (status === 401 || status === 403) return transportError("auth", message, status);
+  if (status === 401) return transportError("auth", message, status);
+  // An expired signed part URL answers 403 from the store: retry the part (a fresh grant).
+  if (status === 403) return phase === "part" ? transportError("network", message, status) : transportError("auth", message, status);
   if (status === 429) return transportError("rate", message, status);
   if (status >= 500) return transportError("server", message, status);
   if ((phase === "part" || phase === "complete") && (status === 404 || status === 409 || status === 410)) return transportError("gone", message, status);
-  // `complete` with pieces missing is a 400: restart that upload rather than give up.
-  if (phase === "complete" && status === 400) return transportError("gone", message, status);
   return transportError("rejected", message, status);
 }
 
 function toCreateStatus(req: StatusCreateRequest): CreateStatus {
+  const order = req.groupId !== undefined && req.sequence !== undefined ? { groupId: req.groupId, sequence: req.sequence } : {};
   switch (req.kind) {
-    case "TEXT": return { kind: "TEXT", text: req.text, background: req.background, font: req.font };
-    case "VIDEO": return { kind: "VIDEO", mediaId: req.mediaId, startMs: req.startMs, endMs: req.endMs, caption: req.caption };
-    default: return { kind: req.kind, mediaId: req.mediaId, caption: req.caption };
+    case "TEXT": return { kind: "TEXT", text: req.text, background: req.background, font: req.font, ...order };
+    case "VIDEO": return { kind: "VIDEO", mediaId: req.mediaId, startMs: req.startMs, endMs: req.endMs, caption: req.caption, ...order };
+    default: return { kind: req.kind, mediaId: req.mediaId, caption: req.caption, ...order };
   }
 }
 
 export function createSocialTransport(): StatusTransport {
   return {
-    capabilities: { listParts: false, idempotentCreate: false, cancelUpload: false },
+    capabilities: { listParts: true, idempotentCreate: true, cancelUpload: true },
 
     async startUpload(req, signal) {
+      if (signal.aborted) throw transportError("aborted", "Cancelled");
       try {
-        const m = (await apiV2.post<MediaView>("/social/media", {
-          purpose: "STATUS", kind: req.kind, contentType: req.contentType, sizeBytes: req.sizeBytes,
-          durationMs: req.durationMs === null ? undefined : Math.round(req.durationMs),
-        }, { signal })).data;
+        const m = await socialService.startUpload("STATUS", req.kind, req.contentType, req.sizeBytes, req.durationMs);
         return { uploadId: m.mediaId, partSize: m.chunkBytes, partCount: m.chunkCount };
       } catch (e) { throw mapError(e, "start"); }
     },
 
-    async storedParts() {
-      return null; // DEGRADED: no part listing today.
+    async storedParts(uploadId, signal) {
+      if (signal.aborted) throw transportError("aborted", "Cancelled");
+      try {
+        const m = await socialService.uploadState(uploadId, "STATUS");
+        return m.complete ? Array.from({ length: m.chunkCount }, (_, i) => i) : (m.storedParts ?? []);
+      } catch (e) { throw mapError(e, "part"); }
     },
 
     async uploadPart(uploadId, index, body, signal, onProgress) {
       try {
-        const bytes = new Uint8Array(await body.arrayBuffer());
-        await apiV2.put(`/social/media/${id(uploadId)}/chunks/${index}`, bytes, {
-          signal,
-          headers: { "Content-Type": "application/octet-stream" },
-          transformRequest: [(d) => d],
-          onUploadProgress: (p) => onProgress?.(p.loaded),
-        });
+        await socialService.uploadPart(uploadId, index, body, "STATUS", signal);
+        onProgress?.(body.size);
       } catch (e) { throw mapError(e, "part"); }
     },
 
     async completeUpload(uploadId, signal) {
+      if (signal.aborted) throw transportError("aborted", "Cancelled");
       try {
-        const m = (await apiV2.post<MediaView>(`/social/media/${id(uploadId)}/complete`, {}, { signal })).data;
+        const m = await socialService.completeUpload(uploadId, "STATUS");
         return { mediaId: m.mediaId };
       } catch (e) { throw mapError(e, "complete"); }
     },
 
-    async cancelUpload() {
-      // DEGRADED: no discard endpoint today; the unfinished upload expires server-side.
+    async cancelUpload(uploadId) {
+      try { await socialService.cancelUpload(uploadId, "STATUS"); } catch { /* best effort */ }
     },
 
-    async createStatus(req, _idempotencyKey, signal) {
-      // DEGRADED: the key isn't sent (no server support yet); see findCreatedStatus.
-      void _idempotencyKey;
+    async createStatus(req, idempotencyKey, signal) {
       if (signal.aborted) throw transportError("aborted", "Cancelled");
       try {
-        const post = await socialService.postStatus(toCreateStatus(req));
+        const post = await socialService.postStatus(toCreateStatus(req), idempotencyKey);
         return { postId: post.postId };
       } catch (e) { throw mapError(e, "create"); }
-    },
-
-    async findCreatedStatus(req, since) {
-      let feed;
-      try { feed = await socialService.feed(); } catch (e) { throw mapError(e, "read"); }
-      return feed.mine
-        .filter((p) => Date.parse(p.createdAt) >= Date.parse(since) && p.kind === req.kind)
-        .filter((p) => {
-          if (req.kind === "TEXT") return p.text === req.text && (p.background ?? null) === (req.background ?? null);
-          if (p.media?.mediaId !== req.mediaId) return false;
-          return req.kind !== "VIDEO" || (p.startMs === req.startMs && p.endMs === req.endMs);
-        })
-        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-        .map((p) => ({ postId: p.postId }));
     },
   };
 }

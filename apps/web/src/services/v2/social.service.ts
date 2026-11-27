@@ -325,6 +325,29 @@ async function cancelUpload(mediaId: string, purpose: MediaPurpose = "STATUS"): 
   await call("DELETE", `${mediaBase(purpose)}/${id(mediaId)}`);
 }
 
+/** Start an upload (the server answers the part size and count). */
+async function startUpload(purpose: MediaPurpose, kind: MediaKind, contentType: string, sizeBytes: number, durationMs: number | null): Promise<MediaView> {
+  return mapMedia(await call<Wire>("POST", mediaBase(purpose), { kind, contentType, sizeBytes, durationMs: durationMs === null ? undefined : Math.round(durationMs) }), purpose)!;
+}
+
+/**
+ * Send one part (idempotent: the same bytes again are answered "already stored"; different
+ * bytes for a stored part are a 409). Parts are independent, so several may run at once.
+ */
+async function uploadPart(mediaId: string, index: number, body: Blob, purpose: MediaPurpose = "STATUS", signal?: AbortSignal): Promise<void> {
+  const bytes = await body.arrayBuffer();
+  const sha256 = await sha256Hex(bytes);
+  throwIfAborted(signal);
+  const grant = await call<{ stored: boolean; upload: { url: string; headers: { name: string; value: string }[] } | null }>(
+    "POST", `${mediaBase(purpose)}/${id(mediaId)}/parts/${index}`, { sha256 });
+  if (!grant.stored && grant.upload) await putPart(grant.upload, bytes, signal);
+}
+
+/** Finish an upload: every part stored and the content recognised (only then can it be posted). */
+async function completeUpload(mediaId: string, purpose: MediaPurpose = "STATUS"): Promise<MediaView> {
+  return mapMedia(await call<Wire>("POST", `${mediaBase(purpose)}/${id(mediaId)}/complete`, {}), purpose)!;
+}
+
 /** Upload a file in parts (resumable, parallel, retried); `onProgress` gets 0–1. */
 async function upload(file: Blob, purpose: MediaPurpose, kind: MediaKind, durationMs: number | null, onProgress?: (p: number) => void, options: UploadOptions = {}): Promise<MediaView> {
   const { signal } = options;
@@ -398,6 +421,9 @@ export const socialService = {
   upload,
   uploadState,
   cancelUpload,
+  startUpload,
+  uploadPart,
+  completeUpload,
   feed: async (): Promise<StatusFeed> => {
     const f = await call<Wire>("GET", `${S}/feed`);
     return { mine: (f.mine as Wire[]).map(mapStatus), contacts: await mapAuthors(f.contacts ?? []), muted: await mapAuthors(f.muted ?? []) };
