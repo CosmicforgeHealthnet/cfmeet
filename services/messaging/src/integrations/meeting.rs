@@ -101,6 +101,7 @@ pub async fn resolve(
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
             title: None,
             avatar_ref: None,
+            description: None,
         },
         &key,
     )

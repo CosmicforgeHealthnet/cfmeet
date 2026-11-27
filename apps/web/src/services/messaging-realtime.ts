@@ -45,6 +45,16 @@ export type MessagingTransportOptions = {
   onReadCursor?: (conversationId: string, readSequence: number) => void;
   /** The server ended a subscription (removed from the conversation, policy). */
   onSubscriptionRevoked?: (conversationId: string, reason: string) => void;
+  /**
+   * The account's inbox stream (`inbox.subscribe`): an identifier-only signal that a
+   * conversation this socket is NOT subscribed to changed (a new chat, a message, a read
+   * position). The caller re-reads that chat's summary by REST.
+   */
+  onInboxEvent?: (conversationId: string, eventType: string) => void;
+  /** Inbox signals were dropped (slow consumer, restart): re-read the whole chat list. */
+  onInboxResync?: () => void;
+  /** The server accepted `inbox.subscribe` (live chat-list updates are on). */
+  onInboxSubscribed?: () => void;
   fetchImpl?: typeof fetch;
   socketFactory?: (url: string, protocols: string[]) => WebSocket;
 };
@@ -96,6 +106,8 @@ export class MessagingRealtimeTransport {
   private processing: Promise<void> = Promise.resolve();
   private generation = 0;
   private disposed = false;
+  /** Whether the account's inbox stream is wanted (re-requested on every new socket). */
+  private inbox = false;
 
   constructor(options: MessagingTransportOptions) {
     this.origin = secureOrigin(options.baseUrl);
@@ -136,6 +148,11 @@ export class MessagingRealtimeTransport {
     if (this.socket?.readyState === 1) {
       this.send({ type: "subscribe", conversationId, afterEventSequence: value });
     }
+  }
+  /** Asks for the account's inbox stream (kept across reconnects). */
+  subscribeInbox(): void {
+    this.inbox = true;
+    if (this.socket?.readyState === 1) this.send({ type: "inbox.subscribe" });
   }
   unsubscribe(conversationId: string): void {
     this.subscriptions.delete(conversationId);
@@ -228,6 +245,7 @@ export class MessagingRealtimeTransport {
         for (const [conversationId, afterEventSequence] of this.subscriptions) {
           ws.send(JSON.stringify(this.subscribeFrame(conversationId, afterEventSequence)));
         }
+        if (this.inbox) ws.send(JSON.stringify({ type: "inbox.subscribe" }));
         finish();
       }, { once: true });
       ws.addEventListener("error", () => finish(new MessagingTransportError("WebSocket handshake failed")));
@@ -289,6 +307,18 @@ export class MessagingRealtimeTransport {
     if (frame.type === "subscription.revoked" && typeof frame.conversationId === "string") {
       this.subscriptions.delete(frame.conversationId);
       this.options.onSubscriptionRevoked?.(frame.conversationId, typeof frame.reason === "string" ? frame.reason : "REVOKED");
+      return;
+    }
+    if (frame.type === "inbox.event" && typeof frame.conversationId === "string") {
+      this.options.onInboxEvent?.(frame.conversationId, typeof frame.eventType === "string" ? frame.eventType : "");
+      return;
+    }
+    if (frame.type === "inbox.resync") {
+      this.options.onInboxResync?.();
+      return;
+    }
+    if (frame.type === "inbox.subscribed") {
+      this.options.onInboxSubscribed?.();
       return;
     }
     if (frame.type === "server.draining") {

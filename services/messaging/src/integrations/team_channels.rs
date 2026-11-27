@@ -132,6 +132,7 @@ pub async fn sync(
             managed_disclosure_acknowledged: true,
             title: snapshot.title.clone(),
             avatar_ref: None,
+            description: None,
         },
         &key,
     )
