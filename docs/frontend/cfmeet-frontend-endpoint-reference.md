@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.24.0 | 160 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.25.0 | 168 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **809** |
+| **Total** | | | **817** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -1000,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.24.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1075,6 +1075,8 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.24.0**;
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | resolve Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#resolveMessage` |
 | PATCH | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | edit Managed Message | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editManagedMessage` |
 | POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | customer credential (server-side only); Messaging client token | forward Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardMessage` |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/poll/close` | customer credential (server-side only) | close Poll | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#closePoll` |
+| PUT | `/v1/conversations/{conversationId}/messages/{messageId}/poll/vote` | customer credential (server-side only) | vote Poll | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#votePoll` |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}/revisions` | customer credential (server-side only); Messaging client token | list Message Revisions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listMessageRevisions` |
 
 ### Conversation Reports
@@ -1107,6 +1109,12 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.24.0**;
 | GET | `/v1/conversations/{conversationId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | get Conversation | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getConversation` |
 | PATCH | `/v1/conversations/{conversationId}` | customer credential (server-side only) | update Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#updateConversation` |
 | PUT | `/v1/conversations/{conversationId}/inbox-settings` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | set Conversation Inbox Settings | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#setConversationInboxSettings` |
+| GET | `/v1/messaging/chat-lists` | customer credential (server-side only) | list Chat Lists | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listChatLists` |
+| POST | `/v1/messaging/chat-lists` | customer credential (server-side only) | create Chat List | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createChatList` |
+| DELETE | `/v1/messaging/chat-lists/{listId}` | customer credential (server-side only) | delete Chat List | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChatList` |
+| PATCH | `/v1/messaging/chat-lists/{listId}` | customer credential (server-side only) | update Chat List | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#updateChatList` |
+| DELETE | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | customer credential (server-side only) | remove Chat List Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeChatListConversation` |
+| PUT | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | customer credential (server-side only) | add Chat List Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#addChatListConversation` |
 
 ### Device Keys & E2EE
 

@@ -227,10 +227,86 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
-    // F1: the member's own archive / pin of a chat (Messaging enforces membership).
+    // F1: the member's own archive / pin / favourite of a chat (Messaging enforces membership).
     r(
         Method::PUT,
         &[Lit("conversations"), Id, Lit("inbox-settings")],
+        &[],
+        false,
+    ),
+    // The member's own chat lists (Messaging owns them; ids only cross the relay).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("chat-lists")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("chat-lists")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("chat-lists"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("chat-lists"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("chat-lists"),
+            Id,
+            Lit("conversations"),
+            Id,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("chat-lists"),
+            Id,
+            Lit("conversations"),
+            Id,
+        ],
+        &[],
+        false,
+    ),
+    // MANAGED polls: vote and close (Messaging checks membership and who may close).
+    r(
+        Method::PUT,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("poll"),
+            Lit("vote"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("poll"),
+            Lit("close"),
+        ],
         &[],
         false,
     ),
@@ -1557,6 +1633,26 @@ mod tests {
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),
             ),
+            (Method::GET, "v1/messaging/chat-lists".into()),
+            (Method::POST, "v1/messaging/chat-lists".into()),
+            (Method::PATCH, format!("v1/messaging/chat-lists/{C}")),
+            (Method::DELETE, format!("v1/messaging/chat-lists/{C}")),
+            (
+                Method::PUT,
+                format!("v1/messaging/chat-lists/{C}/conversations/{C}"),
+            ),
+            (
+                Method::DELETE,
+                format!("v1/messaging/chat-lists/{C}/conversations/{C}"),
+            ),
+            (
+                Method::PUT,
+                format!("v1/conversations/{C}/messages/{C}/poll/vote"),
+            ),
+            (
+                Method::POST,
+                format!("v1/conversations/{C}/messages/{C}/poll/close"),
+            ),
         ] {
             assert!(route_for(&m, &p).is_some(), "{m} {p}");
         }
@@ -1603,6 +1699,29 @@ mod tests {
                 format!("v1/messaging/status/media/{C}/parts/{C}"),
             ),
             (Method::GET, "v1/messaging/status/unknown".to_string()),
+            // Chat lists and polls: only their own shapes.
+            (Method::GET, format!("v1/messaging/chat-lists/{C}")),
+            (Method::PUT, "v1/messaging/chat-lists".to_string()),
+            (
+                Method::POST,
+                format!("v1/messaging/chat-lists/{C}/conversations/{C}"),
+            ),
+            (
+                Method::GET,
+                "v1/messaging/chat-lists/not-a-uuid".to_string(),
+            ),
+            (
+                Method::GET,
+                format!("v1/conversations/{C}/messages/{C}/poll/vote"),
+            ),
+            (
+                Method::POST,
+                format!("v1/conversations/{C}/messages/{C}/poll/vote"),
+            ),
+            (
+                Method::DELETE,
+                format!("v1/conversations/{C}/messages/{C}/poll/close"),
+            ),
         ] {
             assert!(route_for(&m, &p).is_none(), "{m} {p}");
         }

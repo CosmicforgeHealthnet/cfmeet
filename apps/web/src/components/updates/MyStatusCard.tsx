@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import type { JobPreview, JobView } from "@/lib/status-publisher/types";
 import type { PersonView } from "@/services/v2/social.service";
 import { useStatusQueue } from "./StatusQueueRoot";
-import { FONTS, PersonAvatar } from "./shared";
+import TextStatusView from "@/components/media-editor/TextStatusView";
+import { PersonAvatar } from "./shared";
 
 /**
  * The own status card (WhatsApp): while statuses are being processed / uploaded / published it
@@ -98,9 +99,7 @@ function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean
   return (
     <span aria-hidden className={cn(small ? "relative block size-12 shrink-0 overflow-hidden rounded-xl" : "absolute inset-0")}>
       {preview.kind === "TEXT" ? (
-        <span className={cn("flex size-full items-center justify-center p-3 text-center leading-tight text-white", small ? "p-1 text-[8px]" : "text-xs", FONTS[preview.font] ?? FONTS[0])} style={{ backgroundColor: preview.background ?? "#128C7E" }}>
-          <span className="line-clamp-5">{preview.text}</span>
-        </span>
+        <TextStatusView status={{ text: preview.text, background: preview.background, font: preview.font }} />
       ) : preview.blob ? (
         <BlobMedia blob={preview.blob} kind="image" />
       ) : preview.kind === "VIDEO" && preview.video ? (

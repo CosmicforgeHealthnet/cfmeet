@@ -16,9 +16,9 @@ in a relational database.
 1. **Messaging owns Status and Channels.** They live in `services/messaging/src/social/`
    (statuses, audiences, media, channels, notices), in Messaging's own database, under its
    own additive migration history `messaging_social_seaql_migrations`
-   (`m20261216_000044_status_channels`; a previous Messaging image never reads it, so a
+   (`m20261217_000045_status_channels`; a previous Messaging image never reads it, so a
    rollback still boots). The customer API is `/v1/messaging/status/**` and
-   `/v1/messaging/channels/**` in `cfmeet.messaging.http-api` 1.24.0 (Messaging's existing
+   `/v1/messaging/channels/**` in `cfmeet.messaging.http-api` 1.25.0 (Messaging's existing
    style: non-conversation resources live under `/v1/messaging`). The operations are
    `EXCLUDED` from the public API Gateway (`FIRST_PARTY_STATUS_CHANNELS`): audiences are CF
    Meet personal contacts.

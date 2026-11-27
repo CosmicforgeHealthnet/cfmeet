@@ -40,6 +40,9 @@ async fn main() {
         messaging_migration::AdminOperationsMigrator::up(&db, None)
             .await
             .expect("Messaging admin-operations migrations failed");
+        messaging_migration::ChatOrganizationMigrator::up(&db, None)
+            .await
+            .expect("Messaging chat-organization migrations failed");
         messaging_migration::SocialMigrator::up(&db, None)
             .await
             .expect("Messaging status / channels migrations failed");
@@ -60,6 +63,9 @@ async fn main() {
         messaging_migration::SocialMigrator::reset(&db)
             .await
             .expect("Messaging status / channels rollback failed");
+        messaging_migration::ChatOrganizationMigrator::reset(&db)
+            .await
+            .expect("Messaging chat-organization rollback failed");
         messaging_migration::AdminOperationsMigrator::reset(&db)
             .await
             .expect("Messaging admin-operations rollback failed");

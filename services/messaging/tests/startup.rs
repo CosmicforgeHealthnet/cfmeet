@@ -274,6 +274,9 @@ async fn a_migrated_server_is_live_ready_and_fails_closed_without_platform_acces
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();

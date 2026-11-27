@@ -3589,6 +3589,18 @@
     {
       "domain": "messaging",
       "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/poll/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
       "path": "/v1/conversations/{conversationId}/read-cursor",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -3662,6 +3674,42 @@
       "domain": "messaging",
       "method": "POST",
       "path": "/v1/messaging/backups/{backupId}/finalize",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/chat-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/chat-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/messaging/chat-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/chat-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}",
       "class": "PUBLIC_CUSTOMER"
     },
     {

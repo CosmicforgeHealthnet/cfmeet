@@ -720,6 +720,87 @@ class BlockRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// 1.36.0: one of the acting member's own chat lists (WhatsApp custom lists). Never visible to anyone else.
+class ChatList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ChatList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ChatList.create({required List<Uuid> conversationIds, required String createdAt, required Uuid listId, required String name, required int position, required String updatedAt}) =>
+      ChatList.fromJson(<String, Object?>{
+        'conversationIds': conversationIds,
+        'createdAt': createdAt,
+        'listId': listId,
+        'name': name,
+        'position': position,
+        'updatedAt': updatedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Conversations of the list the member is still an ACTIVE member of, in the order they were added.
+  List<Uuid> get conversationIds => (json['conversationIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  String get createdAt => json['createdAt']! as String;
+
+  Uuid get listId => json['listId']! as String;
+
+  String get name => json['name']! as String;
+
+  /// The list's place in the member's own order (0 first).
+  int get position => (json['position']! as num).toInt();
+
+  String get updatedAt => json['updatedAt']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class ChatListDeleted {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ChatListDeleted.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ChatListDeleted.create({required bool deleted, required Uuid listId}) =>
+      ChatListDeleted.fromJson(<String, Object?>{
+        'deleted': deleted,
+        'listId': listId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get deleted => json['deleted']! as bool;
+
+  Uuid get listId => json['listId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class ChatListPage {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ChatListPage.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ChatListPage.create({required List<ChatList> chatLists, required int maxChatLists, required int maxConversationsPerList}) =>
+      ChatListPage.fromJson(<String, Object?>{
+        'chatLists': chatLists.map((e) => e.toJson()).toList(),
+        'maxChatLists': maxChatLists,
+        'maxConversationsPerList': maxConversationsPerList,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<ChatList> get chatLists => (json['chatLists']! as List<Object?>).map((e) => ChatList.fromJson(e! as Map<String, Object?>)).toList();
+
+  int get maxChatLists => (json['maxChatLists']! as num).toInt();
+
+  int get maxConversationsPerList => (json['maxConversationsPerList']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// One of: MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519.
 typedef Ciphersuite = String;
 
@@ -898,7 +979,7 @@ class Conversation {
   const Conversation.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Conversation.create({bool? announcementOnly, String? avatarRef, required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, ConversationInbox? inbox, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, String? title, required String updatedAt, required int version}) =>
+  factory Conversation.create({bool? announcementOnly, String? avatarRef, required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, String? description, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, ConversationInbox? inbox, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, String? title, required String updatedAt, required int version}) =>
       Conversation.fromJson(<String, Object?>{
         if (announcementOnly != null) 'announcementOnly': announcementOnly,
         if (avatarRef != null) 'avatarRef': avatarRef,
@@ -907,6 +988,7 @@ class Conversation {
         'conversationId': conversationId,
         'createdAt': createdAt,
         'createdByPrincipalId': createdByPrincipalId,
+        if (description != null) 'description': description,
         'encryption': encryption,
         'expiresAt': expiresAt,
         'expiryGraceSeconds': expiryGraceSeconds,
@@ -935,7 +1017,7 @@ class Conversation {
   /// S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows.
   bool? get announcementOnly => json['announcementOnly'] as bool?;
 
-  /// Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches.
+  /// Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. 1.36.0: attachment:‹attachmentId› is a group photo attachment of the conversation.
   String? get avatarRef => json['avatarRef'] as String?;
 
   ContextRef? get context => json['context'] == null ? null : ContextRef.fromJson(json['context']! as Map<String, Object?>);
@@ -947,6 +1029,9 @@ class Conversation {
   String get createdAt => json['createdAt']! as String;
 
   Uuid get createdByPrincipalId => json['createdByPrincipalId']! as String;
+
+  /// 1.36.0: a MANAGED group's description (always null for DIRECT and PRIVATE_E2EE conversations, whose metadata belongs inside the MLS group).
+  String? get description => json['description'] as String?;
 
   Map<String, Object?> get encryption => json['encryption']! as Map<String, Object?>;
 
@@ -1047,9 +1132,10 @@ class ConversationInbox {
   const ConversationInbox.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationInbox.create({bool? archived, required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, bool? pinned, String? pinnedAt, required int unreadCount}) =>
+  factory ConversationInbox.create({bool? archived, bool? favourite, required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, bool? pinned, String? pinnedAt, required int unreadCount}) =>
       ConversationInbox.fromJson(<String, Object?>{
         if (archived != null) 'archived': archived,
+        if (favourite != null) 'favourite': favourite,
         'lastActivityAt': lastActivityAt,
         'lastMessage': lastMessage?.toJson(),
         'mentionCount': mentionCount,
@@ -1063,6 +1149,9 @@ class ConversationInbox {
 
   /// F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members.
   bool? get archived => json['archived'] as bool?;
+
+  /// 1.36.0: the member marked this chat as a favourite for itself (PUT /v1/conversations/{conversationId}/inbox-settings; WhatsApp Favourites). Independent of archive and pin; never visible to other members.
+  bool? get favourite => json['favourite'] as bool?;
 
   /// The latest application message (or the creation time); the key of orderBy=lastActivity.
   String get lastActivityAt => json['lastActivityAt']! as String;
@@ -1090,10 +1179,11 @@ class ConversationInboxSettings {
   const ConversationInboxSettings.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationInboxSettings.create({required bool archived, required Uuid conversationId, required bool pinned, required String? pinnedAt}) =>
+  factory ConversationInboxSettings.create({required bool archived, required Uuid conversationId, bool? favourite, required bool pinned, required String? pinnedAt}) =>
       ConversationInboxSettings.fromJson(<String, Object?>{
         'archived': archived,
         'conversationId': conversationId,
+        if (favourite != null) 'favourite': favourite,
         'pinned': pinned,
         'pinnedAt': pinnedAt,
       });
@@ -1105,6 +1195,9 @@ class ConversationInboxSettings {
 
   Uuid get conversationId => json['conversationId']! as String;
 
+  /// 1.36.0: the chat is one of the member's Favourites.
+  bool? get favourite => json['favourite'] as bool?;
+
   bool get pinned => json['pinned']! as bool;
 
   String? get pinnedAt => json['pinnedAt'] as String?;
@@ -1112,15 +1205,16 @@ class ConversationInboxSettings {
   Map<String, Object?> toJson() => json;
 }
 
-/// F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true.
+/// F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true. 1.36.0: favourite.
 class ConversationInboxSettingsRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ConversationInboxSettingsRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationInboxSettingsRequest.create({bool? archived, bool? pinned}) =>
+  factory ConversationInboxSettingsRequest.create({bool? archived, bool? favourite, bool? pinned}) =>
       ConversationInboxSettingsRequest.fromJson(<String, Object?>{
         if (archived != null) 'archived': archived,
+        if (favourite != null) 'favourite': favourite,
         if (pinned != null) 'pinned': pinned,
       });
 
@@ -1129,6 +1223,9 @@ class ConversationInboxSettingsRequest {
 
   /// Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it.
   bool? get archived => json['archived'] as bool?;
+
+  /// 1.36.0: add (true) or remove (false) the chat from the acting member's Favourites. Independent of archive and pin.
+  bool? get favourite => json['favourite'] as bool?;
 
   /// Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED.
   bool? get pinned => json['pinned'] as bool?;
@@ -1142,12 +1239,14 @@ class ConversationLastMessage {
   const ConversationLastMessage.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationLastMessage.create({required int attachmentCount, required String createdAt, required MessageLifecycle lifecycle, required Uuid messageId, required String? previewText, required SecurityProfile securityProfile, required Uuid senderPrincipalId, required int sequence}) =>
+  factory ConversationLastMessage.create({required int attachmentCount, String? attachmentKind, required String createdAt, required MessageLifecycle lifecycle, required Uuid messageId, String? presentation, required String? previewText, required SecurityProfile securityProfile, required Uuid senderPrincipalId, required int sequence}) =>
       ConversationLastMessage.fromJson(<String, Object?>{
         'attachmentCount': attachmentCount,
+        if (attachmentKind != null) 'attachmentKind': attachmentKind,
         'createdAt': createdAt,
         'lifecycle': lifecycle,
         'messageId': messageId,
+        if (presentation != null) 'presentation': presentation,
         'previewText': previewText,
         'securityProfile': securityProfile,
         'senderPrincipalId': senderPrincipalId,
@@ -1159,11 +1258,17 @@ class ConversationLastMessage {
 
   int get attachmentCount => (json['attachmentCount']! as num).toInt();
 
+  /// 1.36.0, MANAGED and ACTIVE only: the kind of the message's first attachment (e.g. IMAGE, VIDEO, VOICE_NOTE, DOCUMENT), for the chat list's icon.
+  String? get attachmentKind => json['attachmentKind'] as String?;
+
   String get createdAt => json['createdAt']! as String;
 
   MessageLifecycle get lifecycle => json['lifecycle']! as String;
 
   Uuid get messageId => json['messageId']! as String;
+
+  /// 1.36.0, MANAGED and ACTIVE only: the message's presentation (a poll previews its question).
+  String? get presentation => json['presentation'] as String?;
 
   /// MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones.
   String? get previewText => json['previewText'] as String?;
@@ -1198,19 +1303,43 @@ class ConversationPage {
   Map<String, Object?> toJson() => json;
 }
 
+class CreateChatListRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CreateChatListRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CreateChatListRequest.create({List<Uuid>? conversationIds, required String name}) =>
+      CreateChatListRequest.fromJson(<String, Object?>{
+        if (conversationIds != null) 'conversationIds': conversationIds,
+        'name': name,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Conversations to start with (each one the member is an ACTIVE member of, else 404).
+  List<Uuid>? get conversationIds => json['conversationIds'] == null ? null : (json['conversationIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  /// Trimmed; unique (case-insensitively) among the member's lists (409 CONFLICT / CHAT_LIST_NAME_TAKEN).
+  String get name => json['name']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// A tenant / application / environment is never part of a request: it comes from the authenticated credential.
 class CreateConversationRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const CreateConversationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateConversationRequest.create({String? avatarRef, ContextRef? context, required ContextClass contextClass, String? counterpartCfMeetId, Uuid? counterpartPrincipalId, int? expectedPolicyVersion, String? expiresAt, int? expiryGraceSeconds, bool? managedDisclosureAcknowledged, Uuid? predecessorConversationId, bool? profileChangeDisclosureAcknowledged, bool? readReceipts, int? retentionSeconds, SecurityProfile? securityProfile, String? title}) =>
+  factory CreateConversationRequest.create({String? avatarRef, ContextRef? context, required ContextClass contextClass, String? counterpartCfMeetId, Uuid? counterpartPrincipalId, String? description, int? expectedPolicyVersion, String? expiresAt, int? expiryGraceSeconds, bool? managedDisclosureAcknowledged, Uuid? predecessorConversationId, bool? profileChangeDisclosureAcknowledged, bool? readReceipts, int? retentionSeconds, SecurityProfile? securityProfile, String? title}) =>
       CreateConversationRequest.fromJson(<String, Object?>{
         if (avatarRef != null) 'avatarRef': avatarRef,
         if (context != null) 'context': context.toJson(),
         'contextClass': contextClass,
         if (counterpartCfMeetId != null) 'counterpartCfMeetId': counterpartCfMeetId,
         if (counterpartPrincipalId != null) 'counterpartPrincipalId': counterpartPrincipalId,
+        if (description != null) 'description': description,
         if (expectedPolicyVersion != null) 'expectedPolicyVersion': expectedPolicyVersion,
         if (expiresAt != null) 'expiresAt': expiresAt,
         if (expiryGraceSeconds != null) 'expiryGraceSeconds': expiryGraceSeconds,
@@ -1237,6 +1366,9 @@ class CreateConversationRequest {
   String? get counterpartCfMeetId => json['counterpartCfMeetId'] as String?;
 
   Uuid? get counterpartPrincipalId => json['counterpartPrincipalId'] as String?;
+
+  /// 1.36.0: a group description (MANAGED, non-DIRECT only; trimmed; line breaks allowed, no other control characters).
+  String? get description => json['description'] as String?;
 
   int? get expectedPolicyVersion => (json['expectedPolicyVersion'] as num?)?.toInt();
 
@@ -2804,6 +2936,136 @@ class PolicyView {
   Map<String, Object?> toJson() => json;
 }
 
+/// 1.36.0: the options and current tally of an ACTIVE MANAGED poll message (Message.managed.poll).
+class Poll {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const Poll.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory Poll.create({required bool allowsMultipleAnswers, required bool closed, required String? closedAt, required Uuid? closedByPrincipalId, required List<PollOption> options, required int voterCount}) =>
+      Poll.fromJson(<String, Object?>{
+        'allowsMultipleAnswers': allowsMultipleAnswers,
+        'closed': closed,
+        'closedAt': closedAt,
+        'closedByPrincipalId': closedByPrincipalId,
+        'options': options.map((e) => e.toJson()).toList(),
+        'voterCount': voterCount,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get allowsMultipleAnswers => json['allowsMultipleAnswers']! as bool;
+
+  bool get closed => json['closed']! as bool;
+
+  String? get closedAt => json['closedAt'] as String?;
+
+  Uuid? get closedByPrincipalId => json['closedByPrincipalId'] as String?;
+
+  List<PollOption> get options => (json['options']! as List<Object?>).map((e) => PollOption.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Distinct members with a current vote.
+  int get voterCount => (json['voterCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class PollChangeResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PollChangeResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PollChangeResult.create({required bool changed, required Uuid messageId, required Poll? poll}) =>
+      PollChangeResult.fromJson(<String, Object?>{
+        'changed': changed,
+        'messageId': messageId,
+        'poll': poll?.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// false: nothing changed (the same vote again, or an already closed poll).
+  bool get changed => json['changed']! as bool;
+
+  Uuid get messageId => json['messageId']! as String;
+
+  Poll? get poll => json['poll'] == null ? null : Poll.fromJson(json['poll']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
+class PollOption {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PollOption.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PollOption.create({required int index, required String text, required int voteCount, required List<Uuid> voterPrincipalIds}) =>
+      PollOption.fromJson(<String, Object?>{
+        'index': index,
+        'text': text,
+        'voteCount': voteCount,
+        'voterPrincipalIds': voterPrincipalIds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int get index => (json['index']! as num).toInt();
+
+  String get text => json['text']! as String;
+
+  int get voteCount => (json['voteCount']! as num).toInt();
+
+  /// Who chose this option (members see voters, like WhatsApp).
+  List<Uuid> get voterPrincipalIds => (json['voterPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// 1.36.0: a MANAGED poll (the message text, 1-300 characters, is its question). PRIVATE_E2EE polls are encrypted application messages (POLL_MANAGED_ONLY).
+class PollRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PollRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PollRequest.create({bool? allowsMultipleAnswers, required List<String> options}) =>
+      PollRequest.fromJson(<String, Object?>{
+        if (allowsMultipleAnswers != null) 'allowsMultipleAnswers': allowsMultipleAnswers,
+        'options': options,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool? get allowsMultipleAnswers => json['allowsMultipleAnswers'] as bool?;
+
+  /// 2-12 answers, distinct (case-insensitively) after trimming, 1-100 characters each.
+  List<String> get options => (json['options']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class PollVoteRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PollVoteRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PollVoteRequest.create({required List<int> optionIndexes}) =>
+      PollVoteRequest.fromJson(<String, Object?>{
+        'optionIndexes': optionIndexes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The member's choices; they replace its previous vote. Empty retracts it. At most one unless the poll allowsMultipleAnswers.
+  List<int> get optionIndexes => (json['optionIndexes']! as List<Object?>).map((e) => (e! as num).toInt()).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
 class PresenceSettings {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const PresenceSettings.fromJson(this.json);
@@ -3532,7 +3794,7 @@ class SendMessageRequest {
   const SendMessageRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? frankingCommitment, String? kind, String? managedPresentation, List<Uuid>? mentionedPrincipalIds, bool? notify, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
+  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? frankingCommitment, String? kind, String? managedPresentation, List<Uuid>? mentionedPrincipalIds, bool? notify, PollRequest? poll, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
       SendMessageRequest.fromJson(<String, Object?>{
         if (attachmentIds != null) 'attachmentIds': attachmentIds,
         if (ciphertext != null) 'ciphertext': ciphertext,
@@ -3544,6 +3806,7 @@ class SendMessageRequest {
         if (managedPresentation != null) 'managedPresentation': managedPresentation,
         if (mentionedPrincipalIds != null) 'mentionedPrincipalIds': mentionedPrincipalIds,
         if (notify != null) 'notify': notify,
+        if (poll != null) 'poll': poll.toJson(),
         if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
         if (targetMessageId != null) 'targetMessageId': targetMessageId,
         if (text != null) 'text': text,
@@ -3576,6 +3839,9 @@ class SendMessageRequest {
 
   /// false: no push notification jobs (mirrored / migrated writes). Default true.
   bool? get notify => json['notify'] as bool?;
+
+  /// 1.36.0, MANAGED only: this message is a poll (text is its question; no attachments; not an announcement). The message's managed.presentation is POLL.
+  PollRequest? get poll => json['poll'] == null ? null : PollRequest.fromJson(json['poll']! as Map<String, Object?>);
 
   Uuid? get replyToMessageId => json['replyToMessageId'] as String?;
 
@@ -3956,16 +4222,39 @@ class UnreadCount {
   Map<String, Object?> toJson() => json;
 }
 
+class UpdateChatListRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UpdateChatListRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UpdateChatListRequest.create({String? name, int? position}) =>
+      UpdateChatListRequest.fromJson(<String, Object?>{
+        if (name != null) 'name': name,
+        if (position != null) 'position': position,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get name => json['name'] as String?;
+
+  /// Move the list to this place (beyond the end: last); the other lists keep their relative order.
+  int? get position => (json['position'] as num?)?.toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE).
 class UpdateConversationRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const UpdateConversationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory UpdateConversationRequest.create({bool? announcementOnly, String? avatarRef, required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds, String? title}) =>
+  factory UpdateConversationRequest.create({bool? announcementOnly, String? avatarRef, String? description, required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds, String? title}) =>
       UpdateConversationRequest.fromJson(<String, Object?>{
         if (announcementOnly != null) 'announcementOnly': announcementOnly,
         if (avatarRef != null) 'avatarRef': avatarRef,
+        if (description != null) 'description': description,
         'expectedVersion': expectedVersion,
         if (expiresAt != null) 'expiresAt': expiresAt,
         if (lifecycleState != null) 'lifecycleState': lifecycleState,
@@ -3980,8 +4269,11 @@ class UpdateConversationRequest {
   /// S13 (owner): announcement-only on / off; GROUP and CHANNEL only.
   bool? get announcementOnly => json['announcementOnly'] as bool?;
 
-  /// Section 13: a new avatar reference; null clears it (MANAGED only, owner).
+  /// Section 13: a new avatar reference; null clears it (MANAGED only). 1.36.0: attachment:‹attachmentId› names a READY image attachment uploaded to this conversation (the group photo; members read it through the attachment download / thumbnail grants, and it is not removed as an abandoned upload while it is the avatar). Title, avatarRef and description alone may be changed by the owner or a group …
   String? get avatarRef => json['avatarRef'] as String?;
+
+  /// 1.36.0: a new group description; null clears it (MANAGED, non-DIRECT; the owner or a group admin).
+  String? get description => json['description'] as String?;
 
   int get expectedVersion => (json['expectedVersion']! as num).toInt();
 

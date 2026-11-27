@@ -1672,8 +1672,8 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 107;
-    const SERVED_MESSAGING_NATIVE: usize = 79;
+    const SERVED_MESSAGING_OPERATIONS: usize = 115;
+    const SERVED_MESSAGING_NATIVE: usize = 87;
 
     fn peer(name: &str) -> &'static str {
         PEER_DOCS

@@ -154,6 +154,40 @@ pub async fn load<C: ConnectionTrait>(
     .await?)
 }
 
+/// A MANAGED group's photo: `avatarRef` `attachment:<attachmentId>` names a READY image
+/// attachment uploaded to the conversation itself. Members read it like any attachment
+/// (download / thumbnail grants), and it is never treated as an abandoned upload while it
+/// is the conversation's avatar. Any other `avatarRef` stays an opaque reference.
+pub const AVATAR_ATTACHMENT_PREFIX: &str = "attachment:";
+
+/// The attachment id of an `attachment:<id>` avatar reference.
+pub fn avatar_attachment_id(reference: &str) -> Option<Uuid> {
+    reference
+        .strip_prefix(AVATAR_ATTACHMENT_PREFIX)
+        .and_then(|id| Uuid::parse_str(id).ok())
+}
+
+/// An `attachment:<id>` avatar must name a READY image attachment of this conversation.
+pub(crate) async fn require_avatar_attachment<C: ConnectionTrait>(
+    db: &C,
+    conversation: &ConversationRow,
+    reference: &str,
+) -> Result<()> {
+    if !reference.starts_with(AVATAR_ATTACHMENT_PREFIX) {
+        return Ok(());
+    }
+    let id = avatar_attachment_id(reference)
+        .ok_or_else(|| Error::validation("avatarRef attachment:<id> must name an attachment id"))?;
+    match load(db, conversation.id, id, false).await? {
+        Some(a) if a.state == "READY" && a.media_type.starts_with("image/") => Ok(()),
+        Some(_) => Err(Error::reason(
+            ErrorCode::ValidationError,
+            "AVATAR_NOT_A_READY_IMAGE",
+        )),
+        None => Err(Error::code(ErrorCode::NotFound)),
+    }
+}
+
 /// Whether attachments may be used in this conversation's context (environment and
 /// context-class policy).
 fn attachments_enabled(policy: &EffectivePolicy, conversation: &ConversationRow) -> bool {
@@ -1027,12 +1061,22 @@ async fn authorize_metadata(
     conversation_id: Uuid,
     attachment_id: Uuid,
 ) -> Result<AttachmentRow> {
-    let (_, member) =
+    let (conversation, member) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
     let row = load(&state.db, conversation_id, attachment_id, false)
         .await?
         .ok_or(Error::code(ErrorCode::NotFound))?;
     if row.uploader_principal_id == acting.principal_id {
+        return Ok(row);
+    }
+    // The group photo: every member sees the conversation's current avatar attachment.
+    if row.message_id.is_none()
+        && conversation
+            .avatar_ref
+            .as_deref()
+            .and_then(avatar_attachment_id)
+            == Some(row.id)
+    {
         return Ok(row);
     }
     // Others see an attachment only through a message within their history window.

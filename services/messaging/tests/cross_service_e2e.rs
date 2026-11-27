@@ -498,6 +498,9 @@ impl Stack {
             messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
                 .await
                 .unwrap();
+            messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
+                .await
+                .unwrap();
             messaging_migration::SocialMigrator::up(&db.conn, None)
                 .await
                 .unwrap();
@@ -2363,6 +2366,9 @@ async fn postgresql_loss_during_active_messaging_loses_nothing_acknowledged_and_
         .await
         .unwrap();
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
         .await
         .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)

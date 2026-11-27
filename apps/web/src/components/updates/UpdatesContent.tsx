@@ -12,7 +12,9 @@ import { socialService, type Channel, type PersonView, type StatusPost } from "@
 import MyStatusCard from "./MyStatusCard";
 import StatusComposer from "./StatusComposer";
 import StatusViewer from "./StatusViewer";
-import { errorText, FONTS, PersonAvatar, shortWhen } from "./shared";
+import TextStatusView from "@/components/media-editor/TextStatusView";
+import { errorText, PersonAvatar, shortWhen } from "./shared";
+import { textStatusOfPost } from "./status-adapter";
 
 /** Updates (WhatsApp): Status on top, Channels below. */
 export default function UpdatesContent() {
@@ -102,9 +104,7 @@ function StatusThumb({ post }: { post: StatusPost | undefined }) {
   return (
     <span aria-hidden className="absolute inset-0">
       {post.kind === "TEXT" ? (
-        <span className={cn("flex size-full items-center justify-center p-3 text-center text-xs leading-tight text-white", FONTS[post.font] ?? FONTS[0])} style={{ backgroundColor: post.background ?? "#128C7E" }}>
-          <span className="line-clamp-5">{post.text}</span>
-        </span>
+        <TextStatusView status={textStatusOfPost(post)} />
       ) : url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="size-full object-cover" />

@@ -27,6 +27,11 @@ const routes: Route[] = [
   ["PUT", `${c}/messages/${id}/reactions/${reaction}`, []], ["DELETE", `${c}/messages/${id}/reactions/${reaction}`, []],
   ["GET", `${c}/pins`, []], ["PUT", `${c}/pins/${id}`, []], ["DELETE", `${c}/pins/${id}`, []],
   ["PUT", `${c}/read-cursor`, []], ["PUT", `${c}/inbox-settings`, []], ["POST", `${c}/owner`, []], ["GET", `${c}/unread`, []],
+  // The member's own chat lists and MANAGED polls (Messaging owns both).
+  ["GET", "messaging/chat-lists", []], ["POST", "messaging/chat-lists", []],
+  ["PATCH", `messaging/chat-lists/${id}`, []], ["DELETE", `messaging/chat-lists/${id}`, []],
+  ["PUT", `messaging/chat-lists/${id}/conversations/${id}`, []], ["DELETE", `messaging/chat-lists/${id}/conversations/${id}`, []],
+  ["PUT", `${c}/messages/${id}/poll/vote`, []], ["POST", `${c}/messages/${id}/poll/close`, []],
   // Messaging's canonical replay cursor is `after` (the relay still rewrites the old
   // `afterEventSequence` spelling, MSG-001).
   ["GET", `${c}/events`, ["after", "afterEventSequence", "limit"]],

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.24.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access \u2014 afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable \u2014 fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE \u2026/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_\u2026 OAuth access token or cfob_\u2026 bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted)."
+    "version": "1.25.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (chat organization and polls): favourite on PUT /v1/conversations/{conversationId}/inbox-settings and in the inbox summary (WhatsApp Favourites); the member's own chat lists GET / POST /v1/messaging/chat-lists, PATCH / DELETE /v1/messaging/chat-lists/{listId}, PUT / DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} (at most 20 lists of 500 conversations; never visible to anyone else; removing an item never touches the conversation); MANAGED polls (send with poll; PUT .../messages/{messageId}/poll/vote, POST .../messages/{messageId}/poll/close; events messaging.poll.voted / closed carry the current tally); a MANAGED group's description (create / PATCH description) and group photo (avatarRef attachment:<attachmentId>); a group admin may change title, avatarRef and description. 1.25.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted)."
   },
   "tags": [
     {
@@ -343,7 +343,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Publishes 1\u201320 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
+        "description": "Scope messages.send. Publishes 1–20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1340,7 +1340,7 @@
           }
         ],
         "x-cfmeet-required-scope": "conversations.manage",
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER \u2194 ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1545,7 +1545,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content. S13: SEND_RESTRICTED / ANNOUNCEMENT_ONLY for a non-admin member of an announcement-only conversation. S2: PRIVATE_E2EE sends may carry frankingCommitment (verifiable reports).",
+        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content. S13: SEND_RESTRICTED / ANNOUNCEMENT_ONLY for a non-admin member of an announcement-only conversation. S2: PRIVATE_E2EE sends may carry frankingCommitment (verifiable reports). 1.24.0: MANAGED poll — poll (2-12 options; text is the question, 1-300 characters); refused for PRIVATE_E2EE (POLL_MANAGED_ONLY).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1905,7 +1905,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (\u00a746), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
+        "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -2074,7 +2074,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. F1: the acting member archives / pins this chat for itself (never visible to other members). At most three pinned chats per principal (409 CONFLICT / PIN_LIMIT_REACHED); pinning un-archives, archiving un-pins; an archived chat stays archived when new messages arrive. GET /v1/conversations returns both in each inbox summary. A non-member is 404.",
+        "description": "Scope messages.read. F1: the acting member archives / pins this chat for itself (never visible to other members). At most three pinned chats per principal (409 CONFLICT / PIN_LIMIT_REACHED); pinning un-archives, archiving un-pins; an archived chat stays archived when new messages arrive. GET /v1/conversations returns both in each inbox summary. A non-member is 404. 1.24.0: favourite adds / removes the chat from the member's Favourites (independent of archive and pin; no cap).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -4080,7 +4080,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY \u2014 search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
+        "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY — search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -5050,7 +5050,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H \u00a7106).",
+        "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H §106).",
         "responses": {
           "200": {
             "description": "OK.",
@@ -6891,7 +6891,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size \u2264 backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -7675,7 +7675,7 @@
             "userToken": []
           }
         ],
-        "description": "ADR 0062 (build contract \u00a74): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
+        "description": "ADR 0062 (build contract §4): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
         "parameters": [],
         "responses": {
           "201": {
@@ -7731,7 +7731,7 @@
             "userToken": []
           }
         ],
-        "description": "ADR 0063 (\u00a76 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (\u00a76 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
+        "description": "ADR 0063 (§6 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (§6 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
         "parameters": [
           {
             "name": "installationId",
@@ -7792,7 +7792,7 @@
             "userToken": []
           }
         ],
-        "description": "ADR 0063 (\u00a76 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
+        "description": "ADR 0063 (§6 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
         "parameters": [
           {
             "name": "installationId",
@@ -8331,6 +8331,596 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/chat-lists": {
+      "get": {
+        "operationId": "listChatLists",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "list Chat Lists",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. In the member's order.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatListPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createChatList",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "create Chat List",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. A new list goes last. At most 20 lists (409 CONFLICT / CHAT_LIST_LIMIT_REACHED) of 500 conversations (CHAT_LIST_FULL); names are unique (CHAT_LIST_NAME_TAKEN); a conversation the member is not in is 404.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CreateChatListRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/chat-lists/{listId}": {
+      "patch": {
+        "operationId": "updateChatList",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "update Chat List",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. Renames the list and / or moves it to position (the others keep their relative order). Another member's list is 404.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UpdateChatListRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteChatList",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "delete Chat List",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. Deletes the list and its items, never the conversations.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatListDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}": {
+      "put": {
+        "operationId": "addChatListConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "add Chat List Conversation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. Adds a conversation the member is an ACTIVE member of (else 404); idempotent; a conversation may be in several lists; at most 500 per list (409 CONFLICT / CHAT_LIST_FULL).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeChatListConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "remove Chat List Conversation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The acting member's own chat lists (WhatsApp custom lists such as Family or Work): never visible to anyone else; a list shows only conversations the member is still an ACTIVE member of. Removes the conversation from the list (idempotent); never touches the conversation or its membership.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChatList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote": {
+      "put": {
+        "operationId": "votePoll",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "vote Poll",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send (ACTIVE members). MANAGED polls only (PRIVATE_E2EE: 422 CONTENT_REJECTED / POLL_MANAGED_ONLY). The vote replaces the member's previous choices; an empty optionIndexes retracts it; a closed poll is 409 CONFLICT / POLL_CLOSED; a deleted poll is MESSAGE_NOT_MODIFIABLE. Emits messaging.poll.voted (the hydrated event carries the current tally).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PollChangeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PollVoteRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/poll/close": {
+      "post": {
+        "operationId": "closePoll",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "close Poll",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The poll's sender or an OWNER / ADMIN closes it (else 403 PRINCIPAL_NOT_AUTHORIZED / NOT_POLL_CREATOR); idempotent; votes are kept and no new vote is accepted. Emits messaging.poll.closed.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PollChangeResult"
                 }
               }
             }
@@ -12155,7 +12745,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct, \u00a7105). Accepted by POST /v1/realtime/tickets and, as an alternative to customerCredential, by the member operations that list it: the token's session (device ACTIVE, session ACTIVE and unexpired, principal ACTIVE) is the caller, acting only for its own principal and own device (CF-Acting-Principal may only repeat it). Every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED."
+        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct, §105). Accepted by POST /v1/realtime/tickets and, as an alternative to customerCredential, by the member operations that list it: the token's session (device ACTIVE, session ACTIVE and unexpired, principal ACTIVE) is the caller, acting only for its own principal and own device (CF-Acting-Principal may only repeat it). Every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED."
       },
       "realtimeTicket": {
         "type": "apiKey",
@@ -12167,7 +12757,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "cfoa | cfob",
-        "description": "A CF Meet App's OAuth access token (`cfoa_\u2026`, acting for the granting CF Meet user) or bot token (`cfob_\u2026`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) \u2014 ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
+        "description": "A CF Meet App's OAuth access token (`cfoa_…`, acting for the granting CF Meet user) or bot token (`cfob_…`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) — ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
       }
     },
     "responses": {

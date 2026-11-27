@@ -154,3 +154,29 @@ test("serializes concurrent callback processing to preserve event order", async 
   assert.equal(f.transport.cursor(conversationId), 2);
   f.transport.close();
 });
+
+test("the inbox stream is requested on every socket and its signals reach the chat list", async () => {
+  const inbox = [];
+  let resyncs = 0, subscribed = 0;
+  const f = fixture({
+    onInboxEvent: (conversation, type) => inbox.push([conversation, type]),
+    onInboxResync: () => { resyncs++; },
+    onInboxSubscribed: () => { subscribed++; },
+  });
+  f.transport.subscribeInbox();
+  await f.transport.connect();
+  assert.deepEqual(f.sockets[0].sent, [{ type: "inbox.subscribe" }]);
+  const frame = (value) => f.sockets[0].emit("message", { data: JSON.stringify(value) });
+  frame({ type: "inbox.subscribed" });
+  frame({ type: "inbox.event", conversationId, eventSequence: 4, eventType: "messaging.message.created" });
+  frame({ type: "inbox.resync" });
+  await tick();
+  assert.equal(subscribed, 1);
+  assert.deepEqual(inbox, [[conversationId, "messaging.message.created"]]);
+  assert.equal(resyncs, 1);
+  // A new socket asks again (the server forgets it with the connection).
+  f.sockets[0].close();
+  await f.transport.connect();
+  assert.deepEqual(f.sockets[1].sent, [{ type: "inbox.subscribe" }]);
+  f.transport.close();
+});

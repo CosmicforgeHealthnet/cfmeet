@@ -7,6 +7,10 @@
 //! count), the most recently pinned first; pinning un-archives and archiving un-pins; an
 //! archived chat stays archived when new messages arrive. `GET /v1/conversations`
 //! returns both in each conversation's `inbox` summary.
+//!
+//! `favourite` (WhatsApp "Favourites") is independent of archive and pin: a favourite chat
+//! can also be pinned or archived, and favourites have no cap beyond the conversations the
+//! principal is a member of. The chat list filters on it (`inbox.favourite`).
 
 use axum::{
     extract::{Path, State},
@@ -48,6 +52,8 @@ pub struct InboxSettingsRequest {
     pub archived: Option<bool>,
     #[serde(default)]
     pub pinned: Option<bool>,
+    #[serde(default)]
+    pub favourite: Option<bool>,
 }
 
 async fn put_settings(
@@ -68,15 +74,17 @@ async fn put_settings(
 pub struct InboxSettings {
     pub archived_at: Option<DateTime<Utc>>,
     pub pinned_at: Option<DateTime<Utc>>,
+    pub favourited_at: Option<DateTime<Utc>>,
 }
 
 impl InboxSettings {
     /// The fields the chat list (`inbox`) carries.
-    pub fn summary_fields(&self) -> [(&'static str, Value); 3] {
+    pub fn summary_fields(&self) -> [(&'static str, Value); 4] {
         [
             ("archived", json!(self.archived_at.is_some())),
             ("pinned", json!(self.pinned_at.is_some())),
             ("pinnedAt", json!(self.pinned_at.map(rfc3339))),
+            ("favourite", json!(self.favourited_at.is_some())),
         ]
     }
 }
@@ -88,7 +96,7 @@ pub async fn load<C: ConnectionTrait>(
 ) -> Result<InboxSettings> {
     Ok(db::one::<InboxSettings, _>(
         db,
-        "SELECT archived_at, pinned_at FROM messaging_conversation_inbox_preferences \
+        "SELECT archived_at, pinned_at, favourited_at FROM messaging_conversation_inbox_preferences \
           WHERE conversation_id = $1 AND principal_id = $2",
         vec![conversation.into(), principal.into()],
     )
@@ -103,9 +111,9 @@ pub async fn set(
     id: Uuid,
     request: InboxSettingsRequest,
 ) -> Result<Value> {
-    if request.archived.is_none() && request.pinned.is_none() {
+    if request.archived.is_none() && request.pinned.is_none() && request.favourite.is_none() {
         return Err(Error::validation(
-            "nothing to change: archived or pinned is required",
+            "nothing to change: archived, pinned or favourite is required",
         ));
     }
     if request.archived == Some(true) && request.pinned == Some(true) {
@@ -128,6 +136,11 @@ pub async fn set(
     let current = load(&txn, id, principal).await?;
     let mut archived_at = current.archived_at;
     let mut pinned_at = current.pinned_at;
+    let favourited_at = match request.favourite {
+        Some(true) => current.favourited_at.or(Some(now)),
+        Some(false) => None,
+        None => current.favourited_at,
+    };
     match request.pinned {
         Some(true) if pinned_at.is_none() => {
             let pinned = db::scalar_i64(
@@ -160,10 +173,11 @@ pub async fn set(
     db::exec(
         &txn,
         "INSERT INTO messaging_conversation_inbox_preferences \
-           (conversation_id, principal_id, environment_id, archived_at, pinned_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
+           (conversation_id, principal_id, environment_id, archived_at, pinned_at, updated_at, favourited_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (conversation_id, principal_id) DO UPDATE SET \
-           archived_at = EXCLUDED.archived_at, pinned_at = EXCLUDED.pinned_at, updated_at = EXCLUDED.updated_at",
+           archived_at = EXCLUDED.archived_at, pinned_at = EXCLUDED.pinned_at, updated_at = EXCLUDED.updated_at, \
+           favourited_at = EXCLUDED.favourited_at",
         vec![
             id.into(),
             principal.into(),
@@ -171,6 +185,7 @@ pub async fn set(
             archived_at.into(),
             pinned_at.into(),
             now.into(),
+            favourited_at.into(),
         ],
     )
     .await?;
@@ -181,5 +196,6 @@ pub async fn set(
         "archived": archived_at.is_some(),
         "pinned": pinned_at.is_some(),
         "pinnedAt": pinned_at.map(rfc3339),
+        "favourite": favourited_at.is_some(),
     }))
 }

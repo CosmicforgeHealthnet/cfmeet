@@ -53,12 +53,14 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::membership::http::customer_routes())
         // ADR 0069: Status and Channels.
         .merge(crate::social::http::routes())
+        .merge(crate::conversations::chat_lists::routes())
 }
 
 /// Routes nested under `/v1/conversations`.
 pub fn conversation_tree() -> Router<AppState> {
     crate::conversations::http::conversation_routes()
         .merge(crate::conversations::inbox_settings::routes())
+        .merge(crate::messages::polls::routes())
         .merge(crate::membership::http::routes())
         .merge(crate::messages::http::routes())
         .merge(crate::mls::http::conversation_routes())

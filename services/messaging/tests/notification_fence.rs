@@ -635,6 +635,9 @@ async fn readiness_reports_the_routing_protocol_only_when_applied() {
     migration::AdminOperationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    migration::ChatOrganizationMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     migration::SocialMigrator::up(&db.conn, None).await.unwrap();
     let plain = Harness::on(db.clone(), |_| {});
     let r = ready(&plain).await;
