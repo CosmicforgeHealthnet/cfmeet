@@ -26,6 +26,16 @@ use crate::{
     state::AppState,
 };
 
+/// A piece number from the path (a bad one answers the standard `400 VALIDATION_ERROR`).
+fn piece(seq: &str) -> ApiResult<i32> {
+    seq.parse::<i32>().map_err(|_| {
+        crate::error::ApiError::domain(
+            crate::error::ErrorCode::ValidationError,
+            "The piece number must be a whole number",
+        )
+    })
+}
+
 /// Start an upload
 ///
 /// Declares a photo, video or voice note to upload for a status (`purpose` STATUS) or a
@@ -101,10 +111,11 @@ pub async fn get_media(
 pub async fn put_media_chunk(
     State(state): State<AppState>,
     actor: ActorContext,
-    Path((media_id, seq)): Path<(Uuid, i32)>,
+    Path((media_id, seq)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
     let user = actor.require_registered()?;
+    let seq = piece(&seq)?;
     social::put_chunk(&state.db, user.user_id, media_id, seq, &body).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -127,9 +138,10 @@ pub async fn get_media_chunk(
     State(state): State<AppState>,
     actor: ActorContext,
     headers: HeaderMap,
-    Path((media_id, seq)): Path<(Uuid, i32)>,
+    Path((media_id, seq)): Path<(Uuid, String)>,
 ) -> ApiResult<Response> {
     let user = actor.require_registered()?;
+    let seq = piece(&seq)?;
     social::readable_media(&state, user, &headers, media_id).await?;
     let bytes = social::read_chunk(&state.db, media_id, seq).await?;
     let mut response = (StatusCode::OK, bytes).into_response();
@@ -284,6 +296,8 @@ pub async fn status_viewers(
 }
 
 /// Delete my status
+///
+/// Deletes one of your statuses now, with its views (its media goes in the next sweep).
 #[utoipa::path(
     delete, path = "/api/v2/social/status/{postId}", tag = "Updates (v2)", operation_id = "v2_social_delete_status",
     params(("postId" = Uuid, Path, description = "Status id")),
@@ -380,6 +394,8 @@ pub async fn channels_following(
 }
 
 /// Get a channel
+///
+/// A channel's name, description, owner, followers and your unread count.
 #[utoipa::path(
     get, path = "/api/v2/social/channels/{channelId}", tag = "Updates (v2)", operation_id = "v2_social_get_channel",
     params(("channelId" = Uuid, Path, description = "Channel id")),
@@ -454,6 +470,8 @@ pub async fn delete_channel(
 }
 
 /// Follow a channel
+///
+/// Its posts show in your Updates with unread counts. Following again changes nothing.
 #[utoipa::path(
     put, path = "/api/v2/social/channels/{channelId}/follow", tag = "Updates (v2)", operation_id = "v2_social_follow_channel",
     params(("channelId" = Uuid, Path, description = "Channel id")),
@@ -476,6 +494,8 @@ pub async fn follow_channel(
 }
 
 /// Unfollow a channel
+///
+/// Stops following it. Unfollowing a channel you don't follow changes nothing.
 #[utoipa::path(
     delete, path = "/api/v2/social/channels/{channelId}/follow", tag = "Updates (v2)", operation_id = "v2_social_unfollow_channel",
     params(("channelId" = Uuid, Path, description = "Channel id")),
@@ -560,6 +580,8 @@ pub async fn create_channel_post(
 }
 
 /// Delete a post in my channel
+///
+/// Deletes one post with its reactions (owner only).
 #[utoipa::path(
     delete, path = "/api/v2/social/channels/{channelId}/posts/{postId}", tag = "Updates (v2)", operation_id = "v2_social_delete_channel_post",
     params(("channelId" = Uuid, Path, description = "Channel id"), ("postId" = Uuid, Path, description = "Post id")),
@@ -624,6 +646,8 @@ pub async fn react_channel_post(
 }
 
 /// Remove my reaction to a channel post
+///
+/// Takes back your emoji (nothing happens when there was none).
 #[utoipa::path(
     delete, path = "/api/v2/social/channels/{channelId}/posts/{postId}/reaction", tag = "Updates (v2)", operation_id = "v2_social_unreact_channel_post",
     params(("channelId" = Uuid, Path, description = "Channel id"), ("postId" = Uuid, Path, description = "Post id")),

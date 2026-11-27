@@ -25236,6 +25236,7 @@
           "Updates (v2)"
         ],
         "summary": "Get a channel",
+        "description": "A channel's name, description, owner, followers and your unread count.",
         "operationId": "v2_social_get_channel",
         "parameters": [
           {
@@ -25441,6 +25442,7 @@
           "Updates (v2)"
         ],
         "summary": "Follow a channel",
+        "description": "Its posts show in your Updates with unread counts. Following again changes nothing.",
         "operationId": "v2_social_follow_channel",
         "parameters": [
           {
@@ -25497,6 +25499,7 @@
           "Updates (v2)"
         ],
         "summary": "Unfollow a channel",
+        "description": "Stops following it. Unfollowing a channel you don't follow changes nothing.",
         "operationId": "v2_social_unfollow_channel",
         "parameters": [
           {
@@ -25715,6 +25718,7 @@
           "Updates (v2)"
         ],
         "summary": "Delete a post in my channel",
+        "description": "Deletes one post with its reactions (owner only).",
         "operationId": "v2_social_delete_channel_post",
         "parameters": [
           {
@@ -25873,6 +25877,7 @@
           "Updates (v2)"
         ],
         "summary": "Remove my reaction to a channel post",
+        "description": "Takes back your emoji (nothing happens when there was none).",
         "operationId": "v2_social_unreact_channel_post",
         "parameters": [
           {
@@ -26086,8 +26091,7 @@
             "description": "Piece number from 0",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "string"
             }
           }
         ],
@@ -26154,8 +26158,7 @@
             "description": "Piece number from 0",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "string"
             }
           }
         ],
@@ -26402,6 +26405,7 @@
           "Updates (v2)"
         ],
         "summary": "Delete my status",
+        "description": "Deletes one of your statuses now, with its views (its media goes in the next sweep).",
         "operationId": "v2_social_delete_status",
         "parameters": [
           {
@@ -39279,6 +39283,10 @@
     {
       "name": "Authentication",
       "description": "Passwordless sign-in and sign-up: request a 6-digit code by email (`POST /api/v1/auth/otp/request`), then verify the code or the one-click link from the same email. The first verification of a new address creates the account. Also token refresh, logout, Google sign-in and undoing an email change."
+    },
+    {
+      "name": "Updates (v2)",
+      "description": "WhatsApp-style Updates: status posts (text, photo, voice note or a video segment of at most 60 s) seen by your connected contacts for 24 hours and then deleted with their media, and channels people follow, post in and react to. Media is uploaded and read in 512 KiB pieces."
     },
     {
       "name": "Account profile (v2)",
