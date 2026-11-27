@@ -4,24 +4,29 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Mic, Palette, Send, Type, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
+import PhotoEditor from "@/components/media-editor/PhotoEditor";
+import TextStatusEditor from "@/components/media-editor/TextStatusEditor";
 import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, socialService, type MediaKind } from "@/services/v2/social.service";
-import { BACKGROUNDS, errorText, FONTS } from "./shared";
+import { BACKGROUNDS, errorText } from "./shared";
+import { textStatusToCreate } from "./status-adapter";
 
 type Mode = "text" | "media" | "voice";
 
 /** Wall-clock milliseconds (event handlers and timers only). */
 const now = () => Date.now();
 
+/** Photos are re-encoded by the editor (<= 2560 px, well under the upload limit), so larger originals are fine. */
+const MAX_PHOTO_INPUT = 64 * 1024 * 1024;
+
 /**
- * Add status (WhatsApp): text on a colour, a photo or video from the device with a caption,
- * or a voice note (hold to record, at most a minute). A video longer than a minute is
- * uploaded once and posted as consecutive one-minute statuses.
+ * Add status (WhatsApp): text on a colour or gradient (TextStatusEditor), a photo edited in
+ * PhotoEditor (crop, filters, text, stickers, drawing) with a caption, a video from the device
+ * with a caption, or a voice note (hold to record, at most a minute). A video longer than a
+ * minute is uploaded once and posted as consecutive one-minute statuses.
  */
 export default function StatusComposer({ initial, onClose, onPosted }: { initial: Mode; onClose: () => void; onPosted: () => void }) {
   const [mode, setMode] = useState<Mode>(initial);
-  const [text, setText] = useState("");
   const [bg, setBg] = useState(0);
-  const [font, setFont] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [kind, setKind] = useState<MediaKind | null>(null);
@@ -37,36 +42,51 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
     if (!f) return;
     const k = kindOf(f);
     if (!k || k === "AUDIO") { toast("Choose a photo or a video.", "error"); return; }
-    if (f.size > LIMITS[k]) { toast(k === "VIDEO" ? "Videos can be at most 64 MB." : "Photos can be at most 8 MB.", "error"); return; }
+    if (k === "IMAGE" ? f.size > MAX_PHOTO_INPUT : f.size > LIMITS[k]) { toast(k === "VIDEO" ? "Videos can be at most 64 MB." : "This photo is too big.", "error"); return; }
     let d: number | null = null;
     if (k === "VIDEO") {
       try { d = await durationOf(f); } catch { toast("This video can't be played here.", "error"); return; }
     }
-    setFile(f); setKind(k); setDuration(d); setPreview(URL.createObjectURL(f)); setMode("media");
+    setFile(f); setKind(k); setDuration(d); setPreview(k === "VIDEO" ? URL.createObjectURL(f) : null); setMode("media");
   };
 
-  const post = async () => {
+  const done = () => { toast("Status posted"); onPosted(); onClose(); };
+
+  const postText = async (body: Parameters<typeof textStatusToCreate>[0]) => {
+    try {
+      await socialService.postStatus(textStatusToCreate(body));
+      done();
+    } catch (e) {
+      toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
+    }
+  };
+
+  const postPhoto = async (blob: Blob) => {
     if (busy !== null) return;
     setBusy(0);
     try {
-      if (mode === "text") {
-        if (!text.trim()) return;
-        await socialService.postStatus({ kind: "TEXT", text: text.trim(), background: BACKGROUNDS[bg], font });
-      } else if (mode === "media" && file && kind) {
-        const media = await socialService.upload(file, "STATUS", kind, duration, (p) => setBusy(p));
-        if (kind === "VIDEO" && duration) {
-          const parts = segments(duration);
-          for (const [i, s] of parts.entries()) {
-            // The caption goes with the first part only, as WhatsApp does.
-            await socialService.postStatus({ kind: "VIDEO", mediaId: media.mediaId, startMs: s.startMs, endMs: s.endMs, caption: i === 0 && caption.trim() ? caption.trim() : undefined });
-          }
-        } else {
-          await socialService.postStatus({ kind: "IMAGE", mediaId: media.mediaId, caption: caption.trim() || undefined });
-        }
+      if (blob.size > LIMITS.IMAGE) { toast("Photos can be at most 8 MB.", "error"); return; }
+      const media = await socialService.upload(blob, "STATUS", "IMAGE", null, (p) => setBusy(p));
+      await socialService.postStatus({ kind: "IMAGE", mediaId: media.mediaId, caption: caption.trim() || undefined });
+      done();
+    } catch (e) {
+      toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const postVideo = async () => {
+    if (busy !== null || !file || kind !== "VIDEO" || !duration) return;
+    setBusy(0);
+    try {
+      const media = await socialService.upload(file, "STATUS", kind, duration, (p) => setBusy(p));
+      const parts = segments(duration);
+      for (const [i, s] of parts.entries()) {
+        // The caption goes with the first part only, as WhatsApp does.
+        await socialService.postStatus({ kind: "VIDEO", mediaId: media.mediaId, startMs: s.startMs, endMs: s.endMs, caption: i === 0 && caption.trim() ? caption.trim() : undefined });
       }
-      toast("Status posted");
-      onPosted();
-      onClose();
+      done();
     } catch (e) {
       toast(errorText(e, "Your status couldn't be posted. Try again."), "error");
     } finally {
@@ -75,62 +95,57 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   };
 
   const parts = kind === "VIDEO" && duration ? segments(duration).length : 1;
+  const tabs = (
+    <div className="flex flex-1 gap-1">
+      {([["media", "Photo", ImagePlus], ["text", "Text", Type], ["voice", "Voice", Mic]] as const).map(([m, label, Icon]) => (
+        <button key={m} type="button" onClick={() => (m === "media" && !file ? picker.current?.click() : setMode(m))}
+          className={cn("flex h-10 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold", mode === m ? "bg-white/20" : "text-white/80 hover:bg-white/10")}>
+          <Icon className="size-4" />{label}
+        </button>
+      ))}
+    </div>
+  );
+  const captionField = (
+    <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…" aria-label="Caption"
+      className="h-12 w-full rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+  );
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-label="Add status" data-testid="status-composer">
       <input ref={picker} type="file" accept="image/*,video/*" className="hidden" onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
       {mode === "voice" ? (
         <VoiceStatus bg={BACKGROUNDS[bg]} onCycle={() => setBg((bg + 1) % BACKGROUNDS.length)} onClose={onClose} onPosted={() => { onPosted(); onClose(); }} />
+      ) : mode === "text" ? (
+        <TextStatusEditor onCancel={onClose} onDone={postText} footer={tabs} />
+      ) : file && kind === "IMAGE" ? (
+        <PhotoEditor file={file} onCancel={() => { setFile(null); setKind(null); }} onDone={(r) => postPhoto(r.blob)} doneLabel="Post status"
+          footer={<>{captionField}{busy !== null ? <p className="text-center text-xs text-white/70">Uploading {Math.round(busy * 100)}%</p> : null}</>} />
       ) : (
         <>
           <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
             <button type="button" aria-label="Close" onClick={onClose} className="flex size-11 items-center justify-center rounded-full bg-black/30 backdrop-blur"><X className="size-6" /></button>
-            {mode === "text" ? (
-              <div className="flex gap-2">
-                <button type="button" aria-label="Font" onClick={() => setFont((font + 1) % FONTS.length)} className="flex size-11 items-center justify-center rounded-full bg-black/25 text-base font-semibold backdrop-blur">Aa</button>
-                <button type="button" aria-label="Background colour" onClick={() => setBg((bg + 1) % BACKGROUNDS.length)} className="flex size-11 items-center justify-center rounded-full bg-black/25 backdrop-blur"><Palette className="size-5" /></button>
-              </div>
-            ) : null}
           </div>
 
-          {mode === "text" ? (
-            <div className="flex flex-1 items-center justify-center px-6" style={{ backgroundColor: BACKGROUNDS[bg] }}>
-              <textarea autoFocus value={text} maxLength={700} onChange={(e) => setText(e.target.value)} placeholder="Type a status" data-testid="status-text"
-                className={cn("w-full resize-none bg-transparent text-center text-3xl leading-snug text-white placeholder:text-white/60 focus:outline-none", FONTS[font])}
-                rows={Math.min(8, Math.max(2, Math.ceil(text.length / 18)))} />
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
-              {!preview ? (
-                <button type="button" onClick={() => picker.current?.click()} className="flex flex-col items-center gap-3 text-white/80"><ImagePlus className="size-12" />Choose a photo or video</button>
-              ) : kind === "VIDEO" ? (
-                <video src={preview} controls playsInline className="max-h-full max-w-full" />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={preview} alt="" className="max-h-full max-w-full object-contain" />
-              )}
-            </div>
-          )}
+          <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
+            {!preview ? (
+              <button type="button" onClick={() => picker.current?.click()} className="flex flex-col items-center gap-3 text-white/80"><ImagePlus className="size-12" />Choose a photo or video</button>
+            ) : (
+              <video src={preview} controls playsInline className="max-h-full max-w-full" />
+            )}
+          </div>
 
           <div className="space-y-3 bg-black/90 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
-            {mode === "media" && preview ? (
+            {preview ? (
               <>
                 {kind === "VIDEO" && duration && duration > SEGMENT_MS ? (
                   <p className="text-center text-xs text-white/70" data-testid="status-segments">Longer than a minute: it will be posted as {parts} statuses of up to 1 minute each.</p>
                 ) : null}
-                <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…" className="h-12 w-full rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none" />
+                {captionField}
               </>
             ) : null}
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 gap-1">
-                {([["media", "Photo", ImagePlus], ["text", "Text", Type], ["voice", "Voice", Mic]] as const).map(([m, label, Icon]) => (
-                  <button key={m} type="button" onClick={() => (m === "media" && !preview ? picker.current?.click() : setMode(m))}
-                    className={cn("flex h-10 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold", mode === m ? "bg-white/20" : "text-white/80 hover:bg-white/10")}>
-                    <Icon className="size-4" />{label}
-                  </button>
-                ))}
-              </div>
-              <button type="button" aria-label="Post status" data-testid="status-send" disabled={busy !== null || (mode === "text" ? !text.trim() : !file)} onClick={() => void post()}
+              {tabs}
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={busy !== null || !file} onClick={() => void postVideo()}
                 className="relative flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
                 {busy !== null ? <span className="text-xs font-bold">{Math.round(busy * 100)}%</span> : <Send className="size-6" />}
               </button>

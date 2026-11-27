@@ -97,6 +97,11 @@ jobs:
       - name: Avatar image shrinking tests
         run: node --experimental-strip-types --test tests/avatar-image.test.mjs
 
+      # Media editors (status photo / collage / text status): overlay geometry and hit-testing,
+      # undo / redo, crop / rotate maths, filters, encoding choice, collage layouts, gradients.
+      - name: Media editor tests
+        run: node --experimental-strip-types --test tests/media-editor.test.mjs
+
       # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
       # password reset, password change), with the message-only fallback.
       - name: Form validation error mapping tests
