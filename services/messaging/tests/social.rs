@@ -1045,3 +1045,165 @@ async fn channels_keep_parity() {
         404
     );
 }
+
+/// ADR 0069 rollout: the retired Meeting Service channels arrive through the one-time import
+/// (`messaging-admin social import-channels`), checked like uploads, with ids kept; a second
+/// run changes nothing; a changed document or another environment is refused untouched.
+#[tokio::test]
+async fn legacy_channels_import_once_and_idempotently() {
+    use base64::Engine as _;
+    use messaging::social::legacy_import::{checksum, import, Export, ImportError};
+    let Some(w) = world().await else {
+        return;
+    };
+    let (owner, reader) = (w.person(), w.person());
+    let scope = &w.c.context.scope;
+    let (channel, text_post, media_post, bad_post, media, bad_media) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let image = png(5 * 1024 * 1024); // two 4 MiB parts
+    let at = w.h.state.now() - Duration::days(3);
+    let mut doc = json!({
+        "schemaVersion": 1,
+        "source": "cfmeet.meeting-service.social-channels",
+        "exportedAt": w.h.state.now(),
+        "scope": { "tenantId": scope.tenant_id, "applicationId": scope.application_id, "environmentId": scope.environment_id },
+        "channels": [{ "id": channel, "ownerPrincipalId": owner, "name": "News", "description": "Daily", "createdAt": at, "updatedAt": at }],
+        "followers": [
+            { "channelId": channel, "principalId": owner, "followedAt": at, "lastReadAt": at },
+            { "channelId": channel, "principalId": reader, "followedAt": at, "lastReadAt": at }
+        ],
+        "posts": [
+            { "id": text_post, "channelId": channel, "authorPrincipalId": owner, "kind": "TEXT", "text": "hello", "mediaId": null, "createdAt": at },
+            { "id": media_post, "channelId": channel, "authorPrincipalId": owner, "kind": "IMAGE", "text": null, "mediaId": media, "createdAt": at + Duration::seconds(1) },
+            { "id": bad_post, "channelId": channel, "authorPrincipalId": owner, "kind": "IMAGE", "text": null, "mediaId": bad_media, "createdAt": at + Duration::seconds(2) }
+        ],
+        "reactions": [{ "postId": text_post, "principalId": reader, "emoji": "\u{1F44D}", "reactedAt": at }],
+        "media": [
+            { "id": media, "ownerPrincipalId": owner, "kind": "IMAGE", "contentType": "image/png", "sizeBytes": image.len(),
+              "durationMs": null, "createdAt": at, "sha256": sha256_hex(&image),
+              "data": base64::engine::general_purpose::STANDARD.encode(&image) },
+            { "id": bad_media, "ownerPrincipalId": owner, "kind": "IMAGE", "contentType": "image/png", "sizeBytes": 4,
+              "durationMs": null, "createdAt": at, "sha256": sha256_hex(b"text"),
+              "data": base64::engine::general_purpose::STANDARD.encode(b"text") }
+        ],
+        "checksum": ""
+    });
+    let parsed: Export = serde_json::from_value(doc.clone()).unwrap();
+    doc["checksum"] = json!(checksum(&parsed));
+    let parsed: Export = serde_json::from_value(doc.clone()).unwrap();
+    let env = scope.environment_id;
+    let now = w.h.state.now();
+
+    // A changed document or another environment is refused and writes nothing.
+    let mut tampered = parsed.clone();
+    tampered.channels[0].name = "Other".into();
+    assert!(matches!(
+        import(&w.h.state.db, w.store.as_ref(), env, &tampered, now).await,
+        Err(ImportError::Refused(_))
+    ));
+    assert!(matches!(
+        import(
+            &w.h.state.db,
+            w.store.as_ref(),
+            Uuid::new_v4(),
+            &parsed,
+            now
+        )
+        .await,
+        Err(ImportError::Refused(_))
+    ));
+    assert_eq!(
+        w.get(reader, "/v1/messaging/channels/following").await.json["channels"],
+        json!([])
+    );
+
+    let first = import(&w.h.state.db, w.store.as_ref(), env, &parsed, now)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            first.imported.channels,
+            first.imported.followers,
+            first.imported.posts,
+            first.imported.reactions,
+            first.imported.media
+        ),
+        (1, 2, 2, 1, 1),
+        "{first:?}"
+    );
+    assert_eq!(
+        first.refused.len(),
+        2,
+        "unrecognised media and its media-only post: {first:?}"
+    );
+
+    // The follower sees the channel, its posts (ids kept) and can read the media.
+    let following = w.get(reader, "/v1/messaging/channels/following").await;
+    assert_eq!(
+        following.json["channels"][0]["channelId"],
+        json!(channel),
+        "{}",
+        following.text
+    );
+    assert_eq!(following.json["channels"][0]["name"], "News");
+    let posts = w
+        .get(reader, &format!("/v1/messaging/channels/{channel}/posts"))
+        .await;
+    let ids: Vec<Value> = posts.json["posts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["postId"].clone())
+        .collect();
+    assert!(
+        ids.contains(&json!(text_post)) && ids.contains(&json!(media_post)),
+        "{}",
+        posts.text
+    );
+    assert!(!ids.contains(&json!(bad_post)));
+    let g = w
+        .post(
+            reader,
+            &format!("/v1/messaging/channels/media/{media}/download-grants"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(g.status.as_u16(), 200, "{}", g.text);
+    assert_eq!(g.json["parts"].as_array().unwrap().len(), 2);
+    let mut stored = Vec::new();
+    for part in 0..2 {
+        stored.extend(
+            cf_object_storage::ObjectStore::get(
+                w.store.as_ref(),
+                &messaging::social::media::object_key(env, media, part),
+                8 * 1024 * 1024,
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        );
+    }
+    assert_eq!(stored, image, "media stored whole in 4 MiB parts");
+
+    // A second run changes nothing.
+    let again = import(&w.h.state.db, w.store.as_ref(), env, &parsed, now)
+        .await
+        .unwrap();
+    assert_eq!(again.imported, Default::default(), "{again:?}");
+    assert_eq!(
+        (
+            again.unchanged.channels,
+            again.unchanged.followers,
+            again.unchanged.posts,
+            again.unchanged.reactions,
+            again.unchanged.media
+        ),
+        (1, 2, 2, 1, 1)
+    );
+}

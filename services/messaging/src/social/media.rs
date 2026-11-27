@@ -92,7 +92,7 @@ impl MediaKind {
         }
     }
 
-    fn max_bytes(self) -> i64 {
+    pub(crate) fn max_bytes(self) -> i64 {
         match self {
             MediaKind::Image => MAX_IMAGE_BYTES,
             MediaKind::Video => MAX_VIDEO_BYTES,
@@ -100,7 +100,7 @@ impl MediaKind {
         }
     }
 
-    fn accepts(self, content_type: &str) -> bool {
+    pub(crate) fn accepts(self, content_type: &str) -> bool {
         let t = content_type.split(';').next().unwrap_or("").trim();
         match self {
             MediaKind::Image => {

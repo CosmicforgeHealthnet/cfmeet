@@ -33,7 +33,7 @@ COPY packages/notification-client/ /app/packages/notification-client/
 RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration --bin gap-closure-migration --bin platform-build-migration --bin meeting-audit-migration --bin account-privacy-migration --bin account-phone-migration --bin admin-operations-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
-RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
+RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations --bin export_social_channels
 
 # Runtime Stage
 FROM debian:bookworm-slim
@@ -65,6 +65,7 @@ COPY --from=builder /app/services/meeting-service/target/release/account-phone-m
 COPY --from=builder /app/services/meeting-service/target/release/admin-operations-migration ./admin-operations-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
+COPY --from=builder /app/services/meeting-service/target/release/export_social_channels ./export-social-channels
 
 # Expose the application port
 EXPOSE 8080

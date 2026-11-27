@@ -22,6 +22,8 @@
 pub mod audience;
 pub mod channels;
 pub mod http;
+/// ADR 0069: one-time import of the retired Meeting Service channels (`messaging-admin`).
+pub mod legacy_import;
 pub mod media;
 pub mod notices;
 pub mod status;

@@ -77,6 +77,59 @@ in a relational database.
    `messaging.status.shared` must first be added to the Notification Service catalogue and
    `packages/notification-client` and their routing activated (off by default).
 
+## Rollout
+
+The web app deploys minutes after a merge to main; the backend about an hour later, after
+full CI, and nothing orders the two.
+
+1. **Transition window (TRANSITIONAL web fallback, one release).** Until the backend is
+   deployed, the Meeting relay refuses the new routes with `404 ENDPOINT_NOT_FOUND`
+   ("not available to CF Meet clients"). The web client (`apps/web/src/services/v2/social-backend.ts`)
+   then serves the same operation from the previous `/api/v2/social/*` API
+   (`social.legacy.ts`; the publishing queue through `status-publisher/legacy-transport.ts`
+   with its degraded capability flags) and remembers that for the session (sessionStorage).
+   Only that exact answer switches: a Messaging `404 NOT_FOUND`, a `403` privacy denial or any
+   other error is never retried elsewhere (`apps/web/tests/social-backend.test.mjs`). Once the
+   backend is deployed the old routes answer `404 ENDPOINT_NOT_FOUND` in turn and the client
+   switches back. Messaging-only reads (rings, audience, close friends, lists, mutes) answer
+   empty on the old backend. The web parity gate tolerates these `/api/v2/social` calls from
+   `social.legacy.ts` only. **TODO: remove `social-backend.ts`, `social.legacy.ts`,
+   `legacy-transport.ts`, `switching-transport.ts`, their test and the parity-gate exception
+   after #193 is deployed.**
+2. **Existing channels (one-time, idempotent copy).** Same pattern as the organizations
+   cutover (`export-organizations` → `organizations-import`): the source exports a read-only
+   snapshot of its own tables and the destination imports it into its own database; neither
+   reads the other's database. Statuses expire within 24 hours and are not copied.
+   * Export (meeting-service image, `export-social-channels`, one `REPEATABLE READ, READ ONLY`
+     transaction): channels, followers, posts, reactions and the posts' complete media
+     (whole, base64), people as their Messaging principals from
+     `communication_principal_links`; people without a principal (never used Messaging) are
+     skipped and counted; a SHA-256 checksum over every record.
+   * Import (`messaging-admin social import-channels --file FILE|- --environment UUID
+     --operator ID`): refuses another schema, another environment or a checksum mismatch
+     without writing; keeps every id; checks media like an upload (kind, type, size,
+     recognised content, SHA-256) and stores it in 4 MiB parts in the protected bucket before
+     recording it; every insert is `ON CONFLICT DO NOTHING`, so a repeated run reports
+     everything `unchanged`; audited as `SOCIAL_LEGACY_IMPORT`; prints counts and ids only.
+   * Run once after the backend release (and again any time; it only adds what is new):
+
+     ```sh
+     # on the VPS, as root (export file 0600, never mounted into a container)
+     umask 077
+     docker run --rm --network container:cfmeet-production-backend \
+       --env-file <(docker exec cfmeet-production-backend env | grep -E '^(DATABASE_URL|CFMEET_COMMUNICATION_(TENANT|APPLICATION|ENVIRONMENT)_ID)=') \
+       --entrypoint /app/export-social-channels "$(docker inspect -f '{{.Config.Image}}' cfmeet-production-backend)" > social-channels.json
+     docker exec -i cfmeet-messaging /app/messaging-admin social import-channels \
+       --file - --environment <CFMEET_COMMUNICATION_ENVIRONMENT_ID> --operator <you> < social-channels.json
+     # run the import again: every count must be under "unchanged"
+     shred -u social-channels.json
+     ```
+
+     The export needs `DATABASE_URL` and `CFMEET_COMMUNICATION_{TENANT,APPLICATION,ENVIRONMENT}_ID`
+     (already in the Meeting Service environment); the import runs inside the Messaging
+     container (`messaging-admin` now ships in the image), which already has `DATABASE_URL`
+     and `MESSAGING_ATTACHMENTS_S3_*`. Exit codes: 2 refused input (nothing written), 1 failure.
+
 ## Known limitations
 
 * Status and channel content is stored server-side and readable by the server (text in

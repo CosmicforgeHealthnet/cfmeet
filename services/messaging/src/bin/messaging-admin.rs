@@ -11,7 +11,13 @@
 //! messaging-admin dead-letters replay --kind outbox|webhook-relay|object-deletion [--id UUID] [--operator ID]
 //! messaging-admin kt checkpoint --out FILE        (writes the current tree head, mode 0600)
 //! messaging-admin kt verify --checkpoint FILE     (exit 3 on rollback / fork)
+//! messaging-admin social import-channels --file FILE|- --environment UUID [--operator ID]
 //! ```
+//!
+//! `social import-channels` (ADR 0069) imports the retired Meeting Service channels from the
+//! document `export-social-channels` (meeting-service image) printed; `-` reads stdin. It needs
+//! the attachment bucket settings (`MESSAGING_ATTACHMENTS_S3_*`) for the posts' media. Repeat
+//! runs are idempotent (everything reported `unchanged`); prints counts and ids only.
 //!
 //! Switch names: MESSAGE_SEND, CONVERSATION_CREATE, E2EE_ONBOARDING, ATTACHMENT_UPLOAD,
 //! SMS_BRIDGE, WEBHOOK_RELAY. Switches only stop a capability; none enables anything.
@@ -27,7 +33,7 @@ use sea_orm::Database;
 use uuid::Uuid;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: messaging-admin kill-switch list|engage|release … | incidents list|resolve … | dead-letters list|replay … | kt checkpoint|verify … (see the source header)");
+    eprintln!("usage: messaging-admin kill-switch list|engage|release … | incidents list|resolve … | dead-letters list|replay … | kt checkpoint|verify … | social import-channels … (see the source header)");
     ExitCode::from(2)
 }
 
@@ -209,6 +215,82 @@ async fn main() -> ExitCode {
                     }),
                 Ok(None) => Err("no checkpoint at that path".into()),
                 Err(e) => Err(format!("checkpoint unreadable: {e}")),
+            }
+        }
+        ("social", "import-channels") => {
+            let (Some(file), Some(environment), Some(op)) = (
+                f.get("file"),
+                f.get("environment").and_then(|e| Uuid::parse_str(e).ok()),
+                operator(&f),
+            ) else {
+                eprintln!("messaging-admin: --file FILE|-, --environment UUID and an operator (--operator or CF_OPERATOR_ID) are required");
+                return ExitCode::from(2);
+            };
+            let bytes = if file == "-" {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map(|_| buf)
+            } else {
+                std::fs::read(file)
+            };
+            let doc: messaging::social::legacy_import::Export =
+                match bytes.map_err(|e| e.to_string()).and_then(|b| {
+                    serde_json::from_slice(&b).map_err(|_| {
+                        "the export is not valid JSON of the expected shape".to_string()
+                    })
+                }) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("messaging-admin: {e}");
+                        return ExitCode::from(2);
+                    }
+                };
+            let storage: std::sync::Arc<dyn cf_object_storage::ObjectStore> =
+                match cf_object_storage::S3Config::from_lookup(
+                    "MESSAGING_ATTACHMENTS_S3_",
+                    &|k: &str| std::env::var(k).ok(),
+                ) {
+                    Ok(Some(cfg)) => match cf_object_storage::S3ObjectStore::new(cfg) {
+                        Ok(s) => std::sync::Arc::new(s),
+                        Err(_) => {
+                            eprintln!(
+                                "messaging-admin: the attachment bucket settings are invalid"
+                            );
+                            return ExitCode::from(2);
+                        }
+                    },
+                    Ok(None) => std::sync::Arc::new(cf_object_storage::UnconfiguredStore),
+                    Err(e) => {
+                        eprintln!("messaging-admin: {e}");
+                        return ExitCode::from(2);
+                    }
+                };
+            match messaging::social::legacy_import::import(
+                &db,
+                storage.as_ref(),
+                environment,
+                &doc,
+                now,
+            )
+            .await
+            {
+                Ok(report) => {
+                    let detail = serde_json::to_value(&report).unwrap_or_default();
+                    operations::audit(
+                        &db,
+                        &op,
+                        "SOCIAL_LEGACY_IMPORT",
+                        &environment.to_string(),
+                        detail.clone(),
+                        now,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
+                    .map(|_| {
+                        println!("{detail}");
+                        ExitCode::SUCCESS
+                    })
+                }
+                Err(e) => Err(e.to_string()),
             }
         }
         _ => return usage(),

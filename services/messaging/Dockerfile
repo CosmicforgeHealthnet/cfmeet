@@ -35,7 +35,7 @@ COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
 RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration --bin messaging-notification-fence-migration --bin messaging-send-policy-projection-migration \
- && cargo build --release --locked -p messaging --bin messaging --bin messaging-kt-witness
+ && cargo build --release --locked -p messaging --bin messaging --bin messaging-kt-witness --bin messaging-admin
 
 FROM debian:bookworm-slim
 # Apply pending Debian security updates at build time; nothing else is installed.
@@ -47,6 +47,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 WORKDIR /app
 COPY --from=builder /src/services/messaging/target/release/messaging ./messaging
 COPY --from=builder /src/services/messaging/target/release/messaging-kt-witness ./messaging-kt-witness
+COPY --from=builder /src/services/messaging/target/release/messaging-admin ./messaging-admin
 COPY --from=builder /src/services/messaging/target/release/messaging-migration ./messaging-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-communications-migration ./messaging-communications-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-send-policy-projection-migration ./messaging-send-policy-projection-migration
