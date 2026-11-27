@@ -339,6 +339,9 @@ def runtime_overrides(env, user, redis_password, scan='gateway'):
         'MESSAGING_MANAGED_SCAN_MAX_BYTES': str(MANAGED_SCAN_MAX_BYTES),
         **e2ee,
         'MESSAGING_MANAGED_KEYRING_FILE': '/run/messaging/managed.ring',
+        # Server media is a 14-day delivery copy; long-term copies live on the user's
+        # devices and in their own cloud backup (product decision, 26 November 2026).
+        'MESSAGING_MANAGED_MEDIA_RETENTION_DAYS': '14',
         'MESSAGING_ATTACHMENTS_S3_ENDPOINT': 'http://cfmeet-calling-artifacts:9000',
         'MESSAGING_ATTACHMENTS_S3_PUBLIC_ENDPOINT': 'https://api.cfmeet.com',
         'MESSAGING_ATTACHMENTS_S3_REGION': 'us-east-1', 'MESSAGING_ATTACHMENTS_S3_BUCKET': BUCKET,
