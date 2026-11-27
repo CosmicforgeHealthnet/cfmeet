@@ -297,14 +297,14 @@ async fn only_mutual_unblocked_contacts_in_the_snapshot_see_a_status() {
             (Method::GET, format!("/v1/messaging/status/{s}/viewers")),
             (Method::PUT, format!("/v1/messaging/status/{s}/reaction")),
         ] {
-            let r = w
-                .call(
-                    m.clone(),
-                    outsider,
-                    &p,
-                    Some(json!({ "emoji": "\u{1F44D}" })),
-                )
-                .await;
+            let body = if m == Method::GET {
+                None
+            } else if p.ends_with("/reaction") {
+                Some(json!({ "emoji": "\u{1F44D}" }))
+            } else {
+                Some(json!({}))
+            };
+            let r = w.call(m.clone(), outsider, &p, body).await;
             assert_eq!(r.status.as_u16(), 404, "{m} {p}: {}", r.text);
         }
     }
@@ -962,6 +962,8 @@ async fn channels_keep_parity() {
         )
         .await;
     assert_eq!(f.json["following"], true, "{}", f.text);
+    // Posts after following count as unread (the harness clock does not move by itself).
+    w.h.clock.advance(Duration::seconds(1));
     let denied = w
         .post(
             reader,
