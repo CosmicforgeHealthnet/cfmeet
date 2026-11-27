@@ -19,10 +19,10 @@ export function PersonAvatar({ person, name, size = "size-12", className, ring }
   ) : (
     <span aria-hidden className={cn("flex items-center justify-center rounded-full text-sm font-semibold text-white", size)} style={{ backgroundColor: colorFor(label) }}>{initials(label)}</span>
   );
-  if (!ring) return <span className={cn("shrink-0", className)}>{inner}</span>;
+  if (!ring) return <span className={cn("inline-flex shrink-0", className)}>{inner}</span>;
   return (
-    <span className={cn("shrink-0 rounded-full p-[3px]", ring === "unseen" ? "bg-emerald-500" : "bg-muted-foreground/30", className)}>
-      <span className="block rounded-full bg-background p-[2px]">{inner}</span>
+    <span className={cn("inline-flex shrink-0 rounded-full p-[3px]", ring === "unseen" ? "bg-emerald-500" : "bg-muted-foreground/30", className)}>
+      <span className="flex rounded-full bg-background p-[2px]">{inner}</span>
     </span>
   );
 }
