@@ -476,6 +476,9 @@ async fn a_to_d_foundation_certification_across_real_services() {
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let (mut messaging, url) = world.start_messaging(&db.url).await;
     let m = Client {
         http: &world.http,
@@ -1103,6 +1106,9 @@ async fn external_developer_journey_with_attachments_search_and_webhooks() {
         .await
         .unwrap();
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let (_messaging, url) = world.start_messaging(&db.url).await;
@@ -1748,6 +1754,9 @@ async fn hosted_staging_kit_rehearsal_against_real_services() {
         .await
         .unwrap();
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let (_messaging, url) = world.start_messaging(&db.url).await;

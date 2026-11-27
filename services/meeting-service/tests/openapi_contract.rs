@@ -461,39 +461,6 @@ fn every_v2_route_is_documented() {
         ("put", "/api/v2/me/avatar"),
         ("delete", "/api/v2/me/avatar"),
         ("get", "/api/v2/avatars/{avatarId}"),
-        // Updates — status (24 hours, contacts) and channels
-        ("post", "/api/v2/social/media"),
-        ("get", "/api/v2/social/media/{mediaId}"),
-        ("put", "/api/v2/social/media/{mediaId}/chunks/{seq}"),
-        ("get", "/api/v2/social/media/{mediaId}/chunks/{seq}"),
-        ("post", "/api/v2/social/media/{mediaId}/complete"),
-        ("post", "/api/v2/social/status"),
-        ("get", "/api/v2/social/status/feed"),
-        ("delete", "/api/v2/social/status/{postId}"),
-        ("post", "/api/v2/social/status/{postId}/view"),
-        ("get", "/api/v2/social/status/{postId}/viewers"),
-        ("get", "/api/v2/social/channels"),
-        ("post", "/api/v2/social/channels"),
-        ("get", "/api/v2/social/channels/following"),
-        ("get", "/api/v2/social/channels/{channelId}"),
-        ("patch", "/api/v2/social/channels/{channelId}"),
-        ("delete", "/api/v2/social/channels/{channelId}"),
-        ("put", "/api/v2/social/channels/{channelId}/follow"),
-        ("delete", "/api/v2/social/channels/{channelId}/follow"),
-        ("get", "/api/v2/social/channels/{channelId}/posts"),
-        ("post", "/api/v2/social/channels/{channelId}/posts"),
-        (
-            "delete",
-            "/api/v2/social/channels/{channelId}/posts/{postId}",
-        ),
-        (
-            "put",
-            "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
-        ),
-        (
-            "delete",
-            "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
-        ),
         // Multi-device policy — linked devices, linking challenges, security log
         ("get", "/api/v2/me/device-policy"),
         ("get", "/api/v2/me/devices"),
@@ -789,9 +756,6 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                 // Gap audit A22: an avatar upload is the image itself.
                 let expected = if path == "/api/v2/me/avatar" {
                     ["image/png"]
-                } else if path == "/api/v2/social/media/{mediaId}/chunks/{seq}" {
-                    // Updates: a media piece is raw bytes.
-                    ["application/octet-stream"]
                 } else {
                     ["application/json"]
                 };
@@ -816,15 +780,6 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                     // Gap audit A22: the public avatar address serves the image itself.
                     if path == "/api/v2/avatars/{avatarId}" && status == "200" {
                         assert_eq!(types, ["image/png"], "{method} {path} {status}");
-                        continue;
-                    }
-                    // Updates: a media piece is served as raw bytes.
-                    if path == "/api/v2/social/media/{mediaId}/chunks/{seq}" && status == "200" {
-                        assert_eq!(
-                            types,
-                            ["application/octet-stream"],
-                            "{method} {path} {status}"
-                        );
                         continue;
                     }
                     assert_eq!(types, ["application/json"], "{method} {path} {status}");

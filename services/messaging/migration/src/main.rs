@@ -40,6 +40,9 @@ async fn main() {
         messaging_migration::AdminOperationsMigrator::up(&db, None)
             .await
             .expect("Messaging admin-operations migrations failed");
+        messaging_migration::SocialMigrator::up(&db, None)
+            .await
+            .expect("Messaging status / channels migrations failed");
         println!("Messaging migrations applied");
         return;
     }
@@ -54,6 +57,9 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Messaging migration database connection failed");
+        messaging_migration::SocialMigrator::reset(&db)
+            .await
+            .expect("Messaging status / channels rollback failed");
         messaging_migration::AdminOperationsMigrator::reset(&db)
             .await
             .expect("Messaging admin-operations rollback failed");

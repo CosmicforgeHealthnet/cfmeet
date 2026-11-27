@@ -50,9 +50,11 @@ enum Seg {
     Lit(&'static str),
     Id,
     Reaction,
+    /// A media part number (`0`-`63`, canonical decimal).
+    Part,
 }
 
-use Seg::{Id, Lit, Reaction};
+use Seg::{Id, Lit, Part, Reaction};
 
 /// One relayed operation: method, path shape (under `/v1/`), accepted query keys and
 /// whether the client's `Idempotency-Key` is forwarded.
@@ -83,6 +85,7 @@ impl RelayRoute {
                 Lit(l) => out.push_str(l),
                 Id => out.push_str("{id}"),
                 Reaction => out.push_str("{reaction}"),
+                Part => out.push_str("{part}"),
             }
         }
         out
@@ -689,6 +692,360 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // ADR 0069: Status and Channels (Messaging owns them; Meeting only relays).
+    r(Method::POST, &[Lit("messaging"), Lit("status")], &[], true),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("feed")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("mine")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("audience")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("eligible-contacts")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("close-friends")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("audience-lists")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("mutes")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Lit("delete")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Lit("rings")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Lit("audience-lists")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("status"), Lit("audience")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("status"), Lit("close-friends")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("status"), Lit("audience-lists"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("status"), Lit("audience-lists"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("status"), Lit("mutes"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("status"), Lit("mutes"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("status"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Id, Lit("view")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("status"), Id, Lit("reaction")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("status"), Id, Lit("reaction")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Id, Lit("viewers")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Id, Lit("replies")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Id, Lit("forwards")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Id, Lit("reshares")],
+        &[],
+        true,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("status"), Lit("media")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("status"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("status"),
+            Lit("media"),
+            Id,
+            Lit("parts"),
+            Part,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("status"),
+            Lit("media"),
+            Id,
+            Lit("complete"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("status"),
+            Lit("media"),
+            Id,
+            Lit("download-grants"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Lit("media")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("media"),
+            Id,
+            Lit("parts"),
+            Part,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("media"),
+            Id,
+            Lit("complete"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("media"),
+            Id,
+            Lit("download-grants"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels")],
+        &["q"],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("following")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("channels"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("follow")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("follow")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("posts")],
+        &["before"],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("posts")],
+        &[],
+        true,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("posts"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("reaction"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("reaction"),
+        ],
+        &[],
+        false,
+    ),
 ];
 
 // Bound the path segment independently of the domain reaction validation. Reject
@@ -719,6 +1076,7 @@ pub fn route_for(method: &Method, path: &str) -> Option<&'static RelayRoute> {
                 Lit(l) => l == s,
                 Id => Uuid::parse_str(s).is_ok_and(|u| u.hyphenated().to_string() == *s),
                 Reaction => safe_reaction_segment(s),
+                Part => s.parse::<u8>().is_ok_and(|n| n < 64 && n.to_string() == *s),
             })
     })
 }
@@ -753,6 +1111,8 @@ pub fn native_public_path(method: &str, template: &str) -> Option<String> {
         .map(|part| {
             if part == "{reaction}" {
                 ":example:"
+            } else if part == "{part}" {
+                "0"
             } else if part.starts_with('{') && part.ends_with('}') {
                 "00000000-0000-0000-0000-000000000001"
             } else {
@@ -1181,6 +1541,18 @@ mod tests {
             (Method::PUT, "v1/messaging/presence/settings".into()),
             (Method::GET, format!("v1/messaging/devices/{C}/welcomes")),
             (Method::GET, "v1/messaging/push/configuration".into()),
+            (Method::GET, "v1/messaging/status/feed".into()),
+            (Method::POST, "v1/messaging/status".into()),
+            (Method::GET, format!("v1/messaging/status/{C}")),
+            (
+                Method::POST,
+                format!("v1/messaging/status/media/{C}/parts/0"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/channels/media/{C}/parts/63"),
+            ),
+            (Method::PUT, format!("v1/messaging/channels/{C}/follow")),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),
@@ -1213,6 +1585,24 @@ mod tests {
             (Method::GET, "v1/conversations/not-a-uuid".to_string()),
             (Method::GET, "internal/v1/anything".to_string()),
             (Method::GET, "v2/conversations".to_string()),
+            // Media part numbers are canonical and bounded.
+            (
+                Method::POST,
+                format!("v1/messaging/status/media/{C}/parts/64"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/status/media/{C}/parts/01"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/status/media/{C}/parts/-1"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/status/media/{C}/parts/{C}"),
+            ),
+            (Method::GET, "v1/messaging/status/unknown".to_string()),
         ] {
             assert!(route_for(&m, &p).is_none(), "{m} {p}");
         }
@@ -1259,6 +1649,7 @@ mod tests {
                     .split('/')
                     .map(|p| match p {
                         "{reaction}" => ":thumbsup:",
+                        "{part}" => "0",
                         p if p.starts_with('{') => C,
                         p => p,
                     })
