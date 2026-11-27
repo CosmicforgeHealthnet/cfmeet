@@ -241,6 +241,7 @@ const TYPING_THROTTLE_MS = 3000;
 /** A device not yet in a chat's group retries joining it by itself at most this often. */
 const JOIN_RETRY_MS = 10_000;
 const JOIN_BLOCKED_RETRY_MS = 5 * 60_000;
+const NAME_RETRY_MS = 5_000;
 /** A member device re-publishes a missing GroupInfo at most this often per chat. */
 const GROUP_INFO_RETRY_MS = 60_000;
 /** Before sending, the sender adds members' new devices; checked at most this often per chat. */
@@ -1298,7 +1299,7 @@ export class MessagingEngine {
     for (const c of this.server.values()) {
       const members = (c.members ?? []).map((m) => m.principalId);
       let unnamed = false;
-      for (const m of members) if (m !== me && !this.snapshot.names[m] && !this.unnameable.has(m)) { needNames.add(m); unnamed = true; }
+      for (const m of members) if (m !== me && !this.snapshot.names[m] && Date.now() - (this.unnameable.get(m) ?? 0) > NAME_RETRY_MS) { needNames.add(m); unnamed = true; }
       if (unnamed) nameChats.push(c.conversationId);
       let groupReady = false;
       if (c.securityProfile === "PRIVATE_E2EE" && c.encryption.mlsGroupId && this.crypto && this.snapshot.deviceId) {
@@ -1346,8 +1347,9 @@ export class MessagingEngine {
         const names = { ...this.snapshot.names };
         // Your own saved contact name (alias) first, as the contact list shows it.
         for (const p of r.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
-        // Not asked again on every render (a deleted account stays unnamed).
-        for (const p of asked) if (!names[p]) this.unnameable.add(p);
+        // Not asked again on every render, but again a little later (a name can appear
+        // once a membership or contact link is in place).
+        for (const p of asked) if (!names[p]) this.unnameable.set(p, Date.now());
         this.set({ names });
       } catch {
         // Names are cosmetic; ids are shown instead.
@@ -1450,7 +1452,7 @@ export class MessagingEngine {
   }
 
   private continuing = new Map<string, Promise<string>>();
-  private unnameable = new Set<string>();
+  private unnameable = new Map<string, number>();
 
   /**
    * The synced (MANAGED) chat an older encrypted chat continues in: same kind, same people
