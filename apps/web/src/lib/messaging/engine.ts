@@ -1294,9 +1294,12 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId;
     const views: ConversationView[] = [];
     const needNames = new Set<string>();
+    const nameChats: string[] = [];
     for (const c of this.server.values()) {
       const members = (c.members ?? []).map((m) => m.principalId);
-      for (const m of members) if (m !== me && !this.snapshot.names[m]) needNames.add(m);
+      let unnamed = false;
+      for (const m of members) if (m !== me && !this.snapshot.names[m] && !this.unnameable.has(m)) { needNames.add(m); unnamed = true; }
+      if (unnamed) nameChats.push(c.conversationId);
       let groupReady = false;
       if (c.securityProfile === "PRIVATE_E2EE" && c.encryption.mlsGroupId && this.crypto && this.snapshot.deviceId) {
         groupReady = await this.crypto.call<boolean>("hasGroup", { groupId: b64u.dec(c.encryption.mlsGroupId) }).catch(() => false);
@@ -1338,10 +1341,13 @@ export class MessagingEngine {
     }
     if (needNames.size) {
       try {
-        const r = await identityApi.names([...needNames].slice(0, 256));
+        const asked = [...needNames].slice(0, 256);
+        const r = await identityApi.names(asked, nameChats);
         const names = { ...this.snapshot.names };
         // Your own saved contact name (alias) first, as the contact list shows it.
         for (const p of r.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        // Not asked again on every render (a deleted account stays unnamed).
+        for (const p of asked) if (!names[p]) this.unnameable.add(p);
         this.set({ names });
       } catch {
         // Names are cosmetic; ids are shown instead.
@@ -1424,14 +1430,33 @@ export class MessagingEngine {
     if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
     if (view.securityProfile === "MANAGED") return view.id;
     const others = view.members.filter((m) => m !== me);
+    const twin = this.managedTwinOf(conversationId);
+    if (twin) return twin;
+    // The group's own name when this device knows it, else its members' names (never a prompt).
+    const name = view.contextClass === "DIRECT" ? undefined
+      : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || others.map((p) => this.snapshot.names[p]).filter(Boolean).slice(0, 4).join(", ") || "Group");
+    const pending = this.continuing.get(conversationId);
+    if (pending) return pending;
+    const created = this.createConversation([], "MANAGED", { principalIds: others, title: name }).finally(() => this.continuing.delete(conversationId));
+    this.continuing.set(conversationId, created);
+    return created;
+  }
+
+  private continuing = new Map<string, Promise<string>>();
+  private unnameable = new Set<string>();
+
+  /**
+   * The synced (MANAGED) chat an older encrypted chat continues in: same kind, same people
+   * (for a group, the one with the same name first). The chat list shows it instead.
+   */
+  managedTwinOf(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.securityProfile === "MANAGED") return null;
     const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
       && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
-    // Never the member list shown when a group's name is unknown: that is not its name.
-    const name = view.contextClass === "DIRECT" ? undefined : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || undefined);
-    if (view.contextClass !== "DIRECT" && !name) throw new MessagingApiError(0, "GROUP_NAME_REQUIRED", "Give the group a name to continue.");
-    const twin = this.snapshot.conversations.find((c) => same(c) && (view.contextClass === "DIRECT" || (c.serverTitle ?? null) === (name ?? null)));
-    if (twin) return twin.id;
-    return this.createConversation([], "MANAGED", { principalIds: others, title: name });
+    const candidates = this.snapshot.conversations.filter(same);
+    const named = view.groupTitle ?? view.serverTitle;
+    return (candidates.find((c) => named && c.serverTitle === named) ?? candidates[0])?.id ?? null;
   }
 
   /**

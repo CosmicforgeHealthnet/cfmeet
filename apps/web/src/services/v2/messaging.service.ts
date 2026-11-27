@@ -12,7 +12,8 @@ export const messagingService = {
   me: () => call<MessagingIdentity>("GET", "/messaging/me"),
   directory: (q?: string) => call<{ people: Colleague[] }>("GET", `/messaging/directory${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   resolve: (userIds: string[]) => call<{ people: { userId: string; principalId: string }[] }>("POST", "/messaging/directory/resolve", { userIds }),
-  names: (principalIds: string[]) => call<{ principals: { principalId: string; displayName: string; alias?: string | null }[] }>("POST", "/messaging/principals/names", { principalIds }),
+  /** Names of colleagues, contacts and (with `conversationIds`) everyone in those chats. */
+  names: (principalIds: string[], conversationIds: string[] = []) => call<{ principals: { principalId: string; displayName: string; alias?: string | null }[] }>("POST", "/messaging/principals/names", conversationIds.length ? { principalIds, conversationIds: conversationIds.slice(0, 20) } : { principalIds }),
   registrationChallenge: () => call<RegistrationChallenge>("POST", "/messaging/devices/registration-challenges", {}),
   registerDevice: (challengeId: string, keyPackage: string, displayLabel: string) =>
     call<MessagingDevice>("POST", "/messaging/devices", { challengeId, keyPackage, displayLabel }),
