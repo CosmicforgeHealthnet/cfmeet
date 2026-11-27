@@ -317,6 +317,23 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Updates: statuses past their 24 hours are deleted with their views and media; unposted
+    // and unfinished uploads go too (every five minutes).
+    {
+        let sweep_state = state.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                tick.tick().await;
+                match backend::services::social::purge_expired(&sweep_state.db).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("removed {n} expired status / upload row(s)"),
+                    Err(e) => tracing::warn!("status sweep deferred: {e}"),
+                }
+            }
+        });
+    }
+
     // Gap audit A10: sign-ins past their absolute lifetime end everywhere (once a minute).
     {
         let sweep_state = state.clone();
