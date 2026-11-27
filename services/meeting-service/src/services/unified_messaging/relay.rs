@@ -1081,6 +1081,65 @@ impl UnifiedMessaging {
             .collect::<ApiResult<_>>()?;
         Ok(json!({ "principals": names }))
     }
+
+    /// Names of the people in chats the caller is in (WhatsApp shows the name of everyone in
+    /// a group, contact or not). Messaging itself proves the membership: the member list is
+    /// read as the caller, so a chat the caller is not in names nobody. At most 20 chats.
+    pub async fn name_chat_members(
+        &self,
+        user_id: Uuid,
+        conversation_ids: &[Uuid],
+        principal_ids: &[Uuid],
+    ) -> ApiResult<Vec<Value>> {
+        let mut members = std::collections::HashSet::new();
+        for id in conversation_ids.iter().take(20) {
+            let path = format!("v1/conversations/{id}/members");
+            let Ok((200, body)) = self
+                .relay(
+                    user_id,
+                    RelayRequest {
+                        method: Method::GET,
+                        path: &path,
+                        query: vec![("limit".into(), "100".into())],
+                        idempotency_key: None,
+                        body: None,
+                    },
+                )
+                .await
+            else {
+                continue;
+            };
+            for m in body["members"].as_array().into_iter().flatten() {
+                if let Some(p) = m["principalId"]
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                {
+                    members.insert(p);
+                }
+            }
+        }
+        let wanted: Vec<Uuid> = principal_ids
+            .iter()
+            .copied()
+            .filter(|p| members.contains(p))
+            .collect();
+        if wanted.is_empty() {
+            return Ok(vec![]);
+        }
+        let rows = all(
+            &self.db,
+            "SELECT DISTINCT l.principal_id, u.username FROM communication_principal_links l                JOIN users u ON u.id = l.subject_id               WHERE l.subject_kind = 'USER' AND l.environment_id = $1 AND l.principal_id = ANY($2)",
+            vec![self.environment_id().into(), wanted.into()],
+        )
+        .await?;
+        rows.iter()
+            .map(|r| -> ApiResult<Value> {
+                let p: Uuid = r.try_get_by_index(0)?;
+                let n: String = r.try_get_by_index(1)?;
+                Ok(json!({ "principalId": p, "displayName": n }))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

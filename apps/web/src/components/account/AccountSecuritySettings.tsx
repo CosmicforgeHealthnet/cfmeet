@@ -13,6 +13,15 @@ import { accountService } from "@/services/account.service";
 import { authService } from "@/services/auth.service";
 import { apiErrorOf, passwordProblem } from "@/lib/account/account-core";
 import { validationMessageOf } from "@/lib/validation-errors";
+import { browserDeviceLabel } from "@/lib/auth/device-label";
+
+/** "Chrome on Android" instead of the raw browser string the session recorded. */
+const sessionLabel = (label: string | null | undefined) => !label ? "Unknown device" : /Mozilla\/|AppleWebKit|Gecko\//.test(label) ? browserDeviceLabel(label) : label;
+/** Sign-in is passwordless: an email (or text) code, or Google. */
+const signedInWith = (method: string | null | undefined) => {
+  const m = (method ?? "").toLowerCase();
+  return m.includes("google") ? "signed in with Google" : m.includes("phone") || m.includes("sms") ? "signed in with a text code" : "signed in with an email code";
+};
 import type { SessionRecord } from "@/types/generated/meeting-service";
 
 /** Settings → Security: two-step sign-in and where you're signed in (ACC-007). */
@@ -100,10 +109,10 @@ function Sessions() {
                 <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", s.current ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}><Icon className="size-5" /></span>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-2 truncate text-sm font-semibold">
-                    <span className="truncate">{s.clientLabel || "Unknown device"}</span>
+                    <span className="truncate">{sessionLabel(s.clientLabel)}</span>
                     {s.current && <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">This device</span>}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">{s.current ? "You're using it now" : ago(s.lastRefreshedAt ?? s.createdAt)} · signed in with {s.authMethod?.toLowerCase() === "google" ? "Google" : "password"}</p>
+                  <p className="truncate text-xs text-muted-foreground">{s.current ? "You're using it now" : ago(s.lastRefreshedAt ?? s.createdAt)} · {signedInWith(s.authMethod)}</p>
                 </div>
                 <button type="button" disabled={revoke.isPending} onClick={() => void revokeOne(s)} className="h-9 shrink-0 rounded-full px-3.5 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">Sign out</button>
               </li>

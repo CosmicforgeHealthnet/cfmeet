@@ -17710,8 +17710,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Display names of the principals the caller can see (self, colleagues and connected contacts).",
-        "description": "Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
+        "summary": "Display names of the principals the caller can see.",
+        "description": "Named: the caller, colleagues, connected contacts and the people in the chats listed in\n`conversationIds` (membership checked by Messaging as the caller).\n\nReturns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
         "operationId": "v2_messaging_principal_names",
         "requestBody": {
           "content": {
