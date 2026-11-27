@@ -152,7 +152,7 @@ function engineWith({ routes = {}, names = {}, history = [] } = {}) {
     "@/lib/auth/account-device": { accountDevice: {} },
     "@/lib/auth/session": { accountSession: {} },
     "./crypto-client": { CryptoClient: class {}, CryptoWorkerError: class extends Error {} },
-    "./managed-store": { ManagedConversationState: class {}, emptyRefresh: () => ({}) },
+    "./managed-store": { ManagedConversationState: class {}, emptyRefresh: () => ({}), behindHead: () => [] },
     "./outbox": { MessageOutbox: class {}, browserOutboxStorage: () => ({}), flushOutbox: async () => 0 },
     "./routes": { reactionSegment: (r) => r },
     "./urls": urls,
