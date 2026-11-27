@@ -74,6 +74,7 @@ pub async fn account_phone_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>
 mod m20261120_000001_admin_operations;
 mod m20261121_000001_account_data_exports;
 mod m20261121_000002_admin_account_suspension;
+mod m20261127_000001_social_updates;
 
 pub mod phase2_backfill;
 
@@ -487,7 +488,7 @@ pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionT
 }
 
 /// Backend gap-audit history (case-insensitive identity, authenticator MFA, avatars,
-/// calendar invites, chat edits). SEPARATE and additive: every earlier history fails closed on unknown
+/// calendar invites, chat edits, Updates: status and channels). SEPARATE and additive: every earlier history fails closed on unknown
 /// versions, so the previous image keeps starting after a rollback.
 pub struct GapClosureMigrator;
 #[async_trait::async_trait]
@@ -500,6 +501,7 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(m20261118_000004_email_calendar_invite::Migration),
             Box::new(m20261118_000005_chat_message_edits::Migration),
             Box::new(m20261118_000006_team_channel_sync::Migration),
+            Box::new(m20261127_000001_social_updates::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

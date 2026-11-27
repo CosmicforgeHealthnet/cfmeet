@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, Home, Menu, MessageSquare, Video } from "lucide-react";
+import { CalendarDays, CircleDashed, Home, Menu, MessageSquare, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isActivePath } from "./AppSidebar";
 import { UnreadBadge, useUnreadChats } from "@/hooks/useUnreadChats";
@@ -14,6 +14,7 @@ const tabs = [
   { label: "Home", icon: Home, href: "/dashboard" },
   { label: "Meetings", icon: Video, href: "/dashboard/meetings" },
   { label: "Chats", icon: MessageSquare, href: "/dashboard/messages" },
+  { label: "Updates", icon: CircleDashed, href: "/dashboard/updates" },
   { label: "Schedule", icon: CalendarDays, href: "/dashboard/calendar" },
 ];
 
@@ -26,7 +27,7 @@ export default function MobileTabs() {
       aria-label="Main"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
     >
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-6">
         {tabs.map(({ label, icon: Icon, href }) => {
           const active = isActivePath(pathname, href);
           return (
@@ -35,7 +36,7 @@ export default function MobileTabs() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium",
+                  "flex h-16 flex-col items-center justify-center gap-1 text-[10.5px] font-medium sm:text-[11px]",
                   active ? "font-semibold text-primary" : "text-muted-foreground",
                 )}
               >
@@ -52,7 +53,7 @@ export default function MobileTabs() {
           <button
             type="button"
             onClick={() => window.dispatchEvent(new Event(OPEN_MENU_EVENT))}
-            className="flex h-16 w-full flex-col items-center justify-center gap-1 text-[11px] font-medium text-muted-foreground"
+            className="flex h-16 w-full flex-col items-center justify-center gap-1 text-[10.5px] font-medium sm:text-[11px] text-muted-foreground"
           >
             <Menu className="size-5" aria-hidden />
             More

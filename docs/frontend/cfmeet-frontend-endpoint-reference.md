@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 345 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **758** |
+| **Total** | | | **781** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -522,6 +522,34 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.11.0**; b
 | GET | `/api/v2/conferences/{id}/transcripts` | account session; participant token | Transcription jobs / transcripts of a conference. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_transcripts` |
 | GET | `/api/v2/conferences/{id}/transcripts/{artifactId}` | account session; participant token | Transcript FINAL segments (cursor paginated). | 200, 404 | ARTIFACT_NOT_FOUND | `openapi/meeting-service.json#v2_get_transcript` |
 | POST | `/api/v2/conferences/{id}/transcripts/{artifactId}/translations` | account session; participant token | Translate a READY transcript (downstream; the original is never overwritten). | 200, 503 | TRANSCRIPTION_PROVIDER_UNAVAILABLE | `openapi/meeting-service.json#v2_translate_transcript` |
+
+### Updates (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/social/channels` | account session | Find channels | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_social_channel_directory` |
+| POST | `/api/v2/social/channels` | account session | Create a channel | 201, 400, 401 | AUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_create_channel` |
+| GET | `/api/v2/social/channels/following` | account session | Channels I follow | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_social_channels_following` |
+| DELETE | `/api/v2/social/channels/{channelId}` | account session | Delete my channel | 204, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_social_delete_channel` |
+| GET | `/api/v2/social/channels/{channelId}` | account session | Get a channel | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_get_channel` |
+| PATCH | `/api/v2/social/channels/{channelId}` | account session | Update my channel | 200, 400, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_update_channel` |
+| DELETE | `/api/v2/social/channels/{channelId}/follow` | account session | Unfollow a channel | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_unfollow_channel` |
+| PUT | `/api/v2/social/channels/{channelId}/follow` | account session | Follow a channel | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_follow_channel` |
+| GET | `/api/v2/social/channels/{channelId}/posts` | account session | Channel posts | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_channel_posts` |
+| POST | `/api/v2/social/channels/{channelId}/posts` | account session | Post in my channel | 201, 400, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_create_channel_post` |
+| DELETE | `/api/v2/social/channels/{channelId}/posts/{postId}` | account session | Delete a post in my channel | 204, 401, 403, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_social_delete_channel_post` |
+| DELETE | `/api/v2/social/channels/{channelId}/posts/{postId}/reaction` | account session | Remove my reaction to a channel post | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_unreact_channel_post` |
+| PUT | `/api/v2/social/channels/{channelId}/posts/{postId}/reaction` | account session | React to a channel post | 200, 400, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_react_channel_post` |
+| POST | `/api/v2/social/media` | account session | Start an upload | 201, 400, 401, 429 | AUTHENTICATION_REQUIRED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_create_media` |
+| GET | `/api/v2/social/media/{mediaId}` | account session | Get an upload | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_get_media` |
+| GET | `/api/v2/social/media/{mediaId}/chunks/{seq}` | account session | Read a piece | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_get_media_chunk` |
+| PUT | `/api/v2/social/media/{mediaId}/chunks/{seq}` | account session | Upload a piece | 204, 400, 401, 404, 413 | AUTHENTICATION_REQUIRED, NOT_FOUND, REQUEST_TOO_LARGE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_put_media_chunk` |
+| POST | `/api/v2/social/media/{mediaId}/complete` | account session | Finish an upload | 200, 400, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_complete_media` |
+| POST | `/api/v2/social/status` | account session | Post a status | 201, 400, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_social_create_status` |
+| GET | `/api/v2/social/status/feed` | account session | Status updates | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_social_status_feed` |
+| DELETE | `/api/v2/social/status/{postId}` | account session | Delete my status | 204, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_delete_status` |
+| POST | `/api/v2/social/status/{postId}/view` | account session | Mark a status seen | 204, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_view_status` |
+| GET | `/api/v2/social/status/{postId}/viewers` | account session | Who saw my status | 200, 401, 404 | AUTHENTICATION_REQUIRED, NOT_FOUND | `openapi/meeting-service.json#v2_social_status_viewers` |
 
 ### Users
 

@@ -87,3 +87,4 @@ pub use token_blacklist::TokenBlacklistService;
 
 pub mod account_phone;
 pub mod communications;
+pub mod social;

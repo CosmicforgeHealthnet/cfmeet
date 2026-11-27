@@ -1,5 +1,5 @@
 {
-  "description": "Explicit Part VI \u00a751 public route allow-list of the API Gateway. Every source-contract operation that is not automatically INTERNAL_SERVICE / OPERATOR_ADMIN / PROVIDER_CALLBACK / PUBLIC_INFRASTRUCTURE must appear here as PUBLIC_CUSTOMER (routable) or EXCLUDED (with a reason code); anything else fails scripts/contracts/public_api.py (default deny). Reviewed like code: adding an entry is a public API decision.",
+  "description": "Explicit Part VI §51 public route allow-list of the API Gateway. Every source-contract operation that is not automatically INTERNAL_SERVICE / OPERATOR_ADMIN / PROVIDER_CALLBACK / PUBLIC_INFRASTRUCTURE must appear here as PUBLIC_CUSTOMER (routable) or EXCLUDED (with a reason code); anything else fails scripts/contracts/public_api.py (default deny). Reviewed like code: adding an entry is a public API decision.",
   "reasons": {
     "LEGACY_DIRECT_INGRESS": "Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers.",
     "FIRST_PARTY_APP_BACKEND": "The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly.",
@@ -2580,6 +2580,167 @@
       "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/avatars/{avatarId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/media",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/media/{mediaId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/social/media/{mediaId}/chunks/{seq}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/media/{mediaId}/chunks/{seq}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/media/{mediaId}/complete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/status",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/status/feed",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/social/status/{postId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/status/{postId}/view",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/status/{postId}/viewers",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/channels",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/channels",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/channels/following",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/social/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/social/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/social/channels/{channelId}/follow",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/social/channels/{channelId}/follow",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/social/channels/{channelId}/posts",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/social/channels/{channelId}/posts",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/social/channels/{channelId}/posts/{postId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
     },
