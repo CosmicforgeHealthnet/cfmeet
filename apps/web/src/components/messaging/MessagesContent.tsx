@@ -1651,6 +1651,26 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
               ) : null;
               if (item.type === "card") return <Fragment key={item.key}>{separator}<TimelineCardView card={item.card} /></Fragment>;
               const m = item.message;
+              // Messages sent before this browser joined an older encrypted chat can never be
+              // shown here: one quiet line for the whole run instead of a bubble each.
+              const beforeJoin = (o?: (typeof items)[number]) => !!o && o.type === "message" && o.message.state === "before-join";
+              if (m.state === "before-join") {
+                if (beforeJoin(prev)) return null;
+                let n = 1;
+                while (beforeJoin(items[index + n])) n++;
+                const more = m.note && /other device/.test(m.note);
+                return (
+                  <Fragment key={item.key}>
+                    {separator}
+                    <li className="my-3 flex justify-center" data-testid="before-join-run">
+                      <span className="flex max-w-[90%] items-start gap-2 rounded-xl bg-background/90 px-3 py-2 text-center text-xs text-muted-foreground shadow-sm ring-1 ring-border">
+                        <Lock className="mt-0.5 size-3.5 shrink-0" />
+                        <span>{n === 1 ? "1 earlier message isn't on this browser." : `${n} earlier messages aren't on this browser.`}{more ? " You can bring them over from your other device under Security & devices." : ""}</span>
+                      </span>
+                    </li>
+                  </Fragment>
+                );
+              }
               const same = (o?: (typeof items)[number]) => !!o && o.type === "message" && o.message.senderPrincipalId === m.senderPrincipalId && o.message.mine === m.mine && !!o.message.createdAt && !!m.createdAt && Math.abs(Date.parse(o.message.createdAt) - Date.parse(m.createdAt)) < 5 * 60000;
               const first = !!separator || !same(prev);
               const nextSeparated = next && (() => { const nAt = next.type === "card" ? next.card.occurredAt : next.message.createdAt; return !!nAt && !!m.createdAt && !sameDay(nAt, m.createdAt); })();
