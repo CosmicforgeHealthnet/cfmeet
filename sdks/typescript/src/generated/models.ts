@@ -6842,6 +6842,26 @@ export namespace Messaging {
   export type BlockRequest = {
     principalId: Uuid;
   };
+  /** 1.36.0: one of the acting member's own chat lists (WhatsApp custom lists). Never visible to anyone else. */
+  export type ChatList = {
+    listId: Uuid;
+    name: string;
+    /** The list's place in the member's own order (0 first). */
+    position: number;
+    /** Conversations of the list the member is still an ACTIVE member of, in the order they were added. */
+    conversationIds: Array<Uuid>;
+    createdAt: string;
+    updatedAt: string;
+  };
+  export type ChatListDeleted = {
+    listId: Uuid;
+    deleted: true;
+  };
+  export type ChatListPage = {
+    chatLists: Array<ChatList>;
+    maxChatLists: number;
+    maxConversationsPerList: number;
+  };
   export type Ciphersuite = "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519";
   export type ClientSessionRevoked = {
     sessionId: Uuid;
@@ -6927,11 +6947,13 @@ export namespace Messaging {
     readReceipts: boolean | null;
     /** Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group). */
     title?: string | null;
-    /** Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. */
+    /** Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. 1.36.0: attachment:<attachmentId> is a group photo attachment of the conversation. */
     avatarRef?: string | null;
     inbox?: ConversationInbox;
     /** S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows. */
     announcementOnly?: boolean;
+    /** 1.36.0: a MANAGED group's description (always null for DIRECT and PRIVATE_E2EE conversations, whose metadata belongs inside the MLS group). */
+    description?: string | null;
   };
   /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
   export type ConversationEvent = {
@@ -6962,6 +6984,8 @@ export namespace Messaging {
     pinned?: boolean;
     /** F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned. */
     pinnedAt?: string | null;
+    /** 1.36.0: the member marked this chat as a favourite for itself (PUT /v1/conversations/{conversationId}/inbox-settings; WhatsApp Favourites). Independent of archive and pin; never visible to other members. */
+    favourite?: boolean;
   };
   /** F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary). */
   export type ConversationInboxSettings = {
@@ -6969,13 +6993,17 @@ export namespace Messaging {
     archived: boolean;
     pinned: boolean;
     pinnedAt: string | null;
+    /** 1.36.0: the chat is one of the member's Favourites. */
+    favourite?: boolean;
   };
-  /** F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true. */
+  /** F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true. 1.36.0: favourite. */
   export type ConversationInboxSettingsRequest = {
     /** Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it. */
     archived?: boolean;
     /** Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED. */
     pinned?: boolean;
+    /** 1.36.0: add (true) or remove (false) the chat from the acting member's Favourites. Independent of archive and pin. */
+    favourite?: boolean;
   };
   /** Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured). */
   export type ConversationLastMessage = {
@@ -6988,10 +7016,20 @@ export namespace Messaging {
     attachmentCount: number;
     /** MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones. */
     previewText: string | null;
+    /** 1.36.0, MANAGED and ACTIVE only: the message's presentation (a poll previews its question). */
+    presentation?: "STANDARD" | "ANNOUNCEMENT" | "POLL";
+    /** 1.36.0, MANAGED and ACTIVE only: the kind of the message's first attachment (e.g. IMAGE, VIDEO, VOICE_NOTE, DOCUMENT), for the chat list's icon. */
+    attachmentKind?: string;
   };
   export type ConversationPage = {
     conversations: Array<Conversation>;
     nextCursor: string | null;
+  };
+  export type CreateChatListRequest = {
+    /** Trimmed; unique (case-insensitively) among the member's lists (409 CONFLICT / CHAT_LIST_NAME_TAKEN). */
+    name: string;
+    /** Conversations to start with (each one the member is an ACTIVE member of, else 404). */
+    conversationIds?: Array<Uuid>;
   };
   /** A tenant / application / environment is never part of a request: it comes from the authenticated credential. */
   export type CreateConversationRequest = {
@@ -7019,6 +7057,8 @@ export namespace Messaging {
     title?: string;
     /** Section 13: opaque avatar reference (MANAGED only). */
     avatarRef?: string;
+    /** 1.36.0: a group description (MANAGED, non-DIRECT only; trimmed; line breaks allowed, no other control characters). */
+    description?: string;
   };
   export type CreateInviteLinkRequest = {
     /** Default 604800 (7 days). */
@@ -7421,7 +7461,9 @@ export namespace Messaging {
     };
     managed?: {
       text: string | null;
-      presentation?: "STANDARD" | "ANNOUNCEMENT";
+      presentation?: "STANDARD" | "ANNOUNCEMENT" | "POLL";
+      /** 1.36.0: present on poll messages (presentation POLL): options, voters and close state; null when it cannot be shown. */
+      poll?: Poll | null;
     };
     mlsEpoch?: number;
     /** NATIVE: created through Messaging. LEGACY_MANAGED: imported from a legacy chat store (MANAGED only, never presented as end-to-end encrypted). */
@@ -7566,6 +7608,39 @@ export namespace Messaging {
     };
     /** 1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE … */
     applicationBaseline?: "CFMEET_FIRST_PARTY" | "CFMEET_PLATFORM_PARTNER" | null;
+  };
+  /** 1.36.0: the options and current tally of an ACTIVE MANAGED poll message (Message.managed.poll). */
+  export type Poll = {
+    options: Array<PollOption>;
+    allowsMultipleAnswers: boolean;
+    /** Distinct members with a current vote. */
+    voterCount: number;
+    closed: boolean;
+    closedAt: string | null;
+    closedByPrincipalId: Uuid | null;
+  };
+  export type PollChangeResult = {
+    messageId: Uuid;
+    /** false: nothing changed (the same vote again, or an already closed poll). */
+    changed: boolean;
+    poll: Poll | null;
+  };
+  export type PollOption = {
+    index: number;
+    text: string;
+    voteCount: number;
+    /** Who chose this option (members see voters, like WhatsApp). */
+    voterPrincipalIds: Array<Uuid>;
+  };
+  /** 1.36.0: a MANAGED poll (the message text, 1-300 characters, is its question). PRIVATE_E2EE polls are encrypted application messages (POLL_MANAGED_ONLY). */
+  export type PollRequest = {
+    /** 2-12 answers, distinct (case-insensitively) after trimming, 1-100 characters each. */
+    options: Array<string>;
+    allowsMultipleAnswers?: boolean;
+  };
+  export type PollVoteRequest = {
+    /** The member's choices; they replace its previous vote. Empty retracts it. At most one unless the poll allowsMultipleAnswers. */
+    optionIndexes: Array<number>;
   };
   export type PresenceSettings = {
     visibility: "CONVERSATION_MEMBERS" | "HIDDEN";
@@ -7802,6 +7877,8 @@ export namespace Messaging {
     mentionedPrincipalIds?: Array<Uuid>;
     /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
     frankingCommitment?: string;
+    /** 1.36.0, MANAGED only: this message is a poll (text is its question; no attachments; not an announcement). The message's managed.presentation is POLL. */
+    poll?: PollRequest;
   };
   export type SmsBridge = {
     bridgeId: Uuid;
@@ -7925,6 +8002,11 @@ export namespace Messaging {
     lastSequence: number;
     readSequence: number;
   };
+  export type UpdateChatListRequest = {
+    name?: string;
+    /** Move the list to this place (beyond the end: last); the other lists keep their relative order. */
+    position?: number;
+  };
   /** Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE). */
   export type UpdateConversationRequest = {
     expectedVersion: number;
@@ -7935,10 +8017,12 @@ export namespace Messaging {
     retentionSeconds?: number | null;
     /** Section 13: a new display title; null clears it (MANAGED only, owner). */
     title?: string | null;
-    /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
+    /** Section 13: a new avatar reference; null clears it (MANAGED only). 1.36.0: attachment:<attachmentId> names a READY image attachment uploaded to this conversation (the group photo; members read it through the attachment download / thumbnail grants, and it is not removed as an abandoned upload while it is the avatar). Title, avatarRef and description alone may be changed by the owner or a group … */
     avatarRef?: string | null;
     /** S13 (owner): announcement-only on / off; GROUP and CHANNEL only. */
     announcementOnly?: boolean;
+    /** 1.36.0: a new group description; null clears it (MANAGED, non-DIRECT; the owner or a group admin). */
+    description?: string | null;
   };
   /** Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost. */
   export type UsageSummary = {
@@ -8012,6 +8096,11 @@ export namespace Messaging {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: Member;
     };
+    /** PUT /v1/messaging/chat-lists/{listId}/conversations/{conversationId} — scope messages.read; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    addChatListConversation: {
+      params: { path: { listId: Uuid; conversationId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: ChatList;
+    };
     /** POST /v1/conversations/{conversationId}/members — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     addMember: {
       params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: AddMemberRequest };
@@ -8047,6 +8136,11 @@ export namespace Messaging {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: KeyPackageClaimRequest };
       response: KeyPackageClaim;
     };
+    /** POST /v1/conversations/{conversationId}/messages/{messageId}/poll/close — scope messages.send; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    closePoll: {
+      params: { path: { conversationId: Uuid; messageId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: PollChangeResult;
+    };
     /** POST /v1/conversations/{conversationId}/sms-bridges/{bridgeId}/close — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     closeSmsBridge: {
       params: { path: { conversationId: Uuid; bridgeId: Uuid }; headers: { "cf-acting-principal": Uuid } };
@@ -8081,6 +8175,11 @@ export namespace Messaging {
     createBlock: {
       params: { headers: { "cf-acting-principal": Uuid }; body: BlockRequest };
       response: Block;
+    };
+    /** POST /v1/messaging/chat-lists — scope messages.read; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    createChatList: {
+      params: { headers: { "cf-acting-principal": Uuid }; body: CreateChatListRequest };
+      response: ChatList;
     };
     /** POST /v1/conversations — scope conversations.create; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     createConversation: {
@@ -8131,6 +8230,11 @@ export namespace Messaging {
     deleteBackup: {
       params: { path: { backupId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: BackupDeletion;
+    };
+    /** DELETE /v1/messaging/chat-lists/{listId} — scope messages.read; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    deleteChatList: {
+      params: { path: { listId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: ChatListDeleted;
     };
     /** DELETE /v1/conversations/{conversationId}/messages/{messageId} — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry IDEMPOTENT */
     deleteMessage: {
@@ -8297,6 +8401,11 @@ export namespace Messaging {
       params: { headers: { "cf-acting-principal": Uuid } };
       response: BlockPage;
     };
+    /** GET /v1/messaging/chat-lists — scope messages.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    listChatLists: {
+      params: { headers: { "cf-acting-principal": Uuid } };
+      response: ChatListPage;
+    };
     /** GET /v1/conversations; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry SAFE */
     listConversations: {
       params: { query?: { lifecycleState?: LifecycleState; contextClass?: ContextClass; limit?: number; cursor?: string; orderBy?: "createdAt" | "lastActivity" }; headers?: { "cf-acting-principal"?: Uuid } };
@@ -8419,6 +8528,11 @@ export namespace Messaging {
       params: { path: { principalId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: BlockRemoved;
     };
+    /** DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} — scope messages.read; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    removeChatListConversation: {
+      params: { path: { listId: Uuid; conversationId: Uuid }; headers: { "cf-acting-principal": Uuid } };
+      response: ChatList;
+    };
     /** DELETE /v1/conversations/{conversationId}/members/{principalId}; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     removeMember: {
       params: { path: { conversationId: Uuid; principalId: Uuid }; query?: { reason?: string }; headers?: { "cf-acting-principal"?: Uuid } };
@@ -8536,6 +8650,11 @@ export namespace Messaging {
       params: { path: { installationId: string }; query?: { platform?: "APNS" | "APNS_VOIP" | "FCM" } };
       response: void;
     };
+    /** PATCH /v1/messaging/chat-lists/{listId} — scope messages.read; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    updateChatList: {
+      params: { path: { listId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: UpdateChatListRequest };
+      response: ChatList;
+    };
     /** PATCH /v1/conversations/{conversationId} — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     updateConversation: {
       params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: UpdateConversationRequest };
@@ -8545,6 +8664,11 @@ export namespace Messaging {
     updateMessagingPolicy: {
       params: { body: PolicyUpdateRequest };
       response: PolicyView;
+    };
+    /** PUT /v1/conversations/{conversationId}/messages/{messageId}/poll/vote — scope messages.send; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    votePoll: {
+      params: { path: { conversationId: Uuid; messageId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: PollVoteRequest };
+      response: PollChangeResult;
     };
   }
 }
