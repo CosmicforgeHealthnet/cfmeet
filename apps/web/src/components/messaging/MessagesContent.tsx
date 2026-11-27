@@ -115,7 +115,7 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 
 function Avatar({ name, seed, size = "size-11", className }: { name: string; seed?: string; size?: string; className?: string }) {
   return (
-    <span aria-hidden className={cn("flex shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white", size, className)} style={{ backgroundColor: colorFor(seed ?? name) }}>
+    <span aria-hidden className={cn("flex shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white", size, className)} style={{ backgroundColor: colorFor(name.trim().toLowerCase() || seed || "?") }}>
       {initials(name)}
     </span>
   );
@@ -1267,45 +1267,6 @@ function NotifyPrompt() {
 }
 const NOTIFY_DISMISSED = "cfmeet:notify-prompt-dismissed";
 
-/**
- * An older end-to-end encrypted chat: it only works on the devices that hold its keys, and
- * messages to someone who has never opened CF Meet wait. It continues as a chat that syncs
- * on every device (same people, same group name); this one stays readable here.
- */
-function ContinueChat({ engine, conversation, onOpenChat }: { engine: MessagingEngine; conversation: ConversationView; onOpenChat?: (id: string) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const needsName = conversation.contextClass !== "DIRECT" && !engine.knownGroupName(conversation.id);
-  const [name, setName] = useState("");
-  return (
-    // Stacked: the explanation across the full width, then the name box and the button on
-    // one row (a narrow phone never squeezes the text into a column).
-    <div className="mb-2 space-y-2 rounded-2xl bg-muted/60 px-3 py-2.5 text-sm" data-testid="continue-chat">
-      <p className="flex items-start gap-2 text-muted-foreground">
-        <Lock className="mt-0.5 size-4 shrink-0" />
-        <span>{error ?? "This older encrypted chat only works on this device. Continue it in a chat that's on all your devices."}</span>
-      </p>
-      <div className="flex items-center gap-2">
-      {needsName ? (
-        <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)}
-          data-testid="continue-chat-name" className="h-9 min-w-0 flex-1 rounded-full bg-background px-3 text-sm ring-1 ring-border" />
-      ) : null}
-      <button type="button" disabled={busy || (needsName && !name.trim())} data-testid="continue-chat-button"
-        className={cn("h-9 shrink-0 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60", !needsName && "ml-auto")}
-        onClick={() => {
-          setBusy(true);
-          setError(null);
-          void engine.continueAsManaged(conversation.id, name)
-            .then((id) => onOpenChat?.(id))
-            .catch((e) => setError(messagingErrorMessage(e)))
-            .finally(() => setBusy(false));
-        }}>
-        {busy ? "Opening…" : "Continue chat"}
-      </button>
-      </div>
-    </div>
-  );
-}
 
 function ConversationPane({ engine, conversation, focusMessageId, onFocused, onBack, onOpenChat, onOpenStarred }: { engine: MessagingEngine; conversation: ConversationView; focusMessageId?: string; onFocused?: () => void; onBack?: () => void; onOpenChat?: (id: string) => void; onOpenStarred?: () => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -1334,7 +1295,25 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
   const mediaInput = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
+  // A synced chat that continues an older encrypted chat starts with that chat's history on a
+  // device that can read it (the older messages exist only on the devices that received them);
+  // nothing is shown for messages this device never had. Earlier history is read-only.
+  const legacy = useMemo(() => (conversation.securityProfile === "MANAGED" ? engine.legacyFor(conversation.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [engine, conversation.id, conversation.securityProfile, s.conversations]);
+  const legacyKey = legacy.join(",");
+  useEffect(() => {
+    for (const id of legacyKey ? legacyKey.split(",") : []) void engine.openConversation(id).catch(() => {});
+  }, [engine, legacyKey]);
+  const messages = useMemo(() => {
+    const own = s.messages[conversation.id] ?? [];
+    if (!legacy.length) return own;
+    const earlier = legacy.flatMap((id) => (s.messages[id] ?? [])
+      .filter((m) => (m.text || m.file) && !["before-join", "unreadable", "removed", "system"].includes(m.state))
+      .map((m) => ({ ...m, key: `l:${id}:${m.key}`, messageId: null, reactions: [], pinned: false })));
+    earlier.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+    return [...earlier, ...own];
+  }, [s.messages, conversation.id, legacy]);
   // "online" / "last seen" for a one-to-one chat (WhatsApp); groups keep the security badge.
   useEffect(() => { engine.watchPresence(conversation.id); return () => engine.watchPresence(null); }, [engine, conversation.id]);
   const others = Object.values(s.presence[conversation.id] ?? {});
@@ -1353,7 +1332,18 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
   const adminsOnly = conversation.announcementOnly && conversation.myRole !== "OWNER" && conversation.myRole !== "ADMIN";
   // While this browser is set up (silently), private messages can already be written: they
   // are sent automatically once it is ready.
-  const canSend = !!s.identity && !adminsOnly && (!e2ee || s.phase === "ready" || MessagingEngine.settingUp(s));
+  // An older encrypted chat continues as a synced one when something is sent: always sendable.
+  const canSend = !!s.identity && !adminsOnly;
+  // Opening an older encrypted chat that already continues as a synced one opens that one.
+  const twin = e2ee ? engine.managedTwinOf(conversation.id) : null;
+  useEffect(() => { if (twin && onOpenChat) onOpenChat(twin); }, [twin, onOpenChat]);
+  /** Where a message goes: this chat, or (older encrypted chat) its synced continuation, opened. */
+  const target = async (): Promise<string> => {
+    if (!e2ee) return conversation.id;
+    const id = await engine.continueAsManaged(conversation.id);
+    if (id !== conversation.id) onOpenChat?.(id);
+    return id;
+  };
   // Files follow Messaging's effective attachment policy (Hub capabilities): the attach
   // control is disabled when the server would refuse every file.
   const hubCapabilities = useHubCapabilities();
@@ -1566,7 +1556,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
     engine.typing(conversation.id, false);
     // @mentions: only the mentioned members' ids reach the server (for their mention badge and
     // "only @mentions" notifications); in a private chat the text stays end-to-end encrypted.
-    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: mentions(t) }).catch((cause) => {
+    void target().then((id) => engine.send(id, t, { replyToMessageId: e2ee ? null : reply, mentionedPrincipalIds: mentions(t) })).catch((cause) => {
       setText((draft) => draft || t);
       setError(messagingErrorMessage(cause));
     });
@@ -1651,6 +1641,26 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
               ) : null;
               if (item.type === "card") return <Fragment key={item.key}>{separator}<TimelineCardView card={item.card} /></Fragment>;
               const m = item.message;
+              // Messages sent before this browser joined an older encrypted chat can never be
+              // shown here: one quiet line for the whole run instead of a bubble each.
+              const beforeJoin = (o?: (typeof items)[number]) => !!o && o.type === "message" && o.message.state === "before-join";
+              if (m.state === "before-join") {
+                if (beforeJoin(prev)) return null;
+                let n = 1;
+                while (beforeJoin(items[index + n])) n++;
+                const more = m.note && /other device/.test(m.note);
+                return (
+                  <Fragment key={item.key}>
+                    {separator}
+                    <li className="my-3 flex justify-center" data-testid="before-join-run">
+                      <span className="flex max-w-[90%] items-start gap-2 rounded-xl bg-background/90 px-3 py-2 text-center text-xs text-muted-foreground shadow-sm ring-1 ring-border">
+                        <Lock className="mt-0.5 size-3.5 shrink-0" />
+                        <span>{n === 1 ? "1 earlier message isn't on this browser." : `${n} earlier messages aren't on this browser.`}{more ? " You can bring them over from your other device under Security & devices." : ""}</span>
+                      </span>
+                    </li>
+                  </Fragment>
+                );
+              }
               const same = (o?: (typeof items)[number]) => !!o && o.type === "message" && o.message.senderPrincipalId === m.senderPrincipalId && o.message.mine === m.mine && !!o.message.createdAt && !!m.createdAt && Math.abs(Date.parse(o.message.createdAt) - Date.parse(m.createdAt)) < 5 * 60000;
               const first = !!separator || !same(prev);
               const nextSeparated = next && (() => { const nAt = next.type === "card" ? next.card.occurredAt : next.message.createdAt; return !!nAt && !!m.createdAt && !sameDay(nAt, m.createdAt); })();
@@ -1684,7 +1694,6 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
         {error ? <p role="alert" className="mx-3 mb-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-6">{error}</p> : null}
         <div className="shrink-0 px-3 pb-3 sm:px-6 sm:pb-4">
           <div className="mx-auto max-w-3xl">
-            {e2ee ? <ContinueChat engine={engine} conversation={conversation} onOpenChat={onOpenChat} /> : null}
             {mentionQuery !== null && mentionOptions.length ? (
               <ul className="mb-2 max-h-56 overflow-y-auto rounded-2xl border border-border bg-popover py-1 shadow-lg" data-testid="mention-picker" role="listbox" aria-label="Mention someone">
                 {mentionOptions.map((p) => (
@@ -1709,12 +1718,12 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
                 onSend={(f, ms) => {
                   const tooLarge = attachmentSizeRefusal(f.size, attachments);
                   setError(tooLarge);
-                  if (!tooLarge) void engine.sendFile(conversation.id, f, ms).catch(fail);
+                  if (!tooLarge) void target().then((id) => engine.sendFile(id, f, ms)).catch(fail);
                 }} />
             ) : (
             <form className="flex items-end gap-1.5 rounded-[26px] border border-border bg-card p-1.5 shadow-sm focus-within:border-primary/50" onSubmit={(e) => { e.preventDefault(); send(); }}>
               <AttachmentPreview file={staged} to={title} onCancel={() => setStaged(null)}
-                onSend={(f, caption) => { setStaged(null); void engine.sendFile(conversation.id, f, undefined, caption).catch(fail); }} />
+                onSend={(f, caption) => { setStaged(null); void target().then((id) => engine.sendFile(id, f, undefined, caption)).catch(fail); }} />
               <input
                 ref={file}
                 type="file"
@@ -1863,6 +1872,8 @@ function PersonalMessages() {
   const statusCopies = new Set<string>();
   const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
     const post = statusPostId(conversation.groupTitle);
+    // An older encrypted chat that continues as a synced chat: only the synced one is listed.
+    if (!post && conversation.securityProfile === "PRIVATE_E2EE" && engine.managedTwinOf(conversation.id)) return false;
     if (post) {
       if (filter !== "STATUS" || !isLiveStatus(conversation) || statusCopies.has(post)) return false;
       statusCopies.add(post);

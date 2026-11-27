@@ -39,8 +39,12 @@ self.addEventListener("notificationclick", (event) => {
   const url = typeof raw === "string" && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
-      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
-      if (open) { open.focus(); return open.navigate(url); }
+      // Never navigate a tab that is in a meeting or a call (that would end it): reuse an
+      // app tab that is not (the focused one first), otherwise open a new tab.
+      const ours = windows.filter((w) => new URL(w.url).origin === self.location.origin);
+      const free = (w) => /^\/(dashboard|settings|organizations|developers)(\/|$)/.test(new URL(w.url).pathname);
+      const open = ours.find((w) => w.focused && free(w)) || ours.find(free);
+      if (open) return open.focus().then(() => open.navigate(url));
       return self.clients.openWindow(url);
     }),
   );

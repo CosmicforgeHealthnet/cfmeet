@@ -37,7 +37,7 @@ import AddPeopleDialog from "./AddPeopleDialog";
 import CallMedia, { closePreviewCamera, openPreviewCamera, CallButton, CallUpgradeButton, CallCameraButton, CallFlipButton, CallMicButton, CallMicToggle, CallScreenShareButton, CallSpeakerButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
 
 const COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
-const colorFor = (key: string) => COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];
+const colorFor = (raw: string) => COLORS[([...raw.trim().toLowerCase()].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?";
 const clock = (ms: number) => {
   const t = Math.max(0, Math.floor(ms / 1000));
