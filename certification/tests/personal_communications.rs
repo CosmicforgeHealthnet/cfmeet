@@ -731,7 +731,12 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         "actual capability readiness",
     )?;
     assert_eq!(capabilities["messaging"]["securityReady"], false);
-    assert_eq!(capabilities["messaging"]["available"], false);
+    // CF Meet's personal chats are server-stored (MANAGED) by the first-party baseline
+    // (product decision of 26 November 2026), so Messaging is available without E2EE readiness.
+    assert_eq!(
+        capabilities["messaging"]["available"], true,
+        "{capabilities}"
+    );
     assert_eq!(
         capabilities["phoneVerification"]["status"],
         "PROVIDER_BLOCKED"
@@ -1285,15 +1290,19 @@ async fn hub_facades_device_sessions_and_revocation_fan_out_across_real_owners(
 }
 async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
     let (a, b) = tokio::try_join!(account(s), account(s))?;
-    // MANAGED capability is reported apart from E2EE readiness: not allowed by the
-    // default (E2EE-only) policy, available with live session-device delivery once the
-    // isolated TEST policy allows MANAGED.
+    // MANAGED capability is reported apart from E2EE readiness. CF Meet's first-party
+    // baseline allows MANAGED one-to-one and group chats by default (product decision of
+    // 26 November 2026); the isolated TEST policy below also makes MANAGED the default and
+    // keeps live session-device delivery.
     let before = status(
         hub(s, &a, Method::GET, "/me/capabilities", None).await?,
         200,
-        "capabilities before MANAGED",
+        "capabilities before the TEST policy",
     )?;
-    assert_eq!(before["messaging"]["managed"]["available"], false);
+    assert_eq!(
+        before["messaging"]["managed"]["available"], true,
+        "{before}"
+    );
     assert_eq!(before["messaging"]["securityReady"], false);
     let policy = status(
         request(
