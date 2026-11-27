@@ -893,7 +893,11 @@ impl ApplicationBaseline {
 
     /// The per-context settings this baseline contributes, under the application's own
     /// override of that context (`None`: the baseline leaves contexts alone).
-    fn context(self, class: ContextClass, own: Option<&ContextOverride>) -> Option<ContextOverride> {
+    fn context(
+        self,
+        class: ContextClass,
+        own: Option<&ContextOverride>,
+    ) -> Option<ContextOverride> {
         match self {
             // Product decision (26 November 2026): CF Meet's personal chats are server-stored
             // (MANAGED) and sync on every device the person signs in on. One-to-one and group
@@ -1524,9 +1528,16 @@ mod tests {
         let r = resolve(&b.under(&own), 1).unwrap();
         let direct = r.contexts.get(&ContextClass::Direct).unwrap();
         assert!(direct.allowed_profiles.contains(&SecurityProfile::Managed));
-        assert_eq!(direct.default_profile, Some(SecurityProfile::PrivateE2ee), "an explicit default is kept");
+        assert_eq!(
+            direct.default_profile,
+            Some(SecurityProfile::PrivateE2ee),
+            "an explicit default is kept"
+        );
         let group = r.contexts.get(&ContextClass::Group).unwrap();
-        assert_eq!(group.allowed_profiles, vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]);
+        assert_eq!(
+            group.allowed_profiles,
+            vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]
+        );
         // Other contexts are left to the application.
         let support = r.contexts.get(&ContextClass::Support).unwrap();
         assert_eq!(support.allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
@@ -1587,7 +1598,8 @@ mod tests {
             ctx(ContextClass::Meeting).default_profile,
             Some(SecurityProfile::Managed)
         );
-        // The first-party baseline leaves contexts alone.
+        // The first-party baseline makes personal chats server-stored by default
+        // (product decision of 26 November 2026; see the_cfmeet_baseline_always_allows_synced_personal_chats).
         let r = resolve(
             &ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()),
             0,
@@ -1598,7 +1610,7 @@ mod tests {
                 .get(&ContextClass::Direct)
                 .unwrap()
                 .default_profile,
-            Some(SecurityProfile::PrivateE2ee)
+            Some(SecurityProfile::Managed)
         );
     }
 
