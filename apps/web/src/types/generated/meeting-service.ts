@@ -731,6 +731,54 @@ export interface ChangedResponse {
   changed: boolean;
 }
 
+
+export interface ChannelPostRequest {
+  /** A completed CHANNEL upload of the owner. */
+  mediaId?: string | null;
+  /** Words, or a photo / video caption (at most 4000 characters). */
+  text?: string | null;
+}
+
+
+export interface ChannelPostView {
+  channelId: string;
+  createdAt: string;
+  kind: PostKind;
+  media?: MediaView | null;
+  myReaction?: string | null;
+  postId: string;
+  reactions: Array<ReactionCount>;
+  text?: string | null;
+}
+
+
+export interface ChannelReactionRequest {
+  /** One emoji. */
+  emoji: string;
+}
+
+
+export interface ChannelRequest {
+  /** At most 500 characters (`""` clears it). */
+  description?: string | null;
+  /** 1–80 characters. */
+  name?: string | null;
+}
+
+
+export interface ChannelView {
+  channelId: string;
+  createdAt: string;
+  description?: string | null;
+  followerCount: number;
+  following: boolean;
+  isOwner: boolean;
+  lastPost?: ChannelPostView | null;
+  name: string;
+  owner: PersonView;
+  unreadCount: number;
+}
+
 /** Single chat message response */
 export interface ChatMessageResponse {
   created_at: string;
@@ -1098,6 +1146,15 @@ export interface CreateInvitationResponse {
   token: string;
 }
 
+/** Start an upload: the media's kind, type, size and (video / voice note) duration. */
+export interface CreateMediaRequest {
+  contentType: string;
+  durationMs?: number | null;
+  kind: MediaKind;
+  purpose: MediaPurpose;
+  sizeBytes: number;
+}
+
 /** Request to create a new meeting */
 export interface CreateMeetingRequest {
   /** End time in the user's local timezone. Format: "YYYY-MM-DDTHH:MM:SS" */
@@ -1189,6 +1246,24 @@ export interface CreatePollRequest {
   quizMode?: boolean;
   resultsVisibility?: ResultsVisibility | null;
   title: string;
+}
+
+/** A new status: text, or an uploaded photo / voice note / video segment (≤ 60 s). */
+export interface CreateStatusRequest {
+  /** TEXT: background colour `#RRGGBB`. */
+  background?: string | null;
+  /** Photo / video caption (at most 700 characters). */
+  caption?: string | null;
+  endMs?: number | null;
+  /** TEXT: font style 0–4. */
+  font?: number | null;
+  kind: PostKind;
+  /** IMAGE / VIDEO / AUDIO: a completed STATUS upload of the caller. */
+  mediaId?: string | null;
+  /** VIDEO: the segment shown, at most 60 000 ms long. */
+  startMs?: number | null;
+  /** TEXT: the words (1–700 characters). */
+  text?: string | null;
 }
 
 
@@ -1847,6 +1922,9 @@ export interface MediaFailure {
 export type MediaHealth = "OK" | "DEGRADED" | "FAILED";
 
 
+export type MediaKind = "IMAGE" | "VIDEO" | "AUDIO";
+
+
 export interface MediaLockResponse {
   audioLocked: boolean;
   changed: boolean;
@@ -1868,6 +1946,9 @@ export interface MediaPermissions {
   videoPublish: boolean;
 }
 
+
+export type MediaPurpose = "STATUS" | "CHANNEL";
+
 /** Response for media state update */
 export interface MediaStateResponse {
   is_muted: boolean;
@@ -1875,6 +1956,19 @@ export interface MediaStateResponse {
   is_video_on: boolean;
   participant_id: string;
   success: boolean;
+}
+
+/** An uploaded (or uploading) photo, video or voice note. */
+export interface MediaView {
+  /** Every chunk but the last has exactly this many bytes. */
+  chunkBytes: number;
+  chunkCount: number;
+  complete: boolean;
+  contentType: string;
+  durationMs?: number | null;
+  kind: MediaKind;
+  mediaId: string;
+  sizeBytes: number;
 }
 
 /** API response wrapper for meeting */
@@ -2709,6 +2803,15 @@ export type PendingLinkView = (DeviceLinkView & {
 });
 
 
+export interface PersonView {
+  avatarUrl?: string | null;
+  name: string;
+  /** Their chat identity (to reply to a status in a chat), when known. */
+  principalId?: string | null;
+  userId: string;
+}
+
+
 export interface PhoneBindRequest {
   phoneNumber: string;
   stepUpToken: string;
@@ -2881,6 +2984,9 @@ export interface PollView {
   title: string;
   version: number;
 }
+
+
+export type PostKind = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO";
 
 
 export interface PreJoinAccess {
@@ -3160,6 +3266,12 @@ export interface RaisedHand {
 
 export interface RaisedHandsResponse {
   hands: Array<RaisedHand>;
+}
+
+
+export interface ReactionCount {
+  count: number;
+  emoji: string;
 }
 
 
@@ -3668,6 +3780,47 @@ export interface StartTranscriptionRequest {
   sourceRecordingId?: string | null;
 }
 
+
+export interface StatusAuthorView {
+  allViewed: boolean;
+  lastPostedAt: string;
+  person: PersonView;
+  posts: Array<StatusPostView>;
+}
+
+/** The Updates screen's status row: your own posts and your contacts' (unseen first). */
+export interface StatusFeed {
+  contacts: Array<StatusAuthorView>;
+  mine: Array<StatusPostView>;
+}
+
+
+export interface StatusPostView {
+  background?: string | null;
+  caption?: string | null;
+  createdAt: string;
+  endMs?: number | null;
+  expiresAt: string;
+  font: number;
+  kind: PostKind;
+  liked: boolean;
+  media?: MediaView | null;
+  postId: string;
+  startMs?: number | null;
+  text?: string | null;
+  /** Your own posts: how many people saw it. */
+  viewCount?: number | null;
+  /** The viewer has seen it (always true for your own). */
+  viewed: boolean;
+}
+
+
+export interface StatusViewerView {
+  liked: boolean;
+  person: PersonView;
+  viewedAt: string;
+}
+
 /** What the confirmation is for; a token for one purpose never authorizes another. */
 export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA" | "MANAGE_PHONE";
 
@@ -3988,6 +4141,12 @@ export interface VersionedRequest {
   version?: number | null;
 }
 
+
+export interface ViewStatusRequest {
+  /** Like (`true`) or unlike (`false`) it; omit to only mark it seen. */
+  liked?: boolean | null;
+}
+
 /** Response for listing waiting participants */
 export interface WaitingListResponse {
   data: Array<WaitingParticipantResponse>;
@@ -4197,6 +4356,11 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/organizations/{id}/member-calling/endpoints/{endpointId}": "v2_organization_member_calling_endpoints_revoke",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
   "DELETE /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_remove_organization_team_member",
+  "DELETE /api/v2/social/channels/{channelId}": "v2_social_delete_channel",
+  "DELETE /api/v2/social/channels/{channelId}/follow": "v2_social_unfollow_channel",
+  "DELETE /api/v2/social/channels/{channelId}/posts/{postId}": "v2_social_delete_channel_post",
+  "DELETE /api/v2/social/channels/{channelId}/posts/{postId}/reaction": "v2_social_unreact_channel_post",
+  "DELETE /api/v2/social/status/{postId}": "v2_social_delete_status",
   "GET /": "get_app_info",
   "GET /api/v1/admin/logs": "list_logs",
   "GET /api/v1/admin/meetings": "admin_list_meetings",
@@ -4304,6 +4468,14 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/teams/{teamId}": "v2_get_organization_team",
   "GET /api/v2/organizations/{id}/teams/{teamId}/members": "v2_list_organization_team_members",
   "GET /api/v2/resolve/{identifier}": "v2_resolve_identifier",
+  "GET /api/v2/social/channels": "v2_social_channel_directory",
+  "GET /api/v2/social/channels/following": "v2_social_channels_following",
+  "GET /api/v2/social/channels/{channelId}": "v2_social_get_channel",
+  "GET /api/v2/social/channels/{channelId}/posts": "v2_social_channel_posts",
+  "GET /api/v2/social/media/{mediaId}": "v2_social_get_media",
+  "GET /api/v2/social/media/{mediaId}/chunks/{seq}": "v2_social_get_media_chunk",
+  "GET /api/v2/social/status/feed": "v2_social_status_feed",
+  "GET /api/v2/social/status/{postId}/viewers": "v2_social_status_viewers",
   "GET /health": "health_check",
   "PATCH /api/v1/admin/users/{id}": "update_user",
   "PATCH /api/v1/admin/users/{id}/email": "change_user_email",
@@ -4331,6 +4503,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/organizations/{id}/policies": "v2_update_organization_policy",
   "PATCH /api/v2/organizations/{id}/teams/{teamId}": "v2_update_organization_team",
   "PATCH /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_update_organization_team_member",
+  "PATCH /api/v2/social/channels/{channelId}": "v2_social_update_channel",
   "POST /api/v1/api-keys": "create_api_key",
   "POST /api/v1/api/meetings": "api_create_meeting",
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
@@ -4502,6 +4675,12 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/teams/{teamId}/archive": "v2_archive_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/members": "v2_add_organization_team_member",
   "POST /api/v2/registrations/cancel": "v2_cancel_own_registration",
+  "POST /api/v2/social/channels": "v2_social_create_channel",
+  "POST /api/v2/social/channels/{channelId}/posts": "v2_social_create_channel_post",
+  "POST /api/v2/social/media": "v2_social_create_media",
+  "POST /api/v2/social/media/{mediaId}/complete": "v2_social_complete_media",
+  "POST /api/v2/social/status": "v2_social_create_status",
+  "POST /api/v2/social/status/{postId}/view": "v2_social_view_status",
   "PUT /api/v1/meetings/{id}": "update_meeting",
   "PUT /api/v2/me/avatar": "v2_upload_my_avatar",
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
@@ -4514,6 +4693,9 @@ export const CONTRACT_OPERATIONS = {
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
   "PUT /api/v2/organizations/{id}/teams/{teamId}/messaging-channel": "v2_organization_team_messaging_channel",
+  "PUT /api/v2/social/channels/{channelId}/follow": "v2_social_follow_channel",
+  "PUT /api/v2/social/channels/{channelId}/posts/{postId}/reaction": "v2_social_react_channel_post",
+  "PUT /api/v2/social/media/{mediaId}/chunks/{seq}": "v2_social_put_media_chunk",
 } as const;
 
 export type ContractOperation = keyof typeof CONTRACT_OPERATIONS;

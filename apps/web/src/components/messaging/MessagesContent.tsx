@@ -1887,7 +1887,7 @@ function PersonalMessages() {
   });
   // WhatsApp's filters; "Private" only while the account still has older encrypted chats.
   const hasPrivate = s.conversations.some((c) => c.securityProfile === "PRIVATE_E2EE");
-  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["GROUPS", "Groups"], ["STATUS", "Status"], ...(hasPrivate ? [["PRIVATE_E2EE", "Private"] as [ListFilter, string]] : [])];
+  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["GROUPS", "Groups"], ...(hasPrivate ? [["PRIVATE_E2EE", "Private"] as [ListFilter, string]] : [])];
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col bg-background" data-testid="messages-page">
@@ -1913,7 +1913,8 @@ function PersonalMessages() {
               <h1 className="text-2xl font-bold tracking-tight">Chats</h1>
               <div className="flex items-center">
                 {s.phase === "ready" ? <>
-                  <button type="button" aria-label="Post a status" title="Post a status" onClick={() => setShareMode("status")} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><History className="size-5" /></button>
+                  {/* Status lives in Updates (24 hours, your contacts). */}
+                  <Link href="/dashboard/updates" aria-label="Status updates" title="Status updates" className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><History className="size-5" /></Link>
                   <button type="button" aria-label="Send a broadcast" title="Send a broadcast" onClick={() => setShareMode("broadcast")} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><SendHorizontal className="size-5" /></button>
                 </> : null}
                 {s.phase === "ready" ? (

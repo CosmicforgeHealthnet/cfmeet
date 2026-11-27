@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 294 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -92,7 +92,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 
 | `CALENDAR_FEED_DIRECT_INGRESS` | 4 | meetings | Private calendar subscription feed of a CF Meet account (audit MF2): managed by the signed-in account in the CF Meet apps and read by calendar clients with the feed token in a `.ics` path; the gateway route grammar has no file-extension segments and it is not a partner API, so it stays on the Meeting Service ingress. |
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
-| `FIRST_PARTY_APP_ACCOUNT` | 41 | meetings | The CF Meet app's own account profile. |
+| `FIRST_PARTY_APP_ACCOUNT` | 64 | meetings | The CF Meet app's own account profile. |
 | `FIRST_PARTY_APP_BACKEND` | 18 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
 | `FIRST_PARTY_APP_CONSENT` | 6 | meetings | The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
@@ -104,7 +104,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **271** | | |
+| **Total** | **294** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -138,7 +138,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/disable` | `disableContact` | `cfmeet.privacy-relay.http-api` |
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/verification` | `assertContactVerification` | `cfmeet.privacy-relay.http-api` |
 
-#### `FIRST_PARTY_APP_ACCOUNT` (41)
+#### `FIRST_PARTY_APP_ACCOUNT` (64)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -183,6 +183,29 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 271 
 | POST | `/api/v2/me/sessions/{sessionId}/revoke` | `v2_revoke_my_session` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/step-up/request` | `v2_request_step_up` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/step-up/verify` | `v2_verify_step_up` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/channels` | `v2_social_channel_directory` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/channels` | `v2_social_create_channel` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/channels/following` | `v2_social_channels_following` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/social/channels/{channelId}` | `v2_social_delete_channel` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/channels/{channelId}` | `v2_social_get_channel` | `cfmeet.meeting-service.http-api` |
+| PATCH | `/api/v2/social/channels/{channelId}` | `v2_social_update_channel` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/social/channels/{channelId}/follow` | `v2_social_unfollow_channel` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/social/channels/{channelId}/follow` | `v2_social_follow_channel` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/channels/{channelId}/posts` | `v2_social_channel_posts` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/channels/{channelId}/posts` | `v2_social_create_channel_post` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/social/channels/{channelId}/posts/{postId}` | `v2_social_delete_channel_post` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/social/channels/{channelId}/posts/{postId}/reaction` | `v2_social_unreact_channel_post` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/social/channels/{channelId}/posts/{postId}/reaction` | `v2_social_react_channel_post` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/media` | `v2_social_create_media` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/media/{mediaId}` | `v2_social_get_media` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/media/{mediaId}/chunks/{seq}` | `v2_social_get_media_chunk` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/social/media/{mediaId}/chunks/{seq}` | `v2_social_put_media_chunk` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/media/{mediaId}/complete` | `v2_social_complete_media` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/status` | `v2_social_create_status` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/status/feed` | `v2_social_status_feed` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/social/status/{postId}` | `v2_social_delete_status` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/social/status/{postId}/view` | `v2_social_view_status` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/social/status/{postId}/viewers` | `v2_social_status_viewers` | `cfmeet.meeting-service.http-api` |
 
 #### `FIRST_PARTY_APP_BACKEND` (18)
 
