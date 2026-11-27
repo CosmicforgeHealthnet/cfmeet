@@ -549,8 +549,10 @@ pub struct NamesRequest {
     pub conversation_ids: Vec<Uuid>,
 }
 
-/// Display names of the principals the caller can see (self, colleagues, connected contacts and
-/// the people in the chats listed in `conversationIds`).
+/// Display names of the principals the caller can see.
+///
+/// Named: the caller, colleagues, connected contacts and the people in the chats listed in
+/// `conversationIds` (membership checked by Messaging as the caller).
 ///
 /// Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of
 /// active members of the caller's verified organizations, and the caller's connected personal

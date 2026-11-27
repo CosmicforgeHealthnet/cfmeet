@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useSharedMessagingEngine } from "@/components/messaging/MessagingEngineProvider";
+import { statusPostId } from "@/lib/messaging/private-shares";
 import { useRouter } from "next/navigation";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, CheckCheck, X } from "lucide-react";
+import { Bell, CheckCheck, MessageCircle, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { notificationsService } from "@/services/v2/notifications.service";
 import type { NotificationItem } from "@/types/generated/notifications";
@@ -12,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/utils/error";
 
 const KEY = ["notifications"] as const;
+const NO_SNAPSHOT = () => null;
+const NO_SUBSCRIBE = () => () => {};
 const COUNT_KEY = ["notifications", "unread-count"] as const;
 
 const ago = (iso: string) => {
@@ -40,7 +44,21 @@ export default function NotificationBell() {
   const refresh = () => { void client.invalidateQueries({ queryKey: KEY }); void client.invalidateQueries({ queryKey: COUNT_KEY }); };
   const readAll = useMutation({ mutationFn: () => notificationsService.markRead(), onSuccess: refresh });
   const dismiss = useMutation({ mutationFn: (id: string) => notificationsService.dismiss([id]), onSuccess: refresh });
-  const unread = count.data?.unreadCount ?? 0;
+  // Unread chats are part of the bell too (new messages, chat invites): the inbox only holds
+  // calls, requests, invitations and notices.
+  const engine = useSharedMessagingEngine();
+  const snapshot = useSyncExternalStore(engine ? engine.subscribe : NO_SUBSCRIBE, engine ? engine.getSnapshot : NO_SNAPSHOT, engine ? engine.getSnapshot : NO_SNAPSHOT);
+  const chats = (snapshot?.conversations ?? [])
+    .filter((c) => c.unreadCount > 0 && !c.archived && !statusPostId(c.groupTitle))
+    .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+    .slice(0, 20);
+  const chatPreview = (c: (typeof chats)[number]) => {
+    const who = c.lastMessage?.senderPrincipalId ? snapshot?.names[c.lastMessage.senderPrincipalId] : null;
+    const text = c.securityProfile === "MANAGED" ? c.lastMessage?.previewText : null;
+    const n = c.unreadCount === 1 ? "1 new message" : `${c.unreadCount} new messages`;
+    return text ? `${c.contextClass === "GROUP" && who ? `${who.split(" ")[0]}: ` : ""}${text}` : who && c.contextClass === "GROUP" ? `${n} · ${who.split(" ")[0]}` : n;
+  };
+  const unread = (count.data?.unreadCount ?? 0) + chats.length;
   const items = mergeInboxPages(list.data?.pages);
   const { refetch } = list;
   // A new notification while the list is open: show it (the count is polled).
@@ -74,7 +92,23 @@ export default function NotificationBell() {
           <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
             {list.isFetching && !list.data ? [0, 1, 2].map((i) => <li key={i} className="mx-4 my-3 h-12 animate-pulse rounded-xl bg-muted" />) : null}
             {list.isError ? <li role="alert" className="px-6 py-10 text-center text-sm text-muted-foreground">Notifications couldn&apos;t load ({getErrorMessage(list.error)}). <button type="button" className="font-semibold text-primary underline" onClick={() => void list.refetch()}>Try again</button></li> : null}
-            {list.data && items.length === 0 ? <li className="px-6 py-10 text-center text-sm text-muted-foreground">You&apos;re all caught up.</li> : null}
+            {chats.length ? <li className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Messages</li> : null}
+            {chats.map((c) => (
+              <li key={`chat:${c.id}`} className="border-b border-border bg-primary/5">
+                <button type="button" onClick={() => router.push(`/dashboard/messages?conversation=${encodeURIComponent(c.id)}`)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-muted/60" data-testid="bell-chat">
+                  <MessageCircle className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-semibold">{c.title}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{ago(c.lastActivityAt)}</span>
+                    </span>
+                    <span className="mt-0.5 line-clamp-2 block text-sm text-muted-foreground">{chatPreview(c)}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            {chats.length && items.length ? <li className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Activity</li> : null}
+            {list.data && items.length === 0 && chats.length === 0 ? <li className="px-6 py-10 text-center text-sm text-muted-foreground">You&apos;re all caught up.</li> : null}
             {items.map((n) => (
               <li key={n.id} className={cn("group relative border-b border-border last:border-b-0", !n.readAt && "bg-primary/5")}>
                 <button type="button" onClick={() => open(n)} className="flex w-full items-start gap-3 px-4 py-3 pr-10 text-left hover:bg-muted/60">
