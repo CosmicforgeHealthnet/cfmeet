@@ -104,11 +104,11 @@ export interface ProcessorContext {
   onProgress: (fraction: number) => void;
 }
 
-export interface ProcessorResult {
-  /** Ordered ≤ 60 s pieces. */
-  segments: { blob: Blob; durationMs: number }[];
-  thumbnail?: Blob;
-}
+export type ProcessorResult =
+  /** Ordered ≤ 60 s pieces, each uploaded and posted on its own. */
+  | { segments: { blob: Blob; durationMs: number }[]; thumbnail?: Blob }
+  /** Processing isn't possible here after all: upload `source` once and post these ranges of it. */
+  | { source: Blob; durationMs: number; ranges: { startMs: number; endMs: number }[]; thumbnail?: Blob };
 
 /** A named, registered processor (`registerStatusProcessor`); persisted as name + input + params, so it re-runs after a reload. */
 export type StatusProcessor = (input: Blob, params: unknown, ctx: ProcessorContext) => Promise<ProcessorResult>;

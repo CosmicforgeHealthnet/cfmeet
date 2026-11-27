@@ -4,7 +4,8 @@ import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 import { socialKeys } from "@/hooks/v2/useSocial";
-import { cancelStatus, enqueueStatus, getStatusQueue, retryStatus, startStatusQueue } from "@/lib/status-publisher/client";
+import { cancelStatus, enqueueStatus, getStatusQueue, registerStatusProcessor, retryStatus, startStatusQueue } from "@/lib/status-publisher/client";
+import { renderVideoEditForStatus, VIDEO_EDIT_PROCESSOR } from "@/lib/status-publisher/video-edit-processor";
 import type { JobView, QueueSnapshot } from "@/lib/status-publisher/types";
 
 const SERVER_SNAPSHOT: QueueSnapshot = { jobs: [], online: true, persistent: false };
@@ -28,7 +29,11 @@ const onUpdates = () => typeof window !== "undefined" && window.location.pathnam
 export function StatusQueueRoot({ ownerId }: { ownerId: string }) {
   const client = useQueryClient();
 
-  useEffect(() => { startStatusQueue(ownerId); }, [ownerId]);
+  useEffect(() => {
+    // Processors first, so jobs restored from a previous visit can render again.
+    registerStatusProcessor(VIDEO_EDIT_PROCESSOR, renderVideoEditForStatus);
+    startStatusQueue(ownerId);
+  }, [ownerId]);
 
   useEffect(() => {
     const q = getStatusQueue();

@@ -443,3 +443,16 @@ test("a job finished here is never re-adopted from a stale storage read", async 
   await q.settled();
   assert.equal(server.statuses.length, 1);
 });
+
+test("a processor that can't encode here falls back to the source once, posted as ranges", async () => {
+  const server = fakeServer();
+  const storage = new MemoryQueueStorage();
+  const { q } = makeQueue(server, storage);
+  await q.start("me");
+  q.registerProcessor("edit", async (input) => ({ source: input, durationMs: 150000, ranges: [{ startMs: 5000, endMs: 65000 }, { startMs: 65000, endMs: 90000 }] }));
+  await q.enqueue({ items: [{ kind: "VIDEO", process: { processor: "edit", input: blob(9, "video/mp4"), params: {} }, caption: "c" }] });
+  await q.settled();
+  assert.equal(server.calls.start, 1);
+  assert.deepEqual(server.statuses.map((s) => [s.req.startMs, s.req.endMs, s.req.caption, s.req.sequence]), [[5000, 65000, "c", 0], [65000, 90000, undefined, 1]]);
+  assert.equal(storage.blobs.size, 0);
+});

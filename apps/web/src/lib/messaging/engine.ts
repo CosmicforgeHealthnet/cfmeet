@@ -135,7 +135,7 @@ export type IncomingLink = { linkId: string; platform: string; label: string | n
 
 export type EngineSnapshot = {
   /** Chats this account was taken out of by someone else (not left on this device), newest last. */
-  removedFrom?: { conversationId: string; title: string }[];
+  removedFrom?: { conversationId: string; title: string; deleted?: boolean }[];
   /** Per conversation: who is online and when others were last seen. */
   presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
@@ -1254,13 +1254,18 @@ export class MessagingEngine {
 
   async refreshConversations(): Promise<void> {
     const out: ServerConversation[] = [];
+    const deleted = new Set<string>();
     let cursor: string | null = null;
     for (let i = 0; i < 10; i++) {
       const page: { conversations: ServerConversation[]; nextCursor: string | null } = await relay(
         "GET",
         `v1/conversations?limit=${PAGE}&orderBy=lastActivity${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       );
-      out.push(...page.conversations);
+      // A group its creator deleted is gone for everyone: it never shows in the list.
+      for (const c of page.conversations) {
+        if (c.lifecycleState === "DELETED") deleted.add(c.conversationId);
+        else out.push(c);
+      }
       cursor = page.nextCursor;
       if (!cursor) break;
     }
@@ -1275,7 +1280,7 @@ export class MessagingEngine {
     const gone = [...this.server.keys()].filter((id) => !out.some((c) => c.conversationId === id));
     const removed = gone
       .filter((id) => !this.leaving.has(id))
-      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat" }));
+      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat", ...(deleted.has(id) ? { deleted: true } : {}) }));
     if (removed.length) this.set({ removedFrom: [...(this.snapshot.removedFrom ?? []), ...removed].slice(-10) });
     for (const id of gone) {
       // No longer a member (removed / left): it disappears from this client.
@@ -1693,6 +1698,22 @@ export class MessagingEngine {
       this.leaving.delete(conversationId);
     }
   }
+  /**
+   * Deletes a group for everyone. Only its creator (the conversation's owner) may: the server
+   * refuses anyone else (NOT_OWNER). The group stops taking messages and leaves every
+   * member's chat list; it cannot be undone.
+   */
+  async deleteGroup(conversationId: string): Promise<void> {
+    this.leaving.add(conversationId);
+    try {
+      const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+      await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, lifecycleState: "DELETED" });
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
+  }
+
   /** Chats being left on this device: their disappearing is not "you were removed". */
   private leaving = new Set<string>();
 

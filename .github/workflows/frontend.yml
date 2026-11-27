@@ -102,6 +102,11 @@ jobs:
       - name: Avatar image shrinking tests
         run: node --experimental-strip-types --test tests/avatar-image.test.mjs
 
+      # Status video editor: 60 s parts (plan / remove / reorder / trim), edit reducer with
+      # undo / redo, crop geometry, <= 720p output plan, pass-through and size estimates.
+      - name: Status video editor tests
+        run: node --experimental-strip-types --test tests/media-editor-video.test.mjs
+
       # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
       # password reset, password change), with the message-only fallback.
       - name: Form validation error mapping tests

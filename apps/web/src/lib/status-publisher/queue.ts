@@ -549,15 +549,24 @@ export class StatusQueue {
       result = await fn(ctx);
     }
     if (signal.aborted || !this.jobs.has(job.id)) return;
-    if (!result.segments.length) throw new FatalError("The video produced nothing to post.");
+    const pieces = "segments" in result ? result.segments : [{ blob: result.source, durationMs: result.durationMs }];
+    const ranges = "segments" in result ? null : result.ranges;
+    if (!pieces.length || (ranges && !ranges.length)) throw new FatalError("The video produced nothing to post.");
 
-    // Persist the outputs before the job record points at them.
+    // Persist the outputs before the job record points at them (a fallback to the edit's own
+    // input reuses its stored copy).
     const fresh: StoredUpload[] = [];
-    for (const [s, seg] of result.segments.entries()) {
+    let keepInput = false;
+    for (const [s, seg] of pieces.entries()) {
       const key = `p${s}`;
-      const blobKey = `${job.id}/${key}`;
-      this.blobs.set(blobKey, seg.blob);
-      await this.storage.putBlob(blobKey, seg.blob).catch(() => {});
+      let blobKey = `${job.id}/${key}`;
+      if (p.inputBlobKey && seg.blob === (await this.blob(p.inputBlobKey))) {
+        blobKey = p.inputBlobKey;
+        keepInput = true;
+      } else {
+        this.blobs.set(blobKey, seg.blob);
+        await this.storage.putBlob(blobKey, seg.blob).catch(() => {});
+      }
       fresh.push({ key, item: p.itemIndex, blobKey, kind: "VIDEO", contentType: contentTypeOf(seg.blob, "VIDEO"), sizeBytes: seg.blob.size, durationMs: Math.round(seg.durationMs), uploadId: null, partSize: null, partCount: null, partsDone: [], mediaId: null });
     }
     if (result.thumbnail && job.preview.kind !== "TEXT" && !job.preview.blobKey) {
@@ -569,9 +578,12 @@ export class StatusQueue {
     const at = job.uploads.findIndex((u) => u.item > p.itemIndex);
     job.uploads.splice(at === -1 ? job.uploads.length : at, 0, ...fresh);
     const placeholder = job.posts.findIndex((x) => x.item === p.itemIndex && x.placeholder);
-    const posts: StoredPost[] = fresh.map((u, s) => ({
-      sequence: 0, item: p.itemIndex, idempotencyKey: this.uuid(), uploadKey: u.key,
-      body: { kind: "VIDEO", startMs: 0, endMs: u.durationMs ?? 0, caption: s === 0 && p.caption ? p.caption : undefined },
+    const bodies = ranges
+      ? ranges.map((r) => ({ uploadKey: fresh[0].key, startMs: Math.round(r.startMs), endMs: Math.round(r.endMs) }))
+      : fresh.map((u) => ({ uploadKey: u.key, startMs: 0, endMs: u.durationMs ?? 0 }));
+    const posts: StoredPost[] = bodies.map((b, s) => ({
+      sequence: 0, item: p.itemIndex, idempotencyKey: this.uuid(), uploadKey: b.uploadKey,
+      body: { kind: "VIDEO", startMs: b.startMs, endMs: b.endMs, caption: s === 0 && p.caption ? p.caption : undefined },
       postId: null, uncertain: false,
     }));
     // The placeholder's key is kept for the first piece: one key per item for its whole life.
@@ -586,7 +598,7 @@ export class StatusQueue {
     this.closures.delete(job.id);
     live.processFrac = 1;
     await this.persist(job);
-    if (inputKey) {
+    if (inputKey && !keepInput) {
       // The edit's input is no longer needed once its outputs are stored.
       this.blobs.delete(inputKey);
       await this.storage.deleteBlob(inputKey).catch(() => {});

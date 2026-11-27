@@ -5,7 +5,10 @@ import { ImagePlus, Mic, Palette, Send, Type, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { durationOf, kindOf, LIMITS, segments, SEGMENT_MS, type MediaKind } from "@/services/v2/social.service";
+import VideoEditor from "@/components/media-editor/VideoEditor";
+import { canProcessVideo, probeVideo, type VideoEdit, type VideoProbe } from "@/lib/media-editor/video";
 import { enqueueStatus } from "@/lib/status-publisher/client";
+import { VIDEO_EDIT_PROCESSOR } from "@/lib/status-publisher/video-edit-processor";
 import { BACKGROUNDS, errorText, FONTS } from "./shared";
 
 type Mode = "text" | "media" | "voice";
@@ -15,8 +18,10 @@ const now = () => Date.now();
 
 /**
  * Add status (WhatsApp): text on a colour, a photo or video from the device with a caption,
- * or a voice note (hold to record, at most a minute). A video longer than a minute is
- * uploaded once and posted as consecutive one-minute statuses.
+ * or a voice note (hold to record, at most a minute). Where the browser can process video
+ * (WebCodecs), a picked video opens in the video editor (trim, parts, crop, rotate, sound) and
+ * is posted as small ≤ 720p MP4 parts of at most a minute each, one status per part. Elsewhere
+ * the original is uploaded once and posted as consecutive one-minute time ranges.
  */
 export default function StatusComposer({ initial, onClose, onPosted }: { initial: Mode; onClose: () => void; onPosted: () => void }) {
   const [mode, setMode] = useState<Mode>(initial);
@@ -28,6 +33,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   const [kind, setKind] = useState<MediaKind | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [caption, setCaption] = useState("");
+  /** Set when the video can be edited and processed in this browser. */
+  const [probe, setProbe] = useState<VideoProbe | null>(null);
+  const [edit, setEdit] = useState<VideoEdit | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (initial === "media") picker.current?.click(); }, [initial]);
@@ -37,19 +45,29 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
     if (!f) return;
     const k = kindOf(f);
     if (!k || k === "AUDIO") { toast("Choose a photo or a video.", "error"); return; }
-    if (f.size > LIMITS[k]) { toast(k === "VIDEO" ? "Videos can be at most 64 MB." : "Photos can be at most 8 MB.", "error"); return; }
-    let d: number | null = null;
-    if (k === "VIDEO") {
+    // A video this browser can process is re-encoded small before upload, so the raw size limit
+    // only applies when the original itself has to go up.
+    let p: VideoProbe | null = null;
+    if (k === "VIDEO" && (await canProcessVideo())) {
+      p = await probeVideo(f).catch(() => null);
+      if (p && !p.canDecode) p = null;
+    }
+    if (!p && f.size > LIMITS[k]) { toast(k === "VIDEO" ? "Videos can be at most 64 MB." : "Photos can be at most 8 MB.", "error"); return; }
+    let d: number | null = p ? p.durationMs : null;
+    if (k === "VIDEO" && !p) {
       try { d = await durationOf(f); } catch { toast("This video can't be played here.", "error"); return; }
     }
-    setFile(f); setKind(k); setDuration(d); setPreview(URL.createObjectURL(f)); setMode("media");
+    setFile(f); setKind(k); setDuration(d); setProbe(p); setEdit(null); setPreview(URL.createObjectURL(f)); setMode("media");
   };
 
   // Non-blocking (WhatsApp): queued, then processed / uploaded / published in the background
   // (src/lib/status-publisher); the Updates card shows "Adding…" and its progress.
+  // An edited video is rendered to ≤ 60 s MP4 parts in the background too (named processor,
+  // so it resumes after a reload); otherwise the original goes up once, posted as time ranges.
   const post = () => {
     if (mode === "text" ? !text.trim() : !(mode === "media" && file && kind)) return;
     void enqueueStatus({ items: [mode === "text" ? { kind: "TEXT", text: text.trim(), background: BACKGROUNDS[bg], font }
+      : kind === "VIDEO" && probe && edit ? { kind: "VIDEO", process: { processor: VIDEO_EDIT_PROCESSOR, input: file!, params: { edit, durationMs: probe.durationMs } }, caption }
       : kind === "VIDEO" && duration ? { kind: "VIDEO", source: file!, durationMs: duration, ranges: segments(duration), caption } // caption: first part only
       : { kind: "IMAGE", blob: file!, caption }] }).catch((e) => toast(errorText(e, "Your status couldn't be added. Try again."), "error"));
     onPosted();
@@ -57,6 +75,24 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   };
 
   const parts = kind === "VIDEO" && duration ? segments(duration).length : 1;
+
+  if (mode === "media" && file && kind === "VIDEO" && probe) {
+    return (
+      <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={onClose}
+        footer={(
+          <div className="space-y-2 bg-gradient-to-t from-black via-black/80 to-transparent p-3" data-testid="status-composer">
+            <div className="flex items-center gap-2">
+              <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…"
+                className="h-12 min-w-0 flex-1 rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+              <button type="button" aria-label="Post status" data-testid="status-send" disabled={!edit} onClick={post}
+                className="relative flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50">
+                <Send className="size-6" />
+              </button>
+            </div>
+          </div>
+        )} />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-label="Add status" data-testid="status-composer">
