@@ -87,9 +87,8 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // + 5 optional phone binding, privacy and removal operations.
     // + 3 admin bridge owner-delivered export operations (organization export download;
     // Messaging export deliveries and the claim-once).
-    // + 23 Updates operations (status media pieces, status, views, channels, follows,
-    // posts and reactions).
-    assert_eq!(probed, 315, "all v2 operations probed");
+    // (The 23 Updates operations moved to Messaging, ADR 0069: relayed, not served here.)
+    assert_eq!(probed, 292, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.
