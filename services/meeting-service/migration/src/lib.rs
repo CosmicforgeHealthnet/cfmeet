@@ -51,6 +51,7 @@ mod m20261118_000007_platform_user_participants;
 mod m20261119_000001_account_privacy_jobs;
 mod m20261119_000001_calendar_feeds;
 mod m20261121_000001_account_phones;
+mod m20261128_000001_refresh_reuse_grace;
 
 /// Independent, additive phone-account history: old images ignore it after rollback.
 pub struct AccountPhoneMigrator;
@@ -302,6 +303,7 @@ impl MigratorTrait for AccountSecurityMigrator {
             Box::new(m20261106_000001_account_security::Migration),
             Box::new(m20261115_000001_account_devices::Migration),
             Box::new(m20261117_000001_account_passwordless::Migration),
+            Box::new(m20261128_000001_refresh_reuse_grace::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {
