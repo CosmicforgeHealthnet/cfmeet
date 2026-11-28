@@ -280,6 +280,9 @@ async fn a_migrated_server_is_live_ready_and_fails_closed_without_platform_acces
     messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let files = Files::new("test");
     let port = free_port();
     let env = files.env("test", &db.url, &format!("127.0.0.1:{port}"));

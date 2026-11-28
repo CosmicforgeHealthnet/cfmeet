@@ -504,6 +504,9 @@ impl Stack {
             messaging_migration::SocialMigrator::up(&db.conn, None)
                 .await
                 .unwrap();
+            messaging_migration::EventsMigrator::up(&db.conn, None)
+                .await
+                .unwrap();
             self.messaging_db = Some(db);
         }
         let mut env = self.messaging_env.clone();
@@ -2372,6 +2375,9 @@ async fn postgresql_loss_during_active_messaging_loses_nothing_acknowledged_and_
         .await
         .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     // postgres://user:pass@host:port/name — reroute host:port through the gate.
