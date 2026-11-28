@@ -55,6 +55,8 @@ pub const READ_TTL: Duration = Duration::from_secs(300);
 pub enum Purpose {
     Status,
     Channel,
+    /// ADR 0071: an event's cover photo.
+    Event,
 }
 
 impl Purpose {
@@ -62,6 +64,7 @@ impl Purpose {
         match self {
             Purpose::Status => "STATUS",
             Purpose::Channel => "CHANNEL",
+            Purpose::Event => "EVENT",
         }
     }
 }
@@ -604,9 +607,16 @@ pub async fn complete(
     Ok(view(&row, Some(&all)))
 }
 
-/// Whether media is used by a live status (or a channel post).
+/// Whether media is used by a live status (or a channel post, or an event's cover).
 async fn in_use<C: ConnectionTrait>(db: &C, row: &MediaRow, now: DateTime<Utc>) -> Result<bool> {
-    let n = if row.purpose == Purpose::Channel.as_str() {
+    let n = if row.purpose == Purpose::Event.as_str() {
+        db::scalar_i64(
+            db,
+            "SELECT count(*) FROM messaging_events WHERE cover_media_id = $1",
+            vec![row.id.into()],
+        )
+        .await?
+    } else if row.purpose == Purpose::Channel.as_str() {
         db::scalar_i64(
             db,
             "SELECT count(*) FROM messaging_channel_posts WHERE media_id = $1",
@@ -688,7 +698,7 @@ pub async fn purge_unused(state: &AppState, now: DateTime<Utc>, limit: i64) -> R
                   WHERE (s.media_id = m.id OR s.music_media_id = m.id) AND s.expires_at > $2) \
                 AND m.created_at < $1) \
             OR (m.purpose = 'CHANNEL' AND m.state = 'COMPLETE' AND m.created_at < $1 \
-                AND NOT EXISTS (SELECT 1 FROM messaging_channel_posts p WHERE p.media_id = m.id)) \
+                AND NOT EXISTS (SELECT 1 FROM messaging_channel_posts p WHERE p.media_id = m.id))             OR (m.purpose = 'EVENT' AND m.state = 'COMPLETE' AND m.created_at < $1                 AND NOT EXISTS (SELECT 1 FROM messaging_events ev WHERE ev.cover_media_id = m.id)) \
              ORDER BY m.created_at LIMIT $3"
         ),
         vec![cutoff.into(), now.into(), limit.into()],
@@ -718,6 +728,9 @@ pub async fn readable(
 ) -> Result<bool> {
     if !row.complete() {
         return Ok(false);
+    }
+    if row.purpose == Purpose::Event.as_str() {
+        return crate::calendar::cover_readable(state, row.environment_id, viewer, row.id).await;
     }
     if row.purpose == Purpose::Channel.as_str() {
         let n = db::scalar_i64(

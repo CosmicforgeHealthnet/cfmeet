@@ -143,7 +143,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
             "m20261214_000042_owner_delivered_exports".to_string(),
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
@@ -160,7 +161,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
             "m20261214_000042_owner_delivered_exports".to_string(),
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -176,6 +178,9 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         .await
         .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)
@@ -251,7 +256,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
             "m20261214_000042_owner_delivered_exports".to_string(),
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -272,7 +278,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
             "m20261214_000042_owner_delivered_exports".to_string(),
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     // What the previous image checks is untouched by this history.
@@ -348,6 +355,9 @@ async fn the_chat_controls_history_is_separate_and_rolls_back() {
     messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)
         .await
         .unwrap()
@@ -383,6 +393,9 @@ async fn the_chat_controls_history_is_separate_and_rolls_back() {
         .await
         .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)
@@ -423,7 +436,8 @@ async fn the_admin_operations_history_is_separate_and_rolls_back() {
             "m20261214_000042_owner_delivered_exports".to_string(),
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
@@ -433,6 +447,9 @@ async fn the_admin_operations_history_is_separate_and_rolls_back() {
         .await
         .unwrap();
     messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)
@@ -479,6 +496,9 @@ async fn the_admin_operations_history_is_separate_and_rolls_back() {
     messaging_migration::SocialMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    messaging_migration::EventsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     assert!(messaging_migration::admin_operations_pending(&db.conn)
         .await
         .unwrap()
@@ -517,18 +537,22 @@ async fn the_chat_organization_history_is_separate_and_rolls_back() {
             .unwrap(),
         vec![
             "m20261216_000044_chat_organization_polls".to_string(),
-            "m20261217_000045_status_channels".to_string()
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
         ]
     );
     messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
         .await
         .unwrap();
-    // Only the later, separate Status / Channels history is left.
+    // Only the later, separate Status / Channels and Events histories are left.
     assert_eq!(
         messaging_migration::pending_migrations(&db.conn)
             .await
             .unwrap(),
-        vec!["m20261217_000045_status_channels".to_string()]
+        vec![
+            "m20261217_000045_status_channels".to_string(),
+            "m20261218_000046_events".to_string()
+        ]
     );
     let tables = "SELECT count(*) FROM pg_tables WHERE tablename IN ('messaging_chat_lists',          'messaging_chat_list_items', 'messaging_polls', 'messaging_poll_votes')";
     let columns = "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public'          AND ((table_name = 'messaging_conversation_inbox_preferences' AND column_name = 'favourited_at')            OR (table_name = 'messaging_conversations' AND column_name = 'description'))";
@@ -552,6 +576,82 @@ async fn the_chat_organization_history_is_separate_and_rolls_back() {
         .await
         .unwrap();
     assert!(messaging_migration::chat_organization_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// Events (ADR 0071) live in their OWN history: the previous image never reads it, this
+/// image requires it, and it rolls back on its own (its tables go and the media store's
+/// purpose check is restored; Status / Channels are untouched).
+#[tokio::test]
+async fn the_events_history_is_separate_and_rolls_back() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::SocialMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        messaging_migration::pending_migrations(&db.conn)
+            .await
+            .unwrap(),
+        vec!["m20261218_000046_events".to_string()]
+    );
+    messaging_migration::EventsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    let tables = "SELECT count(*) FROM pg_tables WHERE tablename IN ('messaging_events',                   'messaging_event_people', 'messaging_event_reminders', 'messaging_event_notices')";
+    let event_purpose = "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_messaging_social_media_purpose'                          AND pg_get_constraintdef(oid) LIKE '%EVENT%'";
+    assert_eq!(count(&db, tables).await, 4);
+    assert_eq!(count(&db, event_purpose).await, 1);
+    messaging_migration::EventsMigrator::reset(&db.conn)
+        .await
+        .unwrap();
+    assert_eq!(count(&db, tables).await, 0);
+    assert_eq!(count(&db, event_purpose).await, 0);
+    // The Status / Channels history is untouched by the rollback.
+    assert!(messaging_migration::social_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM pg_tables WHERE tablename = 'messaging_social_media'"
+        )
+        .await,
+        1
+    );
+    messaging_migration::EventsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::events_pending(&db.conn)
         .await
         .unwrap()
         .is_empty());

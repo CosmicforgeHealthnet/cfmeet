@@ -20,6 +20,8 @@ pub mod attachments;
 pub mod audit;
 pub mod backups;
 pub mod bridge_events;
+/// ADR 0071: Events (personal and conversation events, RSVP, reminders, ICS).
+pub mod calendar;
 pub mod compliance;
 pub mod config;
 pub mod conversations;

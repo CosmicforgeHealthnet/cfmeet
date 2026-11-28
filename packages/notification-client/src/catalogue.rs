@@ -1,10 +1,11 @@
-//! The closed event catalogue (Document 4 §5.2): 42 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 45 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
 //! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
 //! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
 //! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
-//! Developer Platform's first-party workspace owner invitation #41, and since 1.7.0 the
-//! organization export notice #42) and the control event
+//! Developer Platform's first-party workspace owner invitation #41, since 1.7.0 the
+//! organization export notice #42, and since 1.8.0 the Messaging event notices #43–#45:
+//! invited, cancelled and reminder) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -429,8 +430,9 @@ const MEMBERSHIP: &[&str] = &["membershipId", "organizationId"];
 const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
+const MESSAGING_EVENT: &[&str] = &["eventId"];
 
-/// The catalogue, in contract order (#1–#42, then the control event).
+/// The catalogue, in contract order (#1–#45, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -946,6 +948,46 @@ pub const CATALOGUE: &[EventSpec] = &[
             "ORGANIZATION_UPDATES",
             "ORGANIZATION_EXPORT",
             &["deliveryId", "expiresAt", "exportId", "organizationId"],
+        )
+    },
+    // ADR 0071 (contract 1.8.0): Events in Messaging. One notice per invited CF Meet account
+    // (exactly one cfmeet-user recipient), ids and times only, nothing sealed; the EVENT
+    // subject is the event. Invitations and cancellations follow the group-invitation
+    // preference, reminders (startsAt = the occurrence start) the meeting-reminder one.
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            43,
+            "messaging.event.invited",
+            MSG,
+            Normal,
+            "GROUP_INVITATIONS",
+            "EVENT",
+            MESSAGING_EVENT,
+        )
+    },
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            44,
+            "messaging.event.cancelled",
+            MSG,
+            Normal,
+            "GROUP_INVITATIONS",
+            "EVENT",
+            MESSAGING_EVENT,
+        )
+    },
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            45,
+            "messaging.event.reminder",
+            MSG,
+            Normal,
+            "MEETING_REMINDERS",
+            "EVENT",
+            &["eventId", "startsAt"],
         )
     },
     EventSpec {
