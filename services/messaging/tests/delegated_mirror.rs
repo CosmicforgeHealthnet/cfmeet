@@ -181,6 +181,7 @@ const MIRROR: &[(&str, &str)] = &[
     ("PUT", "/internal/v1/delegated/v1/messaging/status/{statusId}/reaction"),
     ("DELETE", "/internal/v1/delegated/v1/messaging/status/{statusId}/reaction"),
     ("GET", "/internal/v1/delegated/v1/messaging/status/{statusId}/viewers"),
+    ("GET", "/internal/v1/delegated/v1/messaging/status/{statusId}/replies"),
     ("POST", "/internal/v1/delegated/v1/messaging/status/{statusId}/replies"),
     ("POST", "/internal/v1/delegated/v1/messaging/status/{statusId}/forwards"),
     ("POST", "/internal/v1/delegated/v1/messaging/status/{statusId}/reshares"),
