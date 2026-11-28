@@ -228,7 +228,8 @@ export interface InboxEntry {
   notifications: ContactNotifications;
   mutedUntil: string | null;
   clearedThroughSequence: number;
-  latestActivity: { entryId: string; kind: string; occurredAt: string; missed?: boolean } | null;
+  /** The latest timeline card (ids, kinds, times; a CALL card says VOICE or VIDEO in callKind). */
+  latestActivity: { entryId: string; kind: string; occurredAt: string; missed?: boolean; callKind?: string | null } | null;
 }
 
 export interface MeetingLink {

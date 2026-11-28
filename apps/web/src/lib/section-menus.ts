@@ -34,6 +34,12 @@ export const ROUTES = {
  */
 export type Sections = { events: boolean; communities: boolean };
 
+/**
+ * This build: Events (ADR 0071, its own change) and Communities are not deployed yet. Flip a
+ * flag in the change that ships the section's screens.
+ */
+export const DEPLOYED: Sections = { events: false, communities: false };
+
 // ------------------------------------------------------------------ Updates
 
 /** Updates: Create channel, Discover channels, Status privacy, Starred, Events, Settings. */

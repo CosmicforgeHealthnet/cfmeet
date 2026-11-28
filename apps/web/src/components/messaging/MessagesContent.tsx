@@ -10,11 +10,13 @@
  * chat on the right; on phones the list and the chat are separate screens.
  */
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
-import SavedMessages, { SAVED_KEY } from "./SavedMessages";
+import { SAVED_KEY } from "@/components/starred/StarredContent";
+import { callPreview, groupActivityPreview, latestReactionBy, orderByActivity, type CallPreview, type StatusReaction } from "@/lib/messaging/chat-indicators";
+import { ROUTES } from "@/lib/section-menus";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, ChatListsDialog, ChatsMenu, DisappearingMessages, FilterChips } from "./ChatListControls";
 import { Avatar, ChatListRow, Ticks, colorFor, listTime, useGroupPhoto } from "./ChatListRow";
-import { useStatusRings } from "@/hooks/v2/useSocial";
+import { useMyStatusesForChats, useStatusRings } from "@/hooks/v2/useSocial";
 import { StatusRingFrame, useOpenStatus } from "@/components/updates/StatusRing";
 import { GroupDescription, GroupPhoto } from "./GroupInfo";
 import { AttachMenu, RichContentView } from "./RichMessages";
@@ -1830,8 +1832,12 @@ function PersonalMessages() {
   const params = useSearchParams();
   const requested = params.get("conversation");
   const [selected, setSelected] = useState<string | null>(requested);
-  /** A search result to show once its chat is open. */
-  const [focus, setFocus] = useState<{ conversationId: string; messageId: string } | null>(null);
+  const router = useRouter();
+  /** A search result (or a starred message: `?conversation=…&message=…`) to show once its chat is open. */
+  const [focus, setFocus] = useState<{ conversationId: string; messageId: string } | null>(() => {
+    const messageId = params.get("message");
+    return requested && messageId ? { conversationId: requested, messageId } : null;
+  });
   const [search, setSearch] = useState("");
   const [chosenFilter, setFilter] = useState<ChatFilter>(ALL_CHATS);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -1841,12 +1847,34 @@ function PersonalMessages() {
   const [rowLimit, setRowLimit] = useState(ROW_WINDOW);
   const drafts = useSyncExternalStore(subscribeDrafts, draftsVersion, draftsVersion);
   const [shareMode, setShareMode] = useState<"status" | "broadcast" | null>(null);
-  const [starredOpen, setStarredOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const openStarred = useCallback(() => router.push(ROUTES.starred), [router]);
   const capabilities = useHubCapabilities();
   const areas = communicationsAreas(capabilities.data);
   const inbox = useHubInbox(areas.contacts || areas.managedMessaging);
   const muted = useMemo(() => new Set((inbox.data?.data ?? []).filter((e) => e.notifications === "MUTED").map((e) => e.conversationId)), [inbox.data]);
+  // ADR 0073: each chat's latest call (the Hub card it already returns) ...
+  const calls = useMemo(() => {
+    const m = new Map<string, CallPreview>();
+    for (const e of inbox.data?.data ?? []) {
+      const call = callPreview(e.latestActivity);
+      if (call) m.set(e.conversationId, call);
+    }
+    return m;
+  }, [inbox.data]);
+  // ... and who reacted to my live statuses (My status data, read without an interval).
+  const myStatuses = useMyStatusesForChats(s.phase === "ready");
+  const reactions = useMemo(() => {
+    const posts = (myStatuses.data?.posts ?? []).map((p) => ({
+      viewers: (p.viewers ?? []).map((v) => ({ principalId: v.person.principalId ?? v.person.userId, reaction: v.reaction ?? null, reactedAt: v.reactedAt ?? null })),
+    }));
+    const m = new Map<string, StatusReaction>();
+    for (const who of new Set(posts.flatMap((p) => p.viewers.map((v) => v.principalId)))) {
+      const r = latestReactionBy(who, posts);
+      if (r) m.set(who, r);
+    }
+    return m;
+  }, [myStatuses.data]);
   useEffect(() => {
     // Contact -> conversation navigation: a chat created elsewhere appears after a refresh.
     if (requested && !s.conversations.some((c) => c.id === requested) && s.phase !== "loading") void engine.refreshConversations().catch(() => {});
@@ -1863,7 +1891,15 @@ function PersonalMessages() {
   const filter = liveFilter(chosenFilter, s.chatLists);
   const statusCopies = new Set<string>();
   const needle = search.trim().toLocaleLowerCase();
-  const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
+  // Realtime order (the engine), with a newer call or status reaction counting as activity.
+  const ordered = useMemo(() => {
+    const myId = s.identity?.principalId ?? null;
+    return orderByActivity(s.conversations, (c) => [
+      calls.get(c.id)?.at,
+      c.contextClass === "DIRECT" ? reactions.get(c.members.find((m) => m !== myId) ?? "")?.at : null,
+    ]);
+  }, [s.conversations, s.identity, calls, reactions]);
+  const conversations = arrangeChats(ordered, showArchived && archivedChats.length > 0).filter((conversation) => {
     const post = statusPostId(conversation.groupTitle);
     // An older encrypted chat that continues as a synced chat: only the synced one is listed.
     if (!post && conversation.securityProfile === "PRIVATE_E2EE" && engine.managedTwinOf(conversation.id)) return false;
@@ -1931,7 +1967,7 @@ function PersonalMessages() {
                 ) : null}
                 <button type="button" aria-label="New chat" title="New chat" data-testid="new-conversation" disabled={!s.identity} onClick={() => setComposeOpen(true)} className="hidden size-10 items-center justify-center rounded-full bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-40 md:flex"><MessageSquarePlus className="size-5" /></button>
                 <ChatsMenu disabled={!s.identity} onNewGroup={() => setComposeMode("group")} onNewChat={() => setComposeMode("chat")}
-                  onLists={() => setListsDialog("manage")} onStarred={() => setStarredOpen(true)} onSettings={() => setSecurityOpen(true)} />
+                  onLists={() => setListsDialog("manage")} onSettings={() => setSecurityOpen(true)} />
               </div>
             </div>
             <label className="flex h-10 items-center gap-2 rounded-full bg-muted px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
@@ -1958,7 +1994,11 @@ function PersonalMessages() {
                   typingName={typer ? (s.names[typer]?.split(" ")[0] ?? "") : null}
                   active={c.id === selected} muted={muted.has(c.id)} draft={readDraft(me, c.id)}
                   deviceRegisteredAt={s.deviceRegisteredAt} onSelect={selectChat}
-                  statusRing={rings.get(counterpartOf(c) ?? "") ?? null} onOpenStatus={openStatus ?? undefined} />
+                  statusRing={rings.get(counterpartOf(c) ?? "") ?? null} onOpenStatus={openStatus ?? undefined}
+                  call={calls.get(c.id) ?? null}
+                  statusReaction={c.contextClass === "DIRECT" ? reactions.get(counterpartOf(c) ?? "") ?? null : null}
+                  statusMention={!!rings.get(counterpartOf(c) ?? "")?.mentionedMeUnseen}
+                  groupPreview={groupActivityPreview(c, !!latest, me, s.names)} />
               );
             })}
             {hasMoreRows ? <li ref={moreRows} aria-hidden className="h-8" data-testid="more-chats" /> : null}
@@ -1981,7 +2021,7 @@ function PersonalMessages() {
         </aside>
         <main className={cn("min-w-0 min-h-0 flex-1", !current && (removedHere ? "flex items-center justify-center" : "hidden md:flex md:items-center md:justify-center"))} data-testid="conversation-pane">
           {current ? (
-            <ConversationPane key={current.id} engine={engine} conversation={current} focusMessageId={focus?.conversationId === current.id ? focus.messageId : undefined} onFocused={() => setFocus(null)} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={() => setStarredOpen(true)} />
+            <ConversationPane key={current.id} engine={engine} conversation={current} focusMessageId={focus?.conversationId === current.id ? focus.messageId : undefined} onFocused={() => setFocus(null)} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={openStarred} />
           ) : removedHere ? (
             <div className="max-w-sm px-6 text-center" role="status" data-testid="removed-from-chat">
               <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-muted"><MessageSquarePlus className="size-7 text-muted-foreground" /></div>
@@ -2008,9 +2048,6 @@ function PersonalMessages() {
       <NewConversation key={composeMode || "closed"} engine={engine} onCreated={setSelected} open={!!composeMode} setOpen={setComposeOpen} initialStep={composeMode === "group" ? "members" : "chat"} />
       {listsDialog ? <ChatListsDialog engine={engine} lists={s.chatLists} conversations={s.conversations.filter((c) => !statusPostId(c.groupTitle))} startCreating={listsDialog === "create"} onClose={() => setListsDialog(false)} /> : null}
       {shareMode ? <PrivateShares engine={engine} mode={shareMode} onClose={() => { if (shareMode === "status") setFilter({ kind: "status" }); setShareMode(null); }} /> : null}
-      <SavedMessages open={starredOpen} onOpenChange={setStarredOpen} onOpenChat={setSelected}
-        chatTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? "Chat"}
-        messageText={(id, messageId) => s.messages[id]?.find((m) => m.messageId === messageId)?.text ?? null} />
 
       {/* Security & devices: a sheet that stays mounted while closed so a history transfer keeps its state. */}
       <div id="device-security-settings" hidden={!securityOpen} className="fixed inset-0 z-50">

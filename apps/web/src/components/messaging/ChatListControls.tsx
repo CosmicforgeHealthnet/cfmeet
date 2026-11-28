@@ -7,10 +7,12 @@
  * Messaging for your account, so every device shows the same ones; nobody else sees them.
  */
 import { useState } from "react";
+import Link from "next/link";
 import {
-  Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Check, Heart, HeartOff, ListPlus, MessageSquarePlus, MoreVertical, Pencil, Pin, PinOff,
+  Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, Check, Heart, HeartOff, ListPlus, MessageSquarePlus, MoreVertical, Pencil, Pin, PinOff,
   Plus, Settings, Star, Timer, Trash2, Users,
 } from "lucide-react";
+import { chatsMenu, DEPLOYED } from "@/lib/section-menus";
 import { Popover } from "radix-ui";
 import type { ConversationView, MessagingEngine } from "@/lib/messaging/engine";
 import { MAX_CHAT_LISTS, MAX_PINNED_CHATS, filterKey, sortLists, validListName, type ChatFilter, type ChatListView, type FilterChip } from "@/lib/messaging/chat-list";
@@ -152,21 +154,21 @@ export function FilterChips({ chips, active, onSelect, onCreateList, canCreate }
 
 const menuItem = "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-40";
 
+const CHATS_MENU_ICONS: Record<string, typeof Users> = {
+  "new-group": Users, "new-chat": MessageSquarePlus, lists: ListPlus, starred: Star, events: CalendarDays, settings: Settings,
+};
+
 /**
- * The Chats menu (⋮, WhatsApp): New group, New chat, Lists, Starred messages, Settings.
- * (Events will sit here too once they ship.)
+ * The Chats menu (⋮, WhatsApp; ADR 0073 section menus): New group, New conversation, Custom
+ * lists, Starred messages, Events (once that section ships) and Settings — only what this
+ * person may do here (lib/section-menus.ts).
  */
-export function ChatsMenu({ disabled, onNewGroup, onNewChat, onLists, onStarred, onSettings }: {
-  disabled: boolean; onNewGroup: () => void; onNewChat: () => void; onLists: () => void; onStarred: () => void; onSettings: () => void;
+export function ChatsMenu({ disabled, onNewGroup, onNewChat, onLists, onSettings }: {
+  disabled: boolean; onNewGroup: () => void; onNewChat: () => void; onLists: () => void; onSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const items: { key: string; label: string; icon: typeof Users; run: () => void; off?: boolean }[] = [
-    { key: "new-group", label: "New group", icon: Users, run: onNewGroup, off: disabled },
-    { key: "new-chat", label: "New chat", icon: MessageSquarePlus, run: onNewChat, off: disabled },
-    { key: "lists", label: "Lists", icon: ListPlus, run: onLists },
-    { key: "starred", label: "Starred messages", icon: Star, run: onStarred },
-    { key: "settings", label: "Settings", icon: Settings, run: onSettings },
-  ];
+  const run: Record<string, () => void> = { "new-group": onNewGroup, "new-chat": onNewChat, lists: onLists, settings: onSettings };
+  const items = chatsMenu({ messaging: !disabled, lists: !disabled }, DEPLOYED);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
@@ -174,11 +176,15 @@ export function ChatsMenu({ disabled, onNewGroup, onNewChat, onLists, onStarred,
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content side="bottom" align="end" sideOffset={6} collisionPadding={12} className="z-50 w-56 rounded-xl border border-border bg-popover p-1.5 shadow-xl" data-testid="chats-menu-items">
-          {items.map(({ key, label, icon: Icon, run, off }) => (
-            <button key={key} type="button" disabled={off} data-testid={`chats-menu-${key}`} className={menuItem} onClick={() => { setOpen(false); run(); }}>
-              <Icon className="size-4 text-muted-foreground" />{label}
-            </button>
-          ))}
+          {items.map(({ key, label, href }) => {
+            const Icon = CHATS_MENU_ICONS[key] ?? Settings;
+            const body = <><Icon className="size-4 text-muted-foreground" />{label}</>;
+            return href ? (
+              <Link key={key} href={href} data-testid={`chats-menu-${key}`} className={menuItem} onClick={() => setOpen(false)}>{body}</Link>
+            ) : (
+              <button key={key} type="button" data-testid={`chats-menu-${key}`} className={menuItem} onClick={() => { setOpen(false); run[key]?.(); }}>{body}</button>
+            );
+          })}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
