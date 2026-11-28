@@ -21,6 +21,7 @@ export const socialKeys = {
   lists: ["v2", "social", "status-lists"] as const,
   mutes: ["v2", "social", "status-mutes"] as const,
   rings: (ids: string) => ["v2", "social", "status-rings", ids] as const,
+  replies: (statusId: string) => ["v2", "social", "status-replies", statusId] as const,
 };
 
 /** The saved default audience and Allow sharing (server-side: the same on every device). */
@@ -53,6 +54,20 @@ export function useStatusMutes() {
 /** "My status": live statuses with audience, unique viewers (times, reactions) and sharing. */
 export function useMyStatuses() {
   return useQuery({ queryKey: socialKeys.mine, queryFn: socialService.myStatuses, refetchInterval: 60_000, retry: 1 });
+}
+
+/**
+ * "My status" for the chat list's "Reacted to your status" previews (ADR 0073): the same
+ * cached data as My status, read when Chats opens and on focus — no interval of its own, so
+ * the chat list adds no polling (My status keeps its own refresh while it is open).
+ */
+export function useMyStatusesForChats(enabled = true) {
+  return useQuery({ queryKey: socialKeys.mine, queryFn: socialService.myStatuses, enabled, staleTime: 60_000, refetchOnWindowFocus: true, retry: false });
+}
+
+/** The private replies to one of my live statuses (author only, ADR 0073). */
+export function useStatusReplies(statusId: string | null) {
+  return useQuery({ queryKey: socialKeys.replies(statusId ?? ""), queryFn: () => socialService.statusReplies(statusId!), enabled: !!statusId, staleTime: 30_000, retry: 1 });
 }
 
 /**

@@ -35,6 +35,9 @@ export function inboxHref(item: InboxItem): string | null {
     case "OPEN_CONTACT": return "/dashboard/contacts";
     case "OPEN_SECURITY_SETTINGS": return "/dashboard/settings?tab=security";
     case "OPEN_DEVELOPER_APPLICATION": return "/developers";
+    // Mentioned in a status / your status was shared (Messaging, ADR 0069): that status in
+    // Updates (it opens only while the reader may still see it).
+    case "OPEN_STATUS": return ref ? `/dashboard/updates?status=${ref}` : "/dashboard/updates";
     default: return null;
   }
 }

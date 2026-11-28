@@ -14,7 +14,7 @@ export type PreferenceCategory = "DIRECT_MESSAGES" | "GROUP_MESSAGES" | "INCOMIN
 export type Uuid = string;
 
 /** Closed set: clients map each kind to a fixed in-app destination. No URL is ever returned. */
-export type ActionKind = "OPEN_CONVERSATION" | "OPEN_CALL_HISTORY" | "OPEN_VOICEMAIL" | "OPEN_RECORDING" | "OPEN_MEETING" | "OPEN_ORGANIZATION" | "OPEN_ORGANIZATION_INVITATION" | "OPEN_CONTACT_REQUEST" | "OPEN_CONTACT" | "OPEN_SECURITY_SETTINGS" | "OPEN_DEVELOPER_APPLICATION" | "NONE";
+export type ActionKind = "OPEN_CONVERSATION" | "OPEN_CALL_HISTORY" | "OPEN_VOICEMAIL" | "OPEN_RECORDING" | "OPEN_MEETING" | "OPEN_ORGANIZATION" | "OPEN_ORGANIZATION_INVITATION" | "OPEN_CONTACT_REQUEST" | "OPEN_CONTACT" | "OPEN_SECURITY_SETTINGS" | "OPEN_DEVELOPER_APPLICATION" | "OPEN_STATUS" | "NONE";
 
 /** One inbox item. Never E2EE text, codes, tokens, addresses or URLs. */
 export type NotificationItem = {

@@ -1,10 +1,11 @@
-//! The closed event catalogue (Document 4 §5.2): 42 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 44 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
 //! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
 //! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
 //! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
-//! Developer Platform's first-party workspace owner invitation #41, and since 1.7.0 the
-//! organization export notice #42) and the control event
+//! Developer Platform's first-party workspace owner invitation #41, since 1.7.0 the
+//! organization export notice #42, and since 1.9.0 the Messaging status notices #46–#47:
+//! mentioned and shared; #43–#45 are reserved for ADR 0071) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -429,8 +430,9 @@ const MEMBERSHIP: &[&str] = &["membershipId", "organizationId"];
 const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
+const MESSAGING_STATUS: &[&str] = &["statusId"];
 
-/// The catalogue, in contract order (#1–#42, then the control event).
+/// The catalogue, in contract order (#1–#42, #46–#47, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -946,6 +948,34 @@ pub const CATALOGUE: &[EventSpec] = &[
             "ORGANIZATION_UPDATES",
             "ORGANIZATION_EXPORT",
             &["deliveryId", "expiresAt", "exportId", "organizationId"],
+        )
+    },
+    // ADR 0069 (contract 1.9.0): Status in Messaging. One notice per CF Meet account
+    // (exactly one cfmeet-user recipient), ids only, nothing sealed; the STATUS subject is
+    // the status. Mentions go only to a mentioned person inside the status's audience,
+    // shares only to the status's author; both follow the direct-message preference.
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            46,
+            "messaging.status.mentioned",
+            MSG,
+            Normal,
+            "DIRECT_MESSAGES",
+            "STATUS",
+            MESSAGING_STATUS,
+        )
+    },
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            47,
+            "messaging.status.shared",
+            MSG,
+            Normal,
+            "DIRECT_MESSAGES",
+            "STATUS",
+            MESSAGING_STATUS,
         )
     },
     EventSpec {

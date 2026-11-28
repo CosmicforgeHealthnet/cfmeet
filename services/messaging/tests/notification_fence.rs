@@ -639,6 +639,9 @@ async fn readiness_reports_the_routing_protocol_only_when_applied() {
         .await
         .unwrap();
     migration::SocialMigrator::up(&db.conn, None).await.unwrap();
+    migration::StatusRepliesMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let plain = Harness::on(db.clone(), |_| {});
     let r = ready(&plain).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);

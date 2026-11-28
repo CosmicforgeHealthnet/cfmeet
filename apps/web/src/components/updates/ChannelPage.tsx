@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ImagePlus, Mic, MoreVertical, Send, SmilePlus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Bell, Flag, ImagePlus, Info, Mic, MoreVertical, Send, Settings2, Share2, SmilePlus, Trash2, UserMinus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useChannel, useChannelPosts, useFollow, useMediaUrl, useSocialRefresh } from "@/hooks/v2/useSocial";
 import { durationOf, kindOf, LIMITS, socialService, type ChannelPost } from "@/services/v2/social.service";
 import { errorText, PersonAvatar, shortWhen } from "./shared";
+import { channelMenu } from "@/lib/section-menus";
+
+const CHANNEL_MENU_ICONS: Record<string, typeof Info> = { info: Info, notifications: Bell, share: Share2, report: Flag, unfollow: UserMinus, manage: Settings2, delete: Trash2 };
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -20,6 +23,7 @@ export default function ChannelPage({ channelId }: { channelId: string }) {
   const follow = useFollow();
   const refresh = useSocialRefresh();
   const [menu, setMenu] = useState(false);
+  const [info, setInfo] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const list = [...(posts.data?.pages.flat() ?? [])].reverse();
   const latest = list.at(-1)?.postId;
@@ -47,6 +51,31 @@ export default function ChannelPage({ channelId }: { channelId: string }) {
     }
   };
 
+  // The channel menu (ADR 0073 section menus): only what this person may do in this channel.
+  // Notifications, reports and the management screen are not on this build yet (ADR 0072).
+  const canShare = typeof navigator !== "undefined" && (typeof navigator.share === "function" || !!navigator.clipboard);
+  const items = c ? channelMenu({ isOwner: c.isOwner, following: c.following, notifications: false, report: false, manage: false, share: canShare }) : [];
+  const share = async () => {
+    if (!c) return;
+    const url = `${window.location.origin}/dashboard/updates/channels/${encodeURIComponent(c.channelId)}`;
+    try {
+      if (typeof navigator.share === "function") await navigator.share({ title: c.name, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast("Channel link copied");
+      }
+    } catch {
+      // The share sheet was dismissed.
+    }
+  };
+  const pick = (key: string) => {
+    if (!c) return;
+    if (key === "info") setInfo(true);
+    else if (key === "share") void share();
+    else if (key === "unfollow") follow.mutate({ id: c.channelId, on: false }, { onError: (e) => toast(errorText(e), "error") });
+    else if (key === "delete") void remove();
+  };
+
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col md:h-dvh" data-testid="channel-page">
       <header className="flex items-center gap-2 border-b border-border bg-background px-2 py-2">
@@ -62,17 +91,41 @@ export default function ChannelPage({ channelId }: { channelId: string }) {
             {c.following ? "Following" : "Follow"}
           </button>
         ) : null}
-        {c?.isOwner ? (
+        {items.length ? (
           <div className="relative">
-            <button type="button" aria-label="Channel options" onClick={() => setMenu(!menu)} className="flex size-10 items-center justify-center rounded-full hover:bg-muted"><MoreVertical className="size-5" /></button>
+            <button type="button" aria-label="Channel options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)} data-testid="channel-menu" className="flex size-10 items-center justify-center rounded-full hover:bg-muted"><MoreVertical className="size-5" /></button>
             {menu ? (
-              <div className="absolute right-0 top-11 z-20 w-48 rounded-2xl border border-border bg-popover p-1 shadow-xl">
-                <button type="button" onClick={() => { setMenu(false); void remove(); }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-destructive hover:bg-muted"><Trash2 className="size-4" />Delete channel</button>
+              <div role="menu" className="absolute right-0 top-11 z-20 w-52 rounded-2xl border border-border bg-popover p-1 shadow-xl" data-testid="channel-menu-items">
+                {items.map(({ key, label, danger }) => {
+                  const Icon = CHANNEL_MENU_ICONS[key] ?? Info;
+                  return (
+                    <button key={key} type="button" role="menuitem" data-testid={`channel-menu-${key}`} onClick={() => { setMenu(false); pick(key); }}
+                      className={cn("flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm hover:bg-muted", danger && "text-destructive")}>
+                      <Icon className={cn("size-4", !danger && "text-muted-foreground")} />{label}
+                    </button>
+                  );
+                })}
               </div>
             ) : null}
           </div>
         ) : null}
       </header>
+      {info && c ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center" onClick={() => setInfo(false)}>
+          <div role="dialog" aria-label="Channel info" className="w-full max-w-md rounded-t-3xl bg-background p-5 shadow-2xl sm:rounded-3xl" onClick={(e) => e.stopPropagation()} data-testid="channel-info">
+            <div className="flex items-center gap-3">
+              <PersonAvatar name={c.name} size="size-14" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-lg font-bold">{c.name}</p>
+                <p className="text-sm text-muted-foreground">{c.followerCount} {c.followerCount === 1 ? "follower" : "followers"}{c.isOwner ? " · Your channel" : ""}</p>
+              </div>
+              <button type="button" aria-label="Close" onClick={() => setInfo(false)} className="flex size-9 items-center justify-center rounded-full hover:bg-muted"><X className="size-5" /></button>
+            </div>
+            {c.description ? <p className="mt-4 whitespace-pre-wrap text-sm">{c.description}</p> : null}
+            <p className="mt-4 text-xs text-muted-foreground">Created {new Date(c.createdAt).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })}. Only the owner posts; followers can react.</p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div className="mx-auto max-w-2xl space-y-3">

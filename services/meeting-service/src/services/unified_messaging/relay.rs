@@ -909,6 +909,12 @@ pub static ROUTES: &[RelayRoute] = &[
         false,
     ),
     r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Id, Lit("replies")],
+        &[],
+        false,
+    ),
+    r(
         Method::POST,
         &[Lit("messaging"), Lit("status"), Id, Lit("replies")],
         &[],
@@ -1627,6 +1633,7 @@ mod tests {
             (Method::POST, "v1/messaging/status".into()),
             (Method::GET, format!("v1/messaging/status/{C}")),
             (Method::PATCH, format!("v1/messaging/status/{C}")),
+            (Method::GET, format!("v1/messaging/status/{C}/replies")),
             (
                 Method::POST,
                 format!("v1/messaging/status/media/{C}/parts/0"),

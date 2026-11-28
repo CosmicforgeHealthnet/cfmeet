@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/notifications/events/v1.schema.json",
   "title": "CF Meet notification event envelope v1 (cfmeet.notifications.event)",
-  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#38, #41, #42), with exactly the catalogue's `sealed` fields plus any of its `sealedOptional` fields. CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue. 1.4.0 (ADR 0063 N-P4, partner push): recipient kind platform-principal:<environmentId>:<principalId> (a partner's end user, delivered only through that environment's own push provider credentials) for the catalogue types marked partnerRecipients (messaging.message.created): metadata-only (ids, never content), never mixed with other recipient kinds, and in the envelope's scope when it names one. Accepted by the service only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on. 1.6.0 (ADR 0068 A4, owner-delivered secret): NORMAL #41 developer-platform.workspace.owner-invitation.email-requested from cfmeet.developer-platform (DEVELOPER_UPDATES, subject ORGANIZATION_INVITATION = the invitation): the one-time owner invitation of a first-party workspace HQ registers through the admin bridge, delivered only to the invited address as a single-use claim link; the token and the address are sealed, exactly one meeting-email-principal recipient keyed by the invitation; data invitationId, organizationId and optionally expiresAt. 1.7.0 (ADR 0068 A4, owner-delivered export): NORMAL #42 organizations.organization.export_ready from cfmeet.organizations (ORGANIZATION_UPDATES, subject ORGANIZATION_EXPORT = the export): the single-use download link of an organization export HQ requested, delivered only to the owner's account (exactly one cfmeet-user recipient; the service resolves the verified address); the link token is sealed; data organizationId, exportId, deliveryId, expiresAt.",
+  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#38, #41, #42), with exactly the catalogue's `sealed` fields plus any of its `sealedOptional` fields. CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue. 1.4.0 (ADR 0063 N-P4, partner push): recipient kind platform-principal:<environmentId>:<principalId> (a partner's end user, delivered only through that environment's own push provider credentials) for the catalogue types marked partnerRecipients (messaging.message.created): metadata-only (ids, never content), never mixed with other recipient kinds, and in the envelope's scope when it names one. Accepted by the service only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on. 1.6.0 (ADR 0068 A4, owner-delivered secret): NORMAL #41 developer-platform.workspace.owner-invitation.email-requested from cfmeet.developer-platform (DEVELOPER_UPDATES, subject ORGANIZATION_INVITATION = the invitation): the one-time owner invitation of a first-party workspace HQ registers through the admin bridge, delivered only to the invited address as a single-use claim link; the token and the address are sealed, exactly one meeting-email-principal recipient keyed by the invitation; data invitationId, organizationId and optionally expiresAt. 1.7.0 (ADR 0068 A4, owner-delivered export): NORMAL #42 organizations.organization.export_ready from cfmeet.organizations (ORGANIZATION_UPDATES, subject ORGANIZATION_EXPORT = the export): the single-use download link of an organization export HQ requested, delivered only to the owner's account (exactly one cfmeet-user recipient; the service resolves the verified address); the link token is sealed; data organizationId, exportId, deliveryId, expiresAt. 1.9.0 (ADR 0069, Status in Messaging): NORMAL #46 messaging.status.mentioned (a CF Meet account was mentioned in a status it can see) and #47 messaging.status.shared (someone forwarded or reshared the recipient's status) from cfmeet.messaging (DIRECT_MESSAGES), subject STATUS (the status), exactly one cfmeet-user recipient, nothing sealed; data statusId. #43–#45 are reserved for ADR 0071.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -98,7 +98,8 @@
             "ORGANIZATION_EXPORT",
             "ORGANIZATION_INVITATION",
             "ORGANIZATION_MEMBERSHIP",
-            "PRODUCTION_ACCESS_REQUEST"
+            "PRODUCTION_ACCESS_REQUEST",
+            "STATUS"
           ]
         },
         "id": {
@@ -2709,6 +2710,126 @@
       "if": {
         "properties": {
           "eventType": {
+            "const": "messaging.status.mentioned"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.messaging"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statusId"
+            ],
+            "properties": {
+              "statusId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "required": [
+          "subject"
+        ],
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "messaging.status.shared"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.messaging"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statusId"
+            ],
+            "properties": {
+              "statusId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "required": [
+          "subject"
+        ],
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
             "const": "notifications.cancel"
           }
         },
@@ -3583,6 +3704,40 @@
         "expiresAt",
         "exportId",
         "organizationId"
+      ]
+    },
+    {
+      "number": 46,
+      "eventType": "messaging.status.mentioned",
+      "producer": "cfmeet.messaging",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DIRECT_MESSAGES",
+      "subjectKind": "STATUS",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "recipient": "cfmeet-user",
+      "note": "ADR 0069 (1.9.0): a CF Meet account was mentioned in a status it can see (the STATUS subject is the status); ids only, one cfmeet-user recipient per envelope",
+      "dataKeys": [
+        "statusId"
+      ]
+    },
+    {
+      "number": 47,
+      "eventType": "messaging.status.shared",
+      "producer": "cfmeet.messaging",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "DIRECT_MESSAGES",
+      "subjectKind": "STATUS",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "recipient": "cfmeet-user",
+      "note": "ADR 0069 (1.9.0): someone forwarded or reshared the recipient's status (the STATUS subject is the original status); ids only, one cfmeet-user recipient per envelope",
+      "dataKeys": [
+        "statusId"
       ]
     },
     {

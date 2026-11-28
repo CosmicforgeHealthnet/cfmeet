@@ -148,7 +148,7 @@ impl State {
             SELECT jsonb_build_object('conversationId',i.conversation_id,
               'notifications',COALESCE(CASE WHEN pr.muted_until IS NOT NULL AND pr.muted_until<=now() THEN 'ALL' ELSE pr.notifications END,'ALL'),
               'mutedUntil',pr.muted_until,'clearedThroughSequence',COALESCE(w.cleared_through_sequence,0),
-              'latestActivity',(SELECT jsonb_build_object('entryId',e.entry_key,'kind',e.kind,'occurredAt',e.occurred_at,'missed',e.data->'missed')
+              'latestActivity',(SELECT jsonb_build_object('entryId',e.entry_key,'kind',e.kind,'occurredAt',e.occurred_at,'missed',e.data->'missed','callKind',CASE WHEN e.kind='CALL' THEN e.data->'kind' END)
                  FROM communication_timeline_entries e WHERE e.viewer_profile_id=$1 AND e.conversation_id=i.conversation_id ORDER BY e.occurred_at DESC,e.entry_key DESC LIMIT 1)) doc
             FROM ids i LEFT JOIN communication_conversation_preferences pr ON pr.owner_profile_id=$1 AND pr.conversation_id=i.conversation_id
             LEFT JOIN communication_conversation_watermarks w ON w.owner_profile_id=$1 AND w.conversation_id=i.conversation_id
