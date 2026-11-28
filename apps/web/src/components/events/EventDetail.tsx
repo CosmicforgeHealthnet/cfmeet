@@ -72,7 +72,8 @@ function EventView({ event, zone, status, setStatus, onEdit, onDialog }: {
   const { snapshot } = useMessagingSnapshot();
   const me = snapshot?.identity?.principalId ?? null;
   const cancelled = event.state === "CANCELLED";
-  const ended = !cancelled && !event.nextOccurrence && Date.parse(event.seriesEndsAt ?? event.endsAt) <= Date.now();
+  const [now] = useState(() => Date.now());
+  const ended = !cancelled && !event.nextOccurrence && Date.parse(event.seriesEndsAt ?? event.endsAt) <= now;
   const occurrence = event.nextOccurrence ?? { startsAt: event.startsAt, endsAt: event.endsAt };
   const chat = event.conversationId ? snapshot?.conversations.find((c) => c.id === event.conversationId) ?? null : null;
   const organizers = [event.organizerPrincipalId, ...(event.coOrganizerPrincipalIds ?? [])];

@@ -22,7 +22,9 @@ function load(path, dependencies = {}) {
 }
 
 const time = load("../src/lib/meeting-time.ts");
-const core = load("../src/lib/events/core.ts", { "../meeting-time": time });
+// Values made in the module's own realm are cloned into this one (strict deep equality).
+const core = Object.fromEntries(Object.entries(load("../src/lib/events/core.ts", { "../meeting-time": time }))
+  .map(([k, v]) => [k, typeof v === "function" ? (...args) => structuredClone(v(...args)) : structuredClone(v)]));
 const ID = "11111111-1111-4111-8111-111111111111";
 const C = "22222222-2222-4222-8222-222222222222";
 const P = "33333333-3333-4333-8333-333333333333";

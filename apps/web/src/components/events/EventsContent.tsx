@@ -167,7 +167,7 @@ export default function EventsContent() {
                   <Button variant="outline" size="sm" onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage}>{list.isFetchingNextPage ? <Spinner size="sm" /> : null}Load more</Button>
                 </div>
               ) : null}
-              {list.isFetchNextPageError ? <p role="alert" className="mt-2 text-center text-sm text-destructive">{eventErrorMessage(list.error)}</p> : null}
+              {list.isFetchNextPageError ? <p role="alert" className="mt-2 text-center text-sm text-destructive">More events couldn&apos;t be loaded. Try again.</p> : null}
             </>
           )
         ) : (

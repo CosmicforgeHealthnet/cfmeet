@@ -93,20 +93,15 @@ function FormBody({ event: initial, conversationId, onClose, onSaved }: { event:
     enabled: state.scope === "CONVERSATION" && memberIds.length > 0,
     staleTime: 5 * 60_000,
   });
-  const people: Person[] = state.scope === "PERSONAL"
+  const people: Person[] = useMemo(() => state.scope === "PERSONAL"
     ? (contacts.data ?? [])
-    : memberIds.map((p) => ({ principalId: p, name: snapshot?.names[p] || memberNames.data?.get(p) || "Member" }));
+    : memberIds.map((p) => ({ principalId: p, name: snapshot?.names[p] || memberNames.data?.get(p) || "Member" })), [state.scope, contacts.data, memberIds, snapshot?.names, memberNames.data]);
   // Co-organizers already on an event stay listed (and removable) even when not in the list now.
   const coChoices = useMemo(() => {
     const extra = state.coOrganizerPrincipalIds.filter((p) => !people.some((x) => x.principalId === p)).map((p) => ({ principalId: p, name: snapshot?.names[p] || "Co-organizer" }));
     return [...people, ...extra];
   }, [people, state.coOrganizerPrincipalIds, snapshot?.names]);
 
-  // A weekly series' first day must be one of its days: keep the start day selected.
-  const startDay = /^\d{4}-\d{2}-\d{2}$/.test(state.startDate) ? weekdayOf(state.startDate) : null;
-  useEffect(() => {
-    if (state.frequency === "WEEKLY" && startDay && !state.byDay.includes(startDay)) setState((s) => ({ ...s, byDay: [...s.byDay, startDay] }));
-  }, [state.frequency, startDay, state.byDay]);
 
   const reloadLatest = async () => {
     if (!event) return;
@@ -213,7 +208,7 @@ function FormBody({ event: initial, conversationId, onClose, onSaved }: { event:
               <label className="grid gap-1.5 text-sm font-medium">Starts
                 <input type="date" className={field} value={state.startDate} onChange={(e) => {
                   const v = e.target.value;
-                  setState((s) => (s.endDate < v || s.endDate === s.startDate ? { ...s, startDate: v, endDate: v } : { ...s, startDate: v }));
+                  setState((s) => withStartDay(s.endDate < v || s.endDate === s.startDate ? { ...s, startDate: v, endDate: v } : { ...s, startDate: v }));
                 }} required />
               </label>
               {!state.allDay ? <label className="grid gap-1.5 text-sm font-medium"><span className="sr-only">Start time</span><span aria-hidden className="invisible">.</span>
@@ -439,6 +434,13 @@ function MeetingPicker({ state, setState }: { state: EventFormState; setState: R
 
 // ---------------------------------------------------------------------------- recurrence
 
+/** A weekly series' first day must be one of its days: keep the start day selected. */
+function withStartDay(s: EventFormState): EventFormState {
+  if (s.frequency !== "WEEKLY" || !/^\d{4}-\d{2}-\d{2}$/.test(s.startDate)) return s;
+  const day = weekdayOf(s.startDate);
+  return s.byDay.includes(day) ? s : { ...s, byDay: [...s.byDay, day] };
+}
+
 const FREQUENCIES: { value: RecurrenceChoice; label: string }[] = [
   { value: "NONE", label: "Does not repeat" },
   { value: "DAILY", label: "Daily" },
@@ -453,7 +455,7 @@ function RecurrenceFields({ state, setState }: { state: EventFormState; setState
   const startDay = /^\d{4}-\d{2}-\d{2}$/.test(state.startDate) ? weekdayOf(state.startDate) : null;
   return (
     <div className="space-y-3">
-      <NiceSelect label="Repeat" value={state.frequency} options={FREQUENCIES} onChange={(v) => setState((s) => ({ ...s, frequency: v }))} />
+      <NiceSelect label="Repeat" value={state.frequency} options={FREQUENCIES} onChange={(v) => setState((s) => withStartDay({ ...s, frequency: v }))} />
       {state.frequency !== "NONE" ? (
         <div className="space-y-3 rounded-2xl bg-muted/40 p-3">
           <label className="flex items-center gap-2 text-sm">Every

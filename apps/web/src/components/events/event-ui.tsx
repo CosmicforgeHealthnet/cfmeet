@@ -102,7 +102,7 @@ export function useMessagingSnapshot() {
  */
 export function usePrincipalNames(principalIds: string[], conversationIds: string[] = []) {
   const { snapshot } = useMessagingSnapshot();
-  const known = snapshot?.names ?? {};
+  const known = useMemo(() => snapshot?.names ?? {}, [snapshot?.names]);
   const me = snapshot?.identity?.principalId ?? null;
   const missing = useMemo(() => [...new Set(principalIds)].filter((p) => p && !known[p]).sort(), [principalIds, known]);
   const lookup = useQuery({
