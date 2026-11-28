@@ -277,9 +277,12 @@ export class StatusQueue {
       job.uploads.push(u);
       return u;
     };
-    const addPost = (item: number, uploadKey: string | null, body: StoredPost["body"], placeholder = false) => {
-      job.posts.push({ sequence: job.posts.length, item, idempotencyKey: this.uuid(), uploadKey, body, postId: null, uncertain: false, ...(placeholder ? { placeholder } : {}) });
+    const addPost = (item: number, uploadKey: string | null, body: StoredPost["body"], placeholder = false, musicUploadKey: string | null = null) => {
+      job.posts.push({ sequence: job.posts.length, item, idempotencyKey: this.uuid(), uploadKey, body, postId: null, uncertain: false, ...(placeholder ? { placeholder } : {}), ...(musicUploadKey ? { musicUploadKey } : {}) });
     };
+    // Music on a text / photo status: its own AUDIO upload, referenced as musicMediaId.
+    const addMusic = (item: number, music: { blob: Blob; durationMs: number; title?: string } | undefined) =>
+      music ? { key: addUpload(item, music.blob, "AUDIO", music.durationMs).key, title: clean(music.title)?.slice(0, 120) } : null;
     const clean = (s: string | undefined) => (s && s.trim() ? s.trim() : undefined);
     const mentionsOf = (m: string[] | undefined) => (m && m.length ? [...new Set(m)] : undefined);
 
@@ -287,20 +290,28 @@ export class StatusQueue {
     for (const [i, item] of input.items.entries()) {
       const mentions = mentionsOf(item.mentions);
       switch (item.kind) {
-        case "TEXT":
-          addPost(i, null, { kind: "TEXT", text: item.text, background: item.background, font: item.font, mentions });
+        case "TEXT": {
+          const music = addMusic(i, item.music);
+          const style = { textColor: item.textColor, textAlign: item.textAlign, textSize: item.textSize, backgroundGradient: item.backgroundGradient };
+          addPost(i, null, { kind: "TEXT", text: item.text, background: item.backgroundGradient ? undefined : item.background, font: item.font, ...style, musicTitle: music?.title, mentions }, false, music?.key ?? null);
           job.preview = { kind: "TEXT", text: item.text, background: item.background ?? null, font: item.font ?? 0 };
           break;
+        }
         case "IMAGE": {
           const u = addUpload(i, item.blob, "IMAGE", null);
-          addPost(i, u.key, { kind: "IMAGE", caption: clean(item.caption), mentions });
-          job.preview = { kind: "IMAGE", blobKey: item.preview ? keep(`${id}/preview`, item.preview) : u.blobKey };
+          const music = addMusic(i, item.music);
+          addPost(i, u.key, { kind: "IMAGE", caption: clean(item.caption), musicTitle: music?.title, mentions }, false, music?.key ?? null);
+          job.preview = { kind: "IMAGE", blobKey: item.preview ? keep(`${id}/preview`, item.preview) : u.blobKey, ...(music ? { music: true } : {}) };
           break;
         }
         case "AUDIO": {
           const u = addUpload(i, item.blob, "AUDIO", item.durationMs);
-          addPost(i, u.key, { kind: "AUDIO", caption: clean(item.caption), mentions });
-          job.preview = { kind: "AUDIO", blobKey: null, background: item.background ?? null };
+          const title = clean(item.musicTitle)?.slice(0, 120);
+          addPost(i, u.key, {
+            kind: "AUDIO", caption: clean(item.caption), mentions, musicTitle: title,
+            ...(item.backgroundGradient ? { backgroundGradient: item.backgroundGradient } : { background: item.background }),
+          });
+          job.preview = { kind: "AUDIO", blobKey: null, background: item.background ?? null, ...(title ? { music: true } : {}) };
           break;
         }
         case "VIDEO": {
@@ -327,7 +338,10 @@ export class StatusQueue {
           } else {
             if (job.process) throw new Error("At most one deferred video per status job.");
             if ("process" in item) {
-              job.process = { itemIndex: i, mode: "named", processor: item.process.processor, inputBlobKey: keep(`${id}/input`, item.process.input), params: item.process.params ?? null, caption: caption ?? null, mentions: mentions ?? null };
+              const blobKeys = item.process.blobs && Object.keys(item.process.blobs).length
+                ? Object.fromEntries(Object.entries(item.process.blobs).map(([name, b]) => [name, keep(`${id}/input-${name}`, b)]))
+                : null;
+              job.process = { itemIndex: i, mode: "named", processor: item.process.processor, inputBlobKey: keep(`${id}/input`, item.process.input), params: item.process.params ?? null, blobKeys, caption: caption ?? null, mentions: mentions ?? null };
             } else {
               job.process = { itemIndex: i, mode: "closure", processor: null, inputBlobKey: null, params: null, caption: caption ?? null, mentions: mentions ?? null };
               this.closures.set(id, item.prepare);
@@ -540,7 +554,13 @@ export class StatusQueue {
   private async runProcess(job: StoredJob, signal: AbortSignal): Promise<void> {
     const p = job.process!;
     const live = this.liveOf(job.id);
-    const ctx: ProcessorContext = { signal, onProgress: (f) => { live.processFrac = Math.max(0, Math.min(1, f)); this.changed(); } };
+    const blobs: Record<string, Blob> = {};
+    for (const [name, key] of Object.entries(p.blobKeys ?? {})) {
+      const b = await this.blob(key);
+      if (!b) throw new FatalError("A file this status needs is no longer on this device.");
+      blobs[name] = b;
+    }
+    const ctx: ProcessorContext = { signal, blobs, onProgress: (f) => { live.processFrac = Math.max(0, Math.min(1, f)); this.changed(); } };
     let result: ProcessorResult;
     if (p.mode === "named") {
       const fn = p.processor ? this.processors.get(p.processor) : undefined;
@@ -607,6 +627,10 @@ export class StatusQueue {
       // The edit's input is no longer needed once its outputs are stored.
       this.blobs.delete(inputKey);
       await this.storage.deleteBlob(inputKey).catch(() => {});
+    }
+    for (const key of Object.values(p.blobKeys ?? {})) {
+      this.blobs.delete(key);
+      await this.storage.deleteBlob(key).catch(() => {});
     }
   }
 
@@ -710,6 +734,7 @@ export class StatusQueue {
       if (!post) { this.finish(job); continue; }
       if (post.placeholder || job.nextAttemptAt > now) return null;
       if (post.uploadKey && !job.uploads.find((u) => u.key === post.uploadKey)?.mediaId) return null;
+      if (post.musicUploadKey && !job.uploads.find((u) => u.key === post.musicUploadKey)?.mediaId) return null;
       return { job, post };
     }
     return null;
@@ -722,6 +747,8 @@ export class StatusQueue {
     if (job.audience) req.audience = job.audience;
     if (typeof job.allowSharing === "boolean") req.allowSharing = job.allowSharing;
     if (upload) req.mediaId = upload.mediaId;
+    const music = post.musicUploadKey ? job.uploads.find((u) => u.key === post.musicUploadKey) : null;
+    if (music) req.musicMediaId = music.mediaId;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
     const request = req as unknown as StatusCreateRequest;
 
@@ -832,6 +859,8 @@ export class StatusQueue {
       createdAt: job.createdAt,
       state: this.stateOf(job),
       progress: this.progressOf(job),
+      processing: job.hasProcess ? (job.process ? this.live.get(job.id)?.processFrac ?? 0 : 1) : null,
+      upload: job.process ? null : this.uploadBytes(job),
       error: job.error,
       fatal: job.fatal,
       preview: this.previewView(job),
@@ -856,6 +885,16 @@ export class StatusQueue {
     const hasUploads = job.uploads.length > 0 || job.process !== null;
     const wPub = hasUploads ? PUBLISH_WEIGHT : 1 - wProc;
     const wUp = 1 - wProc - wPub;
+    const { sentBytes: sent, totalBytes: total } = this.uploadBytes(job) ?? { sentBytes: 0, totalBytes: 0 };
+    const upFrac = job.process ? 0 : total > 0 ? Math.min(1, sent / total) : 1;
+    const pubFrac = job.posts.length ? job.posts.filter((p) => p.postId).length / job.posts.length : 0;
+    return Math.max(0, Math.min(1, wProc * procFrac + wUp * upFrac + wPub * pubFrac));
+  }
+
+  /** Bytes of the job's uploads acknowledged or in flight, and in all; null with nothing to upload. */
+  private uploadBytes(job: StoredJob): { sentBytes: number; totalBytes: number } | null {
+    if (!job.uploads.length) return null;
+    const live = this.live.get(job.id);
     let total = 0;
     let sent = 0;
     for (const u of job.uploads) {
@@ -864,9 +903,7 @@ export class StatusQueue {
       for (const i of u.partsDone) sent += partBytes(u, i);
       if (live) for (const [tag, bytes] of live.inflight) if (tag.startsWith(`${u.key}:`)) sent += bytes;
     }
-    const upFrac = job.process ? 0 : total > 0 ? Math.min(1, sent / total) : 1;
-    const pubFrac = job.posts.length ? job.posts.filter((p) => p.postId).length / job.posts.length : 0;
-    return Math.max(0, Math.min(1, wProc * procFrac + wUp * upFrac + wPub * pubFrac));
+    return { sentBytes: Math.min(sent, total), totalBytes: total };
   }
 
   private previewView(job: StoredJob): JobPreview {
@@ -877,6 +914,7 @@ export class StatusQueue {
       blob: p.blobKey ? this.blobs.get(p.blobKey) ?? null : null,
       video: p.videoBlobKey ? this.blobs.get(p.videoBlobKey) ?? null : null,
       background: p.background ?? null,
+      ...(p.music ? { music: true } : {}),
     };
   }
 

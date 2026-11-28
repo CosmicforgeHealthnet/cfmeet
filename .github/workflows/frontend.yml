@@ -117,6 +117,12 @@ jobs:
       - name: Status video editor tests
         run: node --experimental-strip-types --test tests/media-editor-video.test.mjs
 
+      # Status creation: music mix (gains, fades, clipping), music selection on the audio
+      # timeline, voice waveform data and WAV fallback, "My music" pruning / search, recent
+      # media, segment reorder / trim, and the video overlay render pipeline.
+      - name: Status creation tests
+        run: node --experimental-strip-types --test tests/status-creation.test.mjs
+
       # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
       # password reset, password change), with the message-only fallback.
       - name: Form validation error mapping tests

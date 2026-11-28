@@ -4,15 +4,20 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import {
   ChevronLeft,
   ChevronRight,
+  Check,
   Crop,
+  Eraser,
   FlipHorizontal2,
   Loader2,
   Pause,
+  Pencil,
   Play,
   Redo2,
   RotateCcw,
   RotateCw,
+  Smile,
   Trash2,
+  Type,
   Undo2,
   Volume2,
   VolumeX,
@@ -42,6 +47,14 @@ import {
   type VideoProbe,
 } from "@/lib/media-editor/video";
 
+import { BRUSH_SIZES, createSticker, createText, OVERLAY_COLORS, updateOverlay, type Overlay, type TextOverlay } from "@/lib/media-editor/overlays";
+import { hasVisibleOverlays } from "@/lib/media-editor/video-overlays";
+import { fadeGain, type MusicSettings } from "@/lib/media-editor/audio";
+import EmojiPicker from "./EmojiPicker";
+import OverlayLayer from "./OverlayLayer";
+import TextOverlayEditor, { DEFAULT_TEXT_DRAFT, type TextDraft } from "./TextOverlayEditor";
+import { ColorRow, Segmented, useHistory } from "./ui";
+
 export type { VideoEdit } from "@/lib/media-editor/video";
 
 export type VideoEditorProps = {
@@ -64,6 +77,14 @@ export type VideoEditorProps = {
   onError?: (error: unknown) => void;
   /** Included in the size estimate. */
   estimate?: { hasMusic?: boolean; hasOverlay?: boolean };
+  /**
+   * Text, stickers, emojis and drawing on the video (burned in by the export). Passing
+   * `onOverlaysChange` turns the tools on; they share undo / redo with the edit. Read on mount.
+   */
+  initialOverlays?: Overlay[];
+  onOverlaysChange?: (overlays: Overlay[]) => void;
+  /** Music to hear with the preview, in step with the posted timeline (the export mixes it for real). */
+  previewMusic?: { file: Blob; settings: MusicSettings } | null;
 };
 
 /**
@@ -133,7 +154,32 @@ const FULL: NormalizedCrop = { x: 0, y: 0, width: 1, height: 1 };
 const THUMBS = 10;
 const STEP_MS = 100;
 
-function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onClose, probe, estimate }: VideoEditorProps & { probe: VideoProbe }) {
+type Tag = "edit" | "overlay";
+type Tool = "none" | "draw" | "sticker";
+
+function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onClose, probe, estimate, initialOverlays, onOverlaysChange, previewMusic }: VideoEditorProps & { probe: VideoProbe }) {
+  const musicEl = useRef<HTMLAudioElement>(null);
+  const musicRef = useRef(previewMusic);
+  useEffect(() => { musicRef.current = previewMusic; });
+  const musicFile = previewMusic?.file;
+  useEffect(() => {
+    const a = musicEl.current;
+    if (!a || !musicFile) return;
+    const url = URL.createObjectURL(musicFile);
+    a.src = url;
+    return () => { a.pause(); a.removeAttribute("src"); a.load(); URL.revokeObjectURL(url); };
+  }, [musicFile]);
+  /** Keeps the preview music at `timelineMs` of the posted timeline (or silent). */
+  const syncMusic = (timelineMs: number | null) => {
+    const a = musicEl.current;
+    const m = musicRef.current?.settings;
+    if (!a || !m || !a.src) return;
+    const target = timelineMs === null ? null : m.startMs + timelineMs;
+    if (target === null || target >= m.endMs) { if (!a.paused) a.pause(); return; }
+    if (Math.abs(a.currentTime * 1000 - target) > 300) a.currentTime = target / 1000;
+    a.volume = Math.min(1, fadeGain(target, m));
+    if (a.paused) void a.play().catch(() => {});
+  };
   const historyRef = useRef<EditHistory | null>(null);
   const [history, setHistory] = useState<EditHistory>(() => createHistory(value ?? initialVideoEdit(probe.durationMs)));
   const edit = history.present;
@@ -153,14 +199,35 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
   const [stageRef, stage] = useElementSize<HTMLDivElement>();
   const drags = useRef(0);
 
+  // One undo / redo across the edit (trim, crop, sound...) and the overlays: each step is tagged
+  // with the history it belongs to, so Undo always reverses the most recent change.
+  const overlaysOn = Boolean(onOverlaysChange);
+  const ov = useHistory<Overlay[]>(() => initialOverlays ?? []);
+  const [tags, setTags] = useState<{ undo: Tag[]; redo: Tag[] }>({ undo: [], redo: [] });
+  const [tool, setTool] = useState<Tool>("none");
+  const [text, setText] = useState<{ id?: string; draft: TextDraft } | null>(null);
+  const [brushColor, setBrushColor] = useState(OVERLAY_COLORS[2]);
+  const [brushSize, setBrushSize] = useState(1);
+  const [eraser, setEraser] = useState(false);
+  const [gesture, setGesture] = useState(false);
+  const pushTag = (t: Tag) => setTags((s) => ({ undo: [...s.undo, t].slice(-200), redo: [] }));
+
   const dispatch = useCallback((a: HistoryAction) => {
     const cur = historyRef.current ?? history;
     const next = historyReducer(cur, a);
     historyRef.current = next;
     if (next === cur) return;
+    if (a.type === "apply" && !(a.mergeKey != null && a.mergeKey === cur.mergeKey)) setTags((s) => ({ undo: [...s.undo, "edit" as Tag].slice(-200), redo: [] }));
     setHistory(next);
     if (next.present !== cur.present) onChange(next.present);
   }, [history, onChange]);
+
+  const commitOverlays = (next: Overlay[]) => {
+    if (next === ov.present) return;
+    pushTag("overlay");
+    ov.commit(next);
+  };
+  useEffect(() => { onOverlaysChange?.(ov.present); }, [ov.present, onOverlaysChange]);
   const apply = useCallback((action: VideoEditAction, mergeKey?: string) => dispatch({ type: "apply", action, mergeKey }), [dispatch]);
   const latest = () => (historyRef.current ?? history).present;
 
@@ -220,11 +287,13 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
         if (t >= seg.endMs - 20 || el.ended) {
           if (loopPart) el.currentTime = seg.startMs / 1000;
           else if (i + 1 < segs.length) { setPart(i + 1); el.currentTime = segs[i + 1].startMs / 1000; }
-          else { el.pause(); setPlaying(false); setPart(0); el.currentTime = segs[0].startMs / 1000; setTimeMs(segs[0].startMs); return; }
+          else { el.pause(); syncMusic(null); setPlaying(false); setPart(0); el.currentTime = segs[0].startMs / 1000; setTimeMs(segs[0].startMs); return; }
         } else if (t < seg.startMs - 250) {
           el.currentTime = seg.startMs / 1000;
         }
         setTimeMs(el.currentTime * 1000);
+        const before = segs.slice(0, i).reduce((sum, x) => sum + (x.endMs - x.startMs), 0);
+        syncMusic(loopPart ? null : before + Math.max(0, t - seg.startMs));
       }
       raf = requestAnimationFrame(tick);
     };
@@ -252,11 +321,32 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
     setLoopPart(loop);
     void el.play().then(() => setPlaying(true), () => setPlaying(false));
   };
-  const pause = () => { video.current?.pause(); setPlaying(false); };
+  const pause = () => { video.current?.pause(); syncMusic(null); setPlaying(false); };
   const toggle = () => (playing ? pause() : play());
 
-  const undo = () => dispatch({ type: "undo" });
-  const redo = () => dispatch({ type: "redo" });
+  const undo = () => {
+    const t = tags.undo[tags.undo.length - 1];
+    if (!t) return;
+    setTags((s) => ({ undo: s.undo.slice(0, -1), redo: [...s.redo, t] }));
+    if (t === "edit") dispatch({ type: "undo" }); else ov.undo();
+  };
+  const redo = () => {
+    const t = tags.redo[tags.redo.length - 1];
+    if (!t) return;
+    setTags((s) => ({ undo: [...s.undo, t], redo: s.redo.slice(0, -1) }));
+    if (t === "edit") dispatch({ type: "redo" }); else ov.redo();
+  };
+  const canUndo = tags.undo.length > 0 && (history.past.length > 0 || ov.canUndo);
+  const canRedo = tags.redo.length > 0 && (history.future.length > 0 || ov.canRedo);
+
+  const addSticker = (emoji: string) => { commitOverlays([...ov.present, createSticker(emoji)]); setTool("none"); };
+  const saveText = (draft: TextDraft) => {
+    const id = text?.id;
+    setText(null);
+    if (!draft.text.trim()) return;
+    if (id) commitOverlays(updateOverlay<TextOverlay>(ov.present, id, (t) => ({ ...t, ...draft })));
+    else commitOverlays([...ov.present, createText(draft)]);
+  };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const tag = (e.target as HTMLElement).tagName;
@@ -266,7 +356,9 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
     if (mod && !typing && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (volumeOpen) setVolumeOpen(false);
+      if (text) setText(null);
+      else if (tool !== "none") { setTool("none"); setEraser(false); }
+      else if (volumeOpen) setVolumeOpen(false);
       else if (cropMode) setCropMode(false);
       else onClose();
       return;
@@ -291,7 +383,11 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
   const cy = -view.y * fh + fh / 2;
 
   const selectedMs = editDurationMs(edit);
-  const size = estimateEditSize(probe, edit, estimate);
+  const hasOverlay = hasVisibleOverlays(ov.present);
+  const size = estimateEditSize(probe, edit, { ...estimate, hasOverlay: hasOverlay || estimate?.hasOverlay });
+  const shownOverlays = text?.id ? ov.present.filter((x) => x.id !== text.id) : ov.present;
+  const chrome = cn("transition-opacity duration-150", gesture && "pointer-events-none opacity-0");
+  const editText = (t: TextOverlay) => { pause(); setText({ id: t.id, draft: { text: t.text, font: t.font, color: t.color, background: t.background, align: t.align, size: t.size } }); };
   const multi = edit.segments.length > 1;
   const selectedSeg = multi ? edit.segments.find((s) => s.id === selected) ?? null : null;
 
@@ -299,11 +395,31 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
     <div ref={root} tabIndex={-1} onKeyDown={onKeyDown} role="dialog" aria-label="Edit video" data-testid="video-editor"
       className="fixed inset-0 z-[80] flex select-none flex-col bg-black text-white outline-none">
       {/* Top bar */}
-      <div className="flex items-start justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
+      <div className={cn("flex items-start justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),0.75rem)]", chrome)}>
+        {tool === "draw" ? (
+          <>
+            <RoundButton label="Undo" onClick={undo} disabled={!canUndo}><Undo2 className="size-5" /></RoundButton>
+            <div className="flex items-center gap-2">
+              <RoundButton label="Eraser" pressed={eraser} onClick={() => setEraser(!eraser)}><Eraser className="size-5" /></RoundButton>
+              <button type="button" onClick={() => { setTool("none"); setEraser(false); }} data-testid="video-draw-done"
+                className="flex h-11 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+                <Check className="size-4" />Done
+              </button>
+            </div>
+          </>
+        ) : (
+        <>
         <RoundButton label="Close" onClick={onClose}><X className="size-6" /></RoundButton>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <RoundButton label="Undo" onClick={undo} disabled={!history.past.length}><Undo2 className="size-5" /></RoundButton>
-          <RoundButton label="Redo" onClick={redo} disabled={!history.future.length}><Redo2 className="size-5" /></RoundButton>
+          <RoundButton label="Undo" onClick={undo} disabled={!canUndo}><Undo2 className="size-5" /></RoundButton>
+          <RoundButton label="Redo" onClick={redo} disabled={!canRedo}><Redo2 className="size-5" /></RoundButton>
+          {overlaysOn && !cropMode ? (
+            <>
+              <RoundButton label="Stickers and emojis" onClick={() => { pause(); setTool("sticker"); setVolumeOpen(false); }}><Smile className="size-5" /></RoundButton>
+              <RoundButton label="Add text" onClick={() => { pause(); setText({ draft: DEFAULT_TEXT_DRAFT }); setVolumeOpen(false); }}><Type className="size-5" /></RoundButton>
+              <RoundButton label="Draw" onClick={() => { pause(); setTool("draw"); setVolumeOpen(false); }}><Pencil className="size-5" /></RoundButton>
+            </>
+          ) : null}
           <RoundButton label="Crop" pressed={cropMode} onClick={() => { pause(); setCropMode(!cropMode); setVolumeOpen(false); }}><Crop className="size-5" /></RoundButton>
           <RoundButton label="Rotate" onClick={() => apply({ type: "rotate" })}><RotateCw className="size-5" /></RoundButton>
           <div className="relative">
@@ -322,6 +438,8 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
           </div>
           {toolbarExtra}
         </div>
+        </>
+        )}
       </div>
 
       {/* Timeline + info chip */}
@@ -358,8 +476,9 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative overflow-hidden" style={{ width: box.width, height: box.height }}
             onClick={() => { if (!cropMode) toggle(); }}>
+            <audio ref={musicEl} preload="auto" className="hidden" />
             <video ref={video} playsInline preload="auto" aria-label="Video preview"
-              onPause={() => setPlaying(false)}
+              onPause={() => { syncMusic(null); setPlaying(false); }}
               className="pointer-events-none absolute max-w-none"
               style={{
                 width: elW,
@@ -374,11 +493,18 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
                 onChange={(crop, mergeKey) => apply({ type: "setCrop", crop }, mergeKey)}
                 newDragKey={() => `crop-${++drags.current}`} />
             ) : (
-              <div className="absolute inset-0" onClick={(e) => e.stopPropagation()}>{overlaySlot}</div>
+              <div className="absolute inset-0" onClick={(e) => e.stopPropagation()}>
+                {overlaysOn ? (
+                  <OverlayLayer overlays={shownOverlays} onChange={commitOverlays}
+                    tool={tool === "draw" ? (eraser ? "erase" : "draw") : text || tool === "sticker" ? "none" : "move"}
+                    brush={{ color: brushColor, width: BRUSH_SIZES[brushSize] }} onEditText={editText} onGestureChange={setGesture} />
+                ) : null}
+                {overlaySlot}
+              </div>
             )}
           </div>
         </div>
-        {!cropMode ? (
+        {!cropMode && tool === "none" && !text ? (
           <button type="button" aria-label={playing ? "Pause" : "Play"} onClick={toggle}
             className={cn("absolute left-1/2 top-1/2 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 backdrop-blur transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
               playing ? "opacity-0 hover:opacity-100" : "opacity-100")}>
@@ -387,7 +513,18 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
         ) : null}
       </div>
 
-      {cropMode ? (
+      {text ? <TextOverlayEditor initial={text.draft} onDone={saveText} onCancel={() => setText(null)} /> : null}
+      {tool === "sticker" ? (
+        <div className="absolute inset-x-0 bottom-0 z-30"><EmojiPicker onPick={addSticker} onClose={() => setTool("none")} /></div>
+      ) : null}
+
+      {tool === "draw" ? (
+        <div className="space-y-2 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]" data-testid="video-draw-panel">
+          <ColorRow label="Brush colour" colors={OVERLAY_COLORS} value={brushColor} onChange={(c) => { setBrushColor(c); setEraser(false); }} />
+          <Segmented label="Brush size" value={brushSize} onChange={(v) => { setBrushSize(v); setEraser(false); }}
+            options={BRUSH_SIZES.map((_, i) => ({ value: i, aria: `Brush size ${i + 1}`, label: <span className="block rounded-full bg-current" style={{ width: 6 + i * 5, height: 6 + i * 5 }} /> }))} />
+        </div>
+      ) : cropMode ? (
         <div className="space-y-3 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
           <div className="flex gap-2 overflow-x-auto pb-1" role="radiogroup" aria-label="Crop shape">
             {CROP_ASPECTS.map((a) => (
@@ -417,7 +554,9 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
               onRemove={(id) => { if (selected === id) setSelected(null); pause(); setPart(0); apply({ type: "removeSegment", id }); }}
               onReset={() => { setSelected(null); apply({ type: "resetSegments" }); }} />
           ) : null}
-          {footer ? <div className="pb-[max(env(safe-area-inset-bottom),0px)]">{footer}</div> : <div className="pb-[env(safe-area-inset-bottom)]" />}
+          <div className={cn(tool === "sticker" && "invisible", chrome)}>
+            {footer ? <div className="pb-[max(env(safe-area-inset-bottom),0px)]">{footer}</div> : <div className="pb-[env(safe-area-inset-bottom)]" />}
+          </div>
         </>
       )}
     </div>
