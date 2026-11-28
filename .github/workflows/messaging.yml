@@ -403,6 +403,8 @@ jobs:
         run: cargo test --locked --test engagement
       - name: Status and Channels (ADR 0069) — mutual-contact audience snapshots, revocation, one read gate, resumable media, idempotency, expiry
         run: cargo test --locked --test social -- --nocapture
+      - name: Events (ADR 0071) — one gate (organizer, invitees, live conversation membership, blocks), RSVP, cancellation notices, recurrence across DST, views and pages, reminders, ICS, idempotency, covers
+        run: cargo test --locked --test calendar_events -- --nocapture
       - name: Authorization / IDOR matrix (every customer and internal operation; denials change nothing, leak nothing; positives match the contract)
         run: cargo test --locked --test authorization_matrix -- --nocapture
 

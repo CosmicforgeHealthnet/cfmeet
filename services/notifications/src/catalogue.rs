@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 42 inbound types, the routing category (the unit of the cutover: one row per
+//! the 45 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -155,6 +155,8 @@ pub const ACTION_KINDS: &[&str] = &[
     "OPEN_CONTACT",
     "OPEN_SECURITY_SETTINGS",
     "OPEN_DEVELOPER_APPLICATION",
+    // ADR 0071 (common contract 1.7.0): a Messaging event (ref = the event id).
+    "OPEN_EVENT",
     "NONE",
 ];
 
@@ -676,6 +678,37 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // ADR 0071 (event contract 1.8.0): Events in Messaging. One routing category,
+    // MESSAGING_EVENTS (in-app + push, seeded OFF by m20261218_000001_messaging_event_notices),
+    // to the invited account only; invitations and cancellations under the group-invitation
+    // preference, reminders under the meeting-reminder one. OPEN_EVENT on eventId.
+    r(
+        "messaging.event.invited",
+        "MESSAGING_EVENTS",
+        C::GroupInvitations,
+        &[I, P],
+        "event.invited",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
+    r(
+        "messaging.event.cancelled",
+        "MESSAGING_EVENTS",
+        C::GroupInvitations,
+        &[I, P],
+        "event.cancelled",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
+    r(
+        "messaging.event.reminder",
+        "MESSAGING_EVENTS",
+        C::MeetingReminders,
+        &[I, P],
+        "event.reminder",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
     TypeRoute {
         email_category: Some("OPERATIONS_ALERT"),
         ..r(
@@ -737,7 +770,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 42);
+        assert_eq!(inbound.len(), 45);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -745,7 +778,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 42);
+        assert_eq!(ROUTES.len(), 45);
     }
 
     #[test]
@@ -811,14 +844,67 @@ mod tests {
         }
     }
 
+    /// ADR 0071: the three Messaging event notices share MESSAGING_EVENTS (in-app + push,
+    /// no email), open the event and go to exactly one CF Meet account.
+    #[test]
+    fn messaging_event_notices_route_to_messaging_events() {
+        for (t, template, pref, data) in [
+            (
+                "messaging.event.invited",
+                "event.invited",
+                PrefCategory::GroupInvitations,
+                &["eventId"][..],
+            ),
+            (
+                "messaging.event.cancelled",
+                "event.cancelled",
+                PrefCategory::GroupInvitations,
+                &["eventId"][..],
+            ),
+            (
+                "messaging.event.reminder",
+                "event.reminder",
+                PrefCategory::MeetingReminders,
+                &["eventId", "startsAt"][..],
+            ),
+        ] {
+            let r = route(t).expect(t);
+            assert_eq!(r.route_category, "MESSAGING_EVENTS", "{t}");
+            assert_eq!(r.pref, pref, "{t}");
+            assert_eq!(r.channels, &[Channel::InApp, Channel::Push], "{t}");
+            assert_eq!(r.template, template);
+            assert_eq!(r.action, "OPEN_EVENT");
+            assert_eq!(r.action_ref, Some("eventId"));
+            assert_eq!(r.email_category, None);
+            let spec = r.spec();
+            assert_eq!(
+                spec.producer,
+                Some(cf_notification_client::Producer::Messaging)
+            );
+            assert_eq!(spec.priority, cf_notification_client::Priority::Normal);
+            assert_eq!(spec.category, Some(pref.as_str()));
+            assert_eq!(spec.subject_kind, Some("EVENT"));
+            assert_eq!(spec.required_data, data);
+            assert!(spec.sealed.is_empty());
+            assert_eq!(
+                spec.recipient,
+                Some(cf_notification_client::RecipientKind::Account)
+            );
+            let (title, body) = crate::templates::inbox_text(template, &serde_json::json!({}));
+            assert_ne!(title, "Notification", "{template} has its own text");
+            assert!(!body.is_empty());
+        }
+    }
+
     #[test]
     fn routing_rows_match_the_migration_seed() {
         // The foundation seed, then the rows later migrations add (ACCOUNT_NOTICES,
-        // ORGANIZATIONS).
+        // ORGANIZATIONS, MESSAGING_EVENTS).
         let seed = [
             include_str!("../migration/src/m20261116_000001_notifications_foundation.rs"),
             include_str!("../migration/src/m20261118_000001_account_notices.rs"),
             include_str!("../migration/src/m20261121_000001_organization_exports.rs"),
+            include_str!("../migration/src/m20261218_000001_messaging_event_notices.rs"),
         ]
         .concat();
         let rows = routing_rows();

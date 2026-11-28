@@ -72,6 +72,7 @@ never cached) and continues exactly as for a bearer credential. A token together
 | Compliance (administration): legal holds, deletion requests, `GET /v1/messaging/audit` | `conversations.manage` |
 | Exports (administration, MANAGED only): `POST /v1/messaging/exports`, `GET …/{id}`, `POST …/{id}/download-grants` | `messaging.export` |
 | Status ([ADR 0069](../../docs/decisions/0069-status-and-channels-in-messaging.md)): `POST /v1/messaging/status` (optional `Idempotency-Key`), feed, mine, rings, `GET` / `DELETE …/status/{statusId}`, view, reaction, viewers, replies, forwards, reshares, audience preference, eligible contacts, close friends, audience lists, mutes, status media (`…/status/media/**`: signed resumable parts) | `messages.read` / `messages.send` |
+| Events ([ADR 0071](../../docs/decisions/0071-events-in-messaging.md)): `GET` / `POST /v1/messaging/events` (optional `Idempotency-Key`; views, calendar range, search, keyset pages), `GET /v1/messaging/events/calendar` (ICS as JSON), `GET` / `PATCH` / `DELETE …/events/{eventId}`, cancel, RSVP, attendees, invitations, reminders, ICS, cover media (`…/events/media/**`) | `messages.read` / `messages.send` |
 | Channels (ADR 0069): directory, create / update / delete, follow, posts (optional `Idempotency-Key`), reactions, channel media (`…/channels/media/**`) | `messages.read` / `messages.send` |
 
 Gap closure (migration `m20261206_000034`, gap-closure history):

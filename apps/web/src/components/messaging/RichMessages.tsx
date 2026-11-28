@@ -9,7 +9,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import LinkPreviewDialog from "./LinkPreviewDialog";
-import { BarChart3, Check, ExternalLink, FileText, Image as ImageIcon, Link2, Lock, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
+import { BarChart3, CalendarDays, Check, ExternalLink, FileText, Image as ImageIcon, Link2, Lock, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -136,8 +136,10 @@ const field = "h-10 w-full rounded-xl border border-border bg-background px-3 te
  * The chat's one attach button (WhatsApp): a file straight away in chats that only take files;
  * in a private chat a menu of Document, Link card, Poll, Location and Contact.
  */
-export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onFile, onMedia, onSend, fileTitle }: {
+export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onFile, onMedia, onSend, onEvent, fileTitle }: {
   canAttach: boolean;
+  /** Create an event in this chat (Events, ADR 0071). */
+  onEvent?: () => void;
   canShare: boolean;
   /** Synced chats: a poll (a server message) next to photos and documents. */
   canPoll?: boolean;
@@ -151,7 +153,8 @@ export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onF
   const [open, setOpen] = useState<"poll" | "location" | "contact" | "link" | null>(null);
   const [menu, setMenu] = useState(false);
   const button = "flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40";
-  if (!canShare && !onMedia && !canPoll) {
+  const event = onEvent ? [{ key: "event", label: "Event", icon: CalendarDays, tint: "bg-rose-600", run: onEvent }] : [];
+  if (!canShare && !onMedia && !canPoll && !onEvent) {
     return <button type="button" className={button} disabled={disabled || !canAttach} onClick={onFile} aria-label="Attach a file" title={fileTitle}><Paperclip className="size-5" /></button>;
   }
   const media = onMedia ? [{ key: "media", label: "Photos & videos", icon: ImageIcon, tint: "bg-blue-600", run: onMedia, off: !canAttach }] : [];
@@ -159,6 +162,7 @@ export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onF
     ...media,
     { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
     ...(canPoll ? [{ key: "poll", label: "Poll", icon: BarChart3, tint: "bg-amber-500", run: () => setOpen("poll") }] : []),
+    ...event,
   ] : [
     ...media,
     { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
@@ -166,6 +170,7 @@ export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onF
     { key: "poll", label: "Poll", icon: BarChart3, tint: "bg-amber-500", run: () => setOpen("poll") },
     { key: "location", label: "Location", icon: MapPin, tint: "bg-emerald-600", run: () => setOpen("location") },
     { key: "contact", label: "Contact", icon: UserRound, tint: "bg-sky-600", run: () => setOpen("contact") },
+    ...event,
   ];
   return (
     <>

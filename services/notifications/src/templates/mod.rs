@@ -357,6 +357,12 @@ pub fn inbox_text(template: &str, params: &Value) -> (String, String) {
             "Added to a group",
             "You were added to a group conversation.".into(),
         ),
+        "event.invited" => ("Event invitation", "You're invited to an event.".into()),
+        "event.cancelled" => (
+            "Event cancelled",
+            "An event you were invited to was cancelled.".into(),
+        ),
+        "event.reminder" => ("Event reminder", "An event starts soon.".into()),
         "call.missed" => ("Missed call", "You missed a call.".into()),
         "call.voicemail" => ("New voicemail", "You have a new voice message.".into()),
         "call.recording" => ("Recording ready", "A call recording is ready.".into()),
