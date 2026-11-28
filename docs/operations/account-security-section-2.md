@@ -8,7 +8,7 @@
 |---|---|---|
 | Token types | `typ` claim; refresh tokens never authenticate, access tokens never refresh; legacy untyped tokens classified by lifetime | ACC-001 |
 | Revocation epoch | `account_security_state` + trigger on `users`; enforced on v1, v2, refresh and the Developer Platform session bridge, with or without Communications | ACC-002, ACC-003, SEC-003 |
-| Sessions | One row per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens with reuse detection; DB-checked on every request | ACC-007, ACC-017, SEC-007 |
+| Sessions | One row per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens with reuse detection (the token superseded by the last rotation is answered with the current one for `ACCOUNT_REFRESH_REUSE_GRACE_SECONDS`, default 60, [ADR 0070](../decisions/0070-refresh-token-reuse-grace-window.md)); DB-checked on every request | ACC-007, ACC-017, SEC-007 |
 | Session APIs | `GET /api/v2/me/sessions`, `POST /api/v2/me/sessions/{sessionId}/revoke`, `POST /api/v2/me/sessions/revoke-all` | ACC-007 |
 | Logout | Ends the current session only (pre-session tokens: everywhere) | ACC-007 |
 | Google sign-in | Subject binding, full claim validation (aud/azp/exp/nonce/email_verified), atomic single-use state, browser-binding cookie, pending-account password discarded before takeover, safe unique usernames, optional one-time exchange code | ACC-004, ACC-005, ACC-006, SEC-005 |
