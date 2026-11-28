@@ -92,6 +92,11 @@ jobs:
       # link previews (F4-F7) inside the encrypted content, validated by the crypto worker.
       - name: Messaging chat controls tests
         run: node --experimental-strip-types --test tests/messaging-chat-controls.test.mjs
+      # Communities (ADR 0073, Messaging): validation, role permissions mirroring the server, group
+      # order, invite links, the Communities chat filter and together / separate preference, and
+      # every client request on the relay allowlist.
+      - name: Communities tests
+        run: node --experimental-strip-types --test tests/communities.test.mjs
 
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh
