@@ -124,7 +124,7 @@ export default function UpdatesContent() {
 
       <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-3 md:bottom-8 md:right-8">
         <button type="button" aria-label="Text status" onClick={() => setComposer("text")} className="flex size-11 items-center justify-center rounded-2xl bg-card text-foreground shadow-lg ring-1 ring-border" data-testid="text-status"><Pencil className="size-5" /></button>
-        <button type="button" aria-label="Photo or video status" onClick={() => setComposer("media")} className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl" data-testid="media-status"><Camera className="size-6" /></button>
+        <button type="button" aria-label="Add status" onClick={() => setComposer("media")} className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl" data-testid="media-status"><Camera className="size-6" /></button>
       </div>
 
       {composer ? <StatusComposer initial={composer} onClose={() => setComposer(null)} onPosted={() => void refresh()} /> : null}

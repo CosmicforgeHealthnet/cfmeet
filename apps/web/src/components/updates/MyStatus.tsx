@@ -17,7 +17,7 @@ import { useMediaUrl, useMyStatuses, useSocialRefresh } from "@/hooks/v2/useSoci
 import { socialService, type PersonView, type StatusPost } from "@/services/v2/social.service";
 import { reactionSummary, snapshotLabel, timeLeft, uniqueViewers } from "@/lib/status-privacy";
 import TextStatusView from "@/components/media-editor/TextStatusView";
-import { PendingThumb, stateText } from "./MyStatusCard";
+import { jobTitle, PendingThumb, StageBars, stateText } from "./MyStatusCard";
 import { useStatusQueue } from "./StatusQueueRoot";
 import StatusComposer from "./StatusComposer";
 import StatusViewer from "./StatusViewer";
@@ -100,8 +100,9 @@ export default function MyStatus() {
               <li key={job.id} className="flex items-center gap-3 px-3 py-3" data-testid="my-status-pending" data-state={job.state}>
                 <PendingThumb preview={job.preview} small />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{job.postCount > 1 ? `${job.postCount} status updates` : job.preview.kind === "TEXT" ? "Text status" : job.preview.kind === "IMAGE" ? "Photo" : job.preview.kind === "VIDEO" ? "Video" : "Voice status"}</span>
-                  <span className={cn("block truncate text-xs", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>{stateText(job, snapshot.online)}</span>
+                  <span className="block truncate text-sm font-semibold">{jobTitle(job)}</span>
+                  <span className={cn("block truncate text-xs", job.state === "failed" ? "text-destructive" : "text-muted-foreground")} aria-live="polite">{stateText(job, snapshot.online)}</span>
+                  <StageBars job={job} />
                   <span className="block truncate text-xs text-muted-foreground">{job.audienceLabel ?? "Default audience"}</span>
                 </span>
                 {job.state === "failed" && !job.fatal ? (
