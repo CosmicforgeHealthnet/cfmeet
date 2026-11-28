@@ -1,0 +1,121 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application_id",
+    "tenant_id",
+    "application_scope_id",
+    "environment_id",
+    "channel_id",
+    "basis",
+    "state",
+    "decision_reason",
+    "decided_at",
+    "created_at",
+    "version",
+    "channel_exists",
+    "handle",
+    "category",
+    "country",
+    "language",
+    "follower_count",
+    "post_count",
+    "channel_created_at"
+  ],
+  "properties": {
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_scope_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "channel_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "basis": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "decision_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "channel_exists": {
+      "type": "boolean"
+    },
+    "handle": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "country": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "follower_count": {
+      "type": "integer"
+    },
+    "post_count": {
+      "type": "integer"
+    },
+    "channel_created_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "description": "ADR 0072: one channel verification application with the channel's public handle, codes and counts (never its name, description or posts). application_scope_id is the CF Meet application (Platform Access) the channel belongs to."
+}

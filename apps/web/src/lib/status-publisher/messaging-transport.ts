@@ -12,7 +12,6 @@
  * be created from COMPLETE media of the caller, so nothing pending is ever visible to anyone.
  */
 import { socialService, type CreateStatus } from "@/services/v2/social.service";
-import { isRouteNotAllowed } from "@/services/v2/social-backend";
 import { transportError } from "./queue";
 import type { StatusCreateRequest, StatusTransport, TransportError } from "./types";
 
@@ -28,8 +27,6 @@ function messageOf(e: unknown): string | undefined {
 
 /** Service error → the queue's error kinds. `phase` decides what 400/404/409 mean. */
 function mapError(e: unknown, phase: "start" | "part" | "complete" | "create" | "read"): TransportError {
-  // Kept recognisable so the queue's transport can switch backends (TRANSITIONAL, social-backend.ts).
-  if (isRouteNotAllowed(e)) return Object.assign(transportError("rejected", "Not served here", 404), { code: "ENDPOINT_NOT_FOUND" });
   if ((e as { name?: string })?.name === "AbortError" || (e as { name?: string })?.name === "CanceledError") {
     return transportError("aborted", "Cancelled");
   }
@@ -46,11 +43,26 @@ function mapError(e: unknown, phase: "start" | "part" | "complete" | "create" | 
 }
 
 function toCreateStatus(req: StatusCreateRequest): CreateStatus {
-  const order = req.groupId !== undefined && req.sequence !== undefined ? { groupId: req.groupId, sequence: req.sequence } : {};
+  const order = {
+    ...(req.groupId !== undefined && req.sequence !== undefined ? { groupId: req.groupId, sequence: req.sequence } : {}),
+    // Per-status choices (every segment of a split video carries the same audience).
+    ...(req.audience ? { audience: req.audience } : {}),
+    ...(typeof req.allowSharing === "boolean" ? { allowSharing: req.allowSharing } : {}),
+    ...(req.mentions?.length ? { mentions: req.mentions } : {}),
+  };
+  // Optional fields go only when set (the server validates each against the kind).
+  const set = <T extends object>(o: T): Partial<T> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "")) as Partial<T>;
   switch (req.kind) {
-    case "TEXT": return { kind: "TEXT", text: req.text, background: req.background, font: req.font, ...order };
+    case "TEXT":
+      return {
+        kind: "TEXT", text: req.text,
+        ...set({ background: req.background, font: req.font, textColor: req.textColor, textAlign: req.textAlign, textSize: req.textSize, backgroundGradient: req.backgroundGradient, musicMediaId: req.musicMediaId, musicTitle: req.musicTitle }),
+        ...order,
+      };
     case "VIDEO": return { kind: "VIDEO", mediaId: req.mediaId, startMs: req.startMs, endMs: req.endMs, caption: req.caption, ...order };
-    default: return { kind: req.kind, mediaId: req.mediaId, caption: req.caption, ...order };
+    case "IMAGE": return { kind: "IMAGE", mediaId: req.mediaId, caption: req.caption, ...set({ musicMediaId: req.musicMediaId, musicTitle: req.musicTitle }), ...order };
+    case "AUDIO":
+      return { kind: "AUDIO", mediaId: req.mediaId, caption: req.caption, ...set({ background: req.background, backgroundGradient: req.backgroundGradient, musicTitle: req.musicTitle }), ...order };
   }
 }
 

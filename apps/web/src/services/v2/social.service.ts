@@ -14,9 +14,6 @@
  */
 import { messagingService, relay } from "./messaging.service";
 import { MessagingApiError } from "@/lib/messaging/errors";
-// TRANSITIONAL (one release): fall back to /api/v2/social/* until #193 is deployed (social-backend.ts).
-import { socialBackend as B } from "./social-backend";
-import * as legacy from "./social.legacy";
 
 export type MediaKind = "IMAGE" | "VIDEO" | "AUDIO";
 export type PostKind = "TEXT" | MediaKind;
@@ -37,8 +34,6 @@ export interface MediaView {
   purpose: MediaPurpose;
   /** Owner only, while uploading: the parts the server already holds. */
   storedParts?: number[];
-  /** TRANSITIONAL: media of the previous /api/v2/social API (read back from it). */
-  source?: "legacy";
 }
 
 export interface PersonView {
@@ -58,6 +53,18 @@ export interface StatusViewer {
   viewedAt: string;
   liked: boolean;
   reaction?: string | null;
+  /** When the current reaction was set (the chat list orders it against messages). */
+  reactedAt?: string | null;
+}
+
+/** One private reply to my status (author only, ADR 0074): the direct message it arrived as. */
+export interface StatusReplyView {
+  replyId: string;
+  person: PersonView;
+  conversationId: string;
+  messageId: string;
+  text: string | null;
+  createdAt: string;
 }
 
 export interface StatusPost {
@@ -95,6 +102,8 @@ export interface StatusPost {
   audience?: StatusAudienceInfo;
   mentions?: string[];
   shareCount?: number;
+  /** The author's own statuses: private replies recorded (ADR 0074). */
+  replyCount?: number;
   uniqueViewerCount?: number | null;
   viewers?: StatusViewer[];
 }
@@ -136,6 +145,10 @@ export interface Channel {
   unreadCount: number;
   lastPost: ChannelPost | null;
   createdAt: string;
+  /** Verified by CF Meet (HQ, through the admin bridge; ADR 0072). */
+  verified: boolean;
+  /** The follower muted the channel's notifications (ADR 0072). */
+  muted: boolean;
 }
 
 export interface AudienceChoice { mode: AudienceMode; principalIds?: string[]; listId?: string }
@@ -167,7 +180,11 @@ export type CreateStatus =
 
 export interface AudiencePreference { mode: AudienceMode; principalIds: string[]; listId: string | null; allowSharing: boolean }
 export interface AudienceList { listId: string; kind: "CLOSE_FRIENDS" | "CUSTOM"; name: string; memberPrincipalIds: string[]; memberCount: number; updatedAt: string }
-export interface StatusRing { principalId: string; hasActiveStatus: boolean; count: number; unseenCount: number; closeFriends: boolean }
+export interface StatusRing {
+  principalId: string; hasActiveStatus: boolean; count: number; unseenCount: number; closeFriends: boolean;
+  /** A visible live status of theirs mentions me (and one of those is not seen yet); ADR 0074. */
+  mentionedMe?: boolean; mentionedMeUnseen?: boolean;
+}
 
 export const SEGMENT_MS = 60_000;
 export const LIMITS: Record<MediaKind, number> = { IMAGE: 8 * 1024 * 1024, AUDIO: 8 * 1024 * 1024, VIDEO: 64 * 1024 * 1024 };
@@ -231,7 +248,7 @@ function mapMedia(m: Wire, purpose: MediaPurpose): MediaView | null {
 }
 
 function mapViewer(v: Wire): StatusViewer {
-  return { person: person(v.principalId), viewedAt: v.viewedAt, liked: !!v.liked, reaction: v.reaction ?? null };
+  return { person: person(v.principalId), viewedAt: v.viewedAt, liked: !!v.liked, reaction: v.reaction ?? null, reactedAt: v.reactedAt ?? null };
 }
 
 function mapStatus(s: Wire): StatusPost {
@@ -245,7 +262,7 @@ function mapStatus(s: Wire): StatusPost {
     music: s.music ? { mediaId: s.music.mediaId, media: mapMedia(s.music.media, "STATUS"), startMs: s.music.startMs ?? null, endMs: s.music.endMs ?? null, title: s.music.title ?? null } : null,
     musicTitle: s.musicTitle ?? null, groupId: s.groupId ?? null, sequence: s.sequence ?? null, remainingSeconds: s.remainingSeconds,
     reaction: s.reaction ?? null, mentionedMe: !!s.mentionedMe, closeFriends: !!s.closeFriends, allowSharing: s.allowSharing !== false,
-    origin: s.origin ?? null, audience: s.audience, mentions: s.mentions, shareCount: s.shareCount,
+    origin: s.origin ?? null, audience: s.audience, mentions: s.mentions, shareCount: s.shareCount, replyCount: s.replyCount,
     uniqueViewerCount: s.uniqueViewerCount, viewers: Array.isArray(s.viewers) ? s.viewers.map(mapViewer) : undefined,
   };
 }
@@ -260,6 +277,7 @@ async function mapChannels(list: Wire[]): Promise<Channel[]> {
     channelId: c.channelId, name: c.name, description: c.description ?? null, owner: person(c.ownerPrincipalId, "Channel owner"),
     followerCount: c.followerCount, following: !!c.following, isOwner: !!c.isOwner, unreadCount: c.unreadCount ?? 0,
     lastPost: c.lastPost ? mapPost(c.lastPost) : null, createdAt: c.createdAt,
+    verified: !!c.verified, muted: !!c.muted,
   }));
 }
 
@@ -354,15 +372,7 @@ async function completeUpload(mediaId: string, purpose: MediaPurpose = "STATUS")
 }
 
 /** Upload a file in parts (resumable, parallel, retried); `onProgress` gets 0–1. */
-/** Upload on the current backend (TRANSITIONAL fallback: social-backend.ts). */
 async function upload(file: Blob, purpose: MediaPurpose, kind: MediaKind, durationMs: number | null, onProgress?: (p: number) => void, options: UploadOptions = {}): Promise<MediaView> {
-  return B.run(
-    () => modernUpload(file, purpose, kind, durationMs, onProgress, options),
-    options.mediaId ? undefined : () => legacy.upload(file, purpose, kind, durationMs, onProgress, options.signal),
-  );
-}
-
-async function modernUpload(file: Blob, purpose: MediaPurpose, kind: MediaKind, durationMs: number | null, onProgress?: (p: number) => void, options: UploadOptions = {}): Promise<MediaView> {
   const { signal } = options;
   const contentType = (file.type || (kind === "AUDIO" ? "audio/webm" : kind === "VIDEO" ? "video/mp4" : "image/jpeg")).split(";")[0];
   let media: MediaView;
@@ -406,14 +416,14 @@ async function modernUpload(file: Blob, purpose: MediaPurpose, kind: MediaKind, 
   }
 }
 
-const blobs = new Map<string, Promise<string>>();
+const blobs = new Map<string, Promise<Blob>>();
+const urls = new Map<string, Promise<string>>();
 
-/** An object URL for a photo / video / voice note (downloaded once per page; the server authorizes every read). */
-export function mediaUrl(media: MediaView): Promise<string> {
+/** A photo / video / voice note's bytes (downloaded once per page; the server authorizes every read). */
+export function mediaBlob(media: MediaView): Promise<Blob> {
   let hit = blobs.get(media.mediaId);
   if (!hit) {
     hit = (async () => {
-      if (media.source === "legacy") return URL.createObjectURL(await legacy.mediaBlob(media));
       const grant = await call<{ contentType: string; parts: { part: number; url: string }[] }>("POST", `${mediaBase(media.purpose ?? "STATUS")}/${id(media.mediaId)}/download-grants`, {});
       const ordered = [...grant.parts].sort((a, b) => a.part - b.part);
       const parts = await Promise.all(ordered.map(async (p) => {
@@ -421,7 +431,7 @@ export function mediaUrl(media: MediaView): Promise<string> {
         if (!r.ok) throw new MessagingApiError(r.status, "DOWNLOAD_FAILED", null);
         return r.arrayBuffer();
       }));
-      return URL.createObjectURL(new Blob(parts, { type: grant.contentType || media.contentType }));
+      return new Blob(parts, { type: grant.contentType || media.contentType });
     })();
     hit.catch(() => blobs.delete(media.mediaId));
     blobs.set(media.mediaId, hit);
@@ -429,12 +439,19 @@ export function mediaUrl(media: MediaView): Promise<string> {
   return hit;
 }
 
+/** An object URL for a photo / video / voice note (one per media for the page's life). */
+export function mediaUrl(media: MediaView): Promise<string> {
+  let hit = urls.get(media.mediaId);
+  if (!hit) {
+    hit = mediaBlob(media).then((b) => URL.createObjectURL(b));
+    hit.catch(() => urls.delete(media.mediaId));
+    urls.set(media.mediaId, hit);
+  }
+  return hit;
+}
+
 // ---------------------------------------------------------------------------------- API
 
-// Every call below runs on Messaging; while the backend is still the release before #193 the
-// ones with an equivalent run on /api/v2/social/* instead (TRANSITIONAL, social-backend.ts).
-// Messaging-only reads answer empty there; Messaging-only writes report their own error.
-const LS = legacy.legacySocial;
 
 export const socialService = {
   upload,
@@ -443,84 +460,88 @@ export const socialService = {
   startUpload,
   uploadPart,
   completeUpload,
-  feed: (): Promise<StatusFeed> => B.run(async () => {
+  feed: async (): Promise<StatusFeed> => {
     const f = await call<Wire>("GET", `${S}/feed`);
     return { mine: (f.mine as Wire[]).map(mapStatus), contacts: await mapAuthors(f.contacts ?? []), muted: await mapAuthors(f.muted ?? []) };
-  }, LS.feed),
+  },
   /**
    * Publish a status. Idempotent per item: pass the same `idempotencyKey` on every retry
    * (within 24 h) and the original status comes back instead of a duplicate. Only the
    * caller's COMPLETE media can be posted.
    */
-  postStatus: (body: CreateStatus, idempotencyKey: string = uuid()) =>
-    B.run(async () => mapStatus(await call<Wire>("POST", S, body, idempotencyKey)), () => LS.postStatus(body)),
+  postStatus: async (body: CreateStatus, idempotencyKey: string = uuid()) =>
+    mapStatus(await call<Wire>("POST", S, body, idempotencyKey)),
   getStatus: async (statusId: string) => mapStatus(await call<Wire>("GET", `${S}/${id(statusId)}`)),
   /** The caller's live statuses with audience, viewers (timestamps, reactions) and sharing. */
-  myStatuses: () => B.run(async () => {
+  myStatuses: async () => {
     const r = await call<Wire>("GET", `${S}/mine`);
     const posts = (r.posts as Wire[]) ?? [];
     await people(posts.flatMap((p) => (Array.isArray(p.viewers) ? p.viewers.map((v: Wire) => v.principalId as string) : [])));
     return { readReceipts: !!r.readReceipts, posts: posts.map(mapStatus) };
-  }, async () => ({ readReceipts: false, posts: (await LS.feed()).mine })),
-  viewStatus: (postId: string, liked?: boolean) =>
-    B.run(async () => { await call("POST", `${S}/${id(postId)}/view`, liked === undefined ? {} : { liked }); }, () => LS.viewStatus(postId, liked)),
+  },
+  viewStatus: async (postId: string, liked?: boolean) => { await call("POST", `${S}/${id(postId)}/view`, liked === undefined ? {} : { liked }); },
   reactToStatus: async (postId: string, emoji: string | null) =>
     mapStatus(emoji ? await call<Wire>("PUT", `${S}/${id(postId)}/reaction`, { emoji }) : await call<Wire>("DELETE", `${S}/${id(postId)}/reaction`)),
-  viewers: (postId: string): Promise<StatusViewer[]> => B.run(async () => {
+  viewers: async (postId: string): Promise<StatusViewer[]> => {
     const r = await call<Wire>("GET", `${S}/${id(postId)}/viewers`);
     await people((r.viewers as Wire[]).map((v) => v.principalId));
     return (r.viewers as Wire[]).map(mapViewer);
-  }, () => LS.viewers(postId)),
-  deleteStatus: (postId: string) => B.run(async () => { await call("DELETE", `${S}/${id(postId)}`); }, () => LS.deleteStatus(postId)),
+  },
+  deleteStatus: async (postId: string) => { await call("DELETE", `${S}/${id(postId)}`); },
+  /** The author turns "Allow sharing" on or off for one live status of theirs. */
+  updateStatus: async (statusId: string, body: { allowSharing: boolean }) => mapStatus(await call<Wire>("PATCH", `${S}/${id(statusId)}`, body)),
   deleteStatuses: async (statusIds: string[]) => (await call<{ deleted: number }>("POST", `${S}/delete`, { statusIds })).deleted,
   /** Private reply: a message in the caller's direct chat with the author. */
   replyToStatus: (postId: string, text: string, clientMessageId: string = uuid()) =>
     call<{ statusId: string; conversationId: string; messageId: string }>("POST", `${S}/${id(postId)}/replies`, { text, clientMessageId }),
+  /** The private replies to one of my live statuses (author only; 404 for anyone else). */
+  statusReplies: async (statusId: string): Promise<StatusReplyView[]> => {
+    const r = await call<{ statusId: string; replies: Wire[] }>("GET", `${S}/${id(statusId)}/replies`);
+    await people(r.replies.map((x) => x.principalId));
+    return r.replies.map((x) => ({ replyId: x.replyId, person: person(x.principalId), conversationId: x.conversationId, messageId: x.messageId, text: x.text ?? null, createdAt: x.createdAt }));
+  },
   forwardStatus: (postId: string, principalIds: string[]) =>
     call<{ statusId: string; forwarded: number; skipped: number }>("POST", `${S}/${id(postId)}/forwards`, { principalIds }),
   reshareStatus: async (postId: string, body: { caption?: string; audience?: AudienceChoice } = {}, idempotencyKey: string = uuid()) =>
     mapStatus(await call<Wire>("POST", `${S}/${id(postId)}/reshares`, body, idempotencyKey)),
   /** Rings for people on screen: only those whose statuses the caller may see come back. */
-  rings: (principalIds: string[]) =>
-    B.run(async () => (await call<{ rings: StatusRing[] }>("POST", `${S}/rings`, { principalIds: principalIds.slice(0, 200) })).rings, async () => [] as StatusRing[]),
-  getAudience: () => B.run(() => call<AudiencePreference>("GET", `${S}/audience`),
-    async (): Promise<AudiencePreference> => ({ mode: "CONTACTS", principalIds: [], listId: null, allowSharing: true })),
+  rings: async (principalIds: string[]) =>
+    (await call<{ rings: StatusRing[] }>("POST", `${S}/rings`, { principalIds: principalIds.slice(0, 200) })).rings,
+  getAudience: async () => call<AudiencePreference>("GET", `${S}/audience`),
   putAudience: (body: { mode: AudienceMode; principalIds?: string[]; listId?: string; allowSharing?: boolean }) => call<AudiencePreference>("PUT", `${S}/audience`, body),
   /** The audience picker: mutual, unblocked contacts (named through the existing names API). */
-  eligibleContacts: (): Promise<PersonView[]> => B.run(async () => {
+  eligibleContacts: async (): Promise<PersonView[]> => {
     const r = await call<{ contacts: { principalId: string }[] }>("GET", `${S}/eligible-contacts`);
     const who = await people(r.contacts.map((c) => c.principalId));
     return r.contacts.map((c) => who.get(c.principalId)!);
-  }, async () => [] as PersonView[]),
-  closeFriends: () => B.run(async () => (await call<{ memberPrincipalIds: string[] }>("GET", `${S}/close-friends`)).memberPrincipalIds, async () => [] as string[]),
+  },
+  closeFriends: async () => (await call<{ memberPrincipalIds: string[] }>("GET", `${S}/close-friends`)).memberPrincipalIds,
   setCloseFriends: async (memberPrincipalIds: string[]) => (await call<{ memberPrincipalIds: string[] }>("PUT", `${S}/close-friends`, { memberPrincipalIds })).memberPrincipalIds,
-  audienceLists: () => B.run(async () => (await call<{ lists: AudienceList[] }>("GET", `${S}/audience-lists`)).lists, async () => [] as AudienceList[]),
+  audienceLists: async () => (await call<{ lists: AudienceList[] }>("GET", `${S}/audience-lists`)).lists,
   createAudienceList: (name: string, memberPrincipalIds: string[]) => call<AudienceList>("POST", `${S}/audience-lists`, { name, memberPrincipalIds }),
   updateAudienceList: (listId: string, body: { name?: string; memberPrincipalIds?: string[] }) => call<AudienceList>("PATCH", `${S}/audience-lists/${id(listId)}`, body),
   deleteAudienceList: async (listId: string) => { await call("DELETE", `${S}/audience-lists/${id(listId)}`); },
-  mutes: () => B.run(async () => (await call<{ mutedPrincipalIds: string[] }>("GET", `${S}/mutes`)).mutedPrincipalIds, async () => [] as string[]),
+  mutes: async () => (await call<{ mutedPrincipalIds: string[] }>("GET", `${S}/mutes`)).mutedPrincipalIds,
   mute: async (principalId: string, on: boolean) => { await call(on ? "PUT" : "DELETE", `${S}/mutes/${id(principalId)}`); },
-  directory: (q: string) =>
-    B.run(async () => mapChannels((await call<Wire>("GET", q.trim() ? `${CH}?q=${encodeURIComponent(q.trim().slice(0, 64))}` : CH)).channels), () => LS.directory(q)),
-  following: () => B.run(async () => mapChannels((await call<Wire>("GET", `${CH}/following`)).channels), LS.following),
-  channel: (channelId: string) => B.run(async () => (await mapChannels([await call<Wire>("GET", `${CH}/${id(channelId)}`)]))[0], () => LS.channel(channelId)),
-  createChannel: (name: string, description: string) =>
-    B.run(async () => (await mapChannels([await call<Wire>("POST", CH, { name, description })]))[0], () => LS.createChannel(name, description)),
-  updateChannel: (channelId: string, body: { name?: string; description?: string }) =>
-    B.run(async () => (await mapChannels([await call<Wire>("PATCH", `${CH}/${id(channelId)}`, body)]))[0], () => LS.updateChannel(channelId, body)),
-  deleteChannel: (channelId: string) => B.run(async () => { await call("DELETE", `${CH}/${id(channelId)}`); }, () => LS.deleteChannel(channelId)),
-  follow: (channelId: string, on: boolean) =>
-    B.run(async () => (await mapChannels([await call<Wire>(on ? "PUT" : "DELETE", `${CH}/${id(channelId)}/follow`)]))[0], () => LS.follow(channelId, on)),
-  posts: (channelId: string, before?: string) =>
-    B.run(async () => ((await call<Wire>("GET", `${CH}/${id(channelId)}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`)).posts as Wire[]).map(mapPost),
-      () => LS.posts(channelId, before)),
-  post: (channelId: string, body: { text?: string; mediaId?: string }, idempotencyKey: string = uuid()) =>
-    B.run(async () => mapPost(await call<Wire>("POST", `${CH}/${id(channelId)}/posts`, body, idempotencyKey)), () => LS.post(channelId, body)),
-  deletePost: (channelId: string, postId: string) =>
-    B.run(async () => { await call("DELETE", `${CH}/${id(channelId)}/posts/${id(postId)}`); }, () => LS.deletePost(channelId, postId)),
-  react: (channelId: string, postId: string, emoji: string | null) =>
-    B.run(async () => mapPost(emoji ? await call<Wire>("PUT", `${CH}/${id(channelId)}/posts/${id(postId)}/reaction`, { emoji })
-      : await call<Wire>("DELETE", `${CH}/${id(channelId)}/posts/${id(postId)}/reaction`)), () => LS.react(channelId, postId, emoji)),
+  directory: async (q: string) =>
+    mapChannels((await call<Wire>("GET", q.trim() ? `${CH}?q=${encodeURIComponent(q.trim().slice(0, 64))}` : CH)).channels),
+  following: async () => mapChannels((await call<Wire>("GET", `${CH}/following`)).channels),
+  channel: async (channelId: string) => (await mapChannels([await call<Wire>("GET", `${CH}/${id(channelId)}`)]))[0],
+  createChannel: async (name: string, description: string) =>
+    (await mapChannels([await call<Wire>("POST", CH, { name, description })]))[0],
+  updateChannel: async (channelId: string, body: { name?: string; description?: string }) =>
+    (await mapChannels([await call<Wire>("PATCH", `${CH}/${id(channelId)}`, body)]))[0],
+  deleteChannel: async (channelId: string) => { await call("DELETE", `${CH}/${id(channelId)}`); },
+  follow: async (channelId: string, on: boolean) =>
+    (await mapChannels([await call<Wire>(on ? "PUT" : "DELETE", `${CH}/${id(channelId)}/follow`)]))[0],
+  posts: async (channelId: string, before?: string) =>
+    ((await call<Wire>("GET", `${CH}/${id(channelId)}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`)).posts as Wire[]).map(mapPost),
+  post: async (channelId: string, body: { text?: string; mediaId?: string }, idempotencyKey: string = uuid()) =>
+    mapPost(await call<Wire>("POST", `${CH}/${id(channelId)}/posts`, body, idempotencyKey)),
+  deletePost: async (channelId: string, postId: string) => { await call("DELETE", `${CH}/${id(channelId)}/posts/${id(postId)}`); },
+  react: async (channelId: string, postId: string, emoji: string | null) =>
+    mapPost(emoji ? await call<Wire>("PUT", `${CH}/${id(channelId)}/posts/${id(postId)}/reaction`, { emoji })
+      : await call<Wire>("DELETE", `${CH}/${id(channelId)}/posts/${id(postId)}/reaction`)),
 };
 
 /** The kind of media a picked file is, or null. */

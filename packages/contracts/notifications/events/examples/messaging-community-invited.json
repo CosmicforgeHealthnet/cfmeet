@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt_0123456789abcdef0123456789abcd48",
+  "eventType": "messaging.community.invited",
+  "eventVersion": 1,
+  "producer": "cfmeet.messaging",
+  "occurredAt": "2026-12-21T09:00:00Z",
+  "correlationId": "corr_fedcba9876543210fedcba9876543210",
+  "scope": {
+    "tenantId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "applicationId": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+    "environmentId": "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f"
+  },
+  "subject": {
+    "kind": "COMMUNITY",
+    "id": "4d7e1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
+  },
+  "recipients": [
+    {
+      "ref": "cfmeet-user:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607"
+    }
+  ],
+  "delivery": {
+    "priority": "NORMAL",
+    "dedupeKey": "messaging.community.invited:6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c48:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+    "idempotencyKey": "evt_0123456789abcdef0123456789abcd48",
+    "expiresAt": "2026-12-24T09:00:00Z"
+  },
+  "route": {
+    "decisionId": "0b9f6c1e-2d3a-4b5c-8d7e-6f5a4b3c2d48",
+    "routingVersion": 1,
+    "protocol": 1
+  },
+  "data": {
+    "communityId": "4d7e1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
+  }
+}

@@ -3,7 +3,7 @@
 //!
 //! Keeps every producer integration identical:
 //!
-//! * [`catalogue`] — the closed catalogue of the 42 inbound event types and the control
+//! * [`catalogue`] — the closed catalogue of the 50 inbound event types and the control
 //!   event (mirrors `x-cfmeet-catalogue` in `cfmeet.notifications.event`);
 //! * [`envelope`] — the `cfmeet.notifications.event` v1 builder and validator (forbidden
 //!   data keys, sealed allowance, legacy idempotency-key formats, CRITICAL rules, size);

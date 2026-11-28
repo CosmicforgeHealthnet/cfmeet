@@ -77,6 +77,10 @@ in a relational database.
    `messaging.status.shared` must first be added to the Notification Service catalogue and
    `packages/notification-client` and their routing activated (off by default).
 
+7. **Allow sharing per status (1.26.0).** `PATCH /v1/messaging/status/{statusId}`
+   (`updateStatus`, `{allowSharing}`) lets the author change it on one live status; forwards
+   and reshares check it when they happen (earlier ones are not undone). Anyone else: `404`.
+
 ## Rollout
 
 The web app deploys minutes after a merge to main; the backend about an hour later, after
@@ -92,10 +96,12 @@ full CI, and nothing orders the two.
    other error is never retried elsewhere (`apps/web/tests/social-backend.test.mjs`). Once the
    backend is deployed the old routes answer `404 ENDPOINT_NOT_FOUND` in turn and the client
    switches back. Messaging-only reads (rings, audience, close friends, lists, mutes) answer
-   empty on the old backend. The web parity gate tolerates these `/api/v2/social` calls from
-   `social.legacy.ts` only. **TODO: remove `social-backend.ts`, `social.legacy.ts`,
-   `legacy-transport.ts`, `switching-transport.ts`, their test and the parity-gate exception
-   after #193 is deployed.**
+   empty on the old backend. The web parity gate tolerated these `/api/v2/social` calls from
+   `social.legacy.ts` only. **Removed (2026-11-28) after #193 was deployed to production and
+   the channel copy ran:** `social-backend.ts`, `social.legacy.ts`, `legacy-transport.ts`,
+   `switching-transport.ts`, `tests/social-backend.test.mjs`, the old `social/` account-route
+   entry of `services/v2/api.ts` and the parity-gate exception; the web app and the publishing
+   queue call Messaging only.
 2. **Existing channels (one-time, idempotent copy).** Same pattern as the organizations
    cutover (`export-organizations` → `organizations-import`): the source exports a read-only
    snapshot of its own tables and the destination imports it into its own database; neither
@@ -150,6 +156,7 @@ full CI, and nothing orders the two.
   plain columns, media unencrypted in the protected bucket). Nothing is labelled end-to-end
   encrypted. End-to-end encrypted statuses are a later phase.
 * Status text is not sealed with the MANAGED keyring yet.
-* No realtime push of status changes (clients poll the feed / rings); the Messaging
+* No realtime push of status changes (clients refresh the feed / rings: on focus, after
+  their own changes, at most every one to two minutes while visible); the Messaging
   WebSocket's per-principal events are the natural later channel.
 * Channel owners' names resolve only for colleagues / contacts (the names API's rules).

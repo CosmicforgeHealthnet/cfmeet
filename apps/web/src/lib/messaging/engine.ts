@@ -2872,6 +2872,22 @@ export class MessagingEngine {
   }
 
   /**
+   * What a starred message says on this device (ADR 0074, the Starred screen): the loaded
+   * message's text, else — for a server-stored (MANAGED) chat only — the member read of that
+   * one message (re-checked by Messaging: a deleted or out-of-reach message returns nothing).
+   * A private (end-to-end encrypted) message is read only from what this device decrypted.
+   */
+  async starredText(conversationId: string, messageId: string): Promise<string | null> {
+    const loaded = this.snapshot.messages[conversationId]?.find((m) => m.messageId === messageId);
+    if (loaded) return loaded.text ?? loaded.file?.name ?? loaded.note ?? null;
+    if (this.server.get(conversationId)?.securityProfile !== "MANAGED") return null;
+    const r = await relay<{ message: ManagedServerMessage }>("GET", `v1/conversations/${conversationId}/messages/${messageId}`).catch(() => null);
+    const m = r?.message;
+    if (!m || m.lifecycle !== "ACTIVE") return null;
+    return m.managed?.text ?? (m.attachmentIds?.length ? "Attachment" : null);
+  }
+
+  /**
    * Search every chat (WhatsApp's search box): the server searches server-stored chats; the
    * messages of older encrypted chats loaded on this device are searched here.
    */

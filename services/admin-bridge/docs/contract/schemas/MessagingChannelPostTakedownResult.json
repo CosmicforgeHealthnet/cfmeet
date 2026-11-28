@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel_id",
+        "post_id",
+        "taken_down_at"
+      ],
+      "properties": {
+        "channel_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "post_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "taken_down_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after messaging.channel-post.takedown; status: TAKEN_DOWN."
+    }
+  }
+}

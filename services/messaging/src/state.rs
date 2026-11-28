@@ -74,6 +74,14 @@ pub struct AppState {
     /// (`MESSAGING_STATUS_NOTICES=on` with `CF_NOTIFICATIONS_BASE_URL`; default off: nothing
     /// is written).
     pub status_notices: bool,
+    /// ADR 0071: event invitation / cancellation / reminder notices for the Notification
+    /// Service (`MESSAGING_EVENT_NOTICES=on` with `CF_NOTIFICATIONS_BASE_URL`; default off:
+    /// nothing is written and no reminder fires).
+    pub event_notices: bool,
+    /// ADR 0073: community invitation / join-request / approval notices for the Notification
+    /// Service (`MESSAGING_COMMUNITY_NOTICES=on` with `CF_NOTIFICATIONS_BASE_URL`; default off:
+    /// nothing is written).
+    pub community_notices: bool,
 }
 
 impl AppState {
@@ -117,6 +125,8 @@ impl AppState {
             member_notices: false,
             plans: None,
             status_notices: false,
+            event_notices: false,
+            community_notices: false,
         }
     }
 

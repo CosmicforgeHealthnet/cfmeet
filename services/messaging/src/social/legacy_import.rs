@@ -422,6 +422,14 @@ pub async fn import(
             report.unchanged.followers += 1
         }
     }
+    // ADR 0072: discovery orders by the denormalized follower count.
+    let imported: Vec<Uuid> = channels.iter().copied().collect();
+    db::exec(
+        &txn,
+        "UPDATE messaging_channels c SET follower_count =            (SELECT count(*) FROM messaging_channel_followers f WHERE f.channel_id = c.id) WHERE c.id = ANY($1)",
+        vec![imported.into()],
+    )
+    .await?;
     let mut posts: HashSet<Uuid> = HashSet::new();
     for p in &doc.posts {
         if !channels.contains(&p.channel_id) {

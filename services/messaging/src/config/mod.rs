@@ -63,6 +63,7 @@
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
 //! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
 //! | `MESSAGING_UNLINKED_ATTACHMENT_HOURS` | no | READY uploads never referenced by a message are deleted after (default 24) |
+//! | `MESSAGING_MANAGED_MEDIA_RETENTION_DAYS` | no | MANAGED media sent in a message is deleted from storage this many days after upload (1–3650; unset: kept). The message stays; devices keep their own copies and the user's cloud backup holds the long-term copy. Legal holds still apply |
 //! | `MESSAGING_PUBLIC_EVENTS_DESTINATION` | no | receivers of relayed public events (Part VI §53): `calling` (default — Calling's platform-event ingress, today's customer webhook delivery, unchanged), `developer-platform` (the central event ingestion only; `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the relay row, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
@@ -296,6 +297,8 @@ pub struct AttachmentSettings {
     pub verify_read_max_bytes: usize,
     pub proxy_max_bytes: usize,
     pub unlinked_ttl: chrono::Duration,
+    /// MANAGED media is a delivery copy: deleted this long after upload (`None`: kept).
+    pub managed_media_retention: Option<chrono::Duration>,
     pub scan_retry_max: i32,
     /// Server-side thumbnails of MANAGED images (never PRIVATE_E2EE).
     pub media_processing: bool,
@@ -311,6 +314,7 @@ impl Default for AttachmentSettings {
             verify_read_max_bytes: 64 * 1024 * 1024,
             proxy_max_bytes: 32 * 1024 * 1024,
             unlinked_ttl: chrono::Duration::hours(24),
+            managed_media_retention: None,
             scan_retry_max: 10,
             media_processing: true,
         }
@@ -1052,6 +1056,16 @@ impl MessagingConfig {
                 1,
                 720,
             )?),
+            managed_media_retention: match get("MESSAGING_MANAGED_MEDIA_RETENTION_DAYS") {
+                None => None,
+                Some(_) => Some(chrono::Duration::days(bounded(
+                    &get,
+                    "MESSAGING_MANAGED_MEDIA_RETENTION_DAYS",
+                    14,
+                    1,
+                    3650,
+                )?)),
+            },
             scan_retry_max: 10,
             media_processing: match get("MESSAGING_MEDIA_PROCESSING").as_deref() {
                 None | Some("true") => true,

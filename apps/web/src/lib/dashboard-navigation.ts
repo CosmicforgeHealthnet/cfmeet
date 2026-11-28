@@ -1,4 +1,4 @@
-import { Home, Video, CalendarDays, Phone, MessageSquare, Code2, Settings, Building2, Users, CircleDashed } from "lucide-react";
+import { Home, Video, CalendarDays, CalendarHeart, Phone, MessageSquare, Code2, Settings, Building2, Users, CircleDashed, UsersRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { WorkspaceAwareNavItem } from "@/lib/workspace/workspace-core";
 
@@ -16,6 +16,10 @@ export const dashboardNavigation: DashboardNavItem[] = [
   { label: "Chats", icon: MessageSquare, href: "/dashboard/messages", feature: "messaging" },
   // Status (24 hours, your contacts) and channels.
   { label: "Updates", icon: CircleDashed, href: "/dashboard/updates" },
+  // Events with contacts and chats (Messaging, ADR 0071).
+  { label: "Events", icon: CalendarHeart, href: "/dashboard/events", feature: "messaging" },
+  // Communities (ADR 0073, Messaging): groups gathered under one community.
+  { label: "Communities", icon: UsersRound, href: "/dashboard/communities", feature: "messaging" },
   { label: "Calls", icon: Phone, href: "/calling", feature: "calling" },
   // Personal contacts (Communications Hub); the screen gates itself on Hub capabilities.
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },

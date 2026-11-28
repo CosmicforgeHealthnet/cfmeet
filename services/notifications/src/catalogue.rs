@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 42 inbound types, the routing category (the unit of the cutover: one row per
+//! the 50 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -155,6 +155,12 @@ pub const ACTION_KINDS: &[&str] = &[
     "OPEN_CONTACT",
     "OPEN_SECURITY_SETTINGS",
     "OPEN_DEVELOPER_APPLICATION",
+    // ADR 0071 (common contract 1.7.0): a Messaging event (ref = the event id).
+    "OPEN_EVENT",
+    // ADR 0069 (common contract 1.8.0): a Messaging status (ref = the status id).
+    "OPEN_STATUS",
+    // ADR 0073 (common contract 1.9.0): a community (ref = the community id).
+    "OPEN_COMMUNITY",
     "NONE",
 ];
 
@@ -676,6 +682,92 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // ADR 0071 (event contract 1.8.0): Events in Messaging. One routing category,
+    // MESSAGING_EVENTS (in-app + push, seeded OFF by m20261218_000001_messaging_event_notices),
+    // to the invited account only; invitations and cancellations under the group-invitation
+    // preference, reminders under the meeting-reminder one. OPEN_EVENT on eventId.
+    r(
+        "messaging.event.invited",
+        "MESSAGING_EVENTS",
+        C::GroupInvitations,
+        &[I, P],
+        "event.invited",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
+    r(
+        "messaging.event.cancelled",
+        "MESSAGING_EVENTS",
+        C::GroupInvitations,
+        &[I, P],
+        "event.cancelled",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
+    r(
+        "messaging.event.reminder",
+        "MESSAGING_EVENTS",
+        C::MeetingReminders,
+        &[I, P],
+        "event.reminder",
+        "OPEN_EVENT",
+        Some("eventId"),
+    ),
+    // ADR 0069 (event contract 1.9.0): Status in Messaging. One routing category,
+    // MESSAGING_STATUS (in-app + push, seeded OFF by
+    // m20261220_000001_messaging_status_notices), to the one CF Meet account concerned (a
+    // mentioned person inside the audience, or the author whose status was shared), under
+    // the direct-message preference. OPEN_STATUS on statusId.
+    r(
+        "messaging.status.mentioned",
+        "MESSAGING_STATUS",
+        C::DirectMessages,
+        &[I, P],
+        "status.mentioned",
+        "OPEN_STATUS",
+        Some("statusId"),
+    ),
+    r(
+        "messaging.status.shared",
+        "MESSAGING_STATUS",
+        C::DirectMessages,
+        &[I, P],
+        "status.shared",
+        "OPEN_STATUS",
+        Some("statusId"),
+    ),
+    // ADR 0073 (event contract 1.10.0): Communities in Messaging. One routing category,
+    // MESSAGING_COMMUNITIES (in-app + push, seeded OFF by
+    // m20261221_000001_messaging_community_notices), to the one CF Meet account concerned
+    // (the invitee, each admin who can decide a join request, or the requester), under the
+    // group-invitation preference. OPEN_COMMUNITY on communityId.
+    r(
+        "messaging.community.invited",
+        "MESSAGING_COMMUNITIES",
+        C::GroupInvitations,
+        &[I, P],
+        "community.invited",
+        "OPEN_COMMUNITY",
+        Some("communityId"),
+    ),
+    r(
+        "messaging.community.join_requested",
+        "MESSAGING_COMMUNITIES",
+        C::GroupInvitations,
+        &[I, P],
+        "community.join_requested",
+        "OPEN_COMMUNITY",
+        Some("communityId"),
+    ),
+    r(
+        "messaging.community.request_approved",
+        "MESSAGING_COMMUNITIES",
+        C::GroupInvitations,
+        &[I, P],
+        "community.request_approved",
+        "OPEN_COMMUNITY",
+        Some("communityId"),
+    ),
     TypeRoute {
         email_category: Some("OPERATIONS_ALERT"),
         ..r(
@@ -737,7 +829,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 42);
+        assert_eq!(inbound.len(), 50);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -745,7 +837,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 42);
+        assert_eq!(ROUTES.len(), 50);
     }
 
     #[test]
@@ -811,14 +903,148 @@ mod tests {
         }
     }
 
+    /// ADR 0071: the three Messaging event notices share MESSAGING_EVENTS (in-app + push,
+    /// no email), open the event and go to exactly one CF Meet account.
+    #[test]
+    fn messaging_event_notices_route_to_messaging_events() {
+        for (t, template, pref, data) in [
+            (
+                "messaging.event.invited",
+                "event.invited",
+                PrefCategory::GroupInvitations,
+                &["eventId"][..],
+            ),
+            (
+                "messaging.event.cancelled",
+                "event.cancelled",
+                PrefCategory::GroupInvitations,
+                &["eventId"][..],
+            ),
+            (
+                "messaging.event.reminder",
+                "event.reminder",
+                PrefCategory::MeetingReminders,
+                &["eventId", "startsAt"][..],
+            ),
+        ] {
+            let r = route(t).expect(t);
+            assert_eq!(r.route_category, "MESSAGING_EVENTS", "{t}");
+            assert_eq!(r.pref, pref, "{t}");
+            assert_eq!(r.channels, &[Channel::InApp, Channel::Push], "{t}");
+            assert_eq!(r.template, template);
+            assert_eq!(r.action, "OPEN_EVENT");
+            assert_eq!(r.action_ref, Some("eventId"));
+            assert_eq!(r.email_category, None);
+            let spec = r.spec();
+            assert_eq!(
+                spec.producer,
+                Some(cf_notification_client::Producer::Messaging)
+            );
+            assert_eq!(spec.priority, cf_notification_client::Priority::Normal);
+            assert_eq!(spec.category, Some(pref.as_str()));
+            assert_eq!(spec.subject_kind, Some("EVENT"));
+            assert_eq!(spec.required_data, data);
+            assert!(spec.sealed.is_empty());
+            assert_eq!(
+                spec.recipient,
+                Some(cf_notification_client::RecipientKind::Account)
+            );
+            let (title, body) = crate::templates::inbox_text(template, &serde_json::json!({}));
+            assert_ne!(title, "Notification", "{template} has its own text");
+            assert!(!body.is_empty());
+        }
+    }
+
+    /// ADR 0069: the two Messaging status notices share MESSAGING_STATUS (in-app + push,
+    /// no email), open the status and go to exactly one CF Meet account.
+    #[test]
+    fn messaging_status_notices_route_to_messaging_status() {
+        for (t, template) in [
+            ("messaging.status.mentioned", "status.mentioned"),
+            ("messaging.status.shared", "status.shared"),
+        ] {
+            let r = route(t).expect(t);
+            assert_eq!(r.route_category, "MESSAGING_STATUS", "{t}");
+            assert_eq!(r.pref, PrefCategory::DirectMessages, "{t}");
+            assert_eq!(r.channels, &[Channel::InApp, Channel::Push], "{t}");
+            assert_eq!(r.template, template);
+            assert_eq!(r.action, "OPEN_STATUS");
+            assert_eq!(r.action_ref, Some("statusId"));
+            assert_eq!(r.email_category, None);
+            let spec = r.spec();
+            assert_eq!(
+                spec.producer,
+                Some(cf_notification_client::Producer::Messaging)
+            );
+            assert_eq!(spec.priority, cf_notification_client::Priority::Normal);
+            assert_eq!(spec.category, Some("DIRECT_MESSAGES"));
+            assert_eq!(spec.subject_kind, Some("STATUS"));
+            assert_eq!(spec.required_data, &["statusId"]);
+            assert!(spec.sealed.is_empty());
+            assert_eq!(
+                spec.recipient,
+                Some(cf_notification_client::RecipientKind::Account)
+            );
+            let (title, body) = crate::templates::inbox_text(template, &serde_json::json!({}));
+            assert_ne!(title, "Notification", "{template} has its own text");
+            assert!(!body.is_empty());
+        }
+    }
+
+    /// ADR 0073: the three community notices share MESSAGING_COMMUNITIES (in-app + push, no
+    /// email), open the community and go to exactly one CF Meet account.
+    #[test]
+    fn messaging_community_notices_route_to_messaging_communities() {
+        for (t, template) in [
+            ("messaging.community.invited", "community.invited"),
+            (
+                "messaging.community.join_requested",
+                "community.join_requested",
+            ),
+            (
+                "messaging.community.request_approved",
+                "community.request_approved",
+            ),
+        ] {
+            let r = route(t).expect(t);
+            assert_eq!(r.route_category, "MESSAGING_COMMUNITIES", "{t}");
+            assert_eq!(r.pref, PrefCategory::GroupInvitations, "{t}");
+            assert_eq!(r.channels, &[Channel::InApp, Channel::Push], "{t}");
+            assert_eq!(r.template, template);
+            assert_eq!(r.action, "OPEN_COMMUNITY");
+            assert_eq!(r.action_ref, Some("communityId"));
+            assert_eq!(r.email_category, None);
+            let spec = r.spec();
+            assert_eq!(
+                spec.producer,
+                Some(cf_notification_client::Producer::Messaging)
+            );
+            assert_eq!(spec.priority, cf_notification_client::Priority::Normal);
+            assert_eq!(spec.category, Some("GROUP_INVITATIONS"));
+            assert_eq!(spec.subject_kind, Some("COMMUNITY"));
+            assert_eq!(spec.required_data, &["communityId"]);
+            assert!(spec.sealed.is_empty());
+            assert_eq!(
+                spec.recipient,
+                Some(cf_notification_client::RecipientKind::Account)
+            );
+            let (title, body) = crate::templates::inbox_text(template, &serde_json::json!({}));
+            assert_ne!(title, "Notification", "{template} has its own text");
+            assert!(!body.is_empty());
+        }
+    }
+
     #[test]
     fn routing_rows_match_the_migration_seed() {
         // The foundation seed, then the rows later migrations add (ACCOUNT_NOTICES,
-        // ORGANIZATIONS).
+        // ORGANIZATIONS, MESSAGING_EVENTS, MESSAGING_STATUS, MESSAGING_COMMUNITIES).
         let seed = [
             include_str!("../migration/src/m20261116_000001_notifications_foundation.rs"),
             include_str!("../migration/src/m20261118_000001_account_notices.rs"),
             include_str!("../migration/src/m20261121_000001_organization_exports.rs"),
+            include_str!("../migration/src/m20261218_000001_messaging_event_notices.rs"),
+            include_str!("../migration/src/m20261220_000001_messaging_status_notices.rs"),
+            include_str!("../migration/src/m20261221_000001_messaging_community_notices.rs"),
         ]
         .concat();
         let rows = routing_rows();

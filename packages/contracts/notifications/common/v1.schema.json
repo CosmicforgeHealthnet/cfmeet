@@ -125,6 +125,14 @@
         "organizations.organization.reactivated",
         "developer-platform.workspace.owner-invitation.email-requested",
         "organizations.organization.export_ready",
+        "messaging.event.invited",
+        "messaging.event.cancelled",
+        "messaging.event.reminder",
+        "messaging.status.mentioned",
+        "messaging.status.shared",
+        "messaging.community.invited",
+        "messaging.community.join_requested",
+        "messaging.community.request_approved",
         "notifications.cancel"
       ]
     },
@@ -273,6 +281,9 @@
         "OPEN_CONTACT",
         "OPEN_SECURITY_SETTINGS",
         "OPEN_DEVELOPER_APPLICATION",
+        "OPEN_EVENT",
+        "OPEN_STATUS",
+        "OPEN_COMMUNITY",
         "NONE"
       ],
       "description": "Closed set: clients map each kind to a fixed in-app destination. No URL is ever returned."

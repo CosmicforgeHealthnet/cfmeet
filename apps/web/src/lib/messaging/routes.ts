@@ -8,6 +8,8 @@ const messages = ["afterSequence", "beforeSequence", "limit", "threadRootId"];
 const c = `conversations/${id}`;
 const st = "messaging/status";
 const ch = "messaging/channels";
+const ev = "messaging/events";
+const cm = "messaging/communities";
 /** A media part number (0-63, canonical decimal). */
 const part = "(?:[0-9]|[1-5][0-9]|6[0-3])";
 type Route = [MessagingMethod, string, readonly string[]];
@@ -67,19 +69,56 @@ const routes: Route[] = [
   ["PUT", `${st}/audience`, []], ["PUT", `${st}/close-friends`, []],
   ["PATCH", `${st}/audience-lists/${id}`, []], ["DELETE", `${st}/audience-lists/${id}`, []],
   ["PUT", `${st}/mutes/${id}`, []], ["DELETE", `${st}/mutes/${id}`, []],
-  ["GET", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
+  ["GET", `${st}/${id}`, []], ["PATCH", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
   ["PUT", `${st}/${id}/reaction`, []], ["DELETE", `${st}/${id}/reaction`, []], ["GET", `${st}/${id}/viewers`, []],
-  ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
-  ...[st, ch].flatMap((base) => [
+  ["GET", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
+  // ADR 0071: Events (owned by Messaging; Meeting only relays them).
+  ["GET", ev, ["view", "from", "to", "conversationId", "q", "type", "limit", "cursor"]], ["POST", ev, []],
+  ["GET", `${ev}/calendar`, []],
+  ["GET", `${ev}/${id}`, []], ["PATCH", `${ev}/${id}`, []], ["DELETE", `${ev}/${id}`, []],
+  ["POST", `${ev}/${id}/cancel`, []], ["PUT", `${ev}/${id}/rsvp`, []], ["GET", `${ev}/${id}/attendees`, []],
+  ["POST", `${ev}/${id}/invitations`, []], ["DELETE", `${ev}/${id}/invitations/${id}`, []],
+  ["PUT", `${ev}/${id}/reminders`, []], ["GET", `${ev}/${id}/ics`, []],
+  ...[st, ch, ev].flatMap((base) => [
     ["POST", `${base}/media`, []], ["GET", `${base}/media/${id}`, []], ["DELETE", `${base}/media/${id}`, []],
     ["POST", `${base}/media/${id}/parts/${part}`, []], ["POST", `${base}/media/${id}/complete`, []],
     ["POST", `${base}/media/${id}/download-grants`, []],
   ] as Route[]),
-  ["GET", ch, ["q"]], ["POST", ch, []], ["GET", `${ch}/following`, []],
+  ["GET", ch, ["q", "category", "country", "language", "sort", "cursor", "limit"]], ["POST", ch, []], ["GET", `${ch}/following`, []],
+  // ADR 0072: channels complete.
+  ["GET", `${ch}/suggestions`, ["q"]], ["GET", `${ch}/lookup`, ["handle"]], ["GET", `${ch}/starred`, page],
+  ["POST", `${ch}/invites/preview`, []], ["POST", `${ch}/invites/join`, []],
+  ["PUT", `${ch}/${id}/mute`, []], ["DELETE", `${ch}/${id}/mute`, []],
+  ["GET", `${ch}/${id}/admins`, []], ["PUT", `${ch}/${id}/admins/${id}`, []], ["DELETE", `${ch}/${id}/admins/${id}`, []],
+  ["POST", `${ch}/${id}/owner`, []],
+  ["GET", `${ch}/${id}/invites`, []], ["POST", `${ch}/${id}/invites`, []], ["DELETE", `${ch}/${id}/invites/${id}`, []],
+  ["POST", `${ch}/${id}/posts/views`, []], ["PATCH", `${ch}/${id}/posts/${id}`, []],
+  ...(["pin", "vote", "star"] as const).flatMap((x) => [["PUT", `${ch}/${id}/posts/${id}/${x}`, []], ["DELETE", `${ch}/${id}/posts/${id}/${x}`, []]] as Route[]),
+  ["POST", `${ch}/${id}/posts/${id}/forwards`, []],
+  ["GET", `${ch}/${id}/scheduled`, []], ["DELETE", `${ch}/${id}/scheduled/${id}`, []],
+  ["POST", `${ch}/${id}/reports`, []], ["GET", `${ch}/${id}/verification`, []], ["POST", `${ch}/${id}/verification`, []],
+  ["GET", `${ch}/${id}/moderation`, []], ["GET", `${ch}/${id}/audit`, page], ["GET", `${ch}/${id}/analytics`, ["from", "to"]],
   ["GET", `${ch}/${id}`, []], ["PATCH", `${ch}/${id}`, []], ["DELETE", `${ch}/${id}`, []],
   ["PUT", `${ch}/${id}/follow`, []], ["DELETE", `${ch}/${id}/follow`, []],
   ["GET", `${ch}/${id}/posts`, ["before"]], ["POST", `${ch}/${id}/posts`, []],
   ["DELETE", `${ch}/${id}/posts/${id}`, []], ["PUT", `${ch}/${id}/posts/${id}/reaction`, []], ["DELETE", `${ch}/${id}/posts/${id}/reaction`, []],
+  // ADR 0073: Communities (owned by Messaging; Meeting only relays them).
+  ["GET", cm, page], ["POST", cm, []],
+  ["GET", `${cm}/invitations`, []], ["POST", `${cm}/invitations/${id}/accept`, []], ["POST", `${cm}/invitations/${id}/decline`, []],
+  ["POST", `${cm}/invite-links/preview`, []], ["POST", `${cm}/invite-links/join`, []],
+  ["GET", `${cm}/join-requests`, page], ["POST", `${cm}/join-requests/${id}/cancel`, []],
+  ["GET", `${cm}/preferences`, []], ["PUT", `${cm}/preferences`, []],
+  ["GET", `${cm}/${id}`, []], ["PATCH", `${cm}/${id}`, []], ["DELETE", `${cm}/${id}`, []],
+  ["POST", `${cm}/${id}/owner`, []], ["POST", `${cm}/${id}/leave`, []],
+  ["GET", `${cm}/${id}/members`, page], ["PUT", `${cm}/${id}/members/${id}/role`, []], ["DELETE", `${cm}/${id}/members/${id}`, []],
+  ["GET", `${cm}/${id}/bans`, []], ["POST", `${cm}/${id}/bans`, []], ["DELETE", `${cm}/${id}/bans/${id}`, []],
+  ["GET", `${cm}/${id}/invitations`, []], ["POST", `${cm}/${id}/invitations`, []], ["DELETE", `${cm}/${id}/invitations/${id}`, []],
+  ["GET", `${cm}/${id}/invite-links`, []], ["POST", `${cm}/${id}/invite-links`, []], ["POST", `${cm}/${id}/invite-links/${id}/revoke`, []],
+  ["GET", `${cm}/${id}/join-requests`, ["state", "limit", "cursor"]],
+  ["POST", `${cm}/${id}/join-requests/${id}/approve`, []], ["POST", `${cm}/${id}/join-requests/${id}/reject`, []],
+  ["GET", `${cm}/${id}/groups`, []], ["POST", `${cm}/${id}/groups`, []], ["POST", `${cm}/${id}/groups/link`, []],
+  ["PUT", `${cm}/${id}/groups/order`, []], ["PATCH", `${cm}/${id}/groups/${id}`, []], ["DELETE", `${cm}/${id}/groups/${id}`, []],
+  ["POST", `${cm}/${id}/groups/${id}/join`, []],
 ];
 
 /** Mirror Meeting's end-user allowlist (`relay.rs` ROUTES); the backend remains the authority. */

@@ -35,6 +35,14 @@ export function inboxHref(item: InboxItem): string | null {
     case "OPEN_CONTACT": return "/dashboard/contacts";
     case "OPEN_SECURITY_SETTINGS": return "/dashboard/settings?tab=security";
     case "OPEN_DEVELOPER_APPLICATION": return "/developers";
+    // An event invitation, cancellation or reminder (Messaging, ADR 0071): the event page.
+    case "OPEN_EVENT": return ref ? `/dashboard/events/${ref}` : "/dashboard/events";
+    // Mentioned in a status / your status was shared (Messaging, ADR 0069): that status in
+    // Updates (it opens only while the reader may still see it).
+    case "OPEN_STATUS": return ref ? `/dashboard/updates?status=${ref}` : "/dashboard/updates";
+    // A community invitation, join request or approval (Messaging, ADR 0073): the community
+    // (an invitee who is not a member yet is pointed to Communities, where invitations wait).
+    case "OPEN_COMMUNITY": return ref ? `/dashboard/communities/${ref}` : "/dashboard/communities";
     default: return null;
   }
 }

@@ -1192,3 +1192,118 @@ async fn local_direct_send_checks_reuse_eligibility_but_never_a_blocked_pair() {
     assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
     assert_eq!(stub.calls.load(Ordering::SeqCst), 3);
 }
+
+/// Starred messages (ADR 0074 unified starred content; the per-account store is the Hub's
+/// saved messages, MS-1b checks every item with Messaging on each read): a starred message
+/// that was deleted for everyone, hidden for the member, expired, or sits in a group the
+/// member was removed from never reports VISIBLE again — so the Starred screen never
+/// returns it — and the check never carries content.
+#[tokio::test]
+async fn starred_access_never_reports_deleted_expired_hidden_or_left_messages() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    let (group, people) = h.managed_group(&c, 3).await;
+    let (owner, member) = (people[0], people[1]);
+    let cid = group["conversationId"].as_str().unwrap().to_string();
+    let mut ids = Vec::new();
+    for text in ["keep", "delete", "hide", "expire"] {
+        let r = h.send_managed(&c, &group, owner, text).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        ids.push(r.json["messageId"].as_str().unwrap().to_string());
+    }
+    let del = h
+        .send(
+            Method::DELETE,
+            Some(&c.token),
+            Some(owner),
+            &format!("/v1/conversations/{cid}/messages/{}?scope=EVERYONE", ids[1]),
+            None,
+            &[],
+        )
+        .await;
+    assert!(del.status.is_success(), "{}", del.text);
+    let hide = h
+        .send(
+            Method::DELETE,
+            Some(&c.token),
+            Some(member),
+            &format!("/v1/conversations/{cid}/messages/{}?scope=ME", ids[2]),
+            None,
+            &[],
+        )
+        .await;
+    assert!(hide.status.is_success(), "{}", hide.text);
+    // Disappearing-message expiry, as the retention worker leaves it.
+    h.sql(&format!(
+        "UPDATE messaging_messages SET lifecycle = 'EXPIRED', lifecycle_reason = 'RETENTION_EXPIRED' WHERE id = '{}'",
+        ids[3]
+    ))
+    .await
+    .unwrap();
+    govern(&mut h, &c);
+
+    let items: Vec<Value> = ids
+        .iter()
+        .map(|m| json!({"conversationId": cid, "messageId": m}))
+        .collect();
+    let check = |who: Uuid| json!({"principalId": who, "items": items.clone()});
+    let r = hub(
+        &h,
+        &c,
+        member,
+        "conversations/messages/access",
+        check(member),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms_internal("MessagesAccess", &r.json);
+    let states: Vec<&str> = r.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        states,
+        ["VISIBLE", "DELETED", "HIDDEN_FOR_ME", "EXPIRED"],
+        "{}",
+        r.text
+    );
+    for text in ["keep", "delete", "hide", "expire"] {
+        assert!(
+            !r.text.contains(text),
+            "the access check never carries content"
+        );
+    }
+
+    // Removed from the group: nothing about any of its messages, starred or not.
+    let removed = h
+        .send(
+            Method::DELETE,
+            Some(&c.token),
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members/{member}"),
+            None,
+            &[],
+        )
+        .await;
+    assert!(removed.status.is_success(), "{}", removed.text);
+    let r = hub(
+        &h,
+        &c,
+        member,
+        "conversations/messages/access",
+        check(member),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for item in r.json["items"].as_array().unwrap() {
+        assert_eq!(item["member"], false, "{}", r.text);
+        assert!(item.get("state").is_none(), "{}", r.text);
+    }
+    // The owner still sees the kept message as VISIBLE.
+    let r = hub(&h, &c, owner, "conversations/messages/access", check(owner)).await;
+    assert_eq!(r.json["items"][0]["state"], "VISIBLE", "{}", r.text);
+}

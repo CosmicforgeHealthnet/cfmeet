@@ -6,6 +6,7 @@ import { SessionEndedError } from "@/lib/auth/session-core";
 import { MessagingEngineProvider } from "@/components/messaging/MessagingEngineProvider";
 import { ChatAlerts } from "@/components/messaging/ChatAlerts";
 import { StatusQueueRoot } from "@/components/updates/StatusQueueRoot";
+import { StatusViewerHost } from "@/components/updates/StatusRing";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
@@ -82,6 +83,7 @@ export default function DashboardLayout({
   return (
     <WorkspaceProvider>
      <MessagingEngineProvider>
+     <StatusViewerHost>
       <div className="flex h-screen overflow-hidden bg-background">
         {/* Desktop / tablet rail */}
         <div className="hidden md:block">
@@ -102,6 +104,7 @@ export default function DashboardLayout({
         {/* Background status publishing (WhatsApp-style): resumes pending statuses, runs across pages. */}
         <StatusQueueRoot ownerId={user.id} />
       </div>
+     </StatusViewerHost>
      </MessagingEngineProvider>
     </WorkspaceProvider>
   );

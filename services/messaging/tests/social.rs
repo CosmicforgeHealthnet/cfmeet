@@ -52,6 +52,34 @@ impl Hub {
     }
 }
 
+/// The personal policy check (`policy/check`): allowed between mutual contacts, as the
+/// real Hub allows a DIRECT chat and its messages (status replies arrive in one).
+async fn policy_check(
+    axum::extract::State(hub): axum::extract::State<Hub>,
+    Json(body): Json<Value>,
+) -> (axum::http::StatusCode, Json<Value>) {
+    if *hub.down.lock().unwrap() {
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(json!({})));
+    }
+    let actor: Uuid = serde_json::from_value(body["actorPrincipalId"].clone()).unwrap();
+    let target: Uuid = serde_json::from_value(body["targetPrincipalId"].clone()).unwrap();
+    let allowed = actor == target
+        || hub
+            .pairs
+            .lock()
+            .unwrap()
+            .contains_key(&Hub::key(actor, target));
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({
+            "schemaVersion": 1,
+            "allowed": allowed,
+            "reason": if allowed { "ALLOWED" } else { "NOT_PERMITTED" },
+            "policyVersion": 1,
+        })),
+    )
+}
+
 async fn eligible(
     axum::extract::State(hub): axum::extract::State<Hub>,
     Json(body): Json<Value>,
@@ -103,6 +131,10 @@ async fn world() -> Option<World> {
         .route(
             "/internal/v1/communications/contacts/eligible",
             post(eligible),
+        )
+        .route(
+            "/internal/v1/communications/policy/check",
+            post(policy_check),
         )
         .with_state(hub.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -929,6 +961,52 @@ async fn close_friends_lists_preferences_and_sharing() {
     )
     .await;
     assert!(!w.sees(bob, reshared).await);
+
+    // "Allow sharing" per status: only its author changes it; forwards and reshares then refuse.
+    let later = w
+        .text_status(
+            alice,
+            json!({ "audience": { "mode": "ONLY", "principalIds": [bob] }, "allowSharing": true }),
+        )
+        .await;
+    let path = format!("/v1/messaging/status/{later}");
+    let other = w
+        .call(
+            Method::PATCH,
+            bob,
+            &path,
+            Some(json!({ "allowSharing": false })),
+        )
+        .await;
+    assert_eq!(other.status.as_u16(), 404, "{}", other.text);
+    let off = w
+        .call(
+            Method::PATCH,
+            alice,
+            &path,
+            Some(json!({ "allowSharing": false })),
+        )
+        .await;
+    assert_eq!(off.status.as_u16(), 200, "{}", off.text);
+    assert_eq!(off.json["allowSharing"], false);
+    assert_eq!(w.get(bob, &path).await.json["allowSharing"], false);
+    let refused = w
+        .post(
+            bob,
+            &format!("/v1/messaging/status/{later}/reshares"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(refused.status.as_u16(), 409, "{}", refused.text);
+    let on = w
+        .call(
+            Method::PATCH,
+            alice,
+            &path,
+            Some(json!({ "allowSharing": true })),
+        )
+        .await;
+    assert_eq!(on.json["allowSharing"], true, "{}", on.text);
 }
 
 #[tokio::test]
@@ -1206,4 +1284,178 @@ async fn legacy_channels_import_once_and_idempotently() {
         ),
         (1, 2, 2, 1, 1)
     );
+}
+
+/// ADR 0074: a private reply is recorded for the status's author ONLY. The author lists the
+/// replies of a live status with the chat each arrived in (and what the replier wrote,
+/// read through the author's own membership); the replier, anyone else and any status that
+/// is not the caller's get `404`. A deleted reply message stops being listed, the record
+/// goes with its status (deletion and expiry), and "My status" counts the replies. The
+/// reaction time and the "mentioned you" ring flag come along.
+#[tokio::test]
+async fn status_replies_are_listed_only_for_the_author() {
+    let Some(w) = world().await else {
+        return;
+    };
+    // A reply is a message in the replier's direct chat with the author, which CF Meet's
+    // personal environment stores server-side (MANAGED, as in production since #177).
+    w.h.allow_managed(&w.c, "DIRECT").await;
+    let (alice, bob, carol) = (w.person(), w.person(), w.person());
+    let early = w.h.now() - Duration::days(3);
+    for p in [bob, carol] {
+        w.hub.connect(alice, p, early);
+    }
+    w.hub.connect(bob, carol, early);
+    let s = w.text_status(alice, json!({ "mentions": [bob] })).await;
+    let path = format!("/v1/messaging/status/{s}/replies");
+
+    let r = w
+        .post(
+            bob,
+            &path,
+            json!({ "text": "Lovely view", "clientMessageId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 201, "{}", r.text);
+    let conversation = r.json["conversationId"].as_str().unwrap().to_string();
+    let message = r.json["messageId"].as_str().unwrap().to_string();
+    // The author replying to their own status is refused (and records nothing).
+    let own = w
+        .post(
+            alice,
+            &path,
+            json!({ "text": "me", "clientMessageId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(own.status.as_u16(), 409, "{}", own.text);
+
+    let listed = w.get(alice, &path).await;
+    assert_eq!(listed.status.as_u16(), 200, "{}", listed.text);
+    assert_eq!(listed.json["statusId"], json!(s));
+    let replies = listed.json["replies"].as_array().unwrap();
+    assert_eq!(replies.len(), 1, "{}", listed.text);
+    assert_eq!(replies[0]["principalId"], json!(bob));
+    assert_eq!(replies[0]["conversationId"], json!(conversation));
+    assert_eq!(replies[0]["messageId"], json!(message));
+    assert_eq!(replies[0]["text"], "Lovely view", "only what bob wrote");
+
+    // Nobody but the author reads them: not the replier, not another viewer, not a stranger.
+    let stranger = w.person();
+    for who in [bob, carol, stranger] {
+        let r = w.get(who, &path).await;
+        assert_eq!(r.status.as_u16(), 404, "{}", r.text);
+        assert_eq!(r.code(), "NOT_FOUND");
+        assert!(!r.text.contains("Lovely view"));
+    }
+    // An unknown status is 404 for the author too.
+    let r = w
+        .get(
+            alice,
+            &format!("/v1/messaging/status/{}/replies", Uuid::new_v4()),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 404, "{}", r.text);
+
+    // "My status" counts them; the viewer of a status never sees the count.
+    let mine = w.get(alice, "/v1/messaging/status/mine").await;
+    assert_eq!(mine.json["posts"][0]["replyCount"], 1, "{}", mine.text);
+    let as_bob = w.get(bob, &format!("/v1/messaging/status/{s}")).await;
+    assert!(as_bob.json.get("replyCount").is_none(), "{}", as_bob.text);
+
+    // A reaction carries when it was set (the chat list orders it against messages).
+    let react = w
+        .call(
+            Method::PUT,
+            carol,
+            &format!("/v1/messaging/status/{s}/reaction"),
+            Some(json!({ "emoji": "\u{1F60D}" })),
+        )
+        .await;
+    assert_eq!(react.status.as_u16(), 200, "{}", react.text);
+    let viewers = w
+        .get(alice, &format!("/v1/messaging/status/{s}/viewers"))
+        .await;
+    let carol_view = viewers.json["viewers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["principalId"] == json!(carol))
+        .cloned()
+        .unwrap_or_else(|| panic!("carol listed: {}", viewers.text));
+    assert_eq!(carol_view["reaction"], "\u{1F60D}");
+    assert!(carol_view["reactedAt"].is_string(), "{}", viewers.text);
+
+    // The ring tells bob (mentioned) that the status mentions him, and nobody else.
+    let rings = w
+        .post(
+            bob,
+            "/v1/messaging/status/rings",
+            json!({ "principalIds": [alice] }),
+        )
+        .await;
+    assert_eq!(
+        rings.json["rings"][0]["mentionedMe"], true,
+        "{}",
+        rings.text
+    );
+    let rings = w
+        .post(
+            carol,
+            "/v1/messaging/status/rings",
+            json!({ "principalIds": [alice] }),
+        )
+        .await;
+    assert_eq!(
+        rings.json["rings"][0]["mentionedMe"], false,
+        "{}",
+        rings.text
+    );
+
+    // Bob deletes his reply message for everyone: it is no longer listed.
+    let del = w
+        .call(
+            Method::DELETE,
+            bob,
+            &format!("/v1/conversations/{conversation}/messages/{message}?scope=EVERYONE"),
+            None,
+        )
+        .await;
+    assert!(
+        del.status.is_success(),
+        "delete reply: {} {}",
+        del.status,
+        del.text
+    );
+    let after = w.get(alice, &path).await;
+    assert_eq!(after.json["replies"], json!([]), "{}", after.text);
+
+    // The record goes with its status: deletion ...
+    let second = w.text_status(alice, json!({})).await;
+    let r = w
+        .post(
+            carol,
+            &format!("/v1/messaging/status/{second}/replies"),
+            json!({ "text": "Nice", "clientMessageId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 201, "{}", r.text);
+    let count = |id: Uuid| {
+        format!("SELECT count(*) FROM messaging_status_replies WHERE status_id = '{id}'")
+    };
+    assert_eq!(w.h.scalar(&count(second)).await, 1);
+    w.call(
+        Method::DELETE,
+        alice,
+        &format!("/v1/messaging/status/{second}"),
+        None,
+    )
+    .await;
+    assert_eq!(w.h.scalar(&count(second)).await, 0);
+    // ... and the 24-hour expiry (the author's list ends with the status, then the sweep).
+    assert!(w.h.scalar(&count(s)).await >= 1);
+    w.h.clock.advance(Duration::hours(25));
+    let gone = w.get(alice, &path).await;
+    assert_eq!(gone.status.as_u16(), 404, "{}", gone.text);
+    messaging::social::sweep(&w.h.state).await.unwrap();
+    assert_eq!(w.h.scalar(&count(s)).await, 0);
 }

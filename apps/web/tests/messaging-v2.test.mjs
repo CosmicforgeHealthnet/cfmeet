@@ -145,7 +145,7 @@ test("the frontend permits every backend end-user relay operation and its query 
     const body = block.slice(start, index - 1);
     const method = body.match(/Method::(\w+)/)[1];
     const segments = body.match(/&\[([\s\S]*?)\]/)[1];
-    const path = "v1/" + [...segments.matchAll(/Lit\("([^"]+)"\)|\bId\b|\bReaction\b/g)].map((m) => m[1] || (m[0] === "Reaction" ? "%F0%9F%91%8D" : id)).join("/");
+    const path = "v1/" + [...segments.matchAll(/Lit\("([^"]+)"\)|\bId\b|\bReaction\b|\bPart\b/g)].map((m) => m[1] || (m[0] === "Reaction" ? "%F0%9F%91%8D" : m[0] === "Part" ? "0" : id)).join("/");
     assert.equal(routes.isMessagingRelayRoute(method, path), true, `${method} ${path}`);
     const rest = body.slice(body.indexOf(segments) + segments.length + 1);
     const query = rest.includes("PAGE") ? ["limit", "cursor"] : rest.includes("MESSAGES") ? ["afterSequence", "beforeSequence", "limit"] : [...rest.matchAll(/"([^"]+)"/g)].map((m) => m[1]);

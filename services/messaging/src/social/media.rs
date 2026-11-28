@@ -42,6 +42,10 @@ pub const PART_BYTES: i64 = 4 * 1024 * 1024;
 pub const MAX_IMAGE_BYTES: i64 = 8 * 1024 * 1024;
 pub const MAX_AUDIO_BYTES: i64 = 8 * 1024 * 1024;
 pub const MAX_VIDEO_BYTES: i64 = 64 * 1024 * 1024;
+/// Channel documents (PDF, Office, text, zip; ADR 0072).
+pub const MAX_DOCUMENT_BYTES: i64 = 32 * 1024 * 1024;
+/// A document's shown file name.
+pub const MAX_FILE_NAME: usize = 200;
 /// Uploads started per principal and hour.
 pub const UPLOADS_PER_HOUR: i64 = 120;
 /// An unfinished upload, or finished media nothing uses, is removed after this.
@@ -55,6 +59,8 @@ pub const READ_TTL: Duration = Duration::from_secs(300);
 pub enum Purpose {
     Status,
     Channel,
+    /// ADR 0071: an event's cover photo.
+    Event,
 }
 
 impl Purpose {
@@ -62,6 +68,7 @@ impl Purpose {
         match self {
             Purpose::Status => "STATUS",
             Purpose::Channel => "CHANNEL",
+            Purpose::Event => "EVENT",
         }
     }
 }
@@ -72,6 +79,8 @@ pub enum MediaKind {
     Image,
     Video,
     Audio,
+    /// Channel posts only (ADR 0072).
+    Document,
 }
 
 impl MediaKind {
@@ -80,6 +89,7 @@ impl MediaKind {
             MediaKind::Image => "IMAGE",
             MediaKind::Video => "VIDEO",
             MediaKind::Audio => "AUDIO",
+            MediaKind::Document => "DOCUMENT",
         }
     }
 
@@ -88,6 +98,7 @@ impl MediaKind {
             "IMAGE" => Some(MediaKind::Image),
             "VIDEO" => Some(MediaKind::Video),
             "AUDIO" => Some(MediaKind::Audio),
+            "DOCUMENT" => Some(MediaKind::Document),
             _ => None,
         }
     }
@@ -97,6 +108,7 @@ impl MediaKind {
             MediaKind::Image => MAX_IMAGE_BYTES,
             MediaKind::Video => MAX_VIDEO_BYTES,
             MediaKind::Audio => MAX_AUDIO_BYTES,
+            MediaKind::Document => MAX_DOCUMENT_BYTES,
         }
     }
 
@@ -116,6 +128,22 @@ impl MediaKind {
                     | "audio/aac"
                     | "audio/wav"
                     | "audio/x-m4a"
+            ),
+            MediaKind::Document => matches!(
+                t,
+                "application/pdf"
+                    | "application/msword"
+                    | "application/vnd.ms-excel"
+                    | "application/vnd.ms-powerpoint"
+                    | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    | "application/vnd.oasis.opendocument.text"
+                    | "application/vnd.oasis.opendocument.spreadsheet"
+                    | "application/epub+zip"
+                    | "application/zip"
+                    | "text/plain"
+                    | "text/csv"
             ),
         }
     }
@@ -142,6 +170,19 @@ pub fn sniff_matches(kind: MediaKind, head: &[u8]) -> bool {
                 || (head.len() >= 2 && head[0] == 0xFF && head[1] & 0xE0 == 0xE0)
                 || (starts(b"RIFF") && head.len() >= 12 && &head[8..12] == b"WAVE")
         }
+        // PDF, ZIP containers (OOXML, ODF, EPUB, zip), OLE (legacy Office), or plain text
+        // (no NUL byte in the first bytes). Never an executable or a script: the declared
+        // content type is one of the document types above.
+        MediaKind::Document => {
+            starts(b"%PDF-")
+                || starts(b"PK\x03\x04")
+                || starts(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
+                || (!head.is_empty()
+                    && !head.contains(&0)
+                    && !starts(b"MZ")
+                    && !starts(b"\x7fELF")
+                    && !starts(b"#!"))
+        }
     }
 }
 
@@ -162,6 +203,7 @@ pub struct MediaRow {
     pub state: String,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub file_name: Option<String>,
 }
 
 impl MediaRow {
@@ -184,7 +226,7 @@ impl MediaRow {
 
 const COLUMNS: &str =
     "id, tenant_id, application_id, environment_id, owner_principal_id, purpose, kind, \
-    media_type, size_bytes, part_bytes, part_count, duration_ms, state, created_at, completed_at";
+    media_type, size_bytes, part_bytes, part_count, duration_ms, state, created_at, completed_at, file_name";
 
 pub fn object_key(environment_id: Uuid, media_id: Uuid, part: i32) -> String {
     format!(
@@ -208,6 +250,9 @@ pub fn view(row: &MediaRow, stored_parts: Option<&[i32]>) -> Value {
         "complete": row.complete(),
         "createdAt": rfc3339(row.created_at),
     });
+    if let Some(name) = &row.file_name {
+        v["fileName"] = json!(name);
+    }
     if let Some(parts) = stored_parts {
         v["storedParts"] = json!(parts);
         if !row.complete() {
@@ -249,6 +294,25 @@ pub struct CreateMedia {
     pub size_bytes: i64,
     #[serde(default)]
     pub duration_ms: Option<i32>,
+    /// A document's file name (DOCUMENT only, required there; at most 200 characters).
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
+/// A document's shown name: no path, no control characters, at most 200 characters.
+pub fn clean_file_name(raw: &str) -> Result<String> {
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    if base.is_empty()
+        || base == "."
+        || base == ".."
+        || base.chars().count() > MAX_FILE_NAME
+        || base.chars().any(char::is_control)
+    {
+        return Err(Error::validation(
+            "Give the document a file name of at most 200 characters",
+        ));
+    }
+    Ok(base.to_string())
 }
 
 pub async fn create(
@@ -283,6 +347,19 @@ pub async fn create(
     if req.kind == MediaKind::Video && req.duration_ms.is_none() {
         return Err(Error::validation("A video needs its durationMs"));
     }
+    let file_name = match (req.kind, req.file_name.as_deref()) {
+        (MediaKind::Document, _) if purpose != Purpose::Channel => {
+            return Err(Error::validation(
+                "Documents can be posted in channels only",
+            ))
+        }
+        (MediaKind::Document, Some(name)) => Some(clean_file_name(name)?),
+        (MediaKind::Document, None) => {
+            return Err(Error::validation("A document needs its fileName"))
+        }
+        (_, Some(_)) => return Err(Error::validation("fileName is for documents only")),
+        (_, None) => None,
+    };
     let now = state.now();
     let key = format!(
         "social-media:{}:{}",
@@ -299,8 +376,8 @@ pub async fn create(
     db::exec(
         &state.db,
         "INSERT INTO messaging_social_media (id, tenant_id, application_id, environment_id, owner_principal_id, purpose, \
-           kind, media_type, size_bytes, part_bytes, part_count, duration_ms, state, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'UPLOADING', $13)",
+           kind, media_type, size_bytes, part_bytes, part_count, duration_ms, state, created_at, file_name) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'UPLOADING', $13, $14)",
         vec![
             id.into(),
             ctx.scope.tenant_id.into(),
@@ -315,6 +392,7 @@ pub async fn create(
             parts.into(),
             req.duration_ms.into(),
             now.into(),
+            file_name.into(),
         ],
     )
     .await?;
@@ -588,7 +666,9 @@ pub async fn complete(
         return Err(Error::Code {
             code: ErrorCode::ContentRejected,
             reason: Some("MEDIA_NOT_RECOGNISED"),
-            message: Some("The file isn't a photo, video or voice note this app can show".into()),
+            message: Some(
+                "The file isn't a photo, video, voice note or document this app can show".into(),
+            ),
         });
     }
     db::exec(
@@ -604,12 +684,21 @@ pub async fn complete(
     Ok(view(&row, Some(&all)))
 }
 
-/// Whether media is used by a live status (or a channel post).
+/// Whether media is used by a live status (or a channel post, or an event's cover).
 async fn in_use<C: ConnectionTrait>(db: &C, row: &MediaRow, now: DateTime<Utc>) -> Result<bool> {
-    let n = if row.purpose == Purpose::Channel.as_str() {
+    let n = if row.purpose == Purpose::Event.as_str() {
         db::scalar_i64(
             db,
-            "SELECT count(*) FROM messaging_channel_posts WHERE media_id = $1",
+            "SELECT count(*) FROM messaging_events WHERE cover_media_id = $1",
+            vec![row.id.into()],
+        )
+        .await?
+    } else if row.purpose == Purpose::Channel.as_str() {
+        db::scalar_i64(
+            db,
+            "SELECT (SELECT count(*) FROM messaging_channel_posts WHERE media_id = $1) \
+                  + (SELECT count(*) FROM messaging_channel_scheduled_posts WHERE media_id = $1) \
+                  + (SELECT count(*) FROM messaging_channels WHERE avatar_media_id = $1)",
             vec![row.id.into()],
         )
         .await?
@@ -688,7 +777,11 @@ pub async fn purge_unused(state: &AppState, now: DateTime<Utc>, limit: i64) -> R
                   WHERE (s.media_id = m.id OR s.music_media_id = m.id) AND s.expires_at > $2) \
                 AND m.created_at < $1) \
             OR (m.purpose = 'CHANNEL' AND m.state = 'COMPLETE' AND m.created_at < $1 \
-                AND NOT EXISTS (SELECT 1 FROM messaging_channel_posts p WHERE p.media_id = m.id)) \
+                AND NOT EXISTS (SELECT 1 FROM messaging_channel_posts p WHERE p.media_id = m.id) \
+                AND NOT EXISTS (SELECT 1 FROM messaging_channel_scheduled_posts sp WHERE sp.media_id = m.id) \
+                AND NOT EXISTS (SELECT 1 FROM messaging_channels ch WHERE ch.avatar_media_id = m.id)) \
+            OR (m.purpose = 'EVENT' AND m.state = 'COMPLETE' AND m.created_at < $1 \
+                AND NOT EXISTS (SELECT 1 FROM messaging_events ev WHERE ev.cover_media_id = m.id)) \
              ORDER BY m.created_at LIMIT $3"
         ),
         vec![cutoff.into(), now.into(), limit.into()],
@@ -707,9 +800,10 @@ pub async fn purge_unused(state: &AppState, now: DateTime<Utc>, limit: i64) -> R
     Ok(n)
 }
 
-/// Whether `viewer` may read `row` (not the owner): channel media is public to the
-/// environment once complete; status media needs a live status using it that the viewer
-/// passes the gate for.
+/// Whether `viewer` may read `row` (not the owner): channel media needs a post (or the
+/// profile picture) of a channel whose posts (or details) the viewer may read (ADR 0072:
+/// private channels, moderation); status media needs a live status using it that the
+/// viewer passes the gate for.
 pub async fn readable(
     state: &AppState,
     ctx: &TrustedContext,
@@ -719,14 +813,11 @@ pub async fn readable(
     if !row.complete() {
         return Ok(false);
     }
+    if row.purpose == Purpose::Event.as_str() {
+        return crate::calendar::cover_readable(state, row.environment_id, viewer, row.id).await;
+    }
     if row.purpose == Purpose::Channel.as_str() {
-        let n = db::scalar_i64(
-            &state.db,
-            "SELECT count(*) FROM messaging_channel_posts WHERE media_id = $1",
-            vec![row.id.into()],
-        )
-        .await?;
-        return Ok(n > 0);
+        return super::channels::media_readable(state, ctx, viewer, row.id).await;
     }
     let statuses =
         super::status::using_media(&state.db, row.environment_id, row.id, state.now()).await?;
@@ -803,6 +894,32 @@ mod tests {
         assert!(!MediaKind::Video.accepts("image/png"));
         assert!(MediaKind::Audio.accepts("audio/webm"));
         assert!(!MediaKind::Image.accepts("image/svg+xml"));
+        assert!(MediaKind::Document.accepts("application/pdf"));
+        assert!(!MediaKind::Document.accepts("application/x-msdownload"));
+        assert!(!MediaKind::Document.accepts("text/html"));
+    }
+
+    #[test]
+    fn documents_are_recognised_and_executables_are_not() {
+        assert!(sniff_matches(MediaKind::Document, b"%PDF-1.7\n"));
+        assert!(sniff_matches(MediaKind::Document, b"PK\x03\x04\x14\0"));
+        assert!(sniff_matches(
+            MediaKind::Document,
+            b"plain words, a csv,1,2"
+        ));
+        assert!(!sniff_matches(MediaKind::Document, b"MZ\x90\0\x03\0"));
+        assert!(!sniff_matches(MediaKind::Document, b"\x7fELF\x02\x01"));
+        assert!(!sniff_matches(MediaKind::Document, b"#!/bin/sh\n"));
+        assert!(!sniff_matches(MediaKind::Document, b"bin\0ary"));
+    }
+
+    #[test]
+    fn file_names_lose_their_path() {
+        assert_eq!(clean_file_name("C:\\x\\report.pdf").unwrap(), "report.pdf");
+        assert_eq!(clean_file_name("../../etc/passwd").unwrap(), "passwd");
+        assert!(clean_file_name("..").is_err());
+        assert!(clean_file_name("a\u{0}b.pdf").is_err());
+        assert!(clean_file_name(&"x".repeat(201)).is_err());
     }
 
     #[test]

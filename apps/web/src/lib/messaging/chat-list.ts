@@ -64,6 +64,8 @@ export type ChatFilter =
   | { kind: "groups" }
   | { kind: "private" }
   | { kind: "status" }
+  /** ADR 0073: the groups of the user's communities. */
+  | { kind: "communities" }
   | { kind: "list"; listId: string };
 
 export const ALL_CHATS: ChatFilter = { kind: "all" };
@@ -73,11 +75,19 @@ export const filterKey = (f: ChatFilter) => (f.kind === "list" ? `list:${f.listI
 type Filterable = { id: string; unreadCount: number; favourite: boolean; contextClass: string; securityProfile: string };
 
 /** Whether a chat belongs to the chip's view (the open chat never counts as unread). */
-export function matchesChatFilter(c: Filterable, filter: ChatFilter, ctx: { selected: string | null; lists: readonly ChatListView[] }): boolean {
+export function matchesChatFilter(
+  c: Filterable,
+  filter: ChatFilter,
+  ctx: { selected: string | null; lists: readonly ChatListView[]; communityIds?: ReadonlySet<string>; communitiesSeparate?: boolean },
+): boolean {
   switch (filter.kind) {
     case "all":
+      // "Show community groups separately": they leave All and live under Communities.
+      return !(ctx.communitiesSeparate && ctx.communityIds?.has(c.id));
     case "status":
       return true;
+    case "communities":
+      return !!ctx.communityIds?.has(c.id);
     case "unread":
       return c.unreadCount > 0 && c.id !== ctx.selected;
     case "favourites":
@@ -94,13 +104,15 @@ export function matchesChatFilter(c: Filterable, filter: ChatFilter, ctx: { sele
 export type FilterChip = { key: string; label: string; filter: ChatFilter; count?: number };
 
 /** WhatsApp's chips: All, Unread (with its count), Favourites, Groups, (Private), then each list. */
-export function filterChips(args: { unread: number; hasPrivate: boolean; lists: readonly ChatListView[] }): FilterChip[] {
+export function filterChips(args: { unread: number; hasPrivate: boolean; lists: readonly ChatListView[]; communities?: boolean }): FilterChip[] {
   const chips: FilterChip[] = [
     { key: "all", label: "All", filter: ALL_CHATS },
     { key: "unread", label: "Unread", filter: { kind: "unread" }, count: args.unread || undefined },
     { key: "favourites", label: "Favourites", filter: { kind: "favourites" } },
     { key: "groups", label: "Groups", filter: { kind: "groups" } },
   ];
+  // "Communities" once the user is in a community group.
+  if (args.communities) chips.push({ key: "communities", label: "Communities", filter: { kind: "communities" } });
   // "Private" only while the account still has older encrypted chats.
   if (args.hasPrivate) chips.push({ key: "private", label: "Private", filter: { kind: "private" } });
   for (const l of sortLists(args.lists)) chips.push({ key: `list:${l.listId}`, label: l.name, filter: { kind: "list", listId: l.listId } });

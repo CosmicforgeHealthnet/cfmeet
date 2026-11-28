@@ -10,10 +10,14 @@
  * chat on the right; on phones the list and the chat are separate screens.
  */
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
-import SavedMessages, { SAVED_KEY } from "./SavedMessages";
+import { SAVED_KEY } from "@/components/starred/StarredContent";
+import { callPreview, groupActivityPreview, latestReactionBy, orderByActivity, statusMessage, type CallPreview, type StatusReaction } from "@/lib/messaging/chat-indicators";
+import { ROUTES } from "@/lib/section-menus";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, ChatListsDialog, ChatsMenu, DisappearingMessages, FilterChips } from "./ChatListControls";
 import { Avatar, ChatListRow, Ticks, colorFor, listTime, useGroupPhoto } from "./ChatListRow";
+import { useMyStatusesForChats, useStatusRings } from "@/hooks/v2/useSocial";
+import { StatusRingFrame, useOpenStatus } from "@/components/updates/StatusRing";
 import { GroupDescription, GroupPhoto } from "./GroupInfo";
 import { AttachMenu, RichContentView } from "./RichMessages";
 import { ChatImage, ChatVideo, LinkifiedText, PhotoViewer } from "./BubbleParts";
@@ -30,10 +34,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown, ArrowLeft, Bell, Check, Clock3, Copy, Star, Forward, Flag, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, Bell, Check, CircleDashed, Clock3, Copy, Star, Forward, Flag, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
-  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban,
+  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban, CalendarDays, CalendarPlus,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -66,7 +70,10 @@ import MessagingDevicesPanel from "./MessagingDevicesPanel";
 import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 import { EmojiPicker } from "./EmojiPicker";
 import { usePeoplePicker } from "./people-picker";
+import { useCommunityChats } from "@/hooks/v2/useCommunities";
 import { authService } from "@/services/auth.service";
+import EventForm from "@/components/events/EventForm";
+import { EventLinkCards } from "@/components/events/EventLinkCard";
 
 function useEngine(): MessagingEngine {
   // The app-wide engine (live on every page of the signed-in app); a page-local one only
@@ -699,7 +706,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                 </span>
               </form>
             ) : m.text !== null && !m.file ? (
-              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
+              m.rich && m.rich.kind !== "link" ? null : <><StatusAwareText text={m.text} mine={mine} /><EventLinkCards text={m.text} mine={mine} /></>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} onClosePoll={actions.closePoll} names={names} /> : null}
             {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} onOpen={onOpenPhoto} /> : m.file ? (
@@ -779,6 +786,30 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
   );
 }
 
+/**
+ * A message's text; a status reply or share (written by the server, ADR 0069) shows as a
+ * status quote with the reply under it, or a card that opens the status in Updates (where
+ * it opens only for people in its audience). ADR 0074.
+ */
+function StatusAwareText({ text, mine }: { text: string; mine: boolean }) {
+  const status = statusMessage(text);
+  if (!status) return <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={text} mine={mine} /></p>;
+  const quote = cn("mb-1 flex items-center gap-2 rounded-lg border-l-4 px-2.5 py-1.5 text-xs", mine ? "border-white/70 bg-white/15" : "border-primary bg-primary/5");
+  if (status.kind === "status-share") {
+    return (
+      <Link href={`/dashboard/updates?status=${status.statusId}`} className={cn(quote, "text-sm font-medium")} data-testid="message-status-share">
+        <CircleDashed className="size-4 shrink-0" aria-hidden /><span className="flex-1">{mine ? "You shared a status" : "Shared a status with you"}</span><span className="text-xs font-semibold underline">View</span>
+      </Link>
+    );
+  }
+  return (
+    <div data-testid="message-status-reply">
+      <p className={quote}><CircleDashed className="size-3.5 shrink-0" aria-hidden /><span className="truncate">{mine ? "Status" : "Your status"} · {status.what}</span></p>
+      <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={status.text} mine={mine} /></p>
+    </div>
+  );
+}
+
 function TimelineCardView({ card }: { card: TimelineCard }) {
   if (card.kind === "MEETING_INVITATION") {
     const meeting = (card.meeting ?? {}) as TimelineMeetingCard;
@@ -818,11 +849,13 @@ function TimelineCardView({ card }: { card: TimelineCard }) {
  * starred messages, settings, the members (searchable, admins marked), and the chat's
  * actions (export, clear, exit, report) at the bottom.
  */
-function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, callLinks, onSearch, onOpenStarred, onOpenChat }: {
+function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, callLinks, onSearch, onOpenStarred, onOpenChat, onCreateEvent }: {
   engine: MessagingEngine; conversation: ConversationView; title: string; onClose: () => void; shareEnabled: boolean;
   callLinks: { voice: string | null; video: string | null };
   onSearch: () => void;
   onOpenStarred?: () => void;
+  /** Opens the event form for this chat (Events, ADR 0071). */
+  onCreateEvent?: () => void;
   onOpenChat?: (id: string) => void;
 }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -849,6 +882,10 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
   };
   const managed = conversation.securityProfile === "MANAGED";
   const isGroup = conversation.contextClass === "GROUP";
+  // Contact info of a DIRECT chat: their status ring (tap the photo to view their status).
+  const counterpart = conversation.contextClass === "DIRECT" ? conversation.members.find((m) => m !== me) ?? null : null;
+  const counterpartRing = useStatusRings([counterpart]).get(counterpart ?? "") ?? null;
+  const openStatus = useOpenStatus();
   const normalized = normalizeCfMeetId(cfMeetId);
   const field = "h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
   const small = "h-10 shrink-0 rounded-xl px-3.5 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-40";
@@ -915,7 +952,11 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
       <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pb-6">
         {/* Who it is, and quick actions. */}
         <section className="flex flex-col items-center px-4 pb-3 pt-6 text-center">
-          <GroupPhoto engine={engine} conversation={conversation} title={title} canEdit={isGroup && managed && manager} />
+          {counterpartRing && openStatus ? (
+            <button type="button" aria-label={`View ${title}'s status`} data-testid="info-status-ring" onClick={() => openStatus(counterpartRing.principalId, title)} className="rounded-full">
+              <StatusRingFrame ring={counterpartRing}><Avatar name={title} seed={conversation.id} size="size-24" className="text-4xl" /></StatusRingFrame>
+            </button>
+          ) : <GroupPhoto engine={engine} conversation={conversation} title={title} canEdit={isGroup && managed && manager} />}
           {renaming ? (
             <form className="mt-3 flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); run(engine.renameConversation(conversation.id, name).then(() => setRenaming(false))); }}>
               <input autoFocus aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={field} />
@@ -948,6 +989,11 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
             <button type="button" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" onClick={onOpenStarred} data-testid="info-starred"><Star className="size-4 text-muted-foreground" />Starred messages</button>
           </div>
         ) : null}
+        {/* Events of this chat (Messaging, ADR 0071). */}
+        <div className="px-4">
+          <Link href={`/dashboard/events?conversation=${encodeURIComponent(conversation.id)}`} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" data-testid="info-events"><CalendarDays className="size-4 text-muted-foreground" />Events</Link>
+          {onCreateEvent ? <button type="button" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" onClick={onCreateEvent} data-testid="info-create-event"><CalendarPlus className="size-4 text-muted-foreground" />Create event</button> : null}
+        </div>
         <div className="space-y-3 px-4"><ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} lists={s.chatLists} /><DisappearingMessages engine={engine} conversation={conversation} canChange={!isGroup || manager} /></div>
 
         {isGroup && manager ? (
@@ -1260,6 +1306,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
   const [staged, setStaged] = useState<File | null>(null);
   const canRecord = useSyncExternalStore(noSubscribe, voiceRecordingSupported, () => false);
   const [details, setDetails] = useState(false);
+  const [creatingEvent, setCreatingEvent] = useState(false);
   const [searching, setSearching] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1739,7 +1786,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
                 setText(next);
                 requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + emoji.length, at + emoji.length); });
               }} />
-              <AttachMenu canAttach={canAttach} canShare={e2ee} canPoll={managed} disabled={!canSend} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => payload.t === "poll" ? engine.sendPoll(conversation.id, { question: payload.question, options: payload.options, multiple: payload.multiple }) : engine.sendRich(conversation.id, payload)}
+              <AttachMenu canAttach={canAttach} canShare={e2ee} canPoll={managed} disabled={!canSend} onEvent={() => setCreatingEvent(true)} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => payload.t === "poll" ? engine.sendPoll(conversation.id, { question: payload.question, options: payload.options, multiple: payload.multiple }) : engine.sendRich(conversation.id, payload)}
                 fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
                 ref={composer}
@@ -1784,7 +1831,9 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
       </section>
       {details ? <DetailsPanel engine={engine} conversation={conversation} title={title} onClose={() => setDetails(false)} shareEnabled={!!actions.shareMeeting}
         callLinks={{ voice: actions.voiceCall ? callHref({ conversationId: conversation.id }, "VOICE", title) : null, video: actions.videoCall ? callHref({ conversationId: conversation.id }, "VIDEO", title) : null }}
-        onSearch={() => setSearching(true)} onOpenStarred={onOpenStarred} onOpenChat={onOpenChat} /> : null}
+        onSearch={() => setSearching(true)} onOpenStarred={onOpenStarred} onOpenChat={onOpenChat} onCreateEvent={canSend ? () => setCreatingEvent(true) : undefined} /> : null}
+      {/* After creation the form posts the event link here; the chat shows it as an event card. */}
+      <EventForm open={creatingEvent} conversationId={conversation.id} onClose={() => setCreatingEvent(false)} onSaved={() => setCreatingEvent(false)} />
     </div>
   );
 }
@@ -1820,8 +1869,12 @@ function PersonalMessages() {
   const params = useSearchParams();
   const requested = params.get("conversation");
   const [selected, setSelected] = useState<string | null>(requested);
-  /** A search result to show once its chat is open. */
-  const [focus, setFocus] = useState<{ conversationId: string; messageId: string } | null>(null);
+  const router = useRouter();
+  /** A search result (or a starred message: `?conversation=…&message=…`) to show once its chat is open. */
+  const [focus, setFocus] = useState<{ conversationId: string; messageId: string } | null>(() => {
+    const messageId = params.get("message");
+    return requested && messageId ? { conversationId: requested, messageId } : null;
+  });
   const [search, setSearch] = useState("");
   const [chosenFilter, setFilter] = useState<ChatFilter>(ALL_CHATS);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -1831,12 +1884,34 @@ function PersonalMessages() {
   const [rowLimit, setRowLimit] = useState(ROW_WINDOW);
   const drafts = useSyncExternalStore(subscribeDrafts, draftsVersion, draftsVersion);
   const [shareMode, setShareMode] = useState<"status" | "broadcast" | null>(null);
-  const [starredOpen, setStarredOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const openStarred = useCallback(() => router.push(ROUTES.starred), [router]);
   const capabilities = useHubCapabilities();
   const areas = communicationsAreas(capabilities.data);
   const inbox = useHubInbox(areas.contacts || areas.managedMessaging);
   const muted = useMemo(() => new Set((inbox.data?.data ?? []).filter((e) => e.notifications === "MUTED").map((e) => e.conversationId)), [inbox.data]);
+  // ADR 0074: each chat's latest call (the Hub card it already returns) ...
+  const calls = useMemo(() => {
+    const m = new Map<string, CallPreview>();
+    for (const e of inbox.data?.data ?? []) {
+      const call = callPreview(e.latestActivity);
+      if (call) m.set(e.conversationId, call);
+    }
+    return m;
+  }, [inbox.data]);
+  // ... and who reacted to my live statuses (My status data, read without an interval).
+  const myStatuses = useMyStatusesForChats(s.phase === "ready");
+  const reactions = useMemo(() => {
+    const posts = (myStatuses.data?.posts ?? []).map((p) => ({
+      viewers: (p.viewers ?? []).map((v) => ({ principalId: v.person.principalId ?? v.person.userId, reaction: v.reaction ?? null, reactedAt: v.reactedAt ?? null })),
+    }));
+    const m = new Map<string, StatusReaction>();
+    for (const who of new Set(posts.flatMap((p) => p.viewers.map((v) => v.principalId)))) {
+      const r = latestReactionBy(who, posts);
+      if (r) m.set(who, r);
+    }
+    return m;
+  }, [myStatuses.data]);
   useEffect(() => {
     // Contact -> conversation navigation: a chat created elsewhere appears after a refresh.
     if (requested && !s.conversations.some((c) => c.id === requested) && s.phase !== "loading") void engine.refreshConversations().catch(() => {});
@@ -1851,9 +1926,19 @@ function PersonalMessages() {
   const archivedChats = s.conversations.filter((c) => c.archived);
   // A list deleted on another device stops being the filter.
   const filter = liveFilter(chosenFilter, s.chatLists);
+  // ADR 0073: community groups (the Communities filter; shown separately when the user prefers).
+  const community = useCommunityChats(!!s.identity);
   const statusCopies = new Set<string>();
   const needle = search.trim().toLocaleLowerCase();
-  const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
+  // Realtime order (the engine), with a newer call or status reaction counting as activity.
+  const ordered = useMemo(() => {
+    const myId = s.identity?.principalId ?? null;
+    return orderByActivity(s.conversations, (c) => [
+      calls.get(c.id)?.at,
+      c.contextClass === "DIRECT" ? reactions.get(c.members.find((m) => m !== myId) ?? "")?.at : null,
+    ]);
+  }, [s.conversations, s.identity, calls, reactions]);
+  const conversations = arrangeChats(ordered, showArchived && archivedChats.length > 0).filter((conversation) => {
     const post = statusPostId(conversation.groupTitle);
     // An older encrypted chat that continues as a synced chat: only the synced one is listed.
     if (!post && conversation.securityProfile === "PRIVATE_E2EE" && engine.managedTwinOf(conversation.id)) return false;
@@ -1862,13 +1947,17 @@ function PersonalMessages() {
       statusCopies.add(post);
     } else if (filter.kind === "status") return false;
     // Search stays inside the chosen filter (WhatsApp).
-    return conversation.title.toLocaleLowerCase().includes(needle) && matchesChatFilter(conversation, filter, { selected, lists: s.chatLists });
+    return conversation.title.toLocaleLowerCase().includes(needle) && matchesChatFilter(conversation, filter, { selected, lists: s.chatLists, communityIds: community.ids, communitiesSeparate: community.separate });
   });
   // WhatsApp's filters; "Private" only while the account still has older encrypted chats.
   const hasPrivate = s.conversations.some((c) => c.securityProfile === "PRIVATE_E2EE");
-  const chips = filterChips({ unread: unreadTotal, hasPrivate, lists: s.chatLists });
+  const chips = filterChips({ unread: unreadTotal, hasPrivate, lists: s.chatLists, communities: community.ids.size > 0 });
   const me = s.identity?.principalId ?? null;
   const shownRows = conversations.slice(0, rowLimit);
+  // Status rings of the people in the shown DIRECT chats (only those whose status we may see).
+  const counterpartOf = (c: (typeof shownRows)[number]) => (c.contextClass === "DIRECT" ? c.members.find((m) => m !== me) ?? null : null);
+  const rings = useStatusRings(shownRows.map(counterpartOf));
+  const openStatus = useOpenStatus();
   const selectChat = useCallback((id: string) => setSelected(id), []);
   // Windowing: the next rows are added when the end of the list comes into view.
   const moreRows = useRef<HTMLLIElement | null>(null);
@@ -1917,7 +2006,7 @@ function PersonalMessages() {
                 ) : null}
                 <button type="button" aria-label="New chat" title="New chat" data-testid="new-conversation" disabled={!s.identity} onClick={() => setComposeOpen(true)} className="hidden size-10 items-center justify-center rounded-full bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-40 md:flex"><MessageSquarePlus className="size-5" /></button>
                 <ChatsMenu disabled={!s.identity} onNewGroup={() => setComposeMode("group")} onNewChat={() => setComposeMode("chat")}
-                  onLists={() => setListsDialog("manage")} onStarred={() => setStarredOpen(true)} onSettings={() => setSecurityOpen(true)} />
+                  onLists={() => setListsDialog("manage")} onSettings={() => setSecurityOpen(true)} />
               </div>
             </div>
             <label className="flex h-10 items-center gap-2 rounded-full bg-muted px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
@@ -1943,7 +2032,12 @@ function PersonalMessages() {
                   senderName={c.contextClass === "GROUP" && senderId ? (s.names[senderId] ?? "").split(" ")[0] || null : null}
                   typingName={typer ? (s.names[typer]?.split(" ")[0] ?? "") : null}
                   active={c.id === selected} muted={muted.has(c.id)} draft={readDraft(me, c.id)}
-                  deviceRegisteredAt={s.deviceRegisteredAt} onSelect={selectChat} />
+                  deviceRegisteredAt={s.deviceRegisteredAt} onSelect={selectChat}
+                  statusRing={rings.get(counterpartOf(c) ?? "") ?? null} onOpenStatus={openStatus ?? undefined}
+                  call={calls.get(c.id) ?? null}
+                  statusReaction={c.contextClass === "DIRECT" ? reactions.get(counterpartOf(c) ?? "") ?? null : null}
+                  statusMention={!!rings.get(counterpartOf(c) ?? "")?.mentionedMeUnseen}
+                  groupPreview={groupActivityPreview(c, !!latest, me, s.names)} />
               );
             })}
             {hasMoreRows ? <li ref={moreRows} aria-hidden className="h-8" data-testid="more-chats" /> : null}
@@ -1966,7 +2060,7 @@ function PersonalMessages() {
         </aside>
         <main className={cn("min-w-0 min-h-0 flex-1", !current && (removedHere ? "flex items-center justify-center" : "hidden md:flex md:items-center md:justify-center"))} data-testid="conversation-pane">
           {current ? (
-            <ConversationPane key={current.id} engine={engine} conversation={current} focusMessageId={focus?.conversationId === current.id ? focus.messageId : undefined} onFocused={() => setFocus(null)} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={() => setStarredOpen(true)} />
+            <ConversationPane key={current.id} engine={engine} conversation={current} focusMessageId={focus?.conversationId === current.id ? focus.messageId : undefined} onFocused={() => setFocus(null)} onBack={() => setSelected(null)} onOpenChat={setSelected} onOpenStarred={openStarred} />
           ) : removedHere ? (
             <div className="max-w-sm px-6 text-center" role="status" data-testid="removed-from-chat">
               <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-muted"><MessageSquarePlus className="size-7 text-muted-foreground" /></div>
@@ -1993,9 +2087,6 @@ function PersonalMessages() {
       <NewConversation key={composeMode || "closed"} engine={engine} onCreated={setSelected} open={!!composeMode} setOpen={setComposeOpen} initialStep={composeMode === "group" ? "members" : "chat"} />
       {listsDialog ? <ChatListsDialog engine={engine} lists={s.chatLists} conversations={s.conversations.filter((c) => !statusPostId(c.groupTitle))} startCreating={listsDialog === "create"} onClose={() => setListsDialog(false)} /> : null}
       {shareMode ? <PrivateShares engine={engine} mode={shareMode} onClose={() => { if (shareMode === "status") setFilter({ kind: "status" }); setShareMode(null); }} /> : null}
-      <SavedMessages open={starredOpen} onOpenChange={setStarredOpen} onOpenChat={setSelected}
-        chatTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? "Chat"}
-        messageText={(id, messageId) => s.messages[id]?.find((m) => m.messageId === messageId)?.text ?? null} />
 
       {/* Security & devices: a sheet that stays mounted while closed so a history transfer keeps its state. */}
       <div id="device-security-settings" hidden={!securityOpen} className="fixed inset-0 z-50">

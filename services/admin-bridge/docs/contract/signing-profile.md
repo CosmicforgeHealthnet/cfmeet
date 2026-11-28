@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 2.0.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 2.1.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -236,6 +236,15 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `messaging.failed-message.retry`
 - `messaging.key-transparency.read`
 - `messaging.key-transparency.checkpoint`
+- `messaging.channel-verifications.list`
+- `messaging.channel-reports.list`
+- `messaging.channels.read`
+- `messaging.channel-actions.list`
+- `messaging.channel-verification.decide`
+- `messaging.channel-verification.revoke`
+- `messaging.channel.moderate`
+- `messaging.channel-post.takedown`
+- `messaging.channel-report.resolve`
 - `calling.calls.list`
 - `calling.calls.read`
 - `calling.live.list`

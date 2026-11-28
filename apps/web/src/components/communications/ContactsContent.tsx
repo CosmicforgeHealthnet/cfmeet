@@ -54,6 +54,9 @@ import {
   type CommunicationsAreas,
 } from "@/lib/communications/comms-core";
 import type { Contact, Privacy, PublicProfile } from "@/types/communications";
+import type { StatusRing } from "@/services/v2/social.service";
+import { useContactStatusRings } from "@/hooks/v2/useSocial";
+import { StatusRingFrame, useOpenStatus } from "@/components/updates/StatusRing";
 
 type Tab = "connections" | "lists" | "requests" | "blocked" | "colleagues";
 
@@ -271,8 +274,9 @@ function CommonGroups({ contactId }: { contactId: string }) {
   );
 }
 
-function ContactRow({ contact, areas }: { contact: Contact; areas: CommunicationsAreas }) {
+function ContactRow({ contact, areas, ring }: { contact: Contact; areas: CommunicationsAreas; ring?: StatusRing | null }) {
   const router = useRouter();
+  const openStatus = useOpenStatus();
   const actions = useHubActions();
   const [renaming, setRenaming] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -288,8 +292,14 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
   return (
     <li className="group" data-testid="contact" data-relationship={contact.relationship}>
       <div className="flex items-center gap-3 rounded-2xl px-2 py-2 transition-colors hover:bg-muted/60">
+        {/* A status ring: tapping the avatar opens their status, the rest of the row their profile. */}
+        {ring && openStatus ? (
+          <button type="button" aria-label={`View ${name}'s status`} data-testid="contact-status-ring" onClick={() => openStatus(ring.principalId, name)} className="shrink-0 rounded-full">
+            <StatusRingFrame ring={ring}><Avatar name={name} seed={contact.cfMeetId} size="size-[34px]" /></StatusRingFrame>
+          </button>
+        ) : null}
         <button type="button" data-testid="contact-open" onClick={() => setProfileOpen(true)} aria-label={`View ${name}'s profile`} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-          <Avatar name={name} seed={contact.cfMeetId} size="size-11" />
+          {ring && openStatus ? null : <Avatar name={name} seed={contact.cfMeetId} size="size-11" />}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 truncate font-semibold">
               <span className="truncate">{name}</span>
@@ -341,7 +351,11 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
       {/* Contact info (WhatsApp): its own screen, full screen on phones, a right panel on computers. */}
       <SidePage open={profileOpen} onOpenChange={setProfileOpen} title="Contact info" description={`${name}'s profile`}>
         <div className="flex flex-col items-center px-6 pb-6 pt-8 text-center">
-          <Avatar name={name} seed={contact.cfMeetId} size="size-32" className="text-5xl" />
+          {ring && openStatus ? (
+            <button type="button" aria-label={`View ${name}'s status`} data-testid="profile-status-ring" onClick={() => openStatus(ring.principalId, name)} className="rounded-full">
+              <StatusRingFrame ring={ring}><Avatar name={name} seed={contact.cfMeetId} size="size-28" className="text-5xl" /></StatusRingFrame>
+            </button>
+          ) : <Avatar name={name} seed={contact.cfMeetId} size="size-32" className="text-5xl" />}
           <p className="mt-4 max-w-full truncate text-2xl font-semibold tracking-tight">{name}</p>
           <p className="mt-0.5 text-sm text-muted-foreground">{contact.alias ? contact.displayName : RELATIONSHIP_LABEL[contact.relationship] ?? ""}</p>
           {connected && (areas.managedMessaging || areas.calling) ? (
@@ -409,6 +423,7 @@ function ConnectionsTab({ areas, onAdd }: { areas: CommunicationsAreas; onAdd: (
       .sort((a, b) => contactLabel(a).localeCompare(contactLabel(b)));
   }, [contacts.data, filter]);
   const favorites = list.filter((c) => c.favorite);
+  const rings = useContactStatusRings(useMemo(() => connectedContacts(contacts.data ?? []), [contacts.data]));
   const groups = useMemo(() => {
     const map = new Map<string, Contact[]>();
     for (const c of list) {
@@ -440,13 +455,13 @@ function ConnectionsTab({ areas, onAdd }: { areas: CommunicationsAreas; onAdd: (
         {favorites.length > 0 && !filter && (
           <section>
             <p className="mb-1 flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Star className="size-3.5 fill-amber-500 text-amber-500" />Favorites</p>
-            <ul>{favorites.map((c) => <ContactRow key={`f-${c.contactId}`} contact={c} areas={areas} />)}</ul>
+            <ul>{favorites.map((c) => <ContactRow key={`f-${c.contactId}`} contact={c} areas={areas} ring={rings.get(c.cfMeetId)} />)}</ul>
           </section>
         )}
         {groups.map(([letter, people]) => (
           <section key={letter}>
             <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{letter}</p>
-            <ul>{people.map((c) => <ContactRow key={c.contactId} contact={c} areas={areas} />)}</ul>
+            <ul>{people.map((c) => <ContactRow key={c.contactId} contact={c} areas={areas} ring={rings.get(c.cfMeetId)} />)}</ul>
           </section>
         ))}
       </div>

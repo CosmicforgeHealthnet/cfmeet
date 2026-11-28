@@ -17,6 +17,9 @@ mod m20261118_000001_account_notices;
 mod m20261119_000001_partner_push;
 mod m20261120_000001_admin_operations;
 mod m20261121_000001_organization_exports;
+mod m20261218_000001_messaging_event_notices;
+mod m20261220_000001_messaging_status_notices;
+mod m20261221_000001_messaging_community_notices;
 
 /// Name of the table recording which Notifications migrations have been applied.
 pub const MIGRATION_TABLE: &str = "notifications_seaql_migrations";
@@ -39,6 +42,16 @@ impl MigratorTrait for Migrator {
             Box::new(m20261120_000001_admin_operations::Migration),
             // ADR 0068 A4: the ORGANIZATIONS / EMAIL routing row (organization export notice).
             Box::new(m20261121_000001_organization_exports::Migration),
+            // ADR 0071: the MESSAGING_EVENTS / IN_APP and PUSH routing rows (Messaging event
+            // notices) and the OPEN_EVENT inbox action.
+            Box::new(m20261218_000001_messaging_event_notices::Migration),
+            // ADR 0069: the MESSAGING_STATUS / IN_APP and PUSH routing rows (Messaging status
+            // mention and share notices) and the OPEN_STATUS inbox action.
+            Box::new(m20261220_000001_messaging_status_notices::Migration),
+            // ADR 0073: the MESSAGING_COMMUNITIES / IN_APP and PUSH routing rows (Messaging
+            // community invitation, join-request and approval notices) and the
+            // OPEN_COMMUNITY inbox action.
+            Box::new(m20261221_000001_messaging_community_notices::Migration),
         ]
     }
 

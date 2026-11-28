@@ -577,7 +577,7 @@ pub async fn claim_key_packages(
             "NOT_AN_E2EE_CONVERSATION",
         ));
     }
-    crate::devices::directory_lookup_allowed(state, ctx).await?;
+    crate::devices::directory_lookup_allowed(state, ctx, acting.principal_id).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let claimer = acting.principal_id;

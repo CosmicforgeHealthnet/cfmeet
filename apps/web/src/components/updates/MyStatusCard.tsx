@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Mic, Plus, RotateCw, X } from "lucide-react";
+import { AlertCircle, Mic, Music2, Plus, RotateCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { JobPreview, JobView } from "@/lib/status-publisher/types";
 import type { PersonView } from "@/services/v2/social.service";
@@ -95,7 +95,7 @@ function ProgressRing({ progress, children }: { progress: number; children: Reac
 }
 
 /** A pending status's preview: the photo, the video's thumbnail / first frame, or the text on its colour. */
-function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean }) {
+export function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean }) {
   return (
     <span aria-hidden className={cn(small ? "relative block size-12 shrink-0 overflow-hidden rounded-xl" : "absolute inset-0")}>
       {preview.kind === "TEXT" ? (
@@ -105,7 +105,7 @@ function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean
       ) : preview.kind === "VIDEO" && preview.video ? (
         <BlobMedia blob={preview.video} kind="video" />
       ) : preview.kind === "AUDIO" ? (
-        <span className="flex size-full items-center justify-center text-white" style={{ backgroundColor: preview.background ?? "#128C7E" }}><Mic className={small ? "size-5" : "size-8"} /></span>
+        <span className="flex size-full items-center justify-center text-white" style={{ backgroundColor: preview.background ?? "#128C7E" }}>{preview.music ? <Music2 className={small ? "size-5" : "size-8"} /> : <Mic className={small ? "size-5" : "size-8"} />}</span>
       ) : (
         <span className="block size-full bg-gradient-to-b from-slate-600 to-slate-900" />
       )}
@@ -130,14 +130,52 @@ function BlobMedia({ blob, kind }: { blob: Blob; kind: "image" | "video" }) {
   return <video ref={video} muted playsInline preload="metadata" className="size-full object-cover" />;
 }
 
-function stateText(job: JobView, online: boolean): string {
+const pct = (f: number) => `${Math.round(Math.max(0, Math.min(1, f)) * 100)}%`;
+const mb = (b: number) => (b >= 1_000_000 ? `${(b / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1000))} kB`);
+
+/** One line naming the stage a pending status is in: processing, uploading, publishing, waiting or failed. */
+export function stateText(job: JobView, online: boolean): string {
   switch (job.state) {
     case "failed": return job.error && job.error !== "Failed to upload" ? `Failed to upload · ${job.error}` : "Failed to upload";
-    case "processing": return `Preparing… ${Math.round(job.progress * 100)}%`;
+    case "processing": return `Processing video… ${pct(job.processing ?? 0)}`;
+    case "uploading": return job.upload ? `Uploading… ${mb(job.upload.sentBytes)} of ${mb(job.upload.totalBytes)}` : "Uploading…";
+    case "publishing": return job.postCount > 1 ? `Publishing ${Math.min(job.postCount, job.publishedCount + 1)} of ${job.postCount}…` : "Publishing…";
     case "waiting": return online ? "Waiting to retry…" : "Waiting for connection…";
-    case "queued": return job.progress > 0 ? `Adding… ${Math.round(job.progress * 100)}%` : "Waiting…";
-    default: return `Adding… ${Math.round(job.progress * 100)}%`;
+    case "done": return "Posted";
+    default: return job.progress > 0 ? `Waiting to continue · ${pct(job.progress)} done` : "Waiting…";
   }
+}
+
+/** Separate bars for processing (video render) and upload, so the stage is never ambiguous. */
+export function StageBars({ job }: { job: JobView }) {
+  if (job.state === "failed" || job.state === "done") return null;
+  const upload = job.upload && job.upload.totalBytes > 0 ? job.upload.sentBytes / job.upload.totalBytes : job.processing !== null && job.processing < 1 ? 0 : null;
+  const rows: { label: string; value: number; active: boolean }[] = [];
+  if (job.processing !== null) rows.push({ label: "Processing", value: job.processing, active: job.state === "processing" });
+  if (upload !== null) rows.push({ label: "Upload", value: upload, active: job.state === "uploading" });
+  rows.push({ label: "Published", value: job.postCount ? job.publishedCount / job.postCount : 0, active: job.state === "publishing" });
+  return (
+    <span className="mt-1 grid gap-1" data-testid="status-stage-bars">
+      {rows.map((r) => (
+        <span key={r.label} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className={cn("w-16 shrink-0", r.active && "font-semibold text-foreground")}>{r.label}</span>
+          <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={r.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.value * 100)}>
+            <span className={cn("block h-full rounded-full transition-[width] duration-300", r.active ? "bg-primary" : "bg-primary/50")} style={{ width: pct(r.value) }} />
+          </span>
+          <span className="w-8 shrink-0 text-right tabular-nums">{pct(r.value)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function jobTitle(job: JobView): string {
+  if (job.postCount > 1) return `${job.postCount} status updates`;
+  const p = job.preview;
+  if (p.kind === "TEXT") return "Text status";
+  if (p.kind === "IMAGE") return p.music ? "Photo with music" : "Photo";
+  if (p.kind === "VIDEO") return "Video";
+  return p.music ? "Music status" : "Voice status";
 }
 
 function QueueSheet({ jobs, canView, online, onView, onClose, onRetry, onCancel }: {
@@ -156,8 +194,9 @@ function QueueSheet({ jobs, canView, online, onView, onClose, onRetry, onCancel 
             <li key={job.id} className="flex items-center gap-3 rounded-2xl px-1 py-2" data-testid="status-queue-item">
               <PendingThumb preview={job.preview} small />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{job.postCount > 1 ? `${job.postCount} status updates` : job.preview.kind === "TEXT" ? "Text status" : job.preview.kind === "IMAGE" ? "Photo" : job.preview.kind === "VIDEO" ? "Video" : "Voice status"}</span>
-                <span className={cn("block truncate text-xs", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>{stateText(job, online)}</span>
+                <span className="block truncate text-sm font-semibold">{jobTitle(job)}</span>
+                <span className={cn("block truncate text-xs", job.state === "failed" ? "text-destructive" : "text-muted-foreground")} aria-live="polite">{stateText(job, online)}</span>
+                <StageBars job={job} />
               </span>
               {job.state === "failed" && !job.fatal ? (
                 <button type="button" onClick={() => onRetry(job.id)} className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-3 text-sm font-semibold text-primary-foreground" data-testid="status-retry">

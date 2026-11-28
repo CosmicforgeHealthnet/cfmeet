@@ -10,6 +10,7 @@
 // (upload the original); `exportVideo` then fails fast with `VideoProcessingUnsupportedError`.
 
 import type { Input, InputVideoTrack } from "mediabunny";
+import { gainCurve, mixPlanar } from "./audio";
 import {
   DEFAULT_MAX_HEIGHT,
   MAX_SEGMENT_MS,
@@ -337,16 +338,7 @@ async function renderMusic(music: MusicTrack, clipMs: number): Promise<AudioBuff
   src.buffer = decoded;
   const gain = ctx.createGain();
   // Gain as a function of music time: volume, ramped in / out at the ends of the music range.
-  const vol = Math.min(2, Math.max(0, music.volume));
-  const gainAt = (musicMs: number) => {
-    let g = vol;
-    if (music.fadeInMs > 0) g *= Math.min(1, Math.max(0, (musicMs - music.startMs) / music.fadeInMs));
-    if (music.fadeOutMs > 0) g *= Math.min(1, Math.max(0, (music.endMs - musicMs) / music.fadeOutMs));
-    return g;
-  };
-  const points = 256;
-  const curve = new Float32Array(points);
-  for (let i = 0; i < points; i++) curve[i] = gainAt(win.fromMs + (win.durationMs * i) / (points - 1));
+  const curve = gainCurve(music, win.fromMs, win.durationMs);
   gain.gain.setValueCurveAtTime(curve, win.atMs / 1000, win.durationMs / 1000);
   src.connect(gain).connect(ctx.destination);
   src.start(win.atMs / 1000, win.fromMs / 1000, win.durationMs / 1000);
@@ -595,19 +587,7 @@ function audioMixer(m: Mediabunny, volume: number, music: AudioBuffer | null) {
     const channels = sample.numberOfChannels;
     const data = new Float32Array(n * channels);
     for (let c = 0; c < channels; c++) sample.copyTo(data.subarray(c * n, (c + 1) * n), { planeIndex: c, format: "f32-planar" });
-    const first = Math.round(sample.timestamp * musicRate);
-    for (let c = 0; c < channels; c++) {
-      const mc = musicChannels.length ? musicChannels[Math.min(c, musicChannels.length - 1)] : null;
-      const base = c * n;
-      for (let i = 0; i < n; i++) {
-        let v = data[base + i] * volume;
-        if (mc) {
-          const j = first + i;
-          if (j >= 0 && j < mc.length) v += mc[j];
-        }
-        data[base + i] = v > 1 ? 1 : v < -1 ? -1 : v;
-      }
-    }
+    mixPlanar(data, n, channels, volume, musicChannels, Math.round(sample.timestamp * musicRate));
     return new m.AudioSample({ data, format: "f32-planar", numberOfChannels: channels, sampleRate: sample.sampleRate, timestamp: sample.timestamp });
   };
 }

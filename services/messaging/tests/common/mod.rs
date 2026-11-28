@@ -160,6 +160,15 @@ async fn template(admin: &str) -> String {
             messaging_migration::SocialMigrator::up(&tmpl, None)
                 .await
                 .expect("status / channels migrations apply");
+            messaging_migration::EventsMigrator::up(&tmpl, None)
+                .await
+                .expect("events migrations apply");
+            messaging_migration::CommunitiesMigrator::up(&tmpl, None)
+                .await
+                .expect("communities migrations apply");
+            messaging_migration::StatusRepliesMigrator::up(&tmpl, None)
+                .await
+                .expect("status replies migrations apply");
             tmpl.close().await.ok();
             name
         })

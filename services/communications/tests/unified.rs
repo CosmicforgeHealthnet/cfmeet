@@ -2410,6 +2410,22 @@ async fn call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nud
         assert_eq!(data[0]["call"]["initiatedByViewer"], false);
     }
     assert_eq!(pending(late.principal_id).await, 0);
+    // ADR 0074: the chat list's call row knows a voice call from a video call.
+    let call_card = h
+        .state
+        .timeline(&sl, &late_profile, conv, &q(&[]))
+        .await
+        .unwrap()["data"][0]["call"]
+        .clone();
+    let inbox = h
+        .state
+        .inbox(&sl, &late_profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    let latest = &inbox["data"][0]["latestActivity"];
+    assert_eq!(latest["kind"], "CALL", "{inbox}");
+    assert!(latest["callKind"].is_string(), "{inbox}");
+    assert_eq!(latest["callKind"], call_card["kind"], "{inbox}");
     // The other late party gets it from Activity too (no timeline read needed).
     let later_profile = h.profile(&later).await;
     let activity = h

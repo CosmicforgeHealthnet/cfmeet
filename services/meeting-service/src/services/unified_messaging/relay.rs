@@ -151,6 +151,19 @@ const CONVERSATIONS: &[&str] = &[
     "orderBy",
 ];
 const MESSAGES: &[&str] = &["afterSequence", "beforeSequence", "limit", "threadRootId"];
+/// `GET v1/messaging/events` (ADR 0071): the views, calendar range, filters and keyset page.
+const EVENT_LIST: &[&str] = &[
+    "view",
+    "from",
+    "to",
+    "conversationId",
+    "q",
+    "type",
+    "limit",
+    "cursor",
+];
+/// `GET v1/messaging/communities/{id}/join-requests` (ADR 0073): the state filter and page.
+const COMMUNITY_REQUESTS: &[&str] = &["state", "limit", "cursor"];
 /// `GET v1/conversations/{id}/events`: Messaging's canonical replay cursor is `after`.
 const EVENTS: &[&str] = &["after", "limit"];
 
@@ -873,6 +886,12 @@ pub static ROUTES: &[RelayRoute] = &[
         false,
     ),
     r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("status"), Id],
+        &[],
+        false,
+    ),
+    r(
         Method::DELETE,
         &[Lit("messaging"), Lit("status"), Id],
         &[],
@@ -899,6 +918,12 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("status"), Id, Lit("viewers")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("status"), Id, Lit("replies")],
         &[],
         false,
     ),
@@ -1033,7 +1058,9 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("channels")],
-        &["q"],
+        &[
+            "q", "category", "country", "language", "sort", "cursor", "limit",
+        ],
         false,
     ),
     r(
@@ -1118,6 +1145,742 @@ pub static ROUTES: &[RelayRoute] = &[
             Lit("posts"),
             Id,
             Lit("reaction"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0071: Events (Messaging owns them; Meeting only relays).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events")],
+        EVENT_LIST,
+        false,
+    ),
+    r(Method::POST, &[Lit("messaging"), Lit("events")], &[], true),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Lit("calendar")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Lit("media")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("parts"),
+            Part,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("complete"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("download-grants"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Id, Lit("cancel")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("events"), Id, Lit("rsvp")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id, Lit("attendees")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Id, Lit("invitations"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("events"), Id, Lit("reminders")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id, Lit("ics")],
+        &[],
+        false,
+    ),
+    // ADR 0072: PATCH /v1/messaging/channels/{channelId}/posts/{postId}
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("posts"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/suggestions
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("suggestions")],
+        &["q"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/lookup
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("lookup")],
+        &["handle"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/starred
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("starred")],
+        &["cursor", "limit"],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/invites/preview
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("invites"),
+            Lit("preview"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/invites/join
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("invites"),
+            Lit("join"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/mute
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("mute")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/mute
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("mute")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/admins
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins")],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/admins/{principalId}
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/admins/{principalId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/owner
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("owner")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/invites
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites")],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/invites
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/invites/{inviteId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/posts/views
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Lit("views"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/pin
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("pin"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/pin
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("pin"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/vote
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("vote"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/vote
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("vote"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/star
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("star"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/star
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("star"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/posts/{postId}/forwards
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("forwards"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/scheduled
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("scheduled")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/scheduled/{postId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("scheduled"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/reports
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("reports")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/verification
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("verification")],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/verification
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("verification")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/moderation
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("moderation")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/audit
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("audit")],
+        &["cursor", "limit"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/analytics
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("analytics")],
+        &["from", "to"],
+        false,
+    ),
+    // ADR 0073: Communities (Messaging owns them; Meeting only relays).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities")],
+        &[],
+        true,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("preferences")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("communities"), Lit("preferences")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invitations"),
+            Id,
+            Lit("accept"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invitations"),
+            Id,
+            Lit("decline"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invite-links"),
+            Lit("preview"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invite-links"),
+            Lit("join"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("join-requests")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("join-requests"),
+            Id,
+            Lit("cancel"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("owner")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("leave")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("members")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("members"),
+            Id,
+            Lit("role"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("members"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invitations"),
+            Id,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+            Id,
+            Lit("revoke"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+        ],
+        COMMUNITY_REQUESTS,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+            Id,
+            Lit("approve"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+            Id,
+            Lit("reject"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups")],
+        &[],
+        true,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Lit("link"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Lit("order"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Id,
+            Lit("join"),
         ],
         &[],
         false,
@@ -1620,6 +2383,8 @@ mod tests {
             (Method::GET, "v1/messaging/status/feed".into()),
             (Method::POST, "v1/messaging/status".into()),
             (Method::GET, format!("v1/messaging/status/{C}")),
+            (Method::PATCH, format!("v1/messaging/status/{C}")),
+            (Method::GET, format!("v1/messaging/status/{C}/replies")),
             (
                 Method::POST,
                 format!("v1/messaging/status/media/{C}/parts/0"),
@@ -1629,6 +2394,41 @@ mod tests {
                 format!("v1/messaging/channels/media/{C}/parts/63"),
             ),
             (Method::PUT, format!("v1/messaging/channels/{C}/follow")),
+            (Method::GET, "v1/messaging/events".into()),
+            (Method::POST, "v1/messaging/events".into()),
+            (Method::GET, "v1/messaging/events/calendar".into()),
+            (Method::GET, format!("v1/messaging/events/{C}")),
+            (Method::PUT, format!("v1/messaging/events/{C}/rsvp")),
+            (
+                Method::DELETE,
+                format!("v1/messaging/events/{C}/invitations/{C}"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/events/media/{C}/parts/7"),
+            ),
+            (Method::GET, "v1/messaging/channels/suggestions".into()),
+            (Method::POST, "v1/messaging/channels/invites/join".into()),
+            (
+                Method::PUT,
+                format!("v1/messaging/channels/{C}/posts/{C}/vote"),
+            ),
+            (Method::GET, format!("v1/messaging/channels/{C}/analytics")),
+            (Method::GET, "v1/messaging/communities".into()),
+            (Method::POST, "v1/messaging/communities".into()),
+            (
+                Method::POST,
+                "v1/messaging/communities/invite-links/join".into(),
+            ),
+            (Method::GET, format!("v1/messaging/communities/{C}/groups")),
+            (
+                Method::POST,
+                format!("v1/messaging/communities/{C}/groups/{C}/join"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/communities/{C}/join-requests/{C}/approve"),
+            ),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),
@@ -1699,6 +2499,10 @@ mod tests {
                 format!("v1/messaging/status/media/{C}/parts/{C}"),
             ),
             (Method::GET, "v1/messaging/status/unknown".to_string()),
+            // Events: only their own shapes.
+            (Method::GET, "v1/messaging/events/unknown".to_string()),
+            (Method::POST, format!("v1/messaging/events/{C}")),
+            (Method::GET, format!("v1/messaging/events/{C}/invitations")),
             // Chat lists and polls: only their own shapes.
             (Method::GET, format!("v1/messaging/chat-lists/{C}")),
             (Method::PUT, "v1/messaging/chat-lists".to_string()),
