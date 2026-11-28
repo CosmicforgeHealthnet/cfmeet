@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { mediaUrl, socialService, type ChannelPost, type MediaView } from "@/services/v2/social.service";
+import { mediaUrl, socialService, type ChannelPost, type MediaView, type StatusRing } from "@/services/v2/social.service";
+import { ringBatches } from "@/lib/status-privacy";
 
 export const socialKeys = {
   all: ["v2", "social"] as const,
@@ -12,7 +13,64 @@ export const socialKeys = {
   directory: (q: string) => ["v2", "social", "channels", "directory", q] as const,
   channel: (id: string) => ["v2", "social", "channels", "one", id] as const,
   posts: (id: string) => ["v2", "social", "channels", "posts", id] as const,
+  mine: ["v2", "social", "status-mine"] as const,
+  audience: ["v2", "social", "status-audience"] as const,
+  eligible: ["v2", "social", "status-eligible"] as const,
+  closeFriends: ["v2", "social", "status-close-friends"] as const,
+  lists: ["v2", "social", "status-lists"] as const,
+  mutes: ["v2", "social", "status-mutes"] as const,
+  rings: (ids: string) => ["v2", "social", "status-rings", ids] as const,
 };
+
+/** The saved default audience and Allow sharing (server-side: the same on every device). */
+export function useAudiencePreference() {
+  return useQuery({ queryKey: socialKeys.audience, queryFn: socialService.getAudience, staleTime: 60_000, retry: 1 });
+}
+
+/** Mutual, unblocked contacts (the people a status can reach), named. */
+export function useEligibleContacts(enabled = true) {
+  return useQuery({ queryKey: socialKeys.eligible, queryFn: socialService.eligibleContacts, enabled, staleTime: 60_000, retry: 1 });
+}
+
+export function useCloseFriends(enabled = true) {
+  return useQuery({ queryKey: socialKeys.closeFriends, queryFn: socialService.closeFriends, enabled, staleTime: 60_000, retry: 1 });
+}
+
+export function useAudienceLists(enabled = true) {
+  return useQuery({ queryKey: socialKeys.lists, queryFn: socialService.audienceLists, enabled, staleTime: 60_000, retry: 1 });
+}
+
+export function useStatusMutes() {
+  return useQuery({ queryKey: socialKeys.mutes, queryFn: socialService.mutes, staleTime: 60_000, retry: 1 });
+}
+
+/** "My status": live statuses with audience, unique viewers (times, reactions) and sharing. */
+export function useMyStatuses() {
+  return useQuery({ queryKey: socialKeys.mine, queryFn: socialService.myStatuses, refetchInterval: 60_000, retry: 1 });
+}
+
+/**
+ * Status rings for the people on screen (only those whose statuses the caller may see come
+ * back). One request per 200 people; refreshed with the rest of Updates (invalidation after
+ * a view / publish / delete), on focus and at most every two minutes while visible: no
+ * aggressive polling (ADR 0069: no realtime status push yet).
+ */
+export function useStatusRings(principalIds: (string | null | undefined)[]) {
+  const batches = ringBatches(principalIds);
+  const key = batches.map((b) => b.join(",")).join("|");
+  const q = useQuery({
+    queryKey: socialKeys.rings(key),
+    queryFn: async () => (await Promise.all(batches.map((b) => socialService.rings(b)))).flat(),
+    enabled: batches.length > 0,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+  const map = new Map<string, StatusRing>();
+  for (const r of q.data ?? []) map.set(r.principalId, r);
+  return map;
+}
 
 export function useStatusFeed() {
   return useQuery({ queryKey: socialKeys.feed, queryFn: socialService.feed, refetchInterval: 60_000, retry: 1 });

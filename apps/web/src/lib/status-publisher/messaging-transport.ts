@@ -46,7 +46,13 @@ function mapError(e: unknown, phase: "start" | "part" | "complete" | "create" | 
 }
 
 function toCreateStatus(req: StatusCreateRequest): CreateStatus {
-  const order = req.groupId !== undefined && req.sequence !== undefined ? { groupId: req.groupId, sequence: req.sequence } : {};
+  const order = {
+    ...(req.groupId !== undefined && req.sequence !== undefined ? { groupId: req.groupId, sequence: req.sequence } : {}),
+    // Per-status choices (every segment of a split video carries the same audience).
+    ...(req.audience ? { audience: req.audience } : {}),
+    ...(typeof req.allowSharing === "boolean" ? { allowSharing: req.allowSharing } : {}),
+    ...(req.mentions?.length ? { mentions: req.mentions } : {}),
+  };
   switch (req.kind) {
     case "TEXT": return { kind: "TEXT", text: req.text, background: req.background, font: req.font, ...order };
     case "VIDEO": return { kind: "VIDEO", mediaId: req.mediaId, startMs: req.startMs, endMs: req.endMs, caption: req.caption, ...order };

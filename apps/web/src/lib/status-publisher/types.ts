@@ -7,6 +7,21 @@
 
 export type StatusMediaKind = "IMAGE" | "VIDEO" | "AUDIO";
 
+/** Who may see a status (ADR 0069); omitted: the account's saved default, applied by the server. */
+export interface StatusAudience {
+  mode: "CONTACTS" | "CONTACTS_EXCEPT" | "ONLY" | "CLOSE_FRIENDS" | "CUSTOM";
+  principalIds?: string[];
+  listId?: string;
+}
+
+/** Per-status choices sent with every create of a job (every split segment gets the same ones). */
+export interface StatusCreateExtras {
+  audience?: StatusAudience;
+  allowSharing?: boolean;
+  /** Principals mentioned in the caption / text (the server keeps only those inside the audience). */
+  mentions?: string[];
+}
+
 /** The body of one status creation (the existing CreateStatus shape, media id filled by the queue). */
 export type StatusCreateBody =
   | { kind: "TEXT"; text: string; background?: string; font?: number }
@@ -14,7 +29,7 @@ export type StatusCreateBody =
   | { kind: "VIDEO"; mediaId: string; startMs: number; endMs: number; caption?: string };
 
 /** What the queue tells the transport when it creates a status (body + ordering metadata). */
-export type StatusCreateRequest = StatusCreateBody & {
+export type StatusCreateRequest = StatusCreateBody & StatusCreateExtras & {
   /** Every status of one `enqueueStatus` call shares a groupId… */
   groupId?: string;
   /** …and is published in this order (0, 1, 2…); N only after N-1 is published. */
@@ -113,7 +128,7 @@ export type ProcessorResult =
 /** A named, registered processor (`registerStatusProcessor`); persisted as name + input + params, so it re-runs after a reload. */
 export type StatusProcessor = (input: Blob, params: unknown, ctx: ProcessorContext) => Promise<ProcessorResult>;
 
-export type StatusItemInput =
+export type StatusItemInput = { mentions?: string[] } & (
   | { kind: "TEXT"; text: string; background?: string; font?: number }
   | { kind: "IMAGE"; blob: Blob; caption?: string; preview?: Blob }
   | { kind: "AUDIO"; blob: Blob; durationMs: number; caption?: string; background?: string }
@@ -130,10 +145,16 @@ export type StatusItemInput =
    * Deferred processing with a closure (not persistable): outputs are persisted as soon as
    * produced; a reload before that marks the job failed ("edit it again"), cancel only.
    */
-  | { kind: "VIDEO"; prepare: (ctx: ProcessorContext) => Promise<ProcessorResult>; caption?: string; thumbnail?: Blob };
+  | { kind: "VIDEO"; prepare: (ctx: ProcessorContext) => Promise<ProcessorResult>; caption?: string; thumbnail?: Blob });
 
 export interface StatusJobInput {
   items: StatusItemInput[];
+  /** The audience chosen in the editor (omitted: the saved default). Applies to every item and segment. */
+  audience?: StatusAudience;
+  /** Allow sharing (omitted: the saved default). */
+  allowSharing?: boolean;
+  /** What the audience button read ("My contacts", "8 excluded", "Close friends", a list's name). */
+  audienceLabel?: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -194,6 +215,8 @@ export interface StoredProcess {
   inputBlobKey: string | null;
   params: unknown;
   caption: string | null;
+  /** Mentions of the caption (sent with the first piece, like the caption). */
+  mentions?: string[] | null;
 }
 
 export type StoredPreview =
@@ -219,6 +242,10 @@ export interface StoredJob {
   error: string | null;
   /** The error is permanent: retrying the same request cannot help (cancel only). */
   fatal: boolean;
+  /** Sent with every create of the job (absent on jobs queued before audiences existed). */
+  audience?: StatusAudience | null;
+  allowSharing?: boolean | null;
+  audienceLabel?: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -244,6 +271,8 @@ export interface JobView {
   preview: JobPreview;
   postCount: number;
   publishedCount: number;
+  /** The audience button's label when it was queued (null: the saved default). */
+  audienceLabel: string | null;
 }
 
 export interface QueueSnapshot {

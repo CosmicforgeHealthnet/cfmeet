@@ -472,6 +472,8 @@ export const socialService = {
     return (r.viewers as Wire[]).map(mapViewer);
   }, () => LS.viewers(postId)),
   deleteStatus: (postId: string) => B.run(async () => { await call("DELETE", `${S}/${id(postId)}`); }, () => LS.deleteStatus(postId)),
+  /** The author turns "Allow sharing" on or off for one live status of theirs. */
+  updateStatus: async (statusId: string, body: { allowSharing: boolean }) => mapStatus(await call<Wire>("PATCH", `${S}/${id(statusId)}`, body)),
   deleteStatuses: async (statusIds: string[]) => (await call<{ deleted: number }>("POST", `${S}/delete`, { statusIds })).deleted,
   /** Private reply: a message in the caller's direct chat with the author. */
   replyToStatus: (postId: string, text: string, clientMessageId: string = uuid()) =>
