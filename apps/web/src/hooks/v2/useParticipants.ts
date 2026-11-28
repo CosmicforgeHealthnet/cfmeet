@@ -13,6 +13,7 @@ import type {
   BanParticipantRequest,
   MuteRequest,
 } from "@/types/v2";
+import { roomPoll } from "@/lib/realtime-health";
 
 // Query Keys
 export const participantKeys = {
@@ -36,7 +37,7 @@ export function useParticipantsV2(conferenceId: string) {
     queryKey: participantKeys.list(conferenceId),
     queryFn: () => participantsService.list(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 3000, // Poll every 3 seconds
+    refetchInterval: roomPoll(conferenceId, 3000),
   });
 }
 
@@ -49,7 +50,7 @@ export function useCurrentParticipant(conferenceId: string) {
     queryFn: () => participantsService.me(conferenceId),
     enabled: !!conferenceId,
     retry: false,
-    refetchInterval: 2000, // Poll every 2 seconds for admission updates
+    refetchInterval: roomPoll(conferenceId, 2000, 10_000),
   });
 }
 
@@ -63,7 +64,7 @@ export function useWaitingRoomV2(conferenceId: string, isHost: boolean = true) {
     queryKey: participantKeys.waitingRoom(conferenceId),
     queryFn: () => participantsService.waitingRoom(conferenceId),
     enabled: !!conferenceId && isHost,
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: roomPoll(conferenceId, 2000, 10_000),
   });
 }
 

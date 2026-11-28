@@ -54,6 +54,7 @@ pub mod reference_reconciliation;
 pub mod safety;
 pub mod search;
 pub mod sms_bridge;
+pub mod social;
 pub mod state;
 pub mod transparency;
 pub mod usage;

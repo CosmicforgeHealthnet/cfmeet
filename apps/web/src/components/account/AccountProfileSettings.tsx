@@ -284,7 +284,7 @@ function AvatarUpload({ avatar, initials }: { avatar: string | null; initials: s
   };
   const remove = async () => {
     setBusy("remove");
-    try { saved(await accountService.updateProfile({ avatarUrl: null })); toast("Profile photo removed"); }
+    try { saved(await accountService.removeAvatar()); toast("Profile photo removed"); }
     catch (e) { toast(getErrorMessage(e, "The photo couldn't be removed. Try again."), "error"); }
     finally { setBusy(null); }
   };

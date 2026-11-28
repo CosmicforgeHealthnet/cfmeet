@@ -368,6 +368,15 @@ export default function CallMedia({ credential, video, onConnected, onDisconnect
   className?: string;
   children?: React.ReactNode;
 }) {
+  // The call is over (or this media connection is replaced): the camera it took from the
+  // preview is stopped and forgotten, so the next call's preview opens the camera afresh
+  // instead of showing this call's stopped stream, and the camera light goes off.
+  useEffect(() => () => {
+    const p = preview;
+    if (!p?.taken) return;
+    preview = null;
+    void p.stream.then((s) => s?.getTracks().forEach((t) => t.stop()));
+  }, []);
   return (
     <LiveKitRoom serverUrl={credential.url} token={credential.token} connect
       audio={false} video={false}

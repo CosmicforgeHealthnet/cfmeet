@@ -22,7 +22,9 @@ import {
   useLocalParticipant,
   type TrackReference,
 } from "@livekit/components-react";
-import { Track, RoomEvent } from "livekit-client";
+import { Track, RoomEvent, DisconnectReason } from "livekit-client";
+import { useMediaCredential } from "@/hooks/v2/useCollaboration";
+import { RefreshCw, WifiOff } from "lucide-react";
 import Image from "next/image";
 import { Grid2X2, CircleHelp, ChartNoAxesColumn, GitFork, Clapperboard, Volume2, LayoutPanelTop, Lock, ShieldCheck, Users, MessageCircle, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,9 +39,11 @@ import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture
 import type { SidebarPanel } from "./sidebar";
 import { useMediaDeviceSelect } from "@livekit/components-react";
 import Sidebar from "@/components/room/sidebar";
-import FooterControls from "@/components/room/footer-controls";
+import FooterControls, { mediaErrorText } from "@/components/room/footer-controls";
+import { toast } from "@/components/ui/toast";
 import { DeviceRecordingProvider } from "@/components/recording/DeviceRecording";
-import type { RoomJoinData } from "@/lib/prejoin";
+import { roomJoinData, type RoomJoinData } from "@/lib/prejoin";
+import type { JoinConferenceResponse } from "@/types/generated/meeting-service";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Maximize, Minimize, UserPlus, UserMinus, MicOff, Mic } from "lucide-react";
@@ -86,6 +90,10 @@ interface LiveRoomProps {
   joinData: RoomJoinData;
   initialVideo?: boolean;
   initialAudio?: boolean;
+  /** A dropped session was replaced by a new one: the room starts again with it. */
+  onRejoin?: (data: RoomJoinData, media: { audio: boolean; video: boolean }) => void;
+  /** Back to the pre-join screen (it asks for whatever joining again needs). */
+  onExitToPreJoin?: () => void;
 }
 
 /**
@@ -93,11 +101,15 @@ interface LiveRoomProps {
  * the backend-issued credential; chat, presence and controls use v2 conference endpoints only
  * (FE-014 / MTG-019: no legacy v1 meeting, chat or media writes).
  */
-export default function LiveRoom({ joinData, initialVideo = true, initialAudio = true }: LiveRoomProps) {
+export default function LiveRoom({ joinData, initialVideo = true, initialAudio = true, onRejoin, onExitToPreJoin }: LiveRoomProps) {
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isDisconnectingRef = useRef(false);
   const isRefreshingCredentialRef = useRef(false);
+  // The mic / camera LiveKit applies when it (re)connects: the join choice at first, then
+  // whatever the person had when a breakout move, backstage switch or "Fix connection"
+  // reconnected the room (LiveKit re-applies these on every reconnect).
+  const [wantedMedia, setWantedMedia] = useState({ audio: initialAudio, video: initialVideo });
   const sessionClosed = useRef(false);
   const queryClient = useQueryClient();
   const conference = useConference(joinData.conferenceId);
@@ -124,11 +136,61 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   }, []);
   const [endedStatus, setEndedStatus] = useState<string | null>(null);
 
+  // A phone pauses a page it is not showing (another tab, the chat list, the lock screen) and
+  // the media connection drops. That is not leaving: the person stays in the meeting and the
+  // room reconnects with a fresh media credential when the page is back (or on "Reconnect").
+  // Only Leave, a host's removal or the meeting ending takes someone out.
+  const leaving = useRef(false);
+  const [rtc, setRtc] = useState({ url: joinData.rtcUrl, token: joinData.rtcToken });
+  const [connection, setConnection] = useState<"ok" | "lost" | "reconnecting" | "failed">("ok");
+  const [attempt, setAttempt] = useState(0);
+  const credential = useMediaCredential(joinData.conferenceId);
+  const replaced = useRef(false);
+  const reconnect = async () => {
+    setConnection("reconnecting");
+    try {
+      if (!joinData.participantSessionId) throw new Error("no session");
+      const fresh = await credential.mutateAsync({ participantSessionId: joinData.participantSessionId });
+      setRtc({ url: fresh.rtc.url, token: fresh.rtc.credential });
+      setAttempt((n) => n + 1);
+      setConnection("ok");
+      return;
+    } catch { /* the server already closed the dropped session: join again below */ }
+    try {
+      const response = await conferencesService.join(joinData.conferenceId, { displayName: me.data?.displayName || undefined, previousSessionId: joinData.participantSessionId });
+      if (response.participantToken) storageStore.setParticipantToken(response.participantToken);
+      storageStore.setV2JoinData(response);
+      const next = roomJoinData(response as unknown as JoinConferenceResponse, joinData.isGuest);
+      if (next && onRejoin) {
+        replaced.current = true;
+        onRejoin(next, wantedMedia);
+        return;
+      }
+    } catch { /* passcode, consent or waiting room: the pre-join screen asks */ }
+    setConnection("failed");
+  };
+  const reconnectRef = useRef(reconnect);
+  useEffect(() => { reconnectRef.current = reconnect; });
+  const connectionRef = useRef(connection);
+  useEffect(() => { connectionRef.current = connection; }, [connection]);
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible" && connectionRef.current === "lost") void reconnectRef.current(); };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("online", back);
+    window.addEventListener("pageshow", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("online", back);
+      window.removeEventListener("pageshow", back);
+    };
+  }, []);
+
   const handleDisconnect = useCallback(async () => {
     if (isDisconnectingRef.current) return;
+    leaving.current = true;
     isDisconnectingRef.current = true;
     try {
-      await closeSession();
+      await closeSession().catch(() => {});
     } finally {
       storageStore.clearParticipantToken();
       storageStore.clearV2JoinData();
@@ -185,29 +247,81 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   return (
     <LayoutContextProvider>
       <LiveKitRoom
-        video={initialVideo && (joinData.permissions?.videoPublish ?? true)}
-        audio={initialAudio && (joinData.permissions?.audioPublish ?? true)}
-        token={joinData.rtcToken}
-        serverUrl={joinData.rtcUrl}
+        video={wantedMedia.video && (joinData.permissions?.videoPublish ?? true)}
+        audio={wantedMedia.audio && (joinData.permissions?.audioPublish ?? true)}
+        key={attempt}
+        token={rtc.token}
+        serverUrl={rtc.url}
         data-lk-theme="default"
         style={{ height: "100vh" }}
-        onDisconnected={() => {
-          if (!isRefreshingCredentialRef.current) {
+        onMediaDeviceFailure={(failure, kind) => {
+          // The mic or camera couldn't start on joining: say why instead of silently staying off.
+          const text = mediaErrorText(kind === "videoinput" ? "video" : "audio", { name: failure === "PermissionDenied" ? "NotAllowedError" : failure === "NotFound" ? "NotFoundError" : failure === "DeviceInUse" ? "NotReadableError" : "Error" });
+          if (text) toast(text, "error");
+        }}
+        onDisconnected={(reason) => {
+          if (isRefreshingCredentialRef.current || replaced.current || connectionRef.current === "reconnecting") return;
+          const out = leaving.current || sessionClosed.current || terminal.current
+            || reason === DisconnectReason.PARTICIPANT_REMOVED || reason === DisconnectReason.ROOM_DELETED;
+          if (out) {
             void handleDisconnect().catch(() => { /* Session expiration also closes a disconnected session. */ });
+            return;
           }
+          if (unloading.current) return;
+          // Dropped, not left: reconnect now if the page is showing, otherwise when it is back.
+          if (typeof document !== "undefined" && document.visibilityState === "visible" && navigator.onLine) void reconnect();
+          else setConnection("lost");
         }}
       >
         <RealtimeRoomSync conferenceId={joinData.conferenceId} />
-        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} />
+        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={async () => { leaving.current = true; await closeSession(); }} onCredentialRefreshStateChange={(value, media) => { isRefreshingCredentialRef.current = value; if (media) setWantedMedia(media); }} />
         <RoomAudioRenderer />
       </LiveKitRoom>
+      {connection !== "ok" ? (
+        <div role="status" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm" data-testid="room-connection-lost">
+          <div className="w-full max-w-sm rounded-3xl bg-[#202124] p-6 text-center text-white shadow-2xl">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/10">
+              {connection === "reconnecting" ? <RefreshCw className="size-5 animate-spin" /> : <WifiOff className="size-5" />}
+            </span>
+            <p className="mt-4 text-lg font-semibold">{connection === "reconnecting" ? "Reconnecting…" : connection === "failed" ? "Couldn't get you back in" : "You're still in the meeting"}</p>
+            <p className="mt-1 text-sm text-white/70">{connection === "reconnecting" ? "Getting you back into the call." : connection === "failed" ? "Join again to go back into the call." : "The connection dropped while the page was in the background."}</p>
+            {connection === "failed" ? (
+              <div className="mt-5 flex gap-2">
+                <button type="button" className="h-11 flex-1 rounded-full bg-white/10 text-sm font-semibold hover:bg-white/15" onClick={() => { setConnection("ok"); void handleDisconnect(); }}>Leave</button>
+                <button type="button" className="h-11 flex-1 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90" onClick={() => { replaced.current = true; storageStore.clearV2JoinData(); onExitToPreJoin?.(); }}>Join again</button>
+              </div>
+            ) : null}
+            {connection === "lost" ? (
+              <div className="mt-5 flex gap-2">
+                <button type="button" className="h-11 flex-1 rounded-full bg-white/10 text-sm font-semibold hover:bg-white/15" onClick={() => { setConnection("ok"); void handleDisconnect(); }}>Leave</button>
+                <button type="button" className="h-11 flex-1 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90" onClick={() => void reconnect()} data-testid="room-reconnect">Reconnect</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </LayoutContextProvider>
   );
 }
 
 // Room content with participant notifications
-/** Collaboration state the tiles need: raised hands (order) and spotlights, matched by name for remote tiles. */
+/** Collaboration state the tiles need: raised hands (order) and spotlights, matched by participant id for remote tiles. */
 interface StageInfo { handOrder: Map<string, number>; spotlit: Set<string>; myId?: string; myHand?: number; mySpot?: boolean }
+
+/**
+ * The CF Meet participant behind a media tile: the media credential carries it as the
+ * `participantId` attribute (and in the metadata). Hands and spotlights are keyed by it, so two
+ * people with the same name are never confused; the name is only a fallback for old credentials.
+ */
+function stageKey(participant: { attributes?: Record<string, string>; metadata?: string; name?: string }): string {
+  const fromAttributes = participant.attributes?.participantId;
+  if (fromAttributes) return fromAttributes;
+  try {
+    const id = participant.metadata ? (JSON.parse(participant.metadata) as { participantId?: unknown }).participantId : null;
+    if (typeof id === "string" && id) return id;
+  } catch { /* not JSON */ }
+  return `name:${participant.name ?? ""}`;
+}
 const StageContext = createContext<StageInfo>({ handOrder: new Map(), spotlit: new Set() });
 
 interface RoomContentProps {
@@ -215,7 +329,7 @@ interface RoomContentProps {
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
   onLeave?: () => Promise<void>;
-  onCredentialRefreshStateChange: (refreshing: boolean) => void;
+  onCredentialRefreshStateChange: (refreshing: boolean, media?: { audio: boolean; video: boolean }) => void;
 }
 
 function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCredentialRefreshStateChange }: RoomContentProps) {
@@ -249,8 +363,8 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
   const hands = [...(collab.data?.raisedHands ?? [])].sort((a, b) => a.raisedAt.localeCompare(b.raisedAt));
   const myHandIndex = hands.findIndex((h) => h.participantId === me.data?.id);
   const stage: StageInfo = {
-    handOrder: new Map(hands.map((h, i) => [h.displayName, i + 1])),
-    spotlit: new Set((collab.data?.spotlights ?? []).map((spot) => spot.displayName)),
+    handOrder: new Map(hands.flatMap((h, i) => [[h.participantId, i + 1], [`name:${h.displayName}`, i + 1]] as [string, number][])),
+    spotlit: new Set((collab.data?.spotlights ?? []).flatMap((spot) => [spot.participantId, `name:${spot.displayName}`])),
     myId: me.data?.id,
     myHand: myHandIndex < 0 ? undefined : myHandIndex + 1,
     mySpot: (collab.data?.spotlights ?? []).some((spot) => spot.participantId === me.data?.id),
@@ -480,7 +594,7 @@ function VideoGridContent({ layout }: { layout: "grid" | "speaker" }) {
 
   // Speaker view: the current (or last) speaker large, everyone else in a strip.
   // A host spotlight overrides the layout for everyone: spotlighted person large.
-  const spotTrack = cameraTracks.find((t) => (t.participant.isLocal ? stage.mySpot : stage.spotlit.has(t.participant.name ?? "")));
+  const spotTrack = cameraTracks.find((t) => (t.participant.isLocal ? stage.mySpot : stage.spotlit.has(stageKey(t.participant))));
   if ((layout === "speaker" || spotTrack) && cameraTracks.length > 1) {
     const mainTrack = spotTrack ?? cameraTracks.find((t) => t.participant.identity === lastSpeaker.current)
       ?? cameraTracks.find((t) => !t.participant.isLocal)
@@ -557,8 +671,8 @@ function CustomTileContent({ compact = false }: { compact?: boolean }) {
   const roomIdentities = useParticipants().map((p) => p.identity);
   const participant = useParticipantContext();
   const stage = useContext(StageContext);
-  const handNumber = participant.isLocal ? stage.myHand : stage.handOrder.get(participant.name ?? "");
-  const spotlit = participant.isLocal ? stage.mySpot : stage.spotlit.has(participant.name ?? "");
+  const handNumber = participant.isLocal ? stage.myHand : stage.handOrder.get(stageKey(participant));
+  const spotlit = participant.isLocal ? stage.mySpot : stage.spotlit.has(stageKey(participant));
   const trackRef = useMaybeTrackRefContext();
   const tileRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);

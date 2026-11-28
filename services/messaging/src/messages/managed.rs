@@ -333,6 +333,24 @@ pub(crate) async fn send_with(
     let text = request
         .text
         .ok_or_else(|| Error::validation("MANAGED messages need text"))?;
+    // A poll: the text is its question; no attachments; the presentation is POLL.
+    let poll = match &request.poll {
+        None => None,
+        Some(p) => {
+            if presentation.is_some() {
+                return Err(Error::validation("a poll cannot also be an announcement"));
+            }
+            if !request.attachment_ids.is_empty() {
+                return Err(Error::validation("a poll carries no attachments"));
+            }
+            Some(super::polls::validate(&text, p)?)
+        }
+    };
+    let presentation = if poll.is_some() {
+        Some(super::polls::POLL)
+    } else {
+        presentation
+    };
     let content = admit(text)?;
     let ring = ring(state)?;
     if let Some(existing) = load_by_client_id(
@@ -416,6 +434,9 @@ pub(crate) async fn send_with(
                 .await?;
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
+                if let Some(poll) = &poll {
+                    super::polls::insert(txn, ring, &st.db, &row, poll, now).await?;
+                }
                 let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
                 super::record_mentions(txn, &row, &mentions).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
@@ -510,6 +531,9 @@ pub async fn edit(
                 }
                 if !row.is_active() {
                     return Err(Error::reason(ErrorCode::MessageNotModifiable, "NOT_ACTIVE"));
+                }
+                if row.managed_presentation.as_deref() == Some(super::polls::POLL) {
+                    return Err(Error::reason(ErrorCode::MessageNotModifiable, "POLL_NOT_EDITABLE"));
                 }
                 if effective
                     .editing

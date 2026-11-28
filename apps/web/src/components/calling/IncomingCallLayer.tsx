@@ -64,6 +64,16 @@ function IncomingCallCard({ offer, more, onDone }: { offer: RecoveredInvitation;
     return () => tone.stop();
   }, [silenced]);
 
+  // The browser held the ringtone back until the page is touched: the first tap or key
+  // anywhere lets it ring (what the hint below promises).
+  useEffect(() => {
+    if (!soundBlocked || silenced) return;
+    const unlock = () => { void ringtone.current.unlock().then((playing) => { if (playing) setSoundBlocked(false); }); };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => { window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); };
+  }, [soundBlocked, silenced]);
+
   // Tab title and a background notification (only when the user already allowed them).
   useEffect(() => {
     const title = document.title;

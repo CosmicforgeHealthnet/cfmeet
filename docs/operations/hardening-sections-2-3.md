@@ -44,7 +44,7 @@
 | `users.password_hash` | bcrypt |
 | `meeting_spaces.passcode_hash` | bcrypt |
 | `meeting_invitations.token_hash`, `conference_participants.credential_hash` | SHA-256 of 256-bit bearer secrets |
-| `account_sessions.current_refresh_id` | identifier inside a signed refresh token; useless without the signing key |
+| `account_sessions.current_refresh_id`, `previous_refresh_id` | identifiers inside signed refresh tokens; useless without the signing key |
 | OTP / reset codes, OAuth state, exchange codes | Redis with expiry (removed from PostgreSQL by `m20260323_000001_migrate_to_redis`) |
 | `JWT_SECRET`, LiveKit, SMTP, Google client secret | environment / secret store, never in the database |
 
@@ -161,6 +161,7 @@ Order:
 | `LEGACY_RTC_TOKEN_TTL_SECS` | 900 | legacy LiveKit credential lifetime (60–21600) |
 | `ACCOUNT_DEACTIVATION_REQUIRE_REAUTH` | true | ACC-026 requirement (emergency off switch) |
 | `ACCOUNT_REAUTH_MAX_AGE_SECS` | 600 | recent-sign-in window (60–3600) |
+| `ACCOUNT_REFRESH_REUSE_GRACE_SECONDS` | 60 | refresh-token reuse grace window (0–300; 0 = strict), [ADR 0070](../decisions/0070-refresh-token-reuse-grace-window.md) |
 | `EMAIL_VERIFICATION_ENFORCEMENT` | off | ACC-016 enforcement level (owner decision) |
 | `CF_MIGRATION_ALLOW_DESTRUCTIVE` | unset | per-command override for `down`/`fresh`/`refresh`/`reset` |
 

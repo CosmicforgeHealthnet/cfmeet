@@ -26,20 +26,20 @@ import { messagingClientAccessToken, messagingSessionDeviceToken } from "@/servi
 
 import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
 import { b64u } from "./api";
-import { MessagingApiError } from "./errors";
+import { MessagingApiError, friendlyErrorCode, messagingErrorMessage } from "./errors";
 import { accountDevice } from "@/lib/auth/account-device";
 import type { LinkView } from "@/lib/auth/account-device-core";
 import { accountSession } from "@/lib/auth/session";
 import type { Colleague, MessagingIdentity } from "@/types/messaging";
 import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
-import { ManagedConversationState, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
+import { ManagedConversationState, behindHead, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
 import { MessageOutbox, browserOutboxStorage, flushOutbox, type OutboxItem } from "./outbox";
 import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
 import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
-import { inboxFlags, type InboxFlags } from "./chat-list";
-import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
+import { inboxFlags, moveList, sortLists, type ChatListView, type InboxFlags } from "./chat-list";
+import { linkPreviewFor, managedPoll, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 import { statusPostId } from "./private-shares";
 
@@ -82,7 +82,13 @@ export type ConversationView = {
   unreadCount: number;
   mentionCount: number;
   lastActivityAt: string;
-  lastMessage: { sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string } | null;
+  lastMessage: {
+    sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string;
+    /** MANAGED: POLL / ANNOUNCEMENT / STANDARD, and the first attachment's kind (chat list icons). */
+    presentation?: string | null; attachmentKind?: string | null;
+  } | null;
+  /** A MANAGED group's description (null: none). */
+  description: string | null;
   memberRoles: Record<string, MemberRole>;
   myRole: MemberRole | null;
   /** Only owners and admins can send (S13). */
@@ -117,6 +123,8 @@ export type MessageView = {
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
+  /** Forwarded from another chat (WhatsApp's "Forwarded" label). */
+  forwarded?: boolean;
   /** F4-F7: a private chat's poll, location, contact card or link preview (encrypted content). */
   rich?: RichContent | null;
 };
@@ -132,6 +140,8 @@ export type IncomingTransfer = {
 export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
 
 export type EngineSnapshot = {
+  /** Chats this account was taken out of by someone else (not left on this device), newest last. */
+  removedFrom?: { conversationId: string; title: string; deleted?: boolean }[];
   /** Per conversation: who is online and when others were last seen. */
   presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
@@ -157,6 +167,10 @@ export type EngineSnapshot = {
   pins: Record<string, PinView[]>;
   /** Older MANAGED history can be loaded (back-pagination). */
   hasOlder: Record<string, boolean>;
+  /** The account's own chat lists ("Family", "Work"), the same on every device. */
+  chatLists: ChatListView[];
+  /** The inbox stream is live (new chats and previews arrive without polling). */
+  inboxLive: boolean;
 };
 
 type ServerConversation = {
@@ -175,15 +189,17 @@ type ServerConversation = {
   ownerPrincipalId?: string;
   title?: string | null;
   avatarRef?: string | null;
+  description?: string | null;
   inbox?: {
     lastActivityAt: string;
-    lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null } | null;
+    lastMessage: { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; lifecycle: string; attachmentCount: number; previewText: string | null; presentation?: string | null; attachmentKind?: string | null } | null;
     unreadCount: number;
     mentionCount: number;
     /** F1: this member's own archive / pin of the chat. */
     archived?: boolean;
     pinned?: boolean;
     pinnedAt?: string | null;
+    favourite?: boolean;
   };
 };
 
@@ -200,7 +216,7 @@ type ServerMessage = {
   createdAt: string;
   attachmentIds: string[];
   e2ee?: { epoch: number; ciphertext: string | null } | null;
-  managed?: { text: string | null } | null;
+  managed?: { text: string | null; presentation?: string; poll?: unknown } | null;
   replyToMessageId?: string | null;
   targetMessageId?: string | null;
 };
@@ -226,6 +242,8 @@ type GroupChange = { commit: Uint8Array; epoch: number; welcome?: Uint8Array | n
 type PendingJoiner = { deviceId: string; sequence: number; senderPrincipalId: string };
 
 const PAGE = 100;
+/** Gone from the chat entirely (WhatsApp): expired, purged, or deleted for you only. */
+const vanishes = (lifecycle: string | undefined) => lifecycle === "EXPIRED" || lifecycle === "PURGED" || lifecycle === "HIDDEN_FOR_YOU";
 /** Newest MANAGED messages loaded when a conversation is first synchronized. */
 const INITIAL_PAGE = 50;
 /** Newest MANAGED messages re-read per poll when no realtime events arrive (edits / tombstones). */
@@ -234,6 +252,8 @@ const SESSION_DEVICE_KEY = "cfmeet.messaging.session-device.";
 const TYPING_THROTTLE_MS = 3000;
 /** A device not yet in a chat's group retries joining it by itself at most this often. */
 const JOIN_RETRY_MS = 10_000;
+const JOIN_BLOCKED_RETRY_MS = 5 * 60_000;
+const NAME_RETRY_MS = 5_000;
 /** A member device re-publishes a missing GroupInfo at most this often per chat. */
 const GROUP_INFO_RETRY_MS = 60_000;
 /** Before sending, the sender adds members' new devices; checked at most this often per chat. */
@@ -242,6 +262,8 @@ const SEND_DEVICE_CHECK_MS = 10_000;
 const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
 
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
+/** The fallback poll while the inbox stream is live (covers missed signals only). */
+const SLOW_POLL_MS = Math.max(POLL_MS, 60_000);
 
 /** The API error code of an Account authority call (axios), if any. */
 function accountErrorCode(e: unknown): string | null {
@@ -264,6 +286,11 @@ export function isInlineImage(mediaType: string | null | undefined): boolean {
   return mediaType === "image/jpeg" || mediaType === "image/png" || mediaType === "image/webp" || mediaType === "image/gif";
 }
 
+/** Videos the chat plays inline (WhatsApp); other video types stay a download. */
+export function isPlayableVideo(mediaType: string | null | undefined): boolean {
+  return mediaType === "video/mp4" || mediaType === "video/webm";
+}
+
 /** Voice notes and audio files the chat plays inline. */
 export function isPlayableAudio(mediaType: string | null | undefined): boolean {
   return !!mediaType && /^audio\/(webm|ogg|mp4|mpeg|aac|wav)$/.test(mediaType);
@@ -274,10 +301,12 @@ export function isPlayableAudio(mediaType: string | null | undefined): boolean {
  * engine so leaving the chat and coming back doesn't download and decrypt them again.
  */
 const mediaUrls = new Map<string, string>();
+/** Group photos by conversation and avatar reference (object URLs, kept for the visit). */
+const avatarUrls = new Map<string, Promise<string | null>>();
 
 /** Remembers a file this device just sent, so its own photo shows without downloading it back. */
 function rememberSentMedia(attachmentId: string, file: Blob, mediaType: string) {
-  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
+  if (!mediaUrls.has(attachmentId) && (isInlineImage(mediaType) || isPlayableAudio(mediaType) || isPlayableVideo(mediaType))) mediaUrls.set(attachmentId, URL.createObjectURL(new Blob([file], { type: mediaType })));
 }
 
 /** Length of an audio or video file, read by the browser (null: it can't tell). */
@@ -325,7 +354,7 @@ function sendFailureText(e: unknown): string {
   if (e instanceof MessagingApiError && e.code === "FEATURE_DISABLED" && (e.reason === "ATTACHMENTS_DISABLED" || e.reason === "ATTACHMENT_STORAGE_NOT_CONFIGURED")) {
     return "sending photos and files isn't switched on for CF Meet yet";
   }
-  return e instanceof Error ? e.message : "error";
+  return messagingErrorMessage(e).replace(/\.$/, "");
 }
 
 export class MessagingEngine {
@@ -350,6 +379,8 @@ export class MessagingEngine {
     typing: {},
     pins: {},
     hasOlder: {},
+    chatLists: [],
+    inboxLive: false,
   };
   private readonly listeners = new Set<() => void>();
   private crypto: CryptoClient | null = null;
@@ -357,6 +388,7 @@ export class MessagingEngine {
   /** Per conversation, each member's delivered / read sequence (from receipt events and snapshots). */
   private receipts = new Map<string, Map<string, { read: number; delivered: number }>>();
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private presenceWatched: string | null = null;
   private server = new Map<string, ServerConversation>();
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
@@ -391,6 +423,8 @@ export class MessagingEngine {
   private mlsChain: Promise<unknown> = Promise.resolve();
   /** Per chat: when this device last tried to join its group by itself. */
   private joinAttempts = new Map<string, number>();
+  /** Chats whose join waits on a member device to commit removals first (retried slowly). */
+  private joinBlocked = new Set<string>();
   /** Per chat: when this device last published a missing GroupInfo. */
   private groupInfoChecks = new Map<string, number>();
   /** Per chat this device is not (yet) in: the latest messages, shown as placeholders. */
@@ -565,6 +599,7 @@ export class MessagingEngine {
     for (const t of this.typingTimers.values()) clearTimeout(t);
     this.typingTimers.clear();
     this.detachTransport();
+    this.outbox?.detach();
     this.crypto?.terminate();
     this.crypto = null;
   }
@@ -594,8 +629,13 @@ export class MessagingEngine {
 
   private async poll(): Promise<void> {
     if (this.stopped) return;
+    // With the inbox stream live, a synced-only account re-reads its chat list and chats
+    // slowly: only to cover gaps the socket can't (a missed signal). Device approvals and
+    // queued sends keep their pace; encrypted accounts keep their periodic device work.
+    const live = !this.crypto && this.snapshot.inboxLive && !!this.transport?.connected;
+    const fresh = live && Date.now() - this.lastListRefresh < SLOW_POLL_MS;
     try {
-      await this.refreshConversations();
+      if (!fresh) await this.refreshConversations();
       // A PRIVATE_E2EE chat appeared (an older client started one): start the encryption
       // device now, once, through the normal start path.
       if (!this.crypto && this.snapshot.phase === "ready" && this.hasPrivateChats() && !this.privateStarting) {
@@ -611,7 +651,7 @@ export class MessagingEngine {
       await this.checkIncomingLinks();
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
-      for (const id of this.server.keys()) this.scheduleSync(id);
+      if (!fresh) for (const id of this.server.keys()) this.scheduleSync(id);
       void this.flush();
       if (this.snapshot.phase === "needs-device" && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
       for (const id of Object.keys(this.snapshot.awaitingSetup)) void this.flushDrafts(id);
@@ -806,7 +846,7 @@ export class MessagingEngine {
     if (!c || this.snapshot.phase !== "ready" || !this.snapshot.deviceId || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return false;
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (await c.call<boolean>("hasGroup", { groupId: gid })) return true;
-    if (!force && Date.now() - (this.joinAttempts.get(id) ?? 0) < JOIN_RETRY_MS) return false;
+    if (!force && Date.now() - (this.joinAttempts.get(id) ?? 0) < (this.joinBlocked.has(id) ? JOIN_BLOCKED_RETRY_MS : JOIN_RETRY_MS)) return false;
     this.joinAttempts.set(id, Date.now());
     await this.checkWelcomes().catch(() => {});
     const joined = await this.withMlsLock(async () => {
@@ -816,10 +856,14 @@ export class MessagingEngine {
       const out = await c.call<GroupChange>("externalJoin", { groupId: gid, groupInfo: b64u.dec(state.groupInfo) });
       try {
         await this.submitChange(conv, out);
-      } catch {
-        // Another commit won this epoch (or a removal must be committed first): retried soon.
+      } catch (e) {
+        // Another commit won this epoch: retried soon. Signed-out devices still in the group
+        // must be removed by a member's device first: that can take a long time (nobody may be
+        // online), so it is retried slowly instead of every few seconds.
+        if (e instanceof MessagingApiError && e.code === "MLS_REKEY_REQUIRED") this.joinBlocked.add(id);
         return false;
       }
+      this.joinBlocked.delete(id);
       return true;
     });
     if (joined) {
@@ -922,14 +966,22 @@ export class MessagingEngine {
     this.connect();
   }
 
-  /** Logout: the local device and its history are erased and the device revoked. */
-  async signOut(): Promise<void> {
-    // Background work stops first: the revocation below must not be "detected" by a poll
-    // that would wipe and reopen the device store in parallel.
+  /**
+   * Sign-out step one, synchronous: background work stops and the outbox closes, so a poll
+   * can't "detect" the revocation and reopen the device store, and a send that finishes
+   * after the browser's storage is cleared can't write its queue back.
+   */
+  halt(): void {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.detachTransport();
+    this.outbox?.close();
+  }
+
+  /** Logout: the local device and its history are erased and the device revoked. */
+  async signOut(): Promise<void> {
+    this.halt();
     try {
       if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
@@ -996,13 +1048,22 @@ export class MessagingEngine {
       onSubscriptionRevoked: () => {
         void this.refreshConversations().catch(() => {});
       },
+      // The inbox stream: a chat this socket isn't subscribed to changed (a new chat, a
+      // message, a read position): the list is re-read at once instead of at the next poll.
+      onInboxEvent: () => this.scheduleInboxRefresh(),
+      onInboxResync: () => this.scheduleInboxRefresh(),
+      onInboxSubscribed: () => {
+        if (this.transport === transport) this.set({ inboxLive: true });
+      },
       onConnectionState: (state) => {
         if (this.transport !== transport) return;
-        this.set({ connection: state });
+        this.set({ connection: state, ...(state === "connected" ? {} : { inboxLive: false }) });
         if (state === "connected") {
           this.reconnectDelay = 1000;
           // Missed while offline: catch up every conversation from the Delivery Service.
           for (const id of this.server.keys()) this.scheduleSync(id);
+          // The open chat's "online" / "last seen" is asked again now, not at the next poll.
+          if (this.presenceWatched) transport.queryPresence(this.presenceWatched);
           this.outbox?.wake();
           void this.flush();
         } else if (!this.stopped) {
@@ -1012,6 +1073,8 @@ export class MessagingEngine {
     });
     this.transport = transport;
     this.set({ realtime: mode });
+    // New chats, previews, unread counts and order arrive live (Messaging `inbox.subscribe`).
+    transport.subscribeInbox();
     for (const c of this.server.values()) this.subscribeConversation(c);
     this.set({ connection: "connecting" });
     transport.connect().catch((e) => {
@@ -1107,10 +1170,39 @@ export class MessagingEngine {
   watchPresence(conversationId: string | null): void {
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
+    this.presenceWatched = conversationId;
     if (!conversationId) return;
     const ask = () => this.transport?.queryPresence(conversationId);
     ask();
     this.presenceTimer = setInterval(ask, 20_000);
+  }
+
+  /** WhatsApp's Message info: each other member's state for one of your messages. */
+  messageInfo(conversationId: string, sequence: number): { principalId: string; state: "read" | "delivered" | "sent" }[] {
+    const me = this.snapshot.identity?.principalId;
+    const byMember = this.receipts.get(conversationId);
+    return (this.server.get(conversationId)?.members ?? [])
+      .map((m) => m.principalId)
+      .filter((p) => p !== me)
+      .map((p) => {
+        const r = byMember?.get(p);
+        return { principalId: p, state: (r && r.read >= sequence ? "read" : r && r.delivered >= sequence ? "delivered" : "sent") as "read" | "delivered" | "sent" };
+      });
+  }
+
+  /** Applies read / delivery receipts among `events`; whether any was found. */
+  private noteReceiptEvents(conversationId: string, events: readonly ConversationEvent[]): boolean {
+    let any = false;
+    for (const e of events) {
+      if (e.type !== "read.cursor.updated" && e.type !== "delivery.cursor.updated") continue;
+      const d = (e.data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId !== "string") continue;
+      this.noteReceipt(conversationId, d.principalId,
+        typeof d.readSequence === "number" ? d.readSequence : undefined,
+        typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+      any = true;
+    }
+    return any;
   }
 
   private noteReceipt(conversationId: string, principalId: string, read?: number, delivered?: number): void {
@@ -1194,13 +1286,18 @@ export class MessagingEngine {
 
   async refreshConversations(): Promise<void> {
     const out: ServerConversation[] = [];
+    const deleted = new Set<string>();
     let cursor: string | null = null;
     for (let i = 0; i < 10; i++) {
       const page: { conversations: ServerConversation[]; nextCursor: string | null } = await relay(
         "GET",
         `v1/conversations?limit=${PAGE}&orderBy=lastActivity${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       );
-      out.push(...page.conversations);
+      // A group its creator deleted is gone for everyone: it never shows in the list.
+      for (const c of page.conversations) {
+        if (c.lifecycleState === "DELETED") deleted.add(c.conversationId);
+        else out.push(c);
+      }
       cursor = page.nextCursor;
       if (!cursor) break;
     }
@@ -1213,6 +1310,10 @@ export class MessagingEngine {
     }
     const fresh = out.filter((c) => !this.server.has(c.conversationId));
     const gone = [...this.server.keys()].filter((id) => !out.some((c) => c.conversationId === id));
+    const removed = gone
+      .filter((id) => !this.leaving.has(id))
+      .map((id) => ({ conversationId: id, title: this.snapshot.conversations.find((c) => c.id === id)?.title ?? "a chat", ...(deleted.has(id) ? { deleted: true } : {}) }));
+    if (removed.length) this.set({ removedFrom: [...(this.snapshot.removedFrom ?? []), ...removed].slice(-10) });
     for (const id of gone) {
       // No longer a member (removed / left): it disappears from this client.
       this.server.delete(id);
@@ -1221,19 +1322,91 @@ export class MessagingEngine {
       this.loadedManaged.delete(id);
       this.outbox?.dropConversation(id);
     }
+    // A chat whose list preview moved past what it shows is synchronized again: a realtime
+    // event lost on a stale socket must not leave the open chat behind its own preview.
+    const behind = behindHead(
+      out.map((c) => [c.conversationId, c.inbox?.lastMessage?.sequence ?? 0] as const),
+      (id) => {
+        const before = this.server.get(id);
+        if (!before) return null;
+        if (before.securityProfile === "MANAGED") return this.loadedManaged.has(id) ? this.stateFor(id).maxSequence : null;
+        return before.inbox?.lastMessage?.sequence ?? 0;
+      },
+    );
     for (const c of out) this.server.set(c.conversationId, c);
     for (const c of fresh) this.subscribeConversation(c);
     await this.renderConversations();
     for (const c of fresh) this.scheduleSync(c.conversationId);
+    for (const id of behind) this.scheduleSync(id);
+    this.lastListRefresh = Date.now();
+    void this.loadChatLists();
+  }
+
+  /** When the chat list was last read in full (the slow fallback poll skips while it's fresh). */
+  private lastListRefresh = 0;
+
+  /** The account's own chat lists (an older server without them: none). */
+  async loadChatLists(): Promise<void> {
+    try {
+      const r = await relay<{ chatLists: ChatListView[] }>("GET", "v1/messaging/chat-lists");
+      this.set({ chatLists: sortLists(r.chatLists.map((l) => ({ listId: l.listId, name: l.name, position: l.position, conversationIds: l.conversationIds }))) });
+    } catch {
+      // Lists are an organizing aid: the chat list works without them.
+    }
+  }
+
+  private putChatList(list: ChatListView): void {
+    const rest = this.snapshot.chatLists.filter((l) => l.listId !== list.listId);
+    this.set({ chatLists: sortLists([...rest, { listId: list.listId, name: list.name, position: list.position, conversationIds: list.conversationIds }]) });
+  }
+
+  /** A new chat list (at the end), optionally with chats in it. */
+  async createChatList(name: string, conversationIds: string[] = []): Promise<ChatListView> {
+    const list = await relay<ChatListView>("POST", "v1/messaging/chat-lists", { name, ...(conversationIds.length ? { conversationIds } : {}) });
+    this.putChatList(list);
+    return list;
+  }
+
+  async renameChatList(listId: string, name: string): Promise<void> {
+    this.putChatList(await relay<ChatListView>("PATCH", `v1/messaging/chat-lists/${listId}`, { name }));
+  }
+
+  /** Moves a list to `position` (its chip moves with it); the others keep their order. */
+  async moveChatList(listId: string, position: number): Promise<void> {
+    const before = this.snapshot.chatLists;
+    this.set({ chatLists: moveList(before, listId, position) });
+    try {
+      await relay<ChatListView>("PATCH", `v1/messaging/chat-lists/${listId}`, { position });
+    } catch (e) {
+      this.set({ chatLists: before });
+      throw e;
+    }
+    void this.loadChatLists();
+  }
+
+  /** Deletes a list; its chats stay where they are. */
+  async deleteChatList(listId: string): Promise<void> {
+    await relay("DELETE", `v1/messaging/chat-lists/${listId}`);
+    this.set({ chatLists: this.snapshot.chatLists.filter((l) => l.listId !== listId) });
+    void this.loadChatLists();
+  }
+
+  /** Adds a chat to (or removes it from) one of my lists; the chat itself is never touched. */
+  async setInChatList(listId: string, conversationId: string, member: boolean): Promise<void> {
+    const path = `v1/messaging/chat-lists/${listId}/conversations/${conversationId}`;
+    this.putChatList(await relay<ChatListView>(member ? "PUT" : "DELETE", path));
   }
 
   private async renderConversations(): Promise<void> {
     const me = this.snapshot.identity?.principalId;
     const views: ConversationView[] = [];
     const needNames = new Set<string>();
+    const nameChats: string[] = [];
     for (const c of this.server.values()) {
       const members = (c.members ?? []).map((m) => m.principalId);
-      for (const m of members) if (m !== me && !this.snapshot.names[m]) needNames.add(m);
+      let unnamed = false;
+      for (const m of members) if (m !== me && !this.snapshot.names[m] && Date.now() - (this.unnameable.get(m) ?? 0) > NAME_RETRY_MS) { needNames.add(m); unnamed = true; }
+      if (unnamed) nameChats.push(c.conversationId);
       let groupReady = false;
       if (c.securityProfile === "PRIVATE_E2EE" && c.encryption.mlsGroupId && this.crypto && this.snapshot.deviceId) {
         groupReady = await this.crypto.call<boolean>("hasGroup", { groupId: b64u.dec(c.encryption.mlsGroupId) }).catch(() => false);
@@ -1264,8 +1437,9 @@ export class MessagingEngine {
         mentionCount: c.inbox?.mentionCount ?? previous?.mentionCount ?? 0,
         lastActivityAt: c.inbox?.lastActivityAt ?? previous?.lastActivityAt ?? c.createdAt,
         lastMessage: last
-          ? { sequence: last.sequence, senderPrincipalId: last.senderPrincipalId, previewText: last.previewText, attachmentCount: last.attachmentCount, lifecycle: last.lifecycle, createdAt: last.createdAt }
+          ? { sequence: last.sequence, senderPrincipalId: last.senderPrincipalId, previewText: last.previewText, attachmentCount: last.attachmentCount, lifecycle: last.lifecycle, createdAt: last.createdAt, presentation: last.presentation ?? null, attachmentKind: last.attachmentKind ?? null }
           : (previous?.lastMessage ?? null),
+        description: c.description ?? null,
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
         announcementOnly: !!c.announcementOnly,
@@ -1275,10 +1449,14 @@ export class MessagingEngine {
     }
     if (needNames.size) {
       try {
-        const r = await identityApi.names([...needNames].slice(0, 256));
+        const asked = [...needNames].slice(0, 256);
+        const r = await identityApi.names(asked, nameChats);
         const names = { ...this.snapshot.names };
         // Your own saved contact name (alias) first, as the contact list shows it.
         for (const p of r.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        // Not asked again on every render, but again a little later (a name can appear
+        // once a membership or contact link is in place).
+        for (const p of asked) if (!names[p]) this.unnameable.set(p, Date.now());
         this.set({ names });
       } catch {
         // Names are cosmetic; ids are shown instead.
@@ -1343,6 +1521,61 @@ export class MessagingEngine {
   }
 
   /**
+   * An older PRIVATE_E2EE chat continues as a server-stored (MANAGED) chat with the same
+   * people (and the same name for a group): readable on every device the user signs in
+   * on. Opens the server-stored chat when it already exists; the encrypted chat stays
+   * readable where it is. Returns the server-stored chat's id.
+   */
+  /** The group name "Continue chat" can carry over (null: the user must name it). */
+  knownGroupName(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.contextClass === "DIRECT") return null;
+    return view.groupTitle ?? view.serverTitle ?? null;
+  }
+
+  async continueAsManaged(conversationId: string, groupName?: string): Promise<string> {
+    const me = this.snapshot.identity?.principalId;
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!me || !view) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (view.securityProfile === "MANAGED") return view.id;
+    const others = view.members.filter((m) => m !== me);
+    const twin = this.managedTwinOf(conversationId);
+    if (twin) return twin;
+    // The group's own name when this device knows it, else its members' names (never a prompt).
+    const name = view.contextClass === "DIRECT" ? undefined
+      : view.groupTitle ?? view.serverTitle ?? (groupName?.trim() || others.map((p) => this.snapshot.names[p]).filter(Boolean).slice(0, 4).join(", ") || "Group");
+    const pending = this.continuing.get(conversationId);
+    if (pending) return pending;
+    const created = this.createConversation([], "MANAGED", { principalIds: others, title: name }).finally(() => this.continuing.delete(conversationId));
+    this.continuing.set(conversationId, created);
+    return created;
+  }
+
+  /** The older encrypted chats a synced chat continues (their readable history shows in it). */
+  legacyFor(managedId: string): string[] {
+    return this.snapshot.conversations
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE" && this.managedTwinOf(c.id) === managedId)
+      .map((c) => c.id);
+  }
+
+  private continuing = new Map<string, Promise<string>>();
+  private unnameable = new Map<string, number>();
+
+  /**
+   * The synced (MANAGED) chat an older encrypted chat continues in: same kind, same people
+   * (for a group, the one with the same name first). The chat list shows it instead.
+   */
+  managedTwinOf(conversationId: string): string | null {
+    const view = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!view || view.securityProfile === "MANAGED") return null;
+    const same = (c: ConversationView) => c.securityProfile === "MANAGED" && c.contextClass === view.contextClass && c.lifecycleState === "ACTIVE"
+      && c.members.length === view.members.length && view.members.every((m) => c.members.includes(m));
+    const candidates = this.snapshot.conversations.filter(same);
+    const named = view.groupTitle ?? view.serverTitle;
+    return (candidates.find((c) => named && c.serverTitle === named) ?? candidates[0])?.id ?? null;
+  }
+
+  /**
    * Starts a conversation with colleagues. PRIVATE_E2EE builds the MLS group on this
    * device and adds every verified device of the others; MANAGED is server-readable
    * (the UI says so before it is chosen).
@@ -1350,9 +1583,12 @@ export class MessagingEngine {
   async createConversation(
     userIds: string[],
     profile: SecurityProfile,
-    options: { cfMeetIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
+    options: { cfMeetIds?: string[]; principalIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
   ): Promise<string> {
-    const people = userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : [];
+    const people = [
+      ...(userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : []),
+      ...(options.principalIds ?? []),
+    ];
     const contacts = options.cfMeetIds ?? [];
     if (profile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready") throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const title = options.title?.trim() || undefined;
@@ -1556,9 +1792,32 @@ export class MessagingEngine {
   async leaveConversation(conversationId: string): Promise<void> {
     const me = this.snapshot.identity?.principalId;
     if (!me) return;
-    await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
-    await this.refreshConversations();
+    this.leaving.add(conversationId);
+    try {
+      await relay("DELETE", `v1/conversations/${conversationId}/members/${me}`);
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
   }
+  /**
+   * Deletes a group for everyone. Only its creator (the conversation's owner) may: the server
+   * refuses anyone else (NOT_OWNER). The group stops taking messages and leaves every
+   * member's chat list; it cannot be undone.
+   */
+  async deleteGroup(conversationId: string): Promise<void> {
+    this.leaving.add(conversationId);
+    try {
+      const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+      await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, lifecycleState: "DELETED" });
+      await this.refreshConversations();
+    } finally {
+      this.leaving.delete(conversationId);
+    }
+  }
+
+  /** Chats being left on this device: their disappearing is not "you were removed". */
+  private leaving = new Set<string>();
 
   async setMemberRole(conversationId: string, principalId: string, role: MemberRole): Promise<void> {
     await relay("PATCH", `v1/conversations/${conversationId}/members/${principalId}`, { role });
@@ -1583,7 +1842,7 @@ export class MessagingEngine {
   }
 
   /** F1: archive / pin this chat for me (WhatsApp); the list updates straight away. */
-  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean }): Promise<void> {
+  async setInboxSettings(conversationId: string, change: { archived?: boolean; pinned?: boolean; favourite?: boolean }): Promise<void> {
     const r = await relay<InboxFlags>("PUT", `v1/conversations/${conversationId}/inbox-settings`, change);
     const flags = inboxFlags(r);
     const c = this.server.get(conversationId);
@@ -1598,6 +1857,129 @@ export class MessagingEngine {
     await this.refreshConversations();
   }
 
+  /** Re-reads the chat list after inbox signals (coalesced: a burst costs one read). */
+  private inboxTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleInboxRefresh(): void {
+    if (this.inboxTimer || this.stopped) return;
+    // At most one list read every couple of seconds, however many chats change at once.
+    const wait = Math.max(250, 2_000 - (Date.now() - this.lastListRefresh));
+    this.inboxTimer = setTimeout(() => {
+      this.inboxTimer = null;
+      void this.refreshConversations().catch(() => {});
+    }, wait);
+  }
+
+  /**
+   * A poll (WhatsApp): in a synced (MANAGED) chat it is a server message — members vote,
+   * see who voted for what, and the tally updates live; in a private chat it travels
+   * inside the end-to-end encrypted content (`sendRich`).
+   */
+  async sendPoll(conversationId: string, poll: { question: string; options: string[]; multiple: boolean }): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
+    if (conv.securityProfile === "PRIVATE_E2EE") return this.sendRich(conversationId, { t: "poll", ...poll });
+    const clientMessageId = uuid();
+    const body = { clientMessageId, text: poll.question, poll: { options: poll.options, allowsMultipleAnswers: poll.multiple } };
+    const send = () => relay<ManagedServerMessage>("POST", `v1/conversations/${conversationId}/messages`, body);
+    // A lost response is retried with the same clientMessageId (answered as a replay).
+    const msg = await send().catch((e) => (e instanceof MessagingApiError && (e.status === 0 || e.status >= 500) ? send() : Promise.reject(e)));
+    const st = this.stateFor(conversationId);
+    st.applyMessages([msg]);
+    this.renderManaged(conversationId);
+    this.bumpConversation(conversationId, st);
+  }
+
+  /** Votes (or changes / retracts the vote: no choices) on a poll of either kind of chat. */
+  async votePoll(conversationId: string, messageId: string, choices: number[]): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (!conv) return;
+    if (conv.securityProfile === "PRIVATE_E2EE") return this.sendRich(conversationId, { t: "vote", poll: messageId, choices });
+    const r = await relay<{ poll: unknown }>("PUT", `v1/conversations/${conversationId}/messages/${messageId}/poll/vote`, { optionIndexes: choices });
+    this.applyPollAnswer(conversationId, messageId, r.poll);
+  }
+
+  /** Closes a synced chat's poll (its sender or a group admin): votes stay, no new ones. */
+  async closePoll(conversationId: string, messageId: string): Promise<void> {
+    const r = await relay<{ poll: unknown }>("POST", `v1/conversations/${conversationId}/messages/${messageId}/poll/close`, {});
+    this.applyPollAnswer(conversationId, messageId, r.poll);
+  }
+
+  /** The tally a vote / close answered with, shown at once (the event confirms it). */
+  private applyPollAnswer(conversationId: string, messageId: string, poll: unknown): void {
+    const st = this.managed.get(conversationId);
+    const r = st?.get(messageId);
+    if (!st || !r || !poll || typeof poll !== "object") return;
+    st.applyMessages([{
+      messageId: r.messageId, conversationId, sequence: r.sequence, kind: "APPLICATION", securityProfile: "MANAGED",
+      senderPrincipalId: r.senderPrincipalId, clientMessageId: r.clientMessageId, lifecycle: r.lifecycle, editCount: r.editCount,
+      editedAt: r.editedAt, createdAt: r.createdAt, attachmentIds: r.attachmentIds, replyToMessageId: r.replyToMessageId,
+      threadRootId: r.threadRootId, forwarded: r.forwarded,
+      managed: { text: r.text, presentation: "POLL", poll: poll as NonNullable<ManagedRecord["poll"]> },
+    }]);
+    this.renderManaged(conversationId);
+  }
+
+  /** A synced group's description (null clears it); its owner or an admin. */
+  async setGroupDescription(conversationId: string, description: string | null): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    const text = description?.trim() ? description.trim().slice(0, 512) : null;
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, description: text });
+    await this.refreshConversations();
+  }
+
+  /**
+   * A synced group's photo: the image is uploaded to the group itself (the same scanned
+   * attachment flow as any photo) and named as its avatar (`attachment:<id>`); members read
+   * it like any attachment. null removes the photo.
+   */
+  async setGroupPhoto(conversationId: string, file: File | null): Promise<void> {
+    let avatarRef: string | null = null;
+    if (file) {
+      const mediaType = file.type;
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(mediaType)) throw new MessagingApiError(0, "VALIDATION_ERROR", null, "Choose a PNG, JPEG, WebP or GIF picture.");
+      const data = new Uint8Array(await file.arrayBuffer());
+      const intent = await relay<{ attachmentId: string; upload: { url: string; headers: { name: string; value: string }[] } }>("POST", `v1/conversations/${conversationId}/attachments`, {
+        kind: "IMAGE", size: data.length, sha256: await sha256Hex(data), mediaType, fileName: file.name.slice(0, 255) || "group-photo",
+      });
+      await this.uploadWithRetry(intent.upload, data);
+      let fin = await relay<{ state: string; stateReason?: string | null }>("POST", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}/finalize`, {});
+      for (let i = 0; i < 20 && (fin.state === "VERIFYING" || fin.state === "INTENT_CREATED"); i++) {
+        await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** i, 4000)));
+        fin = await relay<{ state: string; stateReason?: string | null }>("GET", `v1/conversations/${conversationId}/attachments/${intent.attachmentId}`);
+      }
+      if (fin.state !== "READY") throw new MessagingApiError(0, `ATTACHMENT_${fin.state}`, fin.stateReason ?? null, "The picture couldn't be used.");
+      avatarRef = `attachment:${intent.attachmentId}`;
+      avatarUrls.set(`${conversationId}|${avatarRef}`, Promise.resolve(URL.createObjectURL(new Blob([data as BlobPart], { type: mediaType }))));
+    }
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, avatarRef });
+    await this.refreshConversations();
+  }
+
+  /** The group photo of a synced chat (cached per photo; null: none or not readable). */
+  avatarUrl(conversationId: string, avatarRef: string | null): Promise<string | null> {
+    if (!avatarRef?.startsWith("attachment:")) return Promise.resolve(null);
+    const key = `${conversationId}|${avatarRef}`;
+    let p = avatarUrls.get(key);
+    if (!p) {
+      const aid = avatarRef.slice("attachment:".length);
+      p = (async () => {
+        const grant = await relay<{ url: string }>("POST", `v1/conversations/${conversationId}/attachments/${aid}/download-grants`, {});
+        const r = await fetch(grant.url, { credentials: "omit", redirect: "error" });
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        // Plain raster pictures only (never SVG, which can carry script).
+        const type = /^image\/(png|jpeg|webp|gif)$/.test(blob.type) ? blob.type : "image/png";
+        return URL.createObjectURL(new Blob([blob], { type }));
+      })().catch(() => {
+        avatarUrls.delete(key);
+        return null;
+      });
+      avatarUrls.set(key, p);
+    }
+    return p;
+  }
+
   async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {
     const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
     await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, announcementOnly: on });
@@ -1608,6 +1990,39 @@ export class MessagingEngine {
    * S11: forward a message. MANAGED → MANAGED goes through the server (it copies the message);
    * anything private is re-sent from this device as a new message (the server can't read it).
    */
+  /**
+   * WhatsApp's Forward: one message to several chats (or people, whose direct chat is opened
+   * or created), with an optional note after it. Text goes through the server's forward
+   * (marked Forwarded); a photo, file or voice note is downloaded once and sent again to each
+   * chat, since the server doesn't copy attachments. Returns the chats it reached.
+   */
+  /**
+   * Forwards to each target in turn. One failing target doesn't stop the rest: the result says
+   * which went (by index into `targets`) and which didn't, so a retry re-sends only those.
+   */
+  async forwardTo(sourceId: string, message: MessageView, targets: { conversationId?: string; userId?: string; cfMeetId?: string }[], note?: string): Promise<{ reached: number[]; failed: { index: number; error: unknown }[] }> {
+    const reached: number[] = [];
+    const failed: { index: number; error: unknown }[] = [];
+    let media: File | null = null;
+    if (message.file?.attachmentId) {
+      const { blob, name } = await this.download(sourceId, message);
+      media = new File([blob], message.file.name || name, { type: message.file.mediaType || blob.type || "application/octet-stream" });
+    }
+    for (const [index, t] of targets.entries()) {
+      try {
+        const id = t.conversationId
+          ?? await this.createConversation(t.userId ? [t.userId] : [], "MANAGED", t.cfMeetId ? { cfMeetIds: [t.cfMeetId] } : {});
+        if (media) await this.sendFile(id, media, undefined, message.text ?? undefined);
+        else await this.forwardMessage(sourceId, message.messageId ?? null, message.text, id);
+        if (note?.trim()) await this.send(id, note.trim());
+        reached.push(index);
+      } catch (error) {
+        failed.push({ index, error });
+      }
+    }
+    return { reached, failed };
+  }
+
   async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
     const source = this.server.get(sourceId);
     const target = this.server.get(targetId);
@@ -1995,6 +2410,7 @@ export class MessagingEngine {
         reactions: r.messageId ? reactions?.get(r.messageId) ?? [] : [],
         pinned: !!r.messageId && pinned.has(r.messageId),
       };
+      if (m && vanishes(m.lifecycle)) continue;
       if (m && m.lifecycle !== "ACTIVE") {
         base.state = "removed";
         base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
@@ -2039,7 +2455,7 @@ export class MessagingEngine {
     // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
     const local = new Set(records.map((r) => r.sequence));
     for (const m of waitingHere) {
-      if (local.has(m.sequence)) continue;
+      if (local.has(m.sequence) || vanishes(m.lifecycle)) continue;
       const removed = m.lifecycle !== "ACTIVE";
       const early = !removed && sentBeforeJoin(m.createdAt);
       views.push({
@@ -2157,6 +2573,8 @@ export class MessagingEngine {
         await this.resnapshotManaged(conv);
       }
       const refresh = st.applyEvents(page.events);
+      // Receipts caught up here count like live ones (delivered ticks were lost otherwise).
+      if (this.noteReceiptEvents(id, page.events)) this.refreshTicks(id);
       this.afterManagedChange(conv, refresh);
       after = Math.max(after, page.nextAfter ?? after, st.eventCursor ?? 0);
       if (!page.hasMore || !page.events.length) break;
@@ -2197,15 +2615,44 @@ export class MessagingEngine {
   }
 
   /** Moves the conversation's list preview forward from what was just synchronized. */
+  private bumpQueued(conversationId: string, text: string, at: string): void {
+    const me = this.snapshot.identity?.principalId;
+    if (!me) return;
+    const conversations = this.snapshot.conversations.map((c) => c.id !== conversationId ? c : {
+      ...c,
+      lastActivityAt: at > c.lastActivityAt ? at : c.lastActivityAt,
+      // The stored message (a higher sequence) replaces this preview when it arrives.
+      lastMessage: { sequence: c.lastMessage?.sequence ?? 0, senderPrincipalId: me, previewText: text, attachmentCount: 0, lifecycle: "ACTIVE", createdAt: at },
+    });
+    conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
+    this.set({ conversations });
+  }
+
+  /** The chat the user is looking at (null: none, or the tab is hidden). */
+  private openConversationId: string | null = null;
+  setOpenConversation(conversationId: string | null): void {
+    this.openConversationId = conversationId;
+  }
+
   private bumpConversation(conversationId: string, st: ManagedConversationState): void {
     const latest = st.ordered().at(-1);
     if (!latest) return;
+    const me = this.snapshot.identity?.principalId;
     const conversations = this.snapshot.conversations.map((c) => {
       if (c.id !== conversationId || (c.lastMessage && c.lastMessage.sequence > latest.sequence)) return c;
+      // A new message from someone else in a chat that isn't open counts as unread at once
+      // (WhatsApp), not at the next poll: badges, the tab title and notifications follow it.
+      const fresh = latest.sequence > (c.lastMessage?.sequence ?? 0) && latest.senderPrincipalId !== me && latest.lifecycle === "ACTIVE";
+      const unseen = fresh && this.openConversationId !== conversationId;
       return {
         ...c,
+        unreadCount: unseen ? c.unreadCount + 1 : c.unreadCount,
         lastActivityAt: latest.createdAt > c.lastActivityAt ? latest.createdAt : c.lastActivityAt,
-        lastMessage: { sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt },
+        lastMessage: {
+          sequence: latest.sequence, senderPrincipalId: latest.senderPrincipalId, previewText: latest.text, attachmentCount: latest.attachmentIds.length, lifecycle: latest.lifecycle, createdAt: latest.createdAt,
+          presentation: latest.poll ? "POLL" : latest.announcement ? "ANNOUNCEMENT" : "STANDARD",
+          attachmentKind: latest.attachmentIds[0] ? (this.attachmentMeta.get(latest.attachmentIds[0])?.kind ?? null) : null,
+        },
       };
     });
     conversations.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
@@ -2219,7 +2666,9 @@ export class MessagingEngine {
     const reply = r.replyToMessageId ? st.get(r.replyToMessageId) : undefined;
     const removed = r.lifecycle !== "ACTIVE";
     return {
-      key: `m:${r.messageId}`,
+      // Stable from the moment of sending: the queued bubble and the stored message share
+      // the clientMessageId, so the bubble is updated in place, never remounted.
+      key: r.clientMessageId ? `c:${r.clientMessageId}` : `m:${r.messageId}`,
       sequence: r.sequence,
       senderPrincipalId: r.senderPrincipalId,
       mine: r.senderPrincipalId === me,
@@ -2240,6 +2689,8 @@ export class MessagingEngine {
       pinned: pinned.has(r.messageId),
       seenBy: [],
       announcement: r.announcement,
+      forwarded: r.forwarded,
+      rich: !removed && r.poll ? managedPoll(r.text ?? "", r.poll, me) : null,
     };
   }
 
@@ -2249,14 +2700,16 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId ?? null;
     const reactions = this.reactions.get(conversationId);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
-    const views = st.ordered().map((r) => this.managedView(r, st, me, reactions, pinned));
+    const views = st.ordered().filter((r) => !vanishes(r.lifecycle)).map((r) => this.managedView(r, st, me, reactions, pinned));
     // Receipts: who has read up to your latest message.
     const lastMine = [...views].reverse().find((v) => v.mine && v.state === "delivered");
     if (lastMine?.sequence != null) lastMine.seenBy = st.seenBy(lastMine.sequence, me);
-    const queued: MessageView[] = (this.outbox?.all(conversationId) ?? [])
-      .filter((item) => !st.byClientMessageId(item.clientMessageId))
-      .map((item: OutboxItem) => ({
-        key: `q:${item.key}`,
+    const pendingItems = (this.outbox?.all(conversationId) ?? []).filter((item) => !st.byClientMessageId(item.clientMessageId));
+    // Order is kept: messages after a failed one wait for it, and say so.
+    const firstFailed = pendingItems.findIndex((item) => item.state === "failed");
+    const queued: MessageView[] = pendingItems
+      .map((item: OutboxItem, index) => ({
+        key: `c:${item.clientMessageId}`,
         sequence: null,
         senderPrincipalId: me,
         mine: true,
@@ -2265,7 +2718,9 @@ export class MessagingEngine {
         state: item.state === "failed" ? "failed" : item.state === "sending" ? "sending" : "queued",
         text: item.text,
         file: null,
-        note: item.state === "failed" ? `Not sent (${item.error ?? "error"})` : item.error ? "Waiting to send — will retry" : null,
+        note: item.state === "failed" ? `Not sent: ${friendlyErrorCode(item.error)}`
+          : firstFailed >= 0 && index > firstFailed ? "Waiting — the message above wasn't sent"
+          : item.error ? "Waiting to send — will retry" : null,
         transferred: false,
         messageId: null,
         outboxKey: item.key,
@@ -2273,7 +2728,7 @@ export class MessagingEngine {
       }));
     const pending = this.pendingSends.get(conversationId) ?? [];
     this.set({
-      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...queued, ...pending]) },
+      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...[...queued, ...pending].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))]) },
       hasOlder: { ...this.snapshot.hasOlder, [conversationId]: st.hasOlder },
     });
   }
@@ -2305,6 +2760,9 @@ export class MessagingEngine {
     );
     st.applyOlderPage(page.messages, page.nextBeforeSequence);
     this.renderManaged(conversationId);
+    // Older messages show their reactions too (opening the chat loads only the newest 30).
+    const ids = page.messages.filter((m) => m.lifecycle === "ACTIVE").map((m) => m.messageId);
+    if (ids.length) void this.loadReactions(conversationId, ids).catch(() => {});
   }
 
   /** Opening a conversation: sync, pins and the newest messages' reactions (MANAGED). */
@@ -2413,6 +2871,57 @@ export class MessagingEngine {
     this.renderManaged(conversationId);
   }
 
+  /**
+   * Search every chat (WhatsApp's search box): the server searches server-stored chats; the
+   * messages of older encrypted chats loaded on this device are searched here.
+   */
+  async searchAll(q: string): Promise<(SearchHit & { conversationId: string })[]> {
+    const query = q.trim();
+    if (query.length < 2) return [];
+    const needle = query.toLocaleLowerCase();
+    const local = [...this.server.values()]
+      .filter((c) => c.securityProfile === "PRIVATE_E2EE")
+      .flatMap((c) => (this.snapshot.messages[c.conversationId] ?? [])
+        .filter((m) => m.sequence !== null && m.text?.toLocaleLowerCase().includes(needle))
+        .map((m) => ({ conversationId: c.conversationId, messageId: m.key, sequence: m.sequence!, senderPrincipalId: m.senderPrincipalId ?? "", createdAt: m.createdAt ?? "", text: m.text })));
+    const r = await relay<{ results: ManagedServerMessage[] }>("GET", `v1/messaging/search?q=${encodeURIComponent(query.slice(0, 200))}&limit=30`).catch(() => ({ results: [] as ManagedServerMessage[] }));
+    const remote = r.results.map((m) => ({ conversationId: m.conversationId, messageId: m.messageId, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId, createdAt: m.createdAt, text: m.managed?.text ?? null }));
+    return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40);
+  }
+
+  /** People banned from a group (admins): removed, and can't be added back until unbanned. */
+  bans(conversationId: string): Promise<{ principalId: string; reason: string | null; bannedAt: string }[]> {
+    return relay<{ bans: { principalId: string; reason: string | null; bannedAt: string }[] }>("GET", `v1/conversations/${conversationId}/bans`).then((r) => r.bans ?? []);
+  }
+  async ban(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/bans`, { principalId });
+    await this.refreshConversations();
+  }
+  unban(conversationId: string, principalId: string): Promise<unknown> {
+    return relay("DELETE", `v1/conversations/${conversationId}/bans/${principalId}`);
+  }
+
+  /** Groups someone added you to that wait for your answer (newest first). */
+  async groupInvitations(): Promise<{ conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[]> {
+    const r = await relay<{ invitations: { conversationId: string; role: string; invitedByPrincipalId: string | null; invitedAt: string | null; expiresAt: string | null; contextClass: string }[] }>("GET", "v1/messaging/invitations");
+    const missing = [...new Set(r.invitations.map((i) => i.invitedByPrincipalId).filter((p): p is string => !!p && !this.snapshot.names[p]))];
+    if (missing.length) {
+      try {
+        const n = await identityApi.names(missing.slice(0, 256));
+        const names = { ...this.snapshot.names };
+        for (const p of n.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
+        this.set({ names });
+      } catch { /* names are cosmetic */ }
+    }
+    return r.invitations;
+  }
+
+  /** Join (or turn down) a group you were invited to; joined chats appear in the list. */
+  async answerGroupInvitation(conversationId: string, accept: boolean): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/invitation/${accept ? "accept" : "decline"}`, {});
+    await this.refreshConversations();
+  }
+
   /** MANAGED server search; PRIVATE_E2EE content is searched on this device only. */
   async search(conversationId: string, q: string): Promise<SearchHit[]> {
     const conv = this.server.get(conversationId);
@@ -2444,6 +2953,10 @@ export class MessagingEngine {
 
   private onTyping(conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number): void {
     if (principalId === this.snapshot.identity?.principalId) return;
+    // Someone typing is online right now.
+    if (state === "started" && this.snapshot.presence[conversationId]?.[principalId]?.online === false) {
+      this.set({ presence: { ...this.snapshot.presence, [conversationId]: { ...this.snapshot.presence[conversationId], [principalId]: { online: true, lastSeenAt: new Date().toISOString() } } } });
+    }
     const key = `${conversationId}:${principalId}`;
     const existing = this.typingTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -2496,7 +3009,8 @@ export class MessagingEngine {
   /** Sends every due MANAGED outbox item (serialized; offline: waits for `online`). */
   private flush(): Promise<number> {
     if (!this.outbox || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve(0);
-    if (this.flushing) return this.flushing;
+    // A run in progress may already be past what was just queued (or just unheld): go again after it.
+    if (this.flushing) { this.flushAgain = true; return this.flushing; }
     const outbox = this.outbox;
     const run = flushOutbox(outbox, async (item) => {
       const msg = await relay<ManagedServerMessage>("POST", `v1/conversations/${item.conversationId}/messages`, {
@@ -2509,14 +3023,25 @@ export class MessagingEngine {
       st.applyMessages([msg]);
       this.renderManaged(item.conversationId);
       this.bumpConversation(item.conversationId, st);
-    }).finally(() => {
+    }, 50, (item) => this.fileSendingBefore(item.conversationId, item.createdAt)).finally(() => {
       if (this.flushing === run) this.flushing = null;
+      if (this.flushAgain) { this.flushAgain = false; void this.flush(); }
     });
     this.flushing = run;
     return run;
   }
 
   // ------------------------------------------------------------------- send
+
+  /**
+   * A photo or file sent before this time is still uploading: text after it waits, so it never
+   * overtakes it — for up to two minutes, so a stalled upload can't hold the chat's text back.
+   */
+  private fileSendingBefore(conversationId: string, createdAt: string): boolean {
+    const since = Date.now() - 120_000;
+    return (this.pendingSends.get(conversationId) ?? []).some((m) => m.file && m.state === "sending" && (m.createdAt ?? "") <= createdAt && Date.parse(m.createdAt ?? "") > since);
+  }
+  private flushAgain = false;
 
   private addPending(conversationId: string, view: MessageView): void {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
@@ -2539,7 +3064,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED" && this.outbox) {
       this.stateFor(conversationId);
       this.loadedManaged.add(conversationId);
-      this.outbox.enqueue({
+      const item = this.outbox.enqueue({
         key: uuid(),
         conversationId,
         clientMessageId: uuid(),
@@ -2547,6 +3072,9 @@ export class MessagingEngine {
         replyToMessageId: options.replyToMessageId ?? null,
         mentionedPrincipalIds: options.mentionedPrincipalIds ?? [],
       });
+      // The chat moves to the top with this message as its preview at once, not after the
+      // server answers.
+      this.bumpQueued(conversationId, item.text, item.createdAt);
       void this.flush();
       return;
     }
@@ -2611,7 +3139,7 @@ export class MessagingEngine {
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
     await this.sync(conversationId);
   }
@@ -2734,8 +3262,10 @@ export class MessagingEngine {
       this.settlePending(conversationId, key, null);
     } catch (e) {
       this.failedFiles.set(key, { file, durationMs, caption });
-      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
+      this.settlePending(conversationId, key, `Not sent: ${sendFailureText(e)}`);
     }
+    // Text typed after this file was waiting for it.
+    if (conv.securityProfile === "MANAGED") void this.flush();
     await this.sync(conversationId);
   }
 
@@ -2771,7 +3301,7 @@ export class MessagingEngine {
    */
   async imageUrl(conversationId: string, message: MessageView): Promise<string | null> {
     const aid = message.file?.attachmentId;
-    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType))) return null;
+    if (!aid || !(isInlineImage(message.file?.mediaType) || isPlayableAudio(message.file?.mediaType) || isPlayableVideo(message.file?.mediaType))) return null;
     const cached = mediaUrls.get(aid);
     if (cached) return cached;
     const { blob } = await this.download(conversationId, message);

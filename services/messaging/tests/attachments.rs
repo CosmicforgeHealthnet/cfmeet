@@ -3114,8 +3114,11 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     );
 
     // Upload + scan + download for a member of a CF Meet conversation.
-    let (conv, people) = e.managed_group(&cfmeet, 2).await;
+    let (conv, people) = e.managed_group(&cfmeet, 4).await;
     let (alice, bob) = (people[0], people[1]);
+    // Members who have uploaded nothing today: `cfmeet_uploaders_have_a_daily_volume`
+    // (same process) may lower the per-uploader daily cap to one maximum-size file.
+    let (carol, dave) = (people[2], people[3]);
     let outsider = e.h.principal(&cfmeet);
     let bytes = png(4096);
     let up = e
@@ -3162,9 +3165,9 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     // Exactly 25 MiB is admitted; one byte more is refused before anything is stored.
     let digest = "0".repeat(64);
     let document = |size: i64| json!({ "kind": "DOCUMENT", "size": size, "sha256": digest, "mediaType": "application/pdf", "fileName": "big.pdf" });
-    let at_limit = e.intent(&cfmeet, &conv, alice, document(26_214_400)).await;
+    let at_limit = e.intent(&cfmeet, &conv, carol, document(26_214_400)).await;
     assert_eq!(at_limit.status, StatusCode::CREATED, "{}", at_limit.text);
-    let over = e.intent(&cfmeet, &conv, alice, document(26_214_401)).await;
+    let over = e.intent(&cfmeet, &conv, dave, document(26_214_401)).await;
     assert_eq!(
         (over.code(), over.reason()),
         ("QUOTA_EXCEEDED", "ATTACHMENT_TOO_LARGE"),
@@ -3295,4 +3298,123 @@ async fn cfmeet_uploaders_have_a_daily_volume() {
     e.h.clock.advance(chrono::Duration::hours(25));
     let r = e.intent(&cfmeet, &conv, alice, body(4096)).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+}
+
+/// A MANAGED group's photo is an image attachment of the group itself
+/// (`avatarRef: attachment:<id>`): a group admin sets it, every member can read it, it is
+/// not removed as an abandoned upload while it is the avatar, and anything but a READY
+/// image of this conversation is refused.
+#[tokio::test]
+async fn a_group_photo_is_an_attachment_every_member_reads() {
+    let Some(e) = env().await else {
+        return;
+    };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({ "managedScanRequired": false })).await;
+    let (conv, people) = e.managed_group(&c, 3).await;
+    let (owner, admin, member) = (people[0], people[1], people[2]);
+    let id = cid(&conv);
+    let r =
+        e.h.patch(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{id}/members/{admin}"),
+            json!({ "role": "ADMIN" }),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let photo = e
+        .managed_upload(
+            &c,
+            &conv,
+            admin,
+            "IMAGE",
+            "image/png",
+            "group.png",
+            &png(64),
+        )
+        .await;
+    assert_eq!(photo.status, StatusCode::OK, "{}", photo.text);
+    let photo_id = photo.json["attachmentId"].clone();
+    // Before it is the avatar, an unlinked upload is only its uploader's.
+    assert_eq!(
+        e.grant(&c, &conv, member, &photo_id).await.code(),
+        "NOT_FOUND"
+    );
+    let version =
+        e.h.get(&c, Some(owner), &format!("/v1/conversations/{id}"))
+            .await
+            .json["version"]
+            .as_i64()
+            .unwrap();
+    let avatar = format!("attachment:{}", photo_id.as_str().unwrap());
+    let r =
+        e.h.patch(
+            &c,
+            Some(admin),
+            &format!("/v1/conversations/{id}"),
+            json!({ "expectedVersion": version, "avatarRef": avatar }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["avatarRef"], avatar);
+    let g = e.grant(&c, &conv, member, &photo_id).await;
+    assert!(g.status.is_success(), "{}", g.text);
+    // Never treated as an abandoned upload while it is the avatar.
+    e.h.sql(&format!(
+        "UPDATE messaging_attachments SET state_changed_at = now() - interval '400 days' WHERE id = '{}'",
+        photo_id.as_str().unwrap()
+    ))
+    .await
+    .unwrap();
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachments WHERE id = '{}' AND state = 'READY'",
+            photo_id.as_str().unwrap()
+        ))
+        .await,
+        1
+    );
+    // A document, or an attachment that is not in this conversation, is refused.
+    let doc = e
+        .managed_upload(
+            &c,
+            &conv,
+            admin,
+            "DOCUMENT",
+            "text/plain",
+            "notes.txt",
+            b"plain notes",
+        )
+        .await;
+    let r =
+        e.h.patch(
+            &c,
+            Some(admin),
+            &format!("/v1/conversations/{id}"),
+            json!({ "expectedVersion": version + 1,
+                    "avatarRef": format!("attachment:{}", doc.json["attachmentId"].as_str().unwrap()) }),
+        )
+        .await;
+    assert_eq!(r.reason(), "AVATAR_NOT_A_READY_IMAGE", "{}", r.text);
+    let r =
+        e.h.patch(
+            &c,
+            Some(admin),
+            &format!("/v1/conversations/{id}"),
+            json!({ "expectedVersion": version + 1, "avatarRef": format!("attachment:{}", Uuid::new_v4()) }),
+        )
+        .await;
+    assert_eq!(r.code(), "NOT_FOUND", "{}", r.text);
+    // A plain member does not change the group photo.
+    let r =
+        e.h.patch(
+            &c,
+            Some(member),
+            &format!("/v1/conversations/{id}"),
+            json!({ "expectedVersion": version + 1, "avatarRef": null }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
 }

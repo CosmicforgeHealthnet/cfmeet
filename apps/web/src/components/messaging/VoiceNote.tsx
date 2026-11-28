@@ -158,6 +158,7 @@ export function MicButton({ disabled, onClick }: { disabled: boolean; onClick: (
 function AudioBar({ src, knownMs, mine, className }: { src: string; knownMs?: number; mine: boolean; className?: string }) {
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const [at, setAt] = useState(0);
   const [length, setLength] = useState(knownMs ? knownMs / 1000 : 0);
 
@@ -189,6 +190,12 @@ function AudioBar({ src, knownMs, mine, className }: { src: string; knownMs?: nu
         onChange={(e) => { const a = audio.current; if (a) { a.currentTime = Number(e.target.value); setAt(a.currentTime); } }}
         className={cn("h-1 min-w-0 flex-1 cursor-pointer", mine ? "accent-white" : "accent-primary")} />
       <span className="w-10 shrink-0 text-right text-xs tabular-nums opacity-80">{clock((playing || at ? at : length) * 1000)}</span>
+      {/* WhatsApp's playback speed: 1× → 1.5× → 2×. */}
+      <button type="button" data-testid="voice-speed" aria-label={`Playback speed ${speed}×`}
+        onClick={() => { const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1; setSpeed(next); if (audio.current) audio.current.playbackRate = next; }}
+        className={cn("h-6 shrink-0 rounded-full px-2 text-[11px] font-semibold tabular-nums", mine ? "bg-white/20 hover:bg-white/30" : "bg-primary/10 text-primary hover:bg-primary/20")}>
+        {speed}×
+      </button>
     </span>
   );
 }

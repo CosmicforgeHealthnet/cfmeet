@@ -107,8 +107,9 @@ function MemberRow({ org, member }: { org: BusinessOrganization; member: Organiz
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 p-3">
       <div className="min-w-0">
-        <p className="font-mono text-xs" title={member.userId}>
-          {isSelf ? "You" : `Account ${shortId(member.userId)}`}
+        {/* The account's name from the account authority; the short id only when it has none (or is gone). */}
+        <p className={member.displayName || isSelf ? "truncate text-sm font-medium" : "font-mono text-xs"} title={member.userId}>
+          {isSelf ? `${member.displayName ?? "You"} (you)` : member.displayName ?? `Account ${shortId(member.userId)}`}
         </p>
         <p className="text-sm text-muted-foreground">
           {role} · {member.status} · joined {formatDateTime(member.createdAt)}

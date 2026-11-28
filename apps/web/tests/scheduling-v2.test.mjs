@@ -134,7 +134,7 @@ test("schedule mutations refresh occurrences and resolution, and membership conf
   await members.useUpdateMember("s").onSettled(undefined, new Error("version conflict"));
   assert.ok(invalidated.some(key => key[1] === "members"));
   assert.ok(invalidated.some(key => key[1] === "spaces"));
-  const conferences = load("../src/hooks/v2/useConferences.ts", { "@tanstack/react-query": reactQuery, "@/services/v2/conferences.service": { conferencesService: {} }, "./useSpaces": spaces });
+  const conferences = load("../src/hooks/v2/useConferences.ts", { "@tanstack/react-query": reactQuery, "@/services/v2/conferences.service": { conferencesService: {} }, "./useSpaces": spaces, "@/lib/realtime-health": { roomPoll: () => () => 5000 } });
   const end = conferences.useEndConference();
   assert.equal(end.onMutate, undefined);
   let saved;

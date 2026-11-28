@@ -23,6 +23,7 @@ pub mod franking;
 pub mod http;
 pub mod keys;
 pub mod managed;
+pub mod polls;
 pub mod receipts;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -197,6 +198,10 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
                 "text": text,
                 "presentation": row.managed_presentation.as_deref().unwrap_or("STANDARD"),
             });
+            // A poll's options and tally (members see who voted for what).
+            if show && row.managed_presentation.as_deref() == Some(polls::POLL) {
+                v["managed"]["poll"] = polls::view(state, row).await.unwrap_or(Value::Null);
+            }
         }
     }
     v
@@ -307,6 +312,9 @@ pub struct SendRequest {
     /// S2, PRIVATE_E2EE only: the sender's franking commitment ([`franking`]).
     #[serde(default)]
     pub franking_commitment: Option<String>,
+    /// MANAGED only: this message is a poll ([`polls`]); `text` is its question.
+    #[serde(default)]
+    pub poll: Option<polls::PollRequest>,
 }
 
 impl SendRequest {

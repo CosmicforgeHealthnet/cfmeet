@@ -32,6 +32,8 @@ export type OutboxItem = {
 };
 
 export interface OutboxStorage {
+  /** Another tab changed the stored queue (optional; the browser storage has it). */
+  watch?(onChange: () => void): () => void;
   load(): string | null;
   save(value: string): void;
   clear(): void;
@@ -40,6 +42,8 @@ export interface OutboxStorage {
 export const OUTBOX_KEY_PREFIX = "cfmeet.messaging.outbox.";
 const MAX_ITEMS = 200;
 const MAX_BACKOFF_MS = 60_000;
+/** After this many attempts a retryable failure stops retrying on its own: the user sees it failed (Try again / Delete). */
+export const MAX_AUTO_ATTEMPTS = 8;
 
 /** Transient failures are retried; everything else waits for the user. */
 export function isRetryable(status: number, code?: string | null): boolean {
@@ -67,6 +71,8 @@ function valid(item: unknown): item is OutboxItem {
 export class MessageOutbox {
   private items: OutboxItem[] = [];
   private readonly listeners = new Set<() => void>();
+  /** Signed out: nothing is stored any more, even by a send that finishes afterwards. */
+  private closed = false;
 
   private readonly storage: OutboxStorage | null;
   private readonly now: () => number;
@@ -75,6 +81,25 @@ export class MessageOutbox {
     this.storage = storage;
     this.now = now;
     this.items = this.read();
+    // Several tabs share one stored queue: each takes the others' changes before its next
+    // write, so one tab never overwrites a message another tab queued.
+    this.unwatch = storage?.watch?.(() => this.reload()) ?? null;
+  }
+
+  private unwatch: (() => void) | null;
+
+  /** Another tab changed the queue: take its version, keeping this tab's own sends in flight. */
+  reload(): void {
+    if (this.closed) return;
+    const sendingHere = new Set(this.items.filter((i) => i.state === "sending").map((i) => i.key));
+    this.items = this.read().map((i) => (sendingHere.has(i.key) ? { ...i, state: "sending" as const } : i));
+    for (const l of this.listeners) l();
+  }
+
+  /** The engine stopped: stop following other tabs (the stored queue stays). */
+  detach(): void {
+    this.unwatch?.();
+    this.unwatch = null;
   }
 
   private read(): OutboxItem[] {
@@ -90,7 +115,15 @@ export class MessageOutbox {
     }
   }
 
+  /** Sign-out: the queue empties and never writes to storage again. */
+  close(): void {
+    this.detach();
+    this.closed = true;
+    this.items = [];
+  }
+
   private persist(): void {
+    if (this.closed) return;
     try {
       if (this.items.length) this.storage?.save(JSON.stringify(this.items));
       else this.storage?.clear();
@@ -162,7 +195,7 @@ export class MessageOutbox {
   markFailed(key: string, error: string, retryable: boolean): void {
     const i = this.items.find((x) => x.key === key);
     if (!i) return;
-    if (retryable) this.update(key, { state: "queued", error, nextAttemptAt: this.now() + backoffMs(i.attempts) });
+    if (retryable && i.attempts < MAX_AUTO_ATTEMPTS) this.update(key, { state: "queued", error, nextAttemptAt: this.now() + backoffMs(i.attempts) });
     else this.update(key, { state: "failed", error });
   }
 
@@ -213,25 +246,30 @@ export async function flushOutbox(
   outbox: MessageOutbox,
   send: (item: OutboxItem) => Promise<void>,
   maxRounds = 50,
+  /** An item that must wait for something outside the queue (a file sent before it). */
+  held: (item: OutboxItem) => boolean = () => false,
 ): Promise<number> {
   let sent = 0;
   for (let round = 0; round < maxRounds; round++) {
-    const due = outbox.due();
+    const due = outbox.due().filter((item) => !held(item));
     if (!due.length) break;
-    let progressed = false;
-    for (const item of due) {
+    // `due` holds at most the oldest item of each conversation: conversations send in
+    // parallel (a slow chat never holds up another) and each keeps its order.
+    const outcomes = await Promise.all(due.map(async (item) => {
       outbox.markSending(item.key);
       try {
         await send(item);
         outbox.markSent(item.key);
-        sent++;
-        progressed = true;
+        return true;
       } catch (e) {
         const err = e as { status?: number; code?: string; message?: string } | null;
         const status = typeof err?.status === "number" ? err.status : 0;
         outbox.markFailed(item.key, err?.code ?? err?.message ?? "SEND_FAILED", isRetryable(status, err?.code));
+        return false;
       }
-    }
+    }));
+    const progressed = outcomes.filter(Boolean).length;
+    sent += progressed;
     if (!progressed) break;
   }
   return sent;
@@ -245,6 +283,11 @@ export function browserOutboxStorage(principalId: string): OutboxStorage | null 
     load: () => window.localStorage.getItem(key),
     save: (v) => window.localStorage.setItem(key, v),
     clear: () => window.localStorage.removeItem(key),
+    watch: (onChange) => {
+      const listener = (e: StorageEvent) => { if (e.key === key || e.key === null) onChange(); };
+      window.addEventListener("storage", listener);
+      return () => window.removeEventListener("storage", listener);
+    },
   };
 }
 

@@ -178,6 +178,7 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
     connect() { return Promise.resolve(); }
     close() { closed++; }
     subscribe() {}
+    subscribeInbox() {}
   }
   const engineModule = load("../src/lib/messaging/engine.ts", {
     "@/services/messaging-realtime": { MessagingRealtimeTransport: Transport },

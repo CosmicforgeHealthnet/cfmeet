@@ -12,7 +12,11 @@ export type PollTally = { counts: number[]; voters: number; myChoices: number[] 
 export type RichContent =
   | { kind: "contact"; cfMeetId: string; name: string }
   | { kind: "location"; lat: number; lng: number; label: string | null }
-  | { kind: "poll"; question: string; options: string[]; multiple: boolean; tally: PollTally }
+  | {
+      kind: "poll"; question: string; options: string[]; multiple: boolean; tally: PollTally;
+      /** MANAGED polls (server-held): who chose each option, and whether it was closed (and by whom). */
+      voters?: string[][]; closed?: boolean; closedBy?: string | null; managed?: boolean;
+    }
   | { kind: "link"; preview: LinkPreview };
 
 /** Payloads the page asks the worker to encrypt (besides text and files). */
@@ -86,3 +90,37 @@ export function richContent(p: StoredPayload, messageId: string | null, votes: V
 
 /** A map link for a shared location (opened in a new tab; nothing is loaded inside CF Meet). */
 export const mapUrl = (lat: number, lng: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
+
+/** A MANAGED poll as the server returns it (`Message.managed.poll`). */
+export type ServerPoll = {
+  options: { index: number; text: string; voteCount: number; voterPrincipalIds: string[] }[];
+  allowsMultipleAnswers: boolean;
+  voterCount: number;
+  closed: boolean;
+  closedAt?: string | null;
+  closedByPrincipalId?: string | null;
+};
+
+/** The poll card of a MANAGED poll message (its text is the question). */
+export function managedPoll(question: string, poll: ServerPoll, me: string | null): RichContent {
+  const options = [...poll.options].sort((a, b) => a.index - b.index);
+  return {
+    kind: "poll",
+    question,
+    options: options.map((o) => o.text),
+    multiple: poll.allowsMultipleAnswers,
+    tally: {
+      counts: options.map((o) => o.voteCount),
+      voters: poll.voterCount,
+      myChoices: me ? options.filter((o) => o.voterPrincipalIds.includes(me)).map((o) => o.index) : [],
+    },
+    voters: options.map((o) => [...o.voterPrincipalIds]),
+    closed: poll.closed,
+    closedBy: poll.closedByPrincipalId ?? null,
+    managed: true,
+  };
+}
+
+/** A stable fingerprint of a server poll (a vote or close changes it). */
+export const pollFingerprint = (poll: ServerPoll | null | undefined) =>
+  poll ? `${poll.closed ? 1 : 0}|${poll.options.map((o) => `${o.index}:${[...o.voterPrincipalIds].sort().join(",")}`).join(";")}` : "";

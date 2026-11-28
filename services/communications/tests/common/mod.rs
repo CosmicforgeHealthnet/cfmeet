@@ -671,6 +671,8 @@ pub struct Harness {
     pub world: Arc<RwLock<World>>,
     pub account_signer: Arc<ServiceTokenSigner>,
     pub calling_signer: Arc<ServiceTokenSigner>,
+    /// Messaging: `communications-policy.check` (status audiences, eligible contacts).
+    pub messaging_signer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
     /// The Notification Service: `communications-restrictions.read` (X4) and
     /// `communications-preferences.export` (N10 copy + catch-up).
@@ -753,6 +755,7 @@ impl Harness {
         let hub_key = hub.public_jwk();
         let account_signer = signer(ServiceId::meeting_service(), key("account-test"));
         let calling_signer = signer(ServiceId::calling(), key("calling-test"));
+        let messaging_signer = signer(ServiceId::messaging(), key("messaging-test"));
         let operator = signer(ServiceId::operator_console(), key("operator-test"));
         let notifications = signer(ServiceId::notifications(), key("notifications-test"));
         let bridge = signer(ServiceId::admin_bridge(), key("admin-bridge-test"));
@@ -860,6 +863,11 @@ impl Harness {
                     ],
                 ),
                 (
+                    ServiceId::messaging(),
+                    messaging_signer.public_jwk(),
+                    vec!["communications-policy.check"],
+                ),
+                (
                     ServiceId::operator_console(),
                     operator.public_jwk(),
                     vec![
@@ -920,6 +928,7 @@ impl Harness {
             account_signer,
             available,
             calling_signer,
+            messaging_signer,
             operator,
             notifications,
             bridge,

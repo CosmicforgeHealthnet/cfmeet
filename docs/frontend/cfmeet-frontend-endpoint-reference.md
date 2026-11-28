@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.23.0 | 109 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.25.0 | 168 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **758** |
+| **Total** | | | **817** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -330,7 +330,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.11.0**; b
 | GET | `/api/v2/messaging/export-deliveries` | account session | Data exports waiting for me (Messaging) | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_export_deliveries` |
 | POST | `/api/v2/messaging/exports/{exportId}/claim` | account session | Claim a Messaging data export once | 200, 401, 404, 409, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, EXPORT_ALREADY_DELIVERED, EXPORT_EXPIRED, EXPORT_NOT_READY, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_claim_export` |
 | GET | `/api/v2/messaging/me` | account session | The caller's Messaging principal and device binding scope. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_me` |
-| POST | `/api/v2/messaging/principals/names` | account session | Display names of the principals the caller can see (self, colleagues and connected contacts). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_principal_names` |
+| POST | `/api/v2/messaging/principals/names` | account session | Display names of the principals the caller can see. | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_principal_names` |
 | DELETE | `/api/v2/messaging/relay/{path}` | account session | Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_delete` |
 | GET | `/api/v2/messaging/relay/{path}` | account session | Relayed read (allowlisted path under `v1/`, e.g. `v1/conversations/{id}/messages`). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_get` |
 | PATCH | `/api/v2/messaging/relay/{path}` | account session | Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_patch` |
@@ -1000,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1009,6 +1009,30 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 | GET | `/v1/messaging/blocks` | customer credential (server-side only); Messaging client token | list Blocks | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listBlocks` |
 | POST | `/v1/messaging/blocks` | customer credential (server-side only); Messaging client token | create Block | 200, 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createBlock` |
 | DELETE | `/v1/messaging/blocks/{principalId}` | customer credential (server-side only); Messaging client token | remove Block | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeBlock` |
+
+### Channels
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/messaging/channels` | customer credential (server-side only) | Find channels | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannels` |
+| POST | `/v1/messaging/channels` | customer credential (server-side only) | Create a channel | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannel` |
+| GET | `/v1/messaging/channels/following` | customer credential (server-side only) | Channels I follow | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listFollowedChannels` |
+| POST | `/v1/messaging/channels/media` | customer credential (server-side only) | Start a channel media upload | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannelMedia` |
+| DELETE | `/v1/messaging/channels/media/{mediaId}` | customer credential (server-side only) | Cancel a channel media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelChannelMedia` |
+| GET | `/v1/messaging/channels/media/{mediaId}` | customer credential (server-side only) | Get channel media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannelMedia` |
+| POST | `/v1/messaging/channels/media/{mediaId}/complete` | customer credential (server-side only) | Complete a channel media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#completeChannelMedia` |
+| POST | `/v1/messaging/channels/media/{mediaId}/download-grants` | customer credential (server-side only) | Read channel media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#grantChannelMediaDownload` |
+| POST | `/v1/messaging/channels/media/{mediaId}/parts/{part}` | customer credential (server-side only) | Upload a channel media part | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#uploadChannelMediaPart` |
+| DELETE | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Delete my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChannel` |
+| GET | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Get a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannel` |
+| PATCH | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Update my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#updateChannel` |
+| DELETE | `/v1/messaging/channels/{channelId}/follow` | customer credential (server-side only) | Unfollow a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unfollowChannel` |
+| PUT | `/v1/messaging/channels/{channelId}/follow` | customer credential (server-side only) | Follow a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#followChannel` |
+| GET | `/v1/messaging/channels/{channelId}/posts` | customer credential (server-side only) | Channel posts | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannelPosts` |
+| POST | `/v1/messaging/channels/{channelId}/posts` | customer credential (server-side only) | Post in my channel | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannelPost` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}` | customer credential (server-side only) | Delete a post in my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChannelPost` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | customer credential (server-side only) | Remove my channel post reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unreactToChannelPost` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | customer credential (server-side only) | React to a channel post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reactToChannelPost` |
 
 ### Client Sessions
 
@@ -1051,6 +1075,8 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | resolve Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#resolveMessage` |
 | PATCH | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | edit Managed Message | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editManagedMessage` |
 | POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | customer credential (server-side only); Messaging client token | forward Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardMessage` |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/poll/close` | customer credential (server-side only) | close Poll | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#closePoll` |
+| PUT | `/v1/conversations/{conversationId}/messages/{messageId}/poll/vote` | customer credential (server-side only) | vote Poll | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#votePoll` |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}/revisions` | customer credential (server-side only); Messaging client token | list Message Revisions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listMessageRevisions` |
 
 ### Conversation Reports
@@ -1083,6 +1109,12 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 | GET | `/v1/conversations/{conversationId}` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | get Conversation | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getConversation` |
 | PATCH | `/v1/conversations/{conversationId}` | customer credential (server-side only) | update Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#updateConversation` |
 | PUT | `/v1/conversations/{conversationId}/inbox-settings` | customer credential (server-side only); Messaging client token; CF Meet app access token (OAuth, server-side only) | set Conversation Inbox Settings | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#setConversationInboxSettings` |
+| GET | `/v1/messaging/chat-lists` | customer credential (server-side only) | list Chat Lists | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listChatLists` |
+| POST | `/v1/messaging/chat-lists` | customer credential (server-side only) | create Chat List | 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#createChatList` |
+| DELETE | `/v1/messaging/chat-lists/{listId}` | customer credential (server-side only) | delete Chat List | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChatList` |
+| PATCH | `/v1/messaging/chat-lists/{listId}` | customer credential (server-side only) | update Chat List | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#updateChatList` |
+| DELETE | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | customer credential (server-side only) | remove Chat List Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeChatListConversation` |
+| PUT | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | customer credential (server-side only) | add Chat List Conversation | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#addChatListConversation` |
 
 ### Device Keys & E2EE
 
@@ -1245,6 +1277,43 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.23.0**;
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/v1/messaging/sms-bridge/disclosure` | customer credential (server-side only) | get SMS Bridge Disclosure | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getSmsBridgeDisclosure` |
+
+### Status
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| POST | `/v1/messaging/status` | customer credential (server-side only) | Publish a status | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createStatus` |
+| GET | `/v1/messaging/status/audience` | customer credential (server-side only) | Get my default status audience | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusAudience` |
+| PUT | `/v1/messaging/status/audience` | customer credential (server-side only) | Set my default status audience | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#putStatusAudience` |
+| GET | `/v1/messaging/status/audience-lists` | customer credential (server-side only) | List my audience lists | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listStatusAudienceLists` |
+| POST | `/v1/messaging/status/audience-lists` | customer credential (server-side only) | Create an audience list | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createStatusAudienceList` |
+| DELETE | `/v1/messaging/status/audience-lists/{listId}` | customer credential (server-side only) | Delete an audience list | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteStatusAudienceList` |
+| PATCH | `/v1/messaging/status/audience-lists/{listId}` | customer credential (server-side only) | Update an audience list | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#updateStatusAudienceList` |
+| GET | `/v1/messaging/status/close-friends` | customer credential (server-side only) | Get my close friends | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusCloseFriends` |
+| PUT | `/v1/messaging/status/close-friends` | customer credential (server-side only) | Set my close friends | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#putStatusCloseFriends` |
+| POST | `/v1/messaging/status/delete` | customer credential (server-side only) | Delete statuses | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteStatuses` |
+| GET | `/v1/messaging/status/eligible-contacts` | customer credential (server-side only) | List contacts for the audience picker | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listStatusEligibleContacts` |
+| GET | `/v1/messaging/status/feed` | customer credential (server-side only) | Status feed | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusFeed` |
+| POST | `/v1/messaging/status/media` | customer credential (server-side only) | Start a status media upload | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createStatusMedia` |
+| DELETE | `/v1/messaging/status/media/{mediaId}` | customer credential (server-side only) | Cancel a status media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelStatusMedia` |
+| GET | `/v1/messaging/status/media/{mediaId}` | customer credential (server-side only) | Get status media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusMedia` |
+| POST | `/v1/messaging/status/media/{mediaId}/complete` | customer credential (server-side only) | Complete a status media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#completeStatusMedia` |
+| POST | `/v1/messaging/status/media/{mediaId}/download-grants` | customer credential (server-side only) | Read status media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#grantStatusMediaDownload` |
+| POST | `/v1/messaging/status/media/{mediaId}/parts/{part}` | customer credential (server-side only) | Upload a status media part | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#uploadStatusMediaPart` |
+| GET | `/v1/messaging/status/mine` | customer credential (server-side only) | My statuses | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getMyStatuses` |
+| GET | `/v1/messaging/status/mutes` | customer credential (server-side only) | List muted status authors | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listStatusMutes` |
+| DELETE | `/v1/messaging/status/mutes/{principalId}` | customer credential (server-side only) | Unmute a contact's statuses | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unmuteStatusAuthor` |
+| PUT | `/v1/messaging/status/mutes/{principalId}` | customer credential (server-side only) | Mute a contact's statuses | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#muteStatusAuthor` |
+| POST | `/v1/messaging/status/rings` | customer credential (server-side only) | Status rings | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusRings` |
+| DELETE | `/v1/messaging/status/{statusId}` | customer credential (server-side only) | Delete a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteStatus` |
+| GET | `/v1/messaging/status/{statusId}` | customer credential (server-side only) | Get a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatus` |
+| POST | `/v1/messaging/status/{statusId}/forwards` | customer credential (server-side only) | Forward a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardStatus` |
+| DELETE | `/v1/messaging/status/{statusId}/reaction` | customer credential (server-side only) | Remove my status reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unreactToStatus` |
+| PUT | `/v1/messaging/status/{statusId}/reaction` | customer credential (server-side only) | React to a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reactToStatus` |
+| POST | `/v1/messaging/status/{statusId}/replies` | customer credential (server-side only) | Reply to a status | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#replyToStatus` |
+| POST | `/v1/messaging/status/{statusId}/reshares` | customer credential (server-side only) | Reshare a status | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reshareStatus` |
+| POST | `/v1/messaging/status/{statusId}/view` | customer credential (server-side only) | Mark a status seen | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#viewStatus` |
+| GET | `/v1/messaging/status/{statusId}/viewers` | customer credential (server-side only) | Who saw my status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listStatusViewers` |
 
 ## Developer Portal (Developer Platform)
 

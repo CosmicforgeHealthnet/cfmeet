@@ -15,6 +15,7 @@
 //!   record that binds a server sequence / id to a client-encrypted MLS message.
 
 pub mod access;
+pub mod chat_lists;
 pub mod http;
 pub mod inbox_settings;
 pub mod policy;

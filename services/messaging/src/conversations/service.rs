@@ -90,7 +90,12 @@ pub struct ConversationRow {
     pub avatar_ref: Option<String>,
     /// S13: only OWNER / ADMIN members may send (send, edit and forward check it).
     pub announcement_only: bool,
+    /// A MANAGED group's description (at most [`MAX_DESCRIPTION_CHARS`] characters).
+    pub description: Option<String>,
 }
+
+/// Longest group description (characters).
+pub const MAX_DESCRIPTION_CHARS: usize = 512;
 
 impl ConversationRow {
     /// When the conversation becomes EXPIRED: `expires_at` plus the grace period.
@@ -105,7 +110,7 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
      c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
-     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref, c.announcement_only";
+     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref, c.announcement_only, c.description";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -168,7 +173,36 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "title": c.title,
         "avatarRef": c.avatar_ref,
         "announcementOnly": c.announcement_only,
+        "description": c.description,
     })
+}
+
+/// A MANAGED conversation's description: trimmed, 1-512 characters (line breaks allowed,
+/// no other control characters). A PRIVATE_E2EE conversation's description belongs inside
+/// its MLS group, so the server refuses to hold one.
+pub(crate) fn valid_description(
+    profile: SecurityProfile,
+    description: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(d) = description else {
+        return Ok(None);
+    };
+    if profile != SecurityProfile::Managed {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "DISPLAY_METADATA_MANAGED_ONLY",
+        ));
+    }
+    let d = d.trim();
+    if d.is_empty()
+        || d.chars().count() > MAX_DESCRIPTION_CHARS
+        || d.chars().any(|c| c.is_control() && c != '\n')
+    {
+        return Err(Error::validation(
+            "description must be 1-512 characters without control characters other than line breaks",
+        ));
+    }
+    Ok(Some(d.to_string()))
 }
 
 /// Section 13 (MSG-007): a MANAGED conversation's display metadata. A PRIVATE_E2EE
@@ -327,6 +361,9 @@ pub struct CreateRequest {
     /// Section 13 (MSG-007): opaque avatar reference (MANAGED only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_ref: Option<String>,
+    /// A MANAGED group's description (1-512 characters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// `(HTTP status, body)` of a creation, as stored for idempotent replays.
@@ -701,6 +738,12 @@ async fn create_in(
         request.title.as_deref(),
         request.avatar_ref.as_deref(),
     )?;
+    if request.description.is_some() && request.context_class == ContextClass::Direct {
+        return Err(Error::validation(
+            "description applies to group conversations",
+        ));
+    }
+    let description = valid_description(profile, request.description.as_deref())?;
     let predecessor = match request.predecessor_conversation_id {
         Some(p) => {
             Some(check_predecessor(txn, ctx, acting, &request, counterpart, profile, p).await?)
@@ -721,8 +764,8 @@ async fn create_in(
            context_namespace, context_ref, context_ref_version, security_profile, protocol, ciphersuite, mls_group_id, \
            security_policy_version, lifecycle_state, policy_snapshot_id, policy_version, created_by_principal_id, \
            created_by_credential_id, owner_principal_id, direct_pair_key, created_at, updated_at, state_changed_at, expires_at, \
-           expiry_grace_seconds, retention_seconds, predecessor_conversation_id, read_receipts, title, avatar_ref) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23, $24, $25, $26) \
+           expiry_grace_seconds, retention_seconds, predecessor_conversation_id, read_receipts, title, avatar_ref, description) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23, $24, $25, $26, $27) \
          ON CONFLICT DO NOTHING",
         vec![
             id.into(),
@@ -751,6 +794,7 @@ async fn create_in(
             request.read_receipts.into(),
             title.into(),
             avatar_ref.into(),
+            description.into(),
         ],
     )
     .await?;
@@ -1066,7 +1110,7 @@ async fn inbox_summary(
             } else {
                 None
             };
-            json!({
+            let mut last = json!({
                 "messageId": m.id,
                 "sequence": m.sequence,
                 "senderPrincipalId": m.sender_principal_id,
@@ -1075,7 +1119,29 @@ async fn inbox_summary(
                 "securityProfile": m.security_profile,
                 "attachmentCount": if m.is_active() { m.attachment_count } else { 0 },
                 "previewText": preview,
-            })
+            });
+            // MANAGED and ACTIVE only: what kind of message it is (poll, announcement) and
+            // the kind of its first attachment, so the chat list shows the right icon.
+            if m.is_active() && m.profile() == SecurityProfile::Managed {
+                last["presentation"] =
+                    json!(m.managed_presentation.as_deref().unwrap_or("STANDARD"));
+                if m.attachment_count > 0 {
+                    #[derive(FromQueryResult)]
+                    struct K {
+                        kind: String,
+                    }
+                    let kind: Option<K> = db::one(
+                        &state.db,
+                        "SELECT kind FROM messaging_attachments WHERE message_id = $1 ORDER BY created_at, id LIMIT 1",
+                        vec![m.id.into()],
+                    )
+                    .await?;
+                    if let Some(k) = kind {
+                        last["attachmentKind"] = json!(k.kind);
+                    }
+                }
+            }
+            last
         }
     };
     let mut summary = json!({
@@ -1265,6 +1331,9 @@ pub struct PatchRequest {
     /// Section 13 (MSG-007): a new display title (`null` clears it). MANAGED only.
     #[serde(default, deserialize_with = "present")]
     pub title: Option<Option<String>>,
+    /// A new group description (`null` clears it). MANAGED, non-DIRECT only.
+    #[serde(default, deserialize_with = "present")]
+    pub description: Option<Option<String>>,
     /// Section 13 (MSG-007): a new avatar reference (`null` clears it). MANAGED only.
     #[serde(default, deserialize_with = "present")]
     pub avatar_ref: Option<Option<String>>,
@@ -1310,10 +1379,11 @@ pub async fn patch(
         && request.retention_seconds.is_none()
         && request.title.is_none()
         && request.avatar_ref.is_none()
+        && request.description.is_none()
         && request.announcement_only.is_none()
     {
         return Err(Error::validation(
-            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title, avatarRef or announcementOnly is required",
+            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title, avatarRef, description or announcementOnly is required",
         ));
     }
 
@@ -1354,8 +1424,30 @@ pub async fn patch(
                         && request.expires_at.is_none()
                         && request.title.is_none()
                         && request.avatar_ref.is_none()
+                        && request.description.is_none()
                         && request.announcement_only.is_none();
-                    if retention_only && row.owner_principal_id != a.principal_id {
+                    // Group info (name, photo, description) is a group admin's to edit too
+                    // (WhatsApp); everything else stays the owner's.
+                    let display_only = (request.title.is_some()
+                        || request.avatar_ref.is_some()
+                        || request.description.is_some())
+                        && request.retention_seconds.is_none()
+                        && request.lifecycle_state.is_none()
+                        && request.expires_at.is_none()
+                        && request.announcement_only.is_none()
+                        && row.context_class != "DIRECT";
+                    if display_only && row.owner_principal_id != a.principal_id {
+                        let member = super::access::membership(txn, id, a.principal_id, false)
+                            .await?
+                            .filter(|m| m.is_active())
+                            .ok_or(Error::code(ErrorCode::NotFound))?;
+                        if !member.is_admin() {
+                            return Err(Error::reason(
+                                ErrorCode::PrincipalNotAuthorized,
+                                "NOT_ADMIN",
+                            ));
+                        }
+                    } else if retention_only && row.owner_principal_id != a.principal_id {
                         let member = super::access::membership(txn, id, a.principal_id, false)
                             .await?
                             .filter(|m| m.is_active())
@@ -1453,6 +1545,18 @@ pub async fn patch(
                     )?;
                     display.title = request.title.as_ref().map(|_| title);
                     display.avatar_ref = request.avatar_ref.as_ref().map(|_| avatar_ref);
+                    if let Some(Some(reference)) = &display.avatar_ref {
+                        crate::attachments::require_avatar_attachment(txn, &row, reference).await?;
+                    }
+                }
+                if let Some(description) = &request.description {
+                    if description.is_some() && row.context_class == "DIRECT" {
+                        return Err(Error::validation(
+                            "description applies to group conversations",
+                        ));
+                    }
+                    display.description =
+                        Some(valid_description(row.profile(), description.as_deref())?);
                 }
                 if let Some(on) = request.announcement_only {
                     if on && row.context_class == "DIRECT" {
@@ -1723,6 +1827,8 @@ pub(crate) struct DisplayChange {
     pub avatar_ref: Option<Option<String>>,
     /// S13: a new announcement-only setting.
     pub announcement_only: Option<bool>,
+    /// A new description (`Some(None)` clears it).
+    pub description: Option<Option<String>>,
     /// B4: turn the conversation's retention (disappearing messages) off.
     pub clear_retention: bool,
 }
@@ -1750,6 +1856,7 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
            title = CASE WHEN $9 THEN $10 ELSE title END, \
            avatar_ref = CASE WHEN $11 THEN $12 ELSE avatar_ref END, \
            announcement_only = COALESCE($13, announcement_only), \
+           description = CASE WHEN $15 THEN $16 ELSE description END, \
            version = version + 1, updated_at = $7, \
            state_changed_at = CASE WHEN $6 THEN $7 ELSE state_changed_at END \
          WHERE id = $1 AND version = $2",
@@ -1768,6 +1875,8 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
             display.avatar_ref.flatten().into(),
             display.announcement_only.into(),
             display.clear_retention.into(),
+            display.description.is_some().into(),
+            display.description.flatten().into(),
         ],
     )
     .await

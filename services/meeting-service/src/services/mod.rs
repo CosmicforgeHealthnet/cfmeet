@@ -76,6 +76,8 @@ pub mod rtc_provider;
 pub mod rtc_webhooks;
 pub mod secrets;
 pub mod session_bridge;
+/// ADR 0069: one-time export of the retired channels for the Messaging import.
+pub mod social_export;
 pub mod specialized;
 pub mod unified_messaging;
 pub mod workspaces;

@@ -154,6 +154,12 @@ async fn template(admin: &str) -> String {
             messaging_migration::AdminOperationsMigrator::up(&tmpl, None)
                 .await
                 .expect("admin-operations migrations apply");
+            messaging_migration::ChatOrganizationMigrator::up(&tmpl, None)
+                .await
+                .expect("chat-organization migrations apply");
+            messaging_migration::SocialMigrator::up(&tmpl, None)
+                .await
+                .expect("status / channels migrations apply");
             tmpl.close().await.ok();
             name
         })

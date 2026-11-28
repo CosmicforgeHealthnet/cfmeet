@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, ChevronRight, Mail, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { useCreateBusinessOrganization } from "@/hooks/v2/useBusinessOrganizations";
+import { useAnswerOrganizationInvitation, useCreateBusinessOrganization, useMyOrganizationInvitations } from "@/hooks/v2/useBusinessOrganizations";
 import LegacyOrganizationsDirectory from "@/components/organizations/LegacyOrganizationsDirectory";
 import { OrgError, OrgMark, TextField } from "@/components/organizations/shared";
 import {
@@ -15,6 +15,45 @@ import {
   provisioningLabel,
   suggestSlug,
 } from "@/lib/organizations/organization-core";
+
+/** Invitations addressed to me (CF Meet ID or verified email), answered right here. */
+function PendingInvitations() {
+  const invitations = useMyOrganizationInvitations();
+  const answer = useAnswerOrganizationInvitation();
+  const [error, setError] = useState<string | null>(null);
+  const items = invitations.data ?? [];
+  if (!items.length) return null;
+  return (
+    <section className="mt-6 rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5" data-testid="org-invitations">
+      <h2 className="text-base font-semibold">Invitations for you</h2>
+      <p className="mt-0.5 text-sm text-muted-foreground">Join a team or company that invited you.</p>
+      {error ? <p role="alert" className="mt-2 text-sm text-destructive">{error}</p> : null}
+      <ul className="mt-3 space-y-2">
+        {items.map((inv) => {
+          const name = inv.organization?.name ?? "An organization";
+          const pending = answer.isPending && answer.variables?.id === inv.id;
+          return (
+            <li key={inv.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-background p-3 ring-1 ring-border" data-testid="org-invitation">
+              <OrgMark name={name} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{name}</span>
+                <span className="block text-xs text-muted-foreground">Join as {niceRole(inv.role)} · expires {new Date(inv.expiresAt).toLocaleDateString()}</span>
+              </span>
+              <span className="flex gap-2">
+                <button type="button" disabled={pending} data-testid="decline-org-invitation"
+                  onClick={() => { setError(null); answer.mutate({ id: inv.id, accept: false }, { onError: () => setError(`Couldn't decline the invitation from ${name}. Try again.`) }); }}
+                  className="h-9 rounded-full px-4 text-sm font-semibold ring-1 ring-border hover:bg-muted disabled:opacity-60">Decline</button>
+                <button type="button" disabled={pending} data-testid="accept-org-invitation"
+                  onClick={() => { setError(null); answer.mutate({ id: inv.id, accept: true }, { onError: () => setError(`Couldn't join ${name}. The invitation may have expired.`) }); }}
+                  className="h-9 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{pending ? "…" : "Join"}</button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 const niceRole = (role?: string | null) => (role ? role.charAt(0) + role.slice(1).toLowerCase().replaceAll("_", " ") : "Member");
 
@@ -43,6 +82,8 @@ export default function OrganizationsContent() {
           <button type="button" onClick={() => setCreating(true)} className="inline-flex h-10 items-center gap-2 rounded-full bg-primary pl-3.5 pr-4 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90"><Plus className="size-4" />New organization</button>
         </div>
       </header>
+
+      <PendingInvitations />
 
       <div className="mt-6">
         {isLoading && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-2xl bg-muted" />)}</div>}

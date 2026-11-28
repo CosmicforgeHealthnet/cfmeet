@@ -543,9 +543,16 @@ pub async fn resolve(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NamesRequest {
     pub principal_ids: Vec<Uuid>,
+    /// Chats the names are needed for: their other members are named too (membership is
+    /// checked by Messaging as the caller).
+    #[serde(default)]
+    pub conversation_ids: Vec<Uuid>,
 }
 
-/// Display names of the principals the caller can see (self, colleagues and connected contacts).
+/// Display names of the principals the caller can see.
+///
+/// Named: the caller, colleagues, connected contacts and the people in the chats listed in
+/// `conversationIds` (membership checked by Messaging as the caller).
 ///
 /// Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of
 /// active members of the caller's verified organizations, and the caller's connected personal
@@ -609,6 +616,39 @@ pub async fn principal_names(
                 }
             }
             Err(error) => tracing::warn!(error = %error, "contact names unavailable"),
+        }
+    }
+    // People in the caller's chats who are neither colleagues nor contacts (WhatsApp names
+    // everyone in a group). Display-only: a Messaging error leaves them unnamed.
+    if !body.conversation_ids.is_empty() {
+        let named: std::collections::HashSet<Uuid> = answer["principals"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                p["principalId"]
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+            })
+            .collect();
+        let rest: Vec<Uuid> = body
+            .principal_ids
+            .iter()
+            .copied()
+            .filter(|p| !named.contains(p))
+            .collect();
+        if !rest.is_empty() {
+            match um
+                .name_chat_members(user, &body.conversation_ids, &rest)
+                .await
+            {
+                Ok(more) => {
+                    if let Some(list) = answer["principals"].as_array_mut() {
+                        list.extend(more);
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "chat member names unavailable"),
+            }
         }
     }
     Ok(Json(answer))

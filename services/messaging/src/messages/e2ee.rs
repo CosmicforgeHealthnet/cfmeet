@@ -226,6 +226,13 @@ pub async fn send(
             "PLAINTEXT_IN_E2EE",
         ));
     }
+    if request.poll.is_some() {
+        // An E2EE poll is an encrypted application message (the server must not learn it).
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "POLL_MANAGED_ONLY",
+        ));
+    }
     if request.managed_presentation.is_some() {
         // Presentation of E2EE content belongs inside the ciphertext.
         return Err(Error::reason(

@@ -145,7 +145,10 @@ export async function ownEndpoints(identity: CallingIdentity): Promise<EndpointL
 
 export async function ownCall(identity: CallingIdentity, id: string): Promise<Call> {
   const response = await callingFetch(`/v1/calls/${id}`);
-  if (!response.ok) throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");
+  // Only a real "not found" means the call is gone: a brief Calling error or rate limit
+  // must not read as one (the client would end a live call over it).
+  if (response.status === 404) throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");
+  if (!response.ok) throw new CallingHttpError(503, "SERVICE_UNAVAILABLE", "Calling is temporarily unavailable.");
   const call = await response.json() as Call;
   if (!call.participants.some((p) => p.principalId === identity.principalId)) {
     throw new CallingHttpError(404, "NOT_FOUND", "Call not found.");

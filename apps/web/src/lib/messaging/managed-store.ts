@@ -10,6 +10,8 @@
  * * A tombstone is final: a later (stale) ACTIVE copy never resurrects it, and a lower
  *   `editCount` never overwrites a newer edit.
  * * Reaction / pin / membership events only say "refetch this"; the caller does it.
+ * * Poll events (`poll.voted` / `poll.closed`) carry the poll message with its current
+ *   tally, so a vote replaces the message's poll like an edit replaces its text.
  *
  * Pure (no imports): node tests run this file directly (tests/messaging-managed-sync.test.mjs).
  */
@@ -34,9 +36,20 @@ export type ServerMessage = {
   createdAt: string;
   attachmentIds: string[];
   e2ee?: { epoch: number; ciphertext: string | null } | null;
-  managed?: { text: string | null; presentation?: "STANDARD" | "ANNOUNCEMENT" } | null;
+  managed?: { text: string | null; presentation?: "STANDARD" | "ANNOUNCEMENT" | "POLL"; poll?: ManagedPoll | null } | null;
   replyToMessageId?: string | null;
   threadRootId?: string | null;
+  forwarded?: boolean;
+};
+
+/** A MANAGED poll's options, voters and close state (`Message.managed.poll`). */
+export type ManagedPoll = {
+  options: { index: number; text: string; voteCount: number; voterPrincipalIds: string[] }[];
+  allowsMultipleAnswers: boolean;
+  voterCount: number;
+  closed: boolean;
+  closedAt?: string | null;
+  closedByPrincipalId?: string | null;
 };
 
 export type ManagedRecord = {
@@ -53,6 +66,9 @@ export type ManagedRecord = {
   replyToMessageId: string | null;
   threadRootId: string | null;
   announcement: boolean;
+  forwarded: boolean;
+  /** A poll message (its text is the question); null otherwise. */
+  poll: ManagedPoll | null;
 };
 
 /** A durable conversation event (`ConversationEvent`). */
@@ -111,6 +127,8 @@ export function toRecord(m: ServerMessage): ManagedRecord {
     replyToMessageId: m.replyToMessageId ?? null,
     threadRootId: m.threadRootId ?? null,
     announcement: m.managed?.presentation === "ANNOUNCEMENT",
+    forwarded: m.forwarded === true,
+    poll: lifecycle === "ACTIVE" && m.managed?.presentation === "POLL" && m.managed.poll ? m.managed.poll : null,
   };
 }
 
@@ -121,13 +139,17 @@ export function supersedes(current: ManagedRecord, next: ManagedRecord): boolean
   return next.editCount >= current.editCount;
 }
 
+const pollKey = (p: ManagedPoll | null) =>
+  p ? `${p.closed ? 1 : 0}|${p.options.map((o) => `${o.index}:${[...o.voterPrincipalIds].sort().join(",")}`).join(";")}` : "";
+
 function sameRecord(a: ManagedRecord, b: ManagedRecord): boolean {
   return (
     a.lifecycle === b.lifecycle &&
     a.text === b.text &&
     a.editCount === b.editCount &&
     a.attachmentIds.join() === b.attachmentIds.join() &&
-    a.replyToMessageId === b.replyToMessageId
+    a.replyToMessageId === b.replyToMessageId &&
+    pollKey(a.poll) === pollKey(b.poll)
   );
 }
 
@@ -234,6 +256,10 @@ export class ManagedConversationState {
       }
       return;
     }
+    if (type.startsWith("poll.")) {
+      if (message) for (const id of this.applyMessages([message])) refresh.messages.add(id);
+      return;
+    }
     if (type.startsWith("reaction.")) {
       if (messageId) refresh.reactions.add(messageId);
       return;
@@ -320,4 +346,19 @@ function sequenceAt(messages: readonly { sequence: number | null; createdAt: str
   let seq = 0;
   for (const m of messages) if (m.sequence !== null && m.createdAt && m.createdAt <= at) seq = Math.max(seq, m.sequence);
   return seq;
+}
+
+/**
+ * Chats whose server head (the chat list's last message) is ahead of what this tab has
+ * synchronized. The list is re-read on a timer while a chat's messages arrive over the
+ * realtime socket; an event the socket lost would otherwise leave the open chat behind
+ * its own list preview until a reload. `known` is null for a chat with nothing to heal.
+ */
+export function behindHead(heads: Iterable<readonly [string, number]>, known: (conversationId: string) => number | null): string[] {
+  const out: string[] = [];
+  for (const [id, head] of heads) {
+    const k = known(id);
+    if (k !== null && head > k) out.push(id);
+  }
+  return out;
 }

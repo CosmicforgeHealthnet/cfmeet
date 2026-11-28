@@ -11,6 +11,7 @@ import type {
   SubmitQuestionRequest,
   AnswerQuestionRequest,
 } from "@/types/v2";
+import { roomPoll } from "@/lib/realtime-health";
 
 // Query Keys
 export const engagementKeys = {
@@ -36,7 +37,7 @@ export function usePolls(conferenceId: string) {
     queryKey: engagementKeys.polls(conferenceId),
     queryFn: () => engagementService.listPolls(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 3000,
+    refetchInterval: roomPoll(conferenceId, 3000),
   });
 }
 
@@ -48,7 +49,7 @@ export function usePoll(conferenceId: string, pollId: string) {
     queryKey: engagementKeys.poll(conferenceId, pollId),
     queryFn: () => engagementService.getPoll(conferenceId, pollId),
     enabled: !!conferenceId && !!pollId,
-    refetchInterval: 2000,
+    refetchInterval: roomPoll(conferenceId, 2000),
   });
 }
 
@@ -60,7 +61,7 @@ export function usePollResults(conferenceId: string, pollId: string, enabled = t
     queryKey: engagementKeys.pollResults(conferenceId, pollId),
     queryFn: () => engagementService.getPollResults(conferenceId, pollId),
     enabled: !!conferenceId && !!pollId && enabled,
-    refetchInterval: enabled ? 3000 : false,
+    refetchInterval: enabled ? roomPoll(conferenceId, 3000) : false,
   });
 }
 
@@ -164,7 +165,7 @@ export function useQuestions(conferenceId: string) {
     queryKey: engagementKeys.questions(conferenceId),
     queryFn: () => engagementService.listQuestions(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 3000,
+    refetchInterval: roomPoll(conferenceId, 3000),
   });
 }
 

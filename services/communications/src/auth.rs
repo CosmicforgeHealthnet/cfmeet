@@ -47,7 +47,8 @@ pub async fn middleware(
             InternalPermission::CommunicationsUserForward
         }
         "/internal/v1/communications/policy/check"
-        | "/internal/v1/communications/principals/resolve" => {
+        | "/internal/v1/communications/principals/resolve"
+        | "/internal/v1/communications/contacts/eligible" => {
             InternalPermission::CommunicationsPolicyCheck
         }
         "/internal/v1/communications/account-events"
