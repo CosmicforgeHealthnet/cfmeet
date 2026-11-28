@@ -54,6 +54,11 @@ pub const MAX_FORWARD_TARGETS: usize = 20;
 pub const MAX_REPLY: usize = 4000;
 /// Viewers listed per status.
 pub const MAX_VIEWERS: i64 = 500;
+/// Replies listed per status (newest first).
+pub const MAX_REPLIES: i64 = 200;
+/// The text the server puts before a reply in the chat ([`reply`]); the author's replies
+/// list shows only what the replier wrote.
+const REPLY_PREFIX: &str = "Replying to your status (";
 
 #[derive(Debug, Clone, FromQueryResult)]
 pub struct StatusRow {
@@ -383,8 +388,9 @@ async fn render(state: &AppState, viewer: Uuid, rows: &[StatusRow]) -> Result<Ve
         .filter(|r| r.author_principal_id == viewer)
         .map(|r| r.id)
         .collect();
-    let (views, shares): (HashMap<Uuid, i64>, HashMap<Uuid, i64>) = if owned.is_empty() {
-        (HashMap::new(), HashMap::new())
+    type Counts = HashMap<Uuid, i64>;
+    let (views, shares, replies): (Counts, Counts, Counts) = if owned.is_empty() {
+        (HashMap::new(), HashMap::new(), HashMap::new())
     } else {
         let views = db::all::<Count, _>(
             &state.db,
@@ -400,13 +406,25 @@ async fn render(state: &AppState, viewer: Uuid, rows: &[StatusRow]) -> Result<Ve
         let shares = db::all::<Count, _>(
             &state.db,
             "SELECT status_id, count(*) AS n FROM messaging_status_shares WHERE status_id = ANY($1) GROUP BY status_id",
-            vec![owned.into()],
+            vec![owned.clone().into()],
         )
         .await?
         .into_iter()
         .map(|c| (c.status_id, c.n))
         .collect();
-        (views, shares)
+        // ADR 0073: the private replies recorded for the author (an upper bound: a reply
+        // whose message was since deleted is counted until the list reads it).
+        let replies = db::all::<Count, _>(
+            &state.db,
+            "SELECT status_id, count(*) AS n FROM messaging_status_replies WHERE status_id = ANY($1) AND author_principal_id = $2 \
+               GROUP BY status_id",
+            vec![owned.into(), viewer.into()],
+        )
+        .await?
+        .into_iter()
+        .map(|c| (c.status_id, c.n))
+        .collect();
+        (views, shares, replies)
     };
     let now = state.now();
     Ok(rows
@@ -453,6 +471,7 @@ async fn render(state: &AppState, viewer: Uuid, rows: &[StatusRow]) -> Result<Ve
             if own {
                 v["viewCount"] = json!(views.get(&r.id).copied().unwrap_or(0));
                 v["shareCount"] = json!(shares.get(&r.id).copied().unwrap_or(0));
+                v["replyCount"] = json!(replies.get(&r.id).copied().unwrap_or(0));
                 v["mentions"] = json!(mentions.get(&r.id).cloned().unwrap_or_default());
                 v["audience"] = json!({
                     "mode": r.audience_mode,
@@ -1219,11 +1238,22 @@ pub async fn rings(
     let seen: HashSet<Uuid> = db::all::<MyView, _>(
         &state.db,
         "SELECT status_id, liked, reaction FROM messaging_status_views WHERE viewer_principal_id = $1 AND status_id = ANY($2)",
-        vec![me.into(), ids.into()],
+        vec![me.into(), ids.clone().into()],
     )
     .await?
     .into_iter()
     .map(|v| v.status_id)
+    .collect();
+    // ADR 0073: the visible statuses that mention the caller (the chat list's "mentioned
+    // you in a status"); only statuses the gate already allowed are considered.
+    let mentioning: HashSet<Uuid> = db::all::<Mention, _>(
+        &state.db,
+        "SELECT status_id, principal_id FROM messaging_status_mentions WHERE principal_id = $1 AND status_id = ANY($2)",
+        vec![me.into(), ids.into()],
+    )
+    .await?
+    .into_iter()
+    .map(|m| m.status_id)
     .collect();
     let mut rings: Vec<Value> = Vec::new();
     for p in wanted {
@@ -1245,6 +1275,11 @@ pub async fn rings(
             "count": of.len(),
             "unseenCount": unseen,
             "closeFriends": p != me && of.iter().any(|s| s.audience_mode == "CLOSE_FRIENDS"),
+            "mentionedMe": p != me && of.iter().any(|s| mentioning.contains(&s.id)),
+            "mentionedMeUnseen": p != me
+                && of
+                    .iter()
+                    .any(|s| mentioning.contains(&s.id) && !seen.contains(&s.id)),
         }));
     }
     Ok(json!({ "rings": rings }))
@@ -1296,8 +1331,10 @@ pub async fn react(
     }
     db::exec(
         &state.db,
-        "INSERT INTO messaging_status_views (status_id, viewer_principal_id, viewed_at, reaction) VALUES ($1, $2, $3, $4) \
-         ON CONFLICT (status_id, viewer_principal_id) DO UPDATE SET reaction = $4",
+        "INSERT INTO messaging_status_views (status_id, viewer_principal_id, viewed_at, reaction, reacted_at) \
+         VALUES ($1, $2, $3, $4, CASE WHEN $4::varchar IS NULL THEN NULL ELSE $3 END) \
+         ON CONFLICT (status_id, viewer_principal_id) DO UPDATE SET reaction = $4, \
+           reacted_at = CASE WHEN $4::varchar IS NULL THEN NULL ELSE $3 END",
         vec![id.into(), me.into(), state.now().into(), emoji.into()],
     )
     .await?;
@@ -1311,6 +1348,7 @@ struct ViewerRow {
     viewed_at: DateTime<Utc>,
     liked: bool,
     reaction: Option<String>,
+    reacted_at: Option<DateTime<Utc>>,
 }
 
 async fn shares_receipts<C: ConnectionTrait>(
@@ -1357,7 +1395,7 @@ async fn viewers_of(
     }
     let views: Vec<ViewerRow> = db::all(
         &state.db,
-        "SELECT status_id, viewer_principal_id, viewed_at, liked, reaction FROM messaging_status_views \
+        "SELECT status_id, viewer_principal_id, viewed_at, liked, reaction, reacted_at FROM messaging_status_views \
           WHERE status_id = ANY($1) AND viewer_principal_id <> $2 ORDER BY viewed_at DESC LIMIT $3",
         vec![ids.into(), owner.into(), (MAX_VIEWERS * rows.len() as i64).into()],
     )
@@ -1387,6 +1425,7 @@ async fn viewers_of(
                 "principalId": v.viewer_principal_id,
                 "viewedAt": rfc3339(v.viewed_at),
                 "liked": v.liked,
+                "reactedAt": v.reaction.as_ref().and(v.reacted_at).map(rfc3339),
                 "reaction": v.reaction,
             }));
         }
@@ -1527,6 +1566,14 @@ pub async fn purge_expired<C: ConnectionTrait>(db: &C, now: DateTime<Utc>) -> Re
         vec![now.into()],
     )
     .await?;
+    // ADR 0073: reply records go with their status (foreign key); this pass also removes
+    // any that outlived it (each carries its status's expiry).
+    db::exec(
+        db,
+        "DELETE FROM messaging_status_replies WHERE id IN (SELECT id FROM messaging_status_replies WHERE expires_at <= $1 LIMIT 5000)",
+        vec![now.into()],
+    )
+    .await?;
     Ok(n)
 }
 
@@ -1617,14 +1664,153 @@ pub async fn reply(
         acting,
         conversation,
         req.client_message_id,
-        format!("Replying to your status ({}): {text}", what(&row)),
+        format!("{REPLY_PREFIX}{}): {text}", what(&row)),
     )
     .await?;
+    // ADR 0073: which message answered which status, for the author's replies list (no
+    // content; a replayed send finds the record already there).
+    if let Some(message_id) = message["messageId"]
+        .as_str()
+        .and_then(|m| Uuid::parse_str(m).ok())
+    {
+        db::exec(
+            &state.db,
+            "INSERT INTO messaging_status_replies (id, environment_id, status_id, author_principal_id, replier_principal_id, \
+               conversation_id, message_id, created_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             ON CONFLICT (message_id) DO NOTHING",
+            vec![
+                Uuid::new_v4().into(),
+                ctx.scope.environment_id.into(),
+                row.id.into(),
+                row.author_principal_id.into(),
+                acting.principal_id.into(),
+                conversation.into(),
+                message_id.into(),
+                state.now().into(),
+                row.expires_at.into(),
+            ],
+        )
+        .await?;
+    }
     Ok(json!({
         "statusId": row.id,
         "conversationId": conversation,
         "messageId": message["messageId"],
     }))
+}
+
+#[derive(FromQueryResult)]
+struct ReplyRecord {
+    id: Uuid,
+    replier_principal_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    created_at: DateTime<Utc>,
+}
+
+/// What the replier wrote: the chat message without the server's "Replying to your status
+/// (...): " lead-in.
+pub fn reply_text(message: &str) -> &str {
+    message
+        .strip_prefix(REPLY_PREFIX)
+        .and_then(|rest| rest.split_once("): ").map(|(_, t)| t))
+        .unwrap_or(message)
+}
+
+/// The private replies to one of the caller's live statuses (author only; ADR 0073),
+/// newest first. Each is read through the author's own membership of the chat it arrived
+/// in: a reply whose message was deleted, expired, hidden for the author or is no longer
+/// visible to them, from someone the author blocked since, or in a chat the author left,
+/// is not listed. Anyone else, and any status not live, answers `404 NOT_FOUND`.
+pub async fn replies(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    id: Uuid,
+) -> Result<Value> {
+    let me = acting.principal_id;
+    let env = ctx.scope.environment_id;
+    let now = state.now();
+    let row = load(&state.db, env, id)
+        .await?
+        .filter(|r| r.author_principal_id == me && r.expires_at > now)
+        .ok_or_else(not_found)?;
+    let records: Vec<ReplyRecord> = db::all(
+        &state.db,
+        "SELECT id, replier_principal_id, conversation_id, message_id, created_at FROM messaging_status_replies \
+          WHERE status_id = $1 AND author_principal_id = $2 AND environment_id = $3 AND expires_at > $4 \
+          ORDER BY created_at DESC, id DESC LIMIT $5",
+        vec![
+            row.id.into(),
+            me.into(),
+            env.into(),
+            now.into(),
+            MAX_REPLIES.into(),
+        ],
+    )
+    .await?;
+    let blocked = blocked_with(&state.db, env, me).await?;
+    let ids: Vec<Uuid> = records.iter().map(|r| r.message_id).collect();
+    let hidden: HashSet<Uuid> = crate::messages::hidden_for(&state.db, me, &ids)
+        .await?
+        .into_iter()
+        .collect();
+    let mut memberships: HashMap<Uuid, Option<i64>> = HashMap::new();
+    let mut out = Vec::with_capacity(records.len());
+    for r in records {
+        if blocked.contains(&r.replier_principal_id) || hidden.contains(&r.message_id) {
+            continue;
+        }
+        let visible_from = match memberships.get(&r.conversation_id) {
+            Some(v) => *v,
+            None => {
+                let m = crate::conversations::access::membership(
+                    &state.db,
+                    r.conversation_id,
+                    me,
+                    false,
+                )
+                .await?
+                .filter(|m| m.is_active())
+                .map(|m| m.visible_from_sequence);
+                memberships.insert(r.conversation_id, m);
+                m
+            }
+        };
+        let Some(visible_from) = visible_from else {
+            continue;
+        };
+        let Some(message) =
+            crate::messages::load_message(&state.db, r.conversation_id, r.message_id, false)
+                .await?
+        else {
+            continue;
+        };
+        if !message.is_active()
+            || message.environment_id != env
+            || message.sender_principal_id != r.replier_principal_id
+            || message.sequence < visible_from
+        {
+            continue;
+        }
+        let text = crate::messages::managed::text_of(
+            state,
+            &message,
+            crate::messages::managed::DecryptPurpose::MemberRead,
+        )
+        .await
+        .map(|t| reply_text(&t).to_owned());
+        out.push(json!({
+            "replyId": r.id,
+            "principalId": r.replier_principal_id,
+            "conversationId": r.conversation_id,
+            "messageId": r.message_id,
+            "sequence": message.sequence,
+            "text": text,
+            "createdAt": rfc3339(r.created_at),
+        }));
+    }
+    Ok(json!({ "statusId": row.id, "replies": out }))
 }
 
 #[derive(Debug, Clone, Deserialize)]
