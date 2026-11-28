@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
   "title": "CF Meet Messaging common v1",
-  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11). 1.31.0 (CF Meet Platform Build, ADR 0062 / 0063): PolicyView.applicationBaseline CFMEET_PLATFORM_PARTNER (EXTERNAL environments while partner session devices are enabled: every context allows MANAGED and PRIVATE_E2EE with MANAGED the default, attachments on); UserSessionRequest / UserSession (the user-token exchange for a MANAGED-only partner session device); UserPushRegistrationRequest / UserPushRegistration (partner push registrations synchronised to the Notification Service). 1.31.0 (CF Meet Apps, ADR 0064): Message.viaApplicationId — the CF Meet App whose OAuth credential sent the message (present only on such messages, so clients can label \"sent by App X\"). 1.33.0: CommitRequest.groupInfo; MlsGroupState.groupInfo / groupInfoEpoch (MLS self-join by external commit); Device.keyPackagesAvailable (own devices only); KeyPackageClaimRequest.deviceIds. 1.34.0: chat controls — ConversationInbox.archived / pinned / pinnedAt and ConversationInboxSettings(Request) (F1), SendMessageRequest.mentionedPrincipalIds for PRIVATE_E2EE (B3), UpdateConversationRequest.retentionSeconds may lengthen or turn off disappearing messages (B4). 1.35.0: Readiness.sendPolicyProtocol / sendPolicyGeneration / sendPolicyLocalEnabled report the synchronous block-projection rollout (optional for older replicas). 1.36.0: chat organization and polls — ConversationInbox.favourite and ConversationInboxSettings(Request).favourite (WhatsApp Favourites); ChatList / ChatListPage / CreateChatListRequest / UpdateChatListRequest / ChatListDeleted (the member's own chat lists); SendMessageRequest.poll / PollRequest, Message.managed.presentation POLL and Message.managed.poll / Poll / PollOption, PollVoteRequest, PollChangeResult (MANAGED polls); ConversationLastMessage.presentation / attachmentKind (chat list icons); Conversation / CreateConversationRequest / UpdateConversationRequest.description (MANAGED group description); avatarRef attachment:<attachmentId> (group photo). 1.37.0 (ADR 0069): Status, status audiences, social media and Channels schemas.",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11). 1.31.0 (CF Meet Platform Build, ADR 0062 / 0063): PolicyView.applicationBaseline CFMEET_PLATFORM_PARTNER (EXTERNAL environments while partner session devices are enabled: every context allows MANAGED and PRIVATE_E2EE with MANAGED the default, attachments on); UserSessionRequest / UserSession (the user-token exchange for a MANAGED-only partner session device); UserPushRegistrationRequest / UserPushRegistration (partner push registrations synchronised to the Notification Service). 1.31.0 (CF Meet Apps, ADR 0064): Message.viaApplicationId — the CF Meet App whose OAuth credential sent the message (present only on such messages, so clients can label \"sent by App X\"). 1.33.0: CommitRequest.groupInfo; MlsGroupState.groupInfo / groupInfoEpoch (MLS self-join by external commit); Device.keyPackagesAvailable (own devices only); KeyPackageClaimRequest.deviceIds. 1.34.0: chat controls — ConversationInbox.archived / pinned / pinnedAt and ConversationInboxSettings(Request) (F1), SendMessageRequest.mentionedPrincipalIds for PRIVATE_E2EE (B3), UpdateConversationRequest.retentionSeconds may lengthen or turn off disappearing messages (B4). 1.35.0: Readiness.sendPolicyProtocol / sendPolicyGeneration / sendPolicyLocalEnabled report the synchronous block-projection rollout (optional for older replicas). 1.36.0: chat organization and polls — ConversationInbox.favourite and ConversationInboxSettings(Request).favourite (WhatsApp Favourites); ChatList / ChatListPage / CreateChatListRequest / UpdateChatListRequest / ChatListDeleted (the member's own chat lists); SendMessageRequest.poll / PollRequest, Message.managed.presentation POLL and Message.managed.poll / Poll / PollOption, PollVoteRequest, PollChangeResult (MANAGED polls); ConversationLastMessage.presentation / attachmentKind (chat list icons); Conversation / CreateConversationRequest / UpdateConversationRequest.description (MANAGED group description); avatarRef attachment:<attachmentId> (group photo). 1.37.0 (ADR 0069): Status, status audiences, social media and Channels schemas. 1.40.0 (ADR 0073): Communities schemas (Community, CommunityGroup, invitations, invite links, join requests, bans, preferences).",
   "oneOf": [
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
@@ -10376,6 +10376,1098 @@
       "required": [
         "postId",
         "deleted"
+      ]
+    },
+    "Community": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacy": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "APPROVAL",
+            "INVITE_ONLY"
+          ]
+        },
+        "membersCanAddGroups": {
+          "type": "boolean"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "announcementsConversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pictureRef": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memberCount": {
+          "type": "integer"
+        },
+        "groupCount": {
+          "type": "integer"
+        },
+        "myRole": {
+          "type": "string",
+          "enum": [
+            "OWNER",
+            "ADMIN",
+            "MEMBER"
+          ]
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "joinedConversationIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "pendingRequestCount": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "communityId",
+        "name",
+        "privacy",
+        "membersCanAddGroups",
+        "ownerPrincipalId",
+        "memberCount",
+        "groupCount",
+        "myRole",
+        "joinedAt",
+        "joinedConversationIds",
+        "pendingRequestCount",
+        "version",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CommunityPage": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "communities": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Community"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "communities"
+      ]
+    },
+    "CommunityCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "1-100 characters."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "At most 2048 characters."
+        },
+        "rules": {
+          "type": "string",
+          "maxLength": 16000,
+          "description": "At most 4000 characters."
+        },
+        "privacy": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "APPROVAL",
+            "INVITE_ONLY"
+          ],
+          "description": "Default APPROVAL."
+        },
+        "membersCanAddGroups": {
+          "type": "boolean",
+          "description": "Default false: only admins add groups."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "CommunityUpdateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "description": "Optional optimistic guard (409 VERSION_CONFLICT)."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 8192
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 16000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacy": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "APPROVAL",
+            "INVITE_ONLY"
+          ]
+        },
+        "membersCanAddGroups": {
+          "type": "boolean"
+        }
+      },
+      "required": []
+    },
+    "CommunityOwnerRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "principalId"
+      ]
+    },
+    "CommunityDeleted": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "communityId",
+        "deleted"
+      ]
+    },
+    "CommunityLeft": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "left": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "communityId",
+        "left"
+      ]
+    },
+    "CommunityMember": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "OWNER",
+            "ADMIN",
+            "MEMBER"
+          ]
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "principalId",
+        "role",
+        "joinedAt"
+      ]
+    },
+    "CommunityMemberPage": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityMember"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "members"
+      ]
+    },
+    "CommunityRoleRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "ADMIN",
+            "MEMBER"
+          ]
+        }
+      },
+      "required": [
+        "role"
+      ]
+    },
+    "CommunityMemberRemoved": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "principalId",
+        "state"
+      ]
+    },
+    "CommunityBan": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "bannedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "bannedByPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "principalId",
+        "bannedAt",
+        "bannedByPrincipalId"
+      ]
+    },
+    "CommunityBanList": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "bans": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityBan"
+          }
+        }
+      },
+      "required": [
+        "bans"
+      ]
+    },
+    "CommunityBanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "principalId"
+      ]
+    },
+    "CommunityBanLifted": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "lifted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "principalId",
+        "lifted"
+      ]
+    },
+    "CommunityPreview": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "privacy": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "APPROVAL",
+            "INVITE_ONLY"
+          ]
+        },
+        "memberCount": {
+          "type": "integer"
+        },
+        "groupCount": {
+          "type": "integer"
+        },
+        "member": {
+          "type": "boolean"
+        },
+        "pendingRequest": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "communityId",
+        "name",
+        "privacy",
+        "memberCount",
+        "groupCount",
+        "member",
+        "pendingRequest"
+      ]
+    },
+    "CommunityInvitation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "invitedByPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "ACCEPTED",
+            "DECLINED",
+            "REVOKED",
+            "EXPIRED"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "community": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityPreview"
+        }
+      },
+      "required": [
+        "invitationId",
+        "communityId",
+        "principalId",
+        "invitedByPrincipalId",
+        "state",
+        "createdAt",
+        "expiresAt"
+      ]
+    },
+    "CommunityInvitationList": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "invitations": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityInvitation"
+          }
+        }
+      },
+      "required": [
+        "invitations"
+      ]
+    },
+    "CommunityInviteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "required": [
+        "principalIds"
+      ]
+    },
+    "CommunityInviteResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "invitations": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityInvitation"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "principalId",
+              "reason"
+            ]
+          }
+        }
+      },
+      "required": [
+        "invitations",
+        "skipped"
+      ]
+    },
+    "CommunityInviteLink": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "inviteLinkId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "maxUses": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "useCount": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdByPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "EXPIRED",
+            "EXHAUSTED",
+            "REVOKED"
+          ]
+        },
+        "token": {
+          "type": "string",
+          "description": "mcl_ token; in the creation response only (only its SHA-256 is stored)."
+        }
+      },
+      "required": [
+        "inviteLinkId",
+        "communityId",
+        "useCount",
+        "expiresAt",
+        "createdByPrincipalId",
+        "createdAt",
+        "status"
+      ]
+    },
+    "CommunityInviteLinkList": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "inviteLinks": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityInviteLink"
+          }
+        }
+      },
+      "required": [
+        "inviteLinks"
+      ]
+    },
+    "CommunityInviteLinkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000,
+          "description": "Default 7 days."
+        },
+        "maxUses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "required": []
+    },
+    "CommunityTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Optional note to the admins (a join request); at most 500 characters."
+        }
+      },
+      "required": [
+        "token"
+      ]
+    },
+    "CommunityJoinRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requestId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "communityId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "communityName": {
+          "type": "string"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "groupTitle": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "APPROVED",
+            "REJECTED",
+            "CANCELLED"
+          ]
+        },
+        "message": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decidedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decidedByPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requestId",
+        "communityId",
+        "communityName",
+        "principalId",
+        "state",
+        "createdAt"
+      ]
+    },
+    "CommunityJoinRequestPage": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityJoinRequest"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requests"
+      ]
+    },
+    "CommunityGroup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "title": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "avatarRef": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "securityProfile": {
+          "type": "string"
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "RESTRICTED"
+          ]
+        },
+        "position": {
+          "type": "integer"
+        },
+        "announcements": {
+          "type": "boolean"
+        },
+        "joined": {
+          "type": "boolean"
+        },
+        "memberCount": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "myRole": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "canManage": {
+          "type": "boolean"
+        },
+        "pendingRequest": {
+          "type": "boolean"
+        },
+        "linkedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "conversationId",
+        "securityProfile",
+        "access",
+        "position",
+        "announcements",
+        "joined",
+        "canManage",
+        "pendingRequest",
+        "linkedAt"
+      ]
+    },
+    "CommunityGroupList": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityGroup"
+          }
+        }
+      },
+      "required": [
+        "groups"
+      ]
+    },
+    "CommunityGroupCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 480,
+          "description": "1-120 characters."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "At most 512 characters."
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "RESTRICTED"
+          ]
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "CommunityGroupLinkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "RESTRICTED"
+          ]
+        }
+      },
+      "required": [
+        "conversationId"
+      ]
+    },
+    "CommunityGroupUpdateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "RESTRICTED"
+          ]
+        }
+      },
+      "required": [
+        "access"
+      ]
+    },
+    "CommunityGroupOrderRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationIds": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "required": [
+        "conversationIds"
+      ]
+    },
+    "CommunityGroupUnlinked": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "unlinked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "unlinked"
+      ]
+    },
+    "CommunityJoinGroupRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": []
+    },
+    "CommunityJoinResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "JOINED",
+            "REQUESTED",
+            "ALREADY_MEMBER"
+          ]
+        },
+        "community": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Community"
+        },
+        "group": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityGroup"
+        },
+        "request": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CommunityJoinRequest"
+        }
+      },
+      "required": [
+        "outcome"
+      ]
+    },
+    "CommunityPreferences": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "chatListMode": {
+          "type": "string",
+          "enum": [
+            "TOGETHER",
+            "SEPARATE"
+          ]
+        }
+      },
+      "required": [
+        "chatListMode"
       ]
     }
   }

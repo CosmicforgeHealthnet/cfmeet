@@ -151,6 +151,8 @@ const CONVERSATIONS: &[&str] = &[
     "orderBy",
 ];
 const MESSAGES: &[&str] = &["afterSequence", "beforeSequence", "limit", "threadRootId"];
+/// `GET v1/messaging/communities/{id}/join-requests` (ADR 0073): the state filter and page.
+const COMMUNITY_REQUESTS: &[&str] = &["state", "limit", "cursor"];
 /// `GET v1/conversations/{id}/events`: Messaging's canonical replay cursor is `after`.
 const EVENTS: &[&str] = &["after", "limit"];
 
@@ -1122,6 +1124,331 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // ADR 0073: Communities (Messaging owns them; Meeting only relays).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities")],
+        &[],
+        true,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("preferences")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("communities"), Lit("preferences")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invitations"),
+            Id,
+            Lit("accept"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invitations"),
+            Id,
+            Lit("decline"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invite-links"),
+            Lit("preview"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("invite-links"),
+            Lit("join"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Lit("join-requests")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Lit("join-requests"),
+            Id,
+            Lit("cancel"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("owner")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("leave")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("members")],
+        PAGE,
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("members"),
+            Id,
+            Lit("role"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("members"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("bans"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invitations"),
+            Id,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("invite-links"),
+            Id,
+            Lit("revoke"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+        ],
+        COMMUNITY_REQUESTS,
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+            Id,
+            Lit("approve"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("join-requests"),
+            Id,
+            Lit("reject"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups")],
+        &[],
+        true,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Lit("link"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Lit("order"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("communities"), Id, Lit("groups"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("communities"),
+            Id,
+            Lit("groups"),
+            Id,
+            Lit("join"),
+        ],
+        &[],
+        false,
+    ),
 ];
 
 // Bound the path segment independently of the domain reaction validation. Reject
@@ -1635,6 +1962,21 @@ mod tests {
             ),
             (Method::GET, "v1/messaging/chat-lists".into()),
             (Method::POST, "v1/messaging/chat-lists".into()),
+            (Method::GET, "v1/messaging/communities".into()),
+            (Method::POST, "v1/messaging/communities".into()),
+            (
+                Method::POST,
+                "v1/messaging/communities/invite-links/join".into(),
+            ),
+            (Method::GET, format!("v1/messaging/communities/{C}/groups")),
+            (
+                Method::POST,
+                format!("v1/messaging/communities/{C}/groups/{C}/join"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/communities/{C}/join-requests/{C}/approve"),
+            ),
             (Method::PATCH, format!("v1/messaging/chat-lists/{C}")),
             (Method::DELETE, format!("v1/messaging/chat-lists/{C}")),
             (
