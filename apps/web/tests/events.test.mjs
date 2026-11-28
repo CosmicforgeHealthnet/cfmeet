@@ -245,3 +245,17 @@ test("the bell opens an event notice on the event page", async () => {
   assert.equal(inboxHref({ id: "1", action: { kind: "OPEN_EVENT", ref: ID } }), `/dashboard/events/${ID}`);
   assert.equal(inboxHref({ id: "2", action: { kind: "OPEN_EVENT", ref: null } }), "/dashboard/events");
 });
+
+test("community events (ADR 0071 / 0073): the form sends communityId, and the community page lists its own events", () => {
+  const CM = "44444444-4444-4444-8444-444444444444";
+  const state = { ...core.emptyForm("Europe/London", NOW, null, CM), title: "Street party", startDate: "2026-07-10", endDate: "2026-07-10" };
+  assert.equal(state.scope, "COMMUNITY");
+  const body = core.buildCreateBody(state);
+  assert.equal(body.scope, "COMMUNITY");
+  assert.equal(body.communityId, CM);
+  assert.equal(body.conversationId, undefined);
+  assert.equal(core.validateForm({ ...state, communityId: "" }, NOW), "Choose the community this event belongs to.");
+  const item = (scope, communityId, eventId) => ({ startsAt: "2026-07-10T18:00:00Z", endsAt: "2026-07-10T19:00:00Z", event: { eventId, scope, communityId } });
+  const items = [item("COMMUNITY", CM, "a"), item("COMMUNITY", C, "b"), item("CONVERSATION", null, "c"), item("PERSONAL", null, "d")];
+  assert.deepEqual(core.communityEventItems(items, CM).map((i) => i.event.eventId), ["a"]);
+});

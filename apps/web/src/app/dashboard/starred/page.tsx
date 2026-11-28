@@ -1,5 +1,5 @@
-import StarredContent from "@/components/starred/StarredContent";
+import StarredWithChannels from "@/components/starred/StarredWithChannels";
 
 export default function StarredPage() {
-  return <StarredContent />;
+  return <StarredWithChannels />;
 }
