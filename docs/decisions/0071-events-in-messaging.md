@@ -68,7 +68,8 @@ chat feature to the meeting app again, which ADR 0069 has just undone for Status
    supported.
 7. **Queries.** `GET /v1/messaging/events?view=` returns OCCURRENCES ordered by start (`PAST`
    newest first) with an opaque keyset `cursor` and `limit` (1-100, default 30):
-   `UPCOMING` (not yet ended), `TODAY` (overlapping the caller's day in `tz`), `PAST` (ended),
+   `UPCOMING` (not yet ended), `TODAY` (overlapping the caller's day: the client sends its local
+   day as `from` / `to`, since the relay forwards at most 8 query keys; without them the UTC day), `PAST` (ended),
    `MINE` (organizer or co-organizer, not yet ended), `INVITATIONS` (invited or a conversation
    member, no answer yet, active, not organizer), `ACCEPTED` (`GOING`, not yet ended). `from`
    / `to` (at most 92 days apart) replace the time window for the month calendar. Filters:
@@ -110,7 +111,7 @@ All under `/v1/messaging/events`, acting principal required; reads `messages.rea
 | Operation | Route | Body / query |
 |---|---|---|
 | `createEvent` | `POST /events` (`Idempotency-Key`) | `EventCreateRequest` → `201 Event` (`200` replay) |
-| `listEvents` | `GET /events` | `view`, `from`, `to`, `tz`, `conversationId`, `q`, `type`, `limit`, `cursor` → `EventPage` |
+| `listEvents` | `GET /events` | `view`, `from`, `to`, `conversationId`, `q`, `type`, `limit`, `cursor` → `EventPage` |
 | `exportEventCalendar` | `GET /events/calendar` | → `EventCalendarFile` |
 | `getEvent` | `GET /events/{eventId}` | → `Event` (with `upcomingOccurrences`) |
 | `updateEvent` | `PATCH /events/{eventId}` | `EventUpdateRequest` → `Event` |

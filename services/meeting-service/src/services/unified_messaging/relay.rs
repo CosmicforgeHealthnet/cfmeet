@@ -156,7 +156,6 @@ const EVENT_LIST: &[&str] = &[
     "view",
     "from",
     "to",
-    "tz",
     "conversationId",
     "q",
     "type",

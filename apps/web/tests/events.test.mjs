@@ -169,12 +169,14 @@ test("occurrences are grouped by the viewer's local day; all-day events keep the
 
 test("list queries keep the relay's key order and drop empty values", () => {
   assert.equal(core.listQuery({ view: "UPCOMING" }), "view=UPCOMING&limit=30");
-  assert.equal(core.listQuery({ view: "TODAY", tz: "Africa/Lagos", q: "  din ", type: "CALL", conversationId: C, cursor: "abc+=" }),
-    `view=TODAY&tz=Africa%2FLagos&conversationId=${C}&q=din&type=CALL&limit=30&cursor=abc%2B%3D`);
-  // tz only for TODAY; a calendar window is absolute.
+  // TODAY is the caller's day in their zone, sent as from / to (Lagos is UTC+1).
+  const noon = Date.parse("2026-11-28T12:00:00Z");
+  assert.equal(core.listQuery({ view: "TODAY", tz: "Africa/Lagos", q: "  din ", type: "CALL", conversationId: C, cursor: "abc+=" }, noon),
+    `view=TODAY&from=2026-11-27T23%3A00%3A00.000Z&to=2026-11-28T23%3A00%3A00.000Z&conversationId=${C}&q=din&type=CALL&limit=30&cursor=abc%2B%3D`);
+  // A calendar window is absolute.
   assert.equal(core.listQuery({ view: "UPCOMING", tz: "UTC", from: "2026-10-26T00:00:00.000Z", to: "2026-12-07T00:00:00.000Z", limit: 500 }),
     "view=UPCOMING&from=2026-10-26T00%3A00%3A00.000Z&to=2026-12-07T00%3A00%3A00.000Z&limit=100");
-  assert.deepEqual([...core.LIST_QUERY_KEYS], ["view", "from", "to", "tz", "conversationId", "q", "type", "limit", "cursor"]);
+  assert.deepEqual([...core.LIST_QUERY_KEYS], ["view", "from", "to", "conversationId", "q", "type", "limit", "cursor"]);
   for (const view of core.EVENT_VIEWS.map((v) => v.value)) {
     const q = core.listQuery({ view, tz: "UTC", conversationId: C, q: "x", type: "ONLINE", cursor: "c" });
     assert.equal(isMessagingRelayRoute("GET", `v1/messaging/events?${q}`), true, q);
@@ -211,7 +213,7 @@ test("event links: the page, the shared text, and links found in chat messages",
 test("the relay allowlist carries every events operation, and nothing else", () => {
   const e = "v1/messaging/events";
   const allowed = [
-    ["GET", `${e}?view=UPCOMING&from=a&to=b&tz=UTC&conversationId=${C}&q=x&type=CALL&limit=30`],
+    ["GET", `${e}?view=UPCOMING&from=a&to=b&conversationId=${C}&q=x&type=CALL&limit=30`],
     ["GET", `${e}?view=PAST&cursor=abc`],
     ["POST", e], ["GET", `${e}/calendar`],
     ["GET", `${e}/${ID}`], ["PATCH", `${e}/${ID}`], ["DELETE", `${e}/${ID}`],

@@ -694,7 +694,7 @@ async fn views_pages_and_search() {
     assert!(w.listed(alice, "view=PAST").await.is_empty());
 
     // Today in a zone, past after time passes.
-    let today = w.listed(alice, "view=TODAY&tz=UTC").await;
+    let today = w.listed(alice, "view=TODAY").await;
     assert!(today.len() <= 3);
     w.h.clock.advance(Duration::hours(10));
     let past = w.listed(alice, "view=PAST").await;

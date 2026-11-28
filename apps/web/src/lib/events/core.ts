@@ -441,7 +441,7 @@ export function reminderLabel(minutes: number): string {
 
 export interface EventFilters {
   view: EventListView;
-  /** The browser's IANA zone (sent for TODAY). */
+  /** The browser's IANA zone (TODAY is sent as that zone's day, from / to). */
   tz?: string;
   from?: string;
   to?: string;
@@ -453,17 +453,23 @@ export interface EventFilters {
 }
 
 /** The relay's order of `GET messaging/events` query keys. */
-export const LIST_QUERY_KEYS = ["view", "from", "to", "tz", "conversationId", "q", "type", "limit", "cursor"] as const;
+export const LIST_QUERY_KEYS = ["view", "from", "to", "conversationId", "q", "type", "limit", "cursor"] as const;
 
-/** `?view=…&…` for `GET v1/messaging/events` (empty values omitted; `tz` only where it matters). */
-export function listQuery(filters: EventFilters): string {
+/** The caller's day in `timeZone` as a UTC window (`to` exclusive). */
+export function todayRange(timeZone: string, now = Date.now()): { from: string; to: string } {
+  const day = localDate(new Date(now).toISOString(), timeZone);
+  return { from: zonedLocalToUtc(`${day}T00:00`, timeZone), to: zonedLocalToUtc(`${addDays(day, 1)}T00:00`, timeZone) };
+}
+
+/** `?view=…&…` for `GET v1/messaging/events` (empty values omitted; the relay takes at most 8 keys). */
+export function listQuery(filters: EventFilters, now = Date.now()): string {
   const q = (filters.q ?? "").trim().slice(0, 100);
+  // TODAY is the caller's own day: sent as its window, so the server needs no zone.
+  const today = filters.view === "TODAY" && !filters.from && filters.tz ? todayRange(filters.tz, now) : null;
   const values: Record<(typeof LIST_QUERY_KEYS)[number], string | undefined> = {
     view: filters.view,
-    from: filters.from || undefined,
-    to: filters.to || undefined,
-    // A calendar window is absolute; TODAY needs the caller's day.
-    tz: filters.view === "TODAY" && !filters.from && filters.tz ? filters.tz : undefined,
+    from: filters.from || today?.from || undefined,
+    to: filters.to || today?.to || undefined,
     conversationId: filters.conversationId || undefined,
     q: q || undefined,
     type: filters.type || undefined,

@@ -1134,7 +1134,6 @@ pub struct ListQuery {
     pub view: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    pub tz: Option<String>,
     pub conversation_id: Option<String>,
     pub q: Option<String>,
     pub kind: Option<String>,
@@ -1212,21 +1211,12 @@ pub async fn list(
             (f, t, false)
         }
         (None, None) => match which {
+            // The client sends its own day as from / to (the relay takes at most 8 query
+            // keys); without them, TODAY is the UTC day.
             View::Today => {
-                let tz = match q.tz.as_deref() {
-                    None | Some("") => chrono_tz::UTC,
-                    Some(z) => {
-                        recurrence::zone(z).ok_or_else(|| Error::validation("Unknown time zone"))?
-                    }
-                };
-                let day = now.with_timezone(&tz).date_naive();
-                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default();
-                let start = recurrence::to_utc(tz, day.and_time(midnight));
-                let end = day
-                    .succ_opt()
-                    .map(|d| recurrence::to_utc(tz, d.and_time(midnight)))
-                    .unwrap_or(start + Duration::days(1));
-                (start, end, false)
+                let day = now.date_naive();
+                let start = day.and_time(NaiveTime::MIN).and_utc();
+                (start, start + Duration::days(1), false)
             }
             View::Past => (DateTime::<Utc>::MIN_UTC, now, true),
             _ => (now, now + Duration::days(MAX_AHEAD_DAYS + 366), false),

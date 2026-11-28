@@ -12753,7 +12753,7 @@
             "name": "view",
             "in": "query",
             "required": false,
-            "description": "Default UPCOMING (not yet ended). TODAY overlaps the caller's day in tz; PAST newest first; MINE organizer or co-organizer; INVITATIONS no answer yet; ACCEPTED GOING.",
+            "description": "Default UPCOMING (not yet ended). TODAY overlaps the caller's day (send it as from / to; without them the UTC day); PAST newest first; MINE organizer or co-organizer; INVITATIONS no answer yet; ACCEPTED GOING.",
             "schema": {
               "type": "string",
               "enum": [
@@ -12784,16 +12784,6 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            }
-          },
-          {
-            "name": "tz",
-            "in": "query",
-            "required": false,
-            "description": "IANA zone of the caller's day (TODAY; default UTC).",
-            "schema": {
-              "type": "string",
-              "maxLength": 64
             }
           },
           {

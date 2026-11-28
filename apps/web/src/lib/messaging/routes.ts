@@ -72,7 +72,7 @@ const routes: Route[] = [
   ["PUT", `${st}/${id}/reaction`, []], ["DELETE", `${st}/${id}/reaction`, []], ["GET", `${st}/${id}/viewers`, []],
   ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
   // ADR 0071: Events (owned by Messaging; Meeting only relays them).
-  ["GET", ev, ["view", "from", "to", "tz", "conversationId", "q", "type", "limit", "cursor"]], ["POST", ev, []],
+  ["GET", ev, ["view", "from", "to", "conversationId", "q", "type", "limit", "cursor"]], ["POST", ev, []],
   ["GET", `${ev}/calendar`, []],
   ["GET", `${ev}/${id}`, []], ["PATCH", `${ev}/${id}`, []], ["DELETE", `${ev}/${id}`, []],
   ["POST", `${ev}/${id}/cancel`, []], ["PUT", `${ev}/${id}/rsvp`, []], ["GET", `${ev}/${id}/attendees`, []],
