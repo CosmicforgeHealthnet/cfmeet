@@ -33,6 +33,8 @@ export interface CalendarEvent {
   eventId: string;
   scope: EventScope;
   conversationId: string | null;
+  /** A COMMUNITY event's community (ADR 0071 / 0073). */
+  communityId?: string | null;
   title: string;
   description: string | null;
   location: string | null;
@@ -72,6 +74,7 @@ export interface EventPage { items: EventPageItem[]; nextCursor: string | null }
 export interface EventCreateRequest {
   scope: EventScope;
   conversationId?: string;
+  communityId?: string;
   title: string;
   description?: string;
   location?: string;
@@ -212,15 +215,16 @@ export interface EventFormState {
   ends: RecurrenceEnd;
   count: number;
   until: string;
-  scope: "PERSONAL" | "CONVERSATION";
+  scope: "PERSONAL" | "CONVERSATION" | "COMMUNITY";
   conversationId: string;
+  communityId: string;
   coOrganizerPrincipalIds: string[];
   inviteePrincipalIds: string[];
   reminders: number[];
 }
 
-/** A new event: the next whole hour for one hour, in the given zone. */
-export function emptyForm(timeZone: string, now = Date.now(), conversationId?: string | null): EventFormState {
+/** A new event: the next whole hour for one hour, in the given zone (in a chat or a community when given). */
+export function emptyForm(timeZone: string, now = Date.now(), conversationId?: string | null, communityId?: string | null): EventFormState {
   const next = Math.ceil((now + 60_000) / 3_600_000) * 3_600_000;
   const start = utcToZonedLocal(new Date(next).toISOString(), timeZone);
   const end = utcToZonedLocal(new Date(next + 3_600_000).toISOString(), timeZone);
@@ -228,7 +232,8 @@ export function emptyForm(timeZone: string, now = Date.now(), conversationId?: s
     title: "", description: "", location: "", type: "PHYSICAL", meetingId: "", meetingUrl: "", coverMediaId: null,
     startDate: start.slice(0, 10), startTime: start.slice(11, 16), endDate: end.slice(0, 10), endTime: end.slice(11, 16),
     allDay: false, timeZone, frequency: "NONE", interval: 1, byDay: [weekdayOf(start.slice(0, 10))], ends: "NEVER", count: 10, until: "",
-    scope: conversationId ? "CONVERSATION" : "PERSONAL", conversationId: conversationId ?? "",
+    scope: communityId ? "COMMUNITY" : conversationId ? "CONVERSATION" : "PERSONAL",
+    conversationId: communityId ? "" : conversationId ?? "", communityId: communityId ?? "",
     coOrganizerPrincipalIds: [], inviteePrincipalIds: [], reminders: [30],
   };
 }
@@ -248,7 +253,8 @@ export function formFromEvent(event: CalendarEvent): EventFormState {
     frequency: r ? r.frequency : "NONE", interval: r?.interval ?? 1,
     byDay: r?.byDay?.length ? [...r.byDay] : [weekdayOf(start.slice(0, 10))],
     ends: r?.count ? "COUNT" : r?.until ? "UNTIL" : "NEVER", count: r?.count ?? 10, until: r?.until ?? "",
-    scope: event.scope === "CONVERSATION" ? "CONVERSATION" : "PERSONAL", conversationId: event.conversationId ?? "",
+    scope: event.scope === "CONVERSATION" || event.scope === "COMMUNITY" ? event.scope : "PERSONAL",
+    conversationId: event.conversationId ?? "", communityId: event.communityId ?? "",
     coOrganizerPrincipalIds: [...(event.coOrganizerPrincipalIds ?? [])], inviteePrincipalIds: [], reminders: [...(event.myReminders ?? [])],
   };
 }
@@ -293,6 +299,7 @@ export function validateForm(state: EventFormState, now = Date.now()): string | 
   if (state.type === "ONLINE" && !state.meetingId && !state.meetingUrl) return "Pick a CF Meet meeting for an online event, or create one.";
   if (state.meetingUrl && !/^https:\/\//i.test(state.meetingUrl)) return "The meeting link must start with https://.";
   if (state.scope === "CONVERSATION" && !state.conversationId) return "Choose the chat this event belongs to.";
+  if (state.scope === "COMMUNITY" && !state.communityId) return "Choose the community this event belongs to.";
   let times: { startsAt: string; endsAt: string };
   try {
     times = eventTimes(state);
@@ -338,6 +345,7 @@ export function buildCreateBody(state: EventFormState): EventCreateRequest {
     allDay: state.allDay,
   };
   if (state.scope === "CONVERSATION") body.conversationId = state.conversationId;
+  if (state.scope === "COMMUNITY") body.communityId = state.communityId;
   if (trimmed(state.description)) body.description = trimmed(state.description);
   if (trimmed(state.location)) body.location = trimmed(state.location);
   if (state.type === "ONLINE") {
@@ -479,6 +487,15 @@ export function listQuery(filters: EventFilters, now = Date.now()): string {
   const params = new URLSearchParams();
   for (const key of LIST_QUERY_KEYS) if (values[key] !== undefined) params.set(key, values[key]!);
   return params.toString();
+}
+
+/**
+ * The occurrences of one community's events (ADR 0071 / 0073). `GET messaging/events` takes
+ * at most 8 query keys and has no community filter, so the community page filters the
+ * caller's visible events (the server already limits them to communities they belong to).
+ */
+export function communityEventItems(items: readonly EventPageItem[], communityId: string): EventPageItem[] {
+  return items.filter((i) => i.event.scope === "COMMUNITY" && i.event.communityId === communityId);
 }
 
 const itemKey = (i: Pick<EventPageItem, "startsAt"> & { event: Pick<CalendarEvent, "eventId"> }) => `${i.event.eventId}@${new Date(i.startsAt).toISOString()}`;

@@ -46,13 +46,15 @@ import { EventCover, TYPE_ICON, field, sectionTitle, useMessagingSnapshot } from
 
 type Person = { principalId: string; name: string };
 
-export default function EventForm({ open, onClose, event, conversationId, onSaved }: {
+export default function EventForm({ open, onClose, event, conversationId, communityId, onSaved }: {
   open: boolean;
   onClose: () => void;
   /** Edit this event (PATCH); omitted: create one. */
   event?: CalendarEvent | null;
   /** Create the event in this chat. */
   conversationId?: string | null;
+  /** Create the event for this community (its admins only; every member sees it). */
+  communityId?: string | null;
   onSaved: (event: CalendarEvent, created: boolean) => void;
 }) {
   return (
@@ -62,16 +64,17 @@ export default function EventForm({ open, onClose, event, conversationId, onSave
           <DialogTitle>{event ? "Edit event" : "Create event"}</DialogTitle>
           <DialogDescription>{event ? "Changes apply to every occurrence and everyone on the event sees them." : "Plan something with your contacts or a chat."}</DialogDescription>
         </DialogHeader>
-        {open ? <FormBody key={event ? `${event.eventId}:${event.version}` : `new:${conversationId ?? ""}`} event={event ?? null} conversationId={conversationId ?? null} onClose={onClose} onSaved={onSaved} /> : null}
+        {open ? <FormBody key={event ? `${event.eventId}:${event.version}` : `new:${conversationId ?? ""}:${communityId ?? ""}`} event={event ?? null} conversationId={conversationId ?? null} communityId={communityId ?? null} onClose={onClose} onSaved={onSaved} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function FormBody({ event: initial, conversationId, onClose, onSaved }: { event: CalendarEvent | null; conversationId: string | null; onClose: () => void; onSaved: (event: CalendarEvent, created: boolean) => void }) {
+function FormBody({ event: initial, conversationId, communityId, onClose, onSaved }: { event: CalendarEvent | null; conversationId: string | null; communityId: string | null; onClose: () => void; onSaved: (event: CalendarEvent, created: boolean) => void }) {
   const [event, setEvent] = useState(initial);
   const editing = !!event;
-  const [state, setState] = useState<EventFormState>(() => (initial ? formFromEvent(initial) : emptyForm(viewerTimeZone(), Date.now(), conversationId)));
+  const [state, setState] = useState<EventFormState>(() => (initial ? formFromEvent(initial) : emptyForm(viewerTimeZone(), Date.now(), conversationId, communityId)));
+  const community = state.scope === "COMMUNITY";
   const set = <K extends keyof EventFormState>(key: K, value: EventFormState[K]) => setState((s) => ({ ...s, [key]: value }));
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -232,7 +235,9 @@ function FormBody({ event: initial, conversationId, onClose, onSaved }: { event:
         <section className="space-y-3">
           <p className={sectionTitle}>Who</p>
           {editing ? (
-            <p className="text-sm text-muted-foreground">{state.scope === "CONVERSATION" ? `Chat event${chat ? ` in ${chat.title}` : ""}` : "Personal event"}. Invite more people from the event page.</p>
+            <p className="text-sm text-muted-foreground">{state.scope === "CONVERSATION" ? `Chat event${chat ? ` in ${chat.title}` : ""}` : community ? "Community event" : "Personal event"}. Invite more people from the event page.</p>
+          ) : community ? (
+            <p className="text-sm text-muted-foreground" data-testid="event-form-community">Community event: every member of the community can see it and answer. Invite members directly from the event page.</p>
           ) : (
             <>
               <div role="radiogroup" aria-label="Who the event is for" className="grid grid-cols-2 gap-2">
@@ -251,12 +256,12 @@ function FormBody({ event: initial, conversationId, onClose, onSaved }: { event:
               ) : null}
             </>
           )}
-          {organizer && (state.scope === "PERSONAL" || state.conversationId) ? (
+          {organizer && !community && (state.scope === "PERSONAL" || state.conversationId) ? (
             <PeoplePicker label="Co-organizers" hint={`They can edit, invite and cancel. Up to ${LIMITS.coOrganizers}.`} people={coChoices} selected={state.coOrganizerPrincipalIds}
               max={LIMITS.coOrganizers} loading={state.scope === "PERSONAL" ? contacts.isPending : false} error={state.scope === "PERSONAL" && contacts.isError ? eventErrorMessage(contacts.error) : null}
               onChange={(v) => setState((s) => ({ ...s, coOrganizerPrincipalIds: v, inviteePrincipalIds: s.inviteePrincipalIds.filter((p) => !v.includes(p)) }))} />
           ) : null}
-          {!editing && (state.scope === "PERSONAL" || state.conversationId) ? (
+          {!editing && !community && (state.scope === "PERSONAL" || state.conversationId) ? (
             <PeoplePicker label={state.scope === "PERSONAL" ? "Invite contacts" : "Invite members"}
               hint={state.scope === "PERSONAL" ? "Only your mutual contacts can be invited." : "Everyone in the chat can see the event and answer; invited members are asked directly."}
               people={people.filter((p) => !state.coOrganizerPrincipalIds.includes(p.principalId))} selected={state.inviteePrincipalIds} max={LIMITS.invitees}

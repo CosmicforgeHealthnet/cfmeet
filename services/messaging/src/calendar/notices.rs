@@ -258,7 +258,10 @@ const DUE: &str = "SELECT n.id, n.event_id, n.kind, n.tenant_id, n.application_i
                   ((b.blocker_principal_id = n.principal_id AND b.blocked_principal_id = e.organizer_principal_id) \
                 OR (b.blocked_principal_id = n.principal_id AND b.blocker_principal_id = e.organizer_principal_id)))) \
             OR (e.scope = 'CONVERSATION' AND EXISTS (SELECT 1 FROM messaging_conversation_members m \
-                  WHERE m.conversation_id = e.conversation_id AND m.principal_id = n.principal_id AND m.state = 'ACTIVE'))) \
+                  WHERE m.conversation_id = e.conversation_id AND m.principal_id = n.principal_id AND m.state = 'ACTIVE')) \
+            OR (e.scope = 'COMMUNITY' AND EXISTS (SELECT 1 FROM messaging_community_members cm \
+                  JOIN messaging_communities cc ON cc.id = cm.community_id WHERE cm.community_id = e.community_id \
+                  AND cm.principal_id = n.principal_id AND cm.state = 'ACTIVE' AND cc.state = 'ACTIVE'))) \
           AND (n.kind <> 'REMINDER' OR NOT EXISTS (SELECT 1 FROM messaging_event_people r WHERE r.event_id = e.id \
                 AND r.principal_id = n.principal_id AND r.response = 'NOT_GOING'))) IS TRUE AS still_relevant \
    FROM messaging_event_notices n LEFT JOIN messaging_events e ON e.id = n.subject_event_id \

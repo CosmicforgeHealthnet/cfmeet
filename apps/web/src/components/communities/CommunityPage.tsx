@@ -2,9 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import EventForm from "@/components/events/EventForm";
+import { WhenLines } from "@/components/events/event-ui";
+import { useEventList } from "@/hooks/v2/useEvents";
+import { communityEventItems } from "@/lib/events/core";
+import { viewerTimeZone } from "@/lib/meeting-time";
 import { useRouter } from "next/navigation";
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Ban, Check, Copy, Crown, Link2, Lock, LogOut, Megaphone, MessageSquare, Plus, Shield, ShieldOff, Trash2, Unlink, UserMinus, UserPlus, X,
+  ArrowDown, ArrowLeft, ArrowUp, Ban, CalendarDays, Check, Copy, Crown, Link2, Lock, LogOut, Megaphone, MessageSquare, Plus, Shield, ShieldOff, Trash2, Unlink, UserMinus, UserPlus, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,7 +31,7 @@ import { CommunityForm } from "./CommunitiesContent";
 import { CommunityAvatar, Empty, ErrorNote, Section, chip, field, useCommunityEngine, useEngineSnapshot, useNames } from "./bits";
 import { cn } from "@/lib/utils";
 
-type Tab = "groups" | "members" | "invite" | "requests" | "settings";
+type Tab = "groups" | "events" | "members" | "invite" | "requests" | "settings";
 
 /** One community: its groups, members, invitations, join requests and settings. */
 export default function CommunityPage({ communityId }: { communityId: string }) {
@@ -40,14 +45,14 @@ export default function CommunityPage({ communityId }: { communityId: string }) 
     return (
       <div className="mx-auto max-w-md space-y-3 p-6 text-center">
         <p className="font-semibold">{gone ? "This community isn't available" : "The community couldn't be loaded"}</p>
-        <p className="text-sm text-muted-foreground">{gone ? "You may have left it, or it was deleted." : messagingErrorMessage(community.error)}</p>
+        <p className="text-sm text-muted-foreground">{gone ? "You may have left it, or it was deleted. If someone invited you, accept the invitation in Communities." : messagingErrorMessage(community.error)}</p>
         <Link href="/dashboard/communities" className={chip}>Back to Communities</Link>
       </div>
     );
   }
   const c = community.data;
   const decidesGroups = (groups.data ?? []).some((g) => g.canManage && !g.announcements);
-  const tabs: [Tab, string][] = [["groups", "Groups"], ["members", "Members"]];
+  const tabs: [Tab, string][] = [["groups", "Groups"], ["events", "Events"], ["members", "Members"]];
   if (canInvite(c.privacy, c.myRole)) tabs.push(["invite", "Invite"]);
   if (isAdmin(c.myRole) || decidesGroups) tabs.push(["requests", c.pendingRequestCount ? `Requests (${c.pendingRequestCount})` : "Requests"]);
   tabs.push(["settings", canManageSettings(c.myRole) ? "Settings" : "Info"]);
@@ -71,10 +76,50 @@ export default function CommunityPage({ communityId }: { communityId: string }) 
         ))}
       </nav>
       {tab === "groups" ? <GroupsTab engine={engine} community={c} groups={groups} /> : null}
+      {tab === "events" ? <EventsTab community={c} /> : null}
       {tab === "members" ? <MembersTab engine={engine} community={c} /> : null}
       {tab === "invite" ? <InviteTab engine={engine} community={c} /> : null}
       {tab === "requests" ? <RequestsTab engine={engine} community={c} /> : null}
       {tab === "settings" ? <SettingsTab engine={engine} community={c} /> : null}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------------------ events
+
+/** The community's upcoming events (Events, ADR 0071, scope COMMUNITY); its admins create them. */
+function EventsTab({ community: c }: { community: Community }) {
+  const router = useRouter();
+  const [creating, setCreating] = useState(false);
+  const zone = viewerTimeZone();
+  const list = useEventList({ view: "UPCOMING", tz: zone, limit: 100 });
+  const items = communityEventItems(list.items, c.communityId);
+  return (
+    <div className="space-y-4" data-testid="community-events">
+      {isAdmin(c.myRole) ? <Button variant="outline" onClick={() => setCreating(true)}><Plus className="size-4" />New event</Button> : null}
+      <Section title="Upcoming events">
+        {list.isPending ? <ul className="space-y-2">{[0, 1].map((i) => <li key={i} className="h-16 animate-pulse rounded-2xl bg-muted" />)}</ul>
+          : list.error ? <ErrorNote error={messagingErrorMessage(list.error)} />
+            : items.length ? (
+              <ul className="space-y-2">
+                {items.map((i) => (
+                  <li key={`${i.event.eventId}@${i.startsAt}`}>
+                    <Link href={`/dashboard/events/${encodeURIComponent(i.event.eventId)}`} className="flex items-center gap-3 rounded-2xl border border-border px-3 py-2.5 hover:bg-muted">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden><CalendarDays className="size-5" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{i.event.title}</span>
+                        <WhenLines startsAt={i.startsAt} endsAt={i.endsAt} event={i.event} viewerZone={zone} className="text-xs text-muted-foreground" />
+                      </span>
+                      {i.event.state === "CANCELLED" ? <span className="text-xs font-semibold text-destructive">Cancelled</span> : null}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : <Empty>No upcoming events in this community.</Empty>}
+        {list.hasNextPage ? <button type="button" className="mt-2 text-sm font-semibold text-primary" onClick={() => void list.fetchNextPage()}>Load more</button> : null}
+      </Section>
+      <EventForm open={creating} onClose={() => setCreating(false)} communityId={c.communityId}
+        onSaved={(event) => { setCreating(false); router.push(`/dashboard/events/${encodeURIComponent(event.eventId)}`); }} />
     </div>
   );
 }

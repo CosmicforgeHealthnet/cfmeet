@@ -215,7 +215,8 @@ export const eventsService = {
 export function eventErrorMessage(error: unknown, fallback = "Something went wrong. Please try again."): string {
   if (error instanceof MessagingApiError) {
     if (error.code === "VERSION_CONFLICT" || (error.status === 409 && error.reason === "VERSION_CONFLICT")) return "Someone else changed this event while you were editing. Reload it to see their changes, then edit again.";
-    if (error.reason === "EVENT_SCOPE_NOT_AVAILABLE") return "Organization and community events aren't available yet. Create a personal event or an event in a chat.";
+    if (error.reason === "EVENT_SCOPE_NOT_AVAILABLE") return "Organization events aren't available yet. Create a personal event, an event in a chat or a community event.";
+    if (error.reason === "NOT_COMMUNITY_ADMIN") return "Only the community's admins can create its events.";
     if (error.status === 404) return "This event isn't available.";
     if (error.status === 409) return error.message && !/^[A-Z_0-9]+$/.test(error.message) ? error.message : "This event has been cancelled or has ended, so it can't be changed.";
     if (error.status === 503) return "Contacts are temporarily unavailable. Try again in a moment.";

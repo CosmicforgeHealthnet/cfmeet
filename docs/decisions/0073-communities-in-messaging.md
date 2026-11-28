@@ -105,8 +105,9 @@ A join (`…/invite-links/join`, `…/groups/{id}/join`) answers `201 { outcome:
 
 ## Consequences
 
-- Community events (Events, ADR 0071, scope `COMMUNITY`) are a follow-up once Events is on
-  main: the scope is authorized by community membership.
+- Community events (Events, ADR 0071, scope `COMMUNITY`): created by the community's owner
+  and admins, seen by its ACTIVE members, authorized live by this module
+  (`communities::is_active_member` / `active_member_sql`); the community page lists them.
 - Group conversations keep working on their own; unlinking never touches a conversation's
   members or content.
 - Abuse bounds: community creation 10 per hour, invitations 200 per hour, link joins and

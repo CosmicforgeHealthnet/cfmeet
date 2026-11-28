@@ -4,7 +4,8 @@
 //!
 //! * One gate, [`visible`]: the organizer; for a PERSONAL event the people on it (no
 //!   Messaging block with the organizer); for a CONVERSATION event the conversation's ACTIVE
-//!   members, decided live. Anything else is `404 NOT_FOUND`.
+//!   members; for a COMMUNITY event the community's ACTIVE members (asked of
+//!   [`crate::communities`]), all decided live. Anything else is `404 NOT_FOUND`.
 //! * [`recurrence`]: the RRULE subset, expanded in the event's IANA zone.
 //! * [`ics`]: RFC 5545 export.
 //! * [`notices`]: invitation, cancellation and reminder notices for the Notification
@@ -28,6 +29,7 @@ use uuid::Uuid;
 
 use self::recurrence::{Recurrence, Series};
 use crate::{
+    communities,
     conversations::{access, service::rfc3339},
     db,
     error::{Error, ErrorCode, Result},
@@ -93,6 +95,7 @@ pub struct EventRow {
     pub organizer_principal_id: Uuid,
     pub scope: String,
     pub conversation_id: Option<Uuid>,
+    pub community_id: Option<Uuid>,
     pub title: String,
     pub description: Option<String>,
     pub location: Option<String>,
@@ -115,7 +118,7 @@ pub struct EventRow {
 }
 
 pub const COLUMNS: &str = "e.id, e.tenant_id, e.application_id, e.environment_id, e.organizer_principal_id, e.scope, \
-    e.conversation_id, e.title, e.description, e.location, e.kind, e.meeting_id, e.meeting_url, e.cover_media_id, \
+    e.conversation_id, e.community_id, e.title, e.description, e.location, e.kind, e.meeting_id, e.meeting_url, e.cover_media_id, \
     e.starts_at, e.ends_at, e.time_zone, e.all_day, e.recurrence, e.series_ends_at, e.state, e.cancelled_at, \
     e.cancel_reason, e.version, e.created_at, e.updated_at";
 
@@ -239,6 +242,10 @@ pub async fn gate<C: ConnectionTrait>(db: &C, row: &EventRow, me: Uuid) -> Resul
             Some(c) => active_member(db, c, me).await?,
             None => false,
         },
+        "COMMUNITY" => match row.community_id {
+            Some(c) => communities::is_active_member(db, c, me).await?,
+            None => false,
+        },
         _ => false,
     };
     Ok(ok.then_some(access))
@@ -267,7 +274,9 @@ fn visible_sql(env: usize, me: usize) -> String {
                  ((vb.blocker_principal_id = ${me} AND vb.blocked_principal_id = e.organizer_principal_id) \
                OR (vb.blocked_principal_id = ${me} AND vb.blocker_principal_id = e.organizer_principal_id)))) \
          OR (e.scope = 'CONVERSATION' AND EXISTS (SELECT 1 FROM messaging_conversation_members vm \
-             WHERE vm.conversation_id = e.conversation_id AND vm.principal_id = ${me} AND vm.state = 'ACTIVE')))"
+             WHERE vm.conversation_id = e.conversation_id AND vm.principal_id = ${me} AND vm.state = 'ACTIVE')) \
+         OR (e.scope = 'COMMUNITY' AND {community}))",
+        community = communities::active_member_sql("e.community_id", &format!("${me}"))
     )
 }
 
@@ -488,21 +497,41 @@ fn people(ids: &[Uuid], me: Uuid, max: usize, what: &str) -> Result<Vec<Uuid>> {
     Ok(out)
 }
 
+/// Where an event belongs: its conversation (CONVERSATION) or community (COMMUNITY).
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    conversation: Option<Uuid>,
+    community: Option<Uuid>,
+}
+
+impl Place {
+    fn of(row: &EventRow) -> Self {
+        Place {
+            conversation: row.conversation_id,
+            community: row.community_id,
+        }
+    }
+}
+
 /// Everyone in `ids` may be put on an event of `scope` by `inviter`: their mutual,
-/// unblocked contacts (PERSONAL) or ACTIVE members of the conversation.
+/// unblocked contacts (PERSONAL), ACTIVE members of the conversation (CONVERSATION) or of
+/// the community (COMMUNITY).
 async fn require_eligible(
     state: &AppState,
     ctx: &TrustedContext,
     scope: &str,
-    conversation: Option<Uuid>,
+    place: Place,
     inviter: Uuid,
     ids: &[Uuid],
 ) -> Result<()> {
     if ids.is_empty() {
         return Ok(());
     }
-    let ok = match (scope, conversation) {
-        ("CONVERSATION", Some(c)) => {
+    let ok = match (scope, place.conversation, place.community) {
+        ("COMMUNITY", _, Some(c)) => {
+            communities::active_members_among(&state.db, c, ids).await? == ids.len() as i64
+        }
+        ("CONVERSATION", Some(c), _) => {
             db::scalar_i64(
                 &state.db,
                 "SELECT count(DISTINCT principal_id) FROM messaging_conversation_members \
@@ -512,7 +541,7 @@ async fn require_eligible(
             .await?
                 == ids.len() as i64
         }
-        ("PERSONAL", _) => {
+        ("PERSONAL", _, _) => {
             let contacts = social::eligible_contacts(state, ctx, inviter, Some(ids)).await?;
             let blocks = social::blocked_with(&state.db, ctx.scope.environment_id, inviter).await?;
             ids.iter()
@@ -524,10 +553,10 @@ async fn require_eligible(
         return Err(refuse(
             ErrorCode::ValidationError,
             "INVITEE_NOT_ELIGIBLE",
-            if scope == "CONVERSATION" {
-                "Only members of this chat can be added"
-            } else {
-                "Only your contacts can be invited"
+            match scope {
+                "CONVERSATION" => "Only members of this chat can be added",
+                "COMMUNITY" => "Only members of this community can be added",
+                _ => "Only your contacts can be invited",
             },
         ));
     }
@@ -686,16 +715,21 @@ async fn extras<C: ConnectionTrait>(db: &C, rows: &[&EventRow], me: Uuid) -> Res
     }
     let counts: Vec<CountRow> = db::all(
         db,
-        "SELECT p.event_id, \
+        &format!(
+            "SELECT p.event_id, \
                 count(*) FILTER (WHERE p.response = 'GOING') AS going, \
                 count(*) FILTER (WHERE p.response = 'MAYBE') AS maybe, \
                 count(*) FILTER (WHERE p.response = 'NOT_GOING') AS not_going, \
                 count(*) FILTER (WHERE p.response IS NULL AND p.role IN ('INVITEE', 'CO_ORGANIZER')) AS awaiting_invited, \
                 count(*) FILTER (WHERE p.response IS NOT NULL) AS answered \
            FROM messaging_event_people p JOIN messaging_events e ON e.id = p.event_id \
-          WHERE p.event_id = ANY($1) AND (e.scope <> 'CONVERSATION' OR EXISTS (SELECT 1 FROM messaging_conversation_members m \
-                WHERE m.conversation_id = e.conversation_id AND m.principal_id = p.principal_id AND m.state = 'ACTIVE')) \
+          WHERE p.event_id = ANY($1) AND (e.scope NOT IN ('CONVERSATION', 'COMMUNITY') \
+                OR (e.scope = 'CONVERSATION' AND EXISTS (SELECT 1 FROM messaging_conversation_members m \
+                    WHERE m.conversation_id = e.conversation_id AND m.principal_id = p.principal_id AND m.state = 'ACTIVE')) \
+                OR (e.scope = 'COMMUNITY' AND {community})) \
           GROUP BY p.event_id",
+            community = communities::active_member_sql("e.community_id", "p.principal_id")
+        ),
         vec![ids.clone().into()],
     )
     .await?;
@@ -720,6 +754,14 @@ async fn extras<C: ConnectionTrait>(db: &C, rows: &[&EventRow], me: Uuid) -> Res
             .map(|m| (m.conversation_id, m.members))
             .collect()
     };
+    let community_ids: Vec<Uuid> = rows
+        .iter()
+        .filter(|r| r.scope == "COMMUNITY")
+        .filter_map(|r| r.community_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let community_members = communities::active_member_counts(db, &community_ids).await?;
     let by_event: HashMap<Uuid, CountRow> = counts.into_iter().map(|c| (c.event_id, c)).collect();
     for r in rows {
         let c = by_event.get(&r.id);
@@ -734,9 +776,12 @@ async fn extras<C: ConnectionTrait>(db: &C, rows: &[&EventRow], me: Uuid) -> Res
                 )
             })
             .unwrap_or((0, 0, 0, 0, 0));
-        let awaiting = match (r.scope.as_str(), r.conversation_id) {
-            ("CONVERSATION", Some(cid)) => {
+        let awaiting = match (r.scope.as_str(), r.conversation_id, r.community_id) {
+            ("CONVERSATION", Some(cid), _) => {
                 (members.get(&cid).copied().unwrap_or(0) - answered).max(0)
+            }
+            ("COMMUNITY", _, Some(cid)) => {
+                (community_members.get(&cid).copied().unwrap_or(0) - answered).max(0)
             }
             _ => invited,
         };
@@ -798,6 +843,7 @@ fn view(row: &EventRow, x: &Extras, me: Uuid, now: DateTime<Utc>) -> Value {
         "eventId": row.id,
         "scope": row.scope,
         "conversationId": row.conversation_id,
+        "communityId": row.community_id,
         "title": row.title,
         "description": row.description,
         "location": row.location,
@@ -854,6 +900,8 @@ pub struct CreateEvent {
     pub scope: String,
     #[serde(default)]
     pub conversation_id: Option<Uuid>,
+    #[serde(default)]
+    pub community_id: Option<Uuid>,
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -925,11 +973,16 @@ pub async fn create(
     let now = state.now();
     match req.scope.as_str() {
         "PERSONAL" => {
-            if req.conversation_id.is_some() {
-                return Err(Error::validation("A personal event has no conversationId"));
+            if req.conversation_id.is_some() || req.community_id.is_some() {
+                return Err(Error::validation(
+                    "A personal event has no conversationId or communityId",
+                ));
             }
         }
         "CONVERSATION" => {
+            if req.community_id.is_some() {
+                return Err(Error::validation("A chat event has no communityId"));
+            }
             let cid = req
                 .conversation_id
                 .ok_or_else(|| Error::validation("A chat event needs its conversationId"))?;
@@ -938,14 +991,36 @@ pub async fn create(
                 return Err(Error::code(ErrorCode::SendRestricted));
             }
         }
-        "ORGANIZATION" | "COMMUNITY" => {
+        "COMMUNITY" => {
+            if req.conversation_id.is_some() {
+                return Err(Error::validation("A community event has no conversationId"));
+            }
+            let cid = req
+                .community_id
+                .ok_or_else(|| Error::validation("A community event needs its communityId"))?;
+            // Members only (404 for anyone else); the community's owner and admins
+            // organize its events, as they post its Announcements.
+            let (_, m) = communities::as_member(&state.db, ctx, cid, me, false).await?;
+            if !m.is_admin() {
+                return Err(refuse(
+                    ErrorCode::PrincipalNotAuthorized,
+                    "NOT_COMMUNITY_ADMIN",
+                    "Only community admins create community events",
+                ));
+            }
+        }
+        "ORGANIZATION" => {
             return Err(refuse(
                 ErrorCode::ContextNotAllowed,
                 "EVENT_SCOPE_NOT_AVAILABLE",
-                "Events for organizations and communities aren't available yet",
+                "Events for organizations aren't available yet",
             ));
         }
-        _ => return Err(Error::validation("scope must be PERSONAL or CONVERSATION")),
+        _ => {
+            return Err(Error::validation(
+                "scope must be PERSONAL, CONVERSATION or COMMUNITY",
+            ))
+        }
     }
     limit(state, ctx, me, "create", Window::Hour, CREATES_PER_HOUR).await?;
     let open = db::scalar_i64(
@@ -991,7 +1066,11 @@ pub async fn create(
         .collect();
     let mine = reminders(&req.reminders_minutes_before)?;
     let everyone: Vec<Uuid> = co.iter().chain(invitees.iter()).copied().collect();
-    require_eligible(state, ctx, &req.scope, req.conversation_id, me, &everyone).await?;
+    let place = Place {
+        conversation: req.conversation_id,
+        community: req.community_id,
+    };
+    require_eligible(state, ctx, &req.scope, place, me, &everyone).await?;
 
     let id = Uuid::new_v4();
     let txn = state.db.begin().await.map_err(Error::from)?;
@@ -1005,8 +1084,9 @@ pub async fn create(
         &txn,
         "INSERT INTO messaging_events (id, tenant_id, application_id, environment_id, organizer_principal_id, scope, \
            conversation_id, title, description, location, kind, meeting_id, meeting_url, cover_media_id, starts_at, \
-           ends_at, time_zone, all_day, recurrence, series_ends_at, state, version, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'ACTIVE', 1, $21, $21)",
+           ends_at, time_zone, all_day, recurrence, series_ends_at, state, version, created_at, updated_at, community_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'ACTIVE', 1, $21, $21, \
+           $22)",
         vec![
             id.into(),
             ctx.scope.tenant_id.into(),
@@ -1032,6 +1112,7 @@ pub async fn create(
                 .into(),
             d.series_ends_at.into(),
             now.into(),
+            req.community_id.into(),
         ],
     )
     .await?;
@@ -1085,6 +1166,7 @@ pub async fn create(
 fn scope_label(scope: &str) -> &'static str {
     match scope {
         "CONVERSATION" => "conversation",
+        "COMMUNITY" => "community",
         _ => "personal",
     }
 }
@@ -1252,8 +1334,8 @@ pub async fn list(
             " AND e.state = 'ACTIVE' AND e.organizer_principal_id <> $2 AND ( \
                (e.scope = 'PERSONAL' AND EXISTS (SELECT 1 FROM messaging_event_people fp WHERE fp.event_id = e.id \
                   AND fp.principal_id = $2 AND fp.role = 'INVITEE' AND fp.response IS NULL)) \
-               OR (e.scope = 'CONVERSATION' AND NOT EXISTS (SELECT 1 FROM messaging_event_people fp WHERE fp.event_id = e.id \
-                  AND fp.principal_id = $2 AND (fp.response IS NOT NULL OR fp.role = 'CO_ORGANIZER'))))",
+               OR (e.scope IN ('CONVERSATION', 'COMMUNITY') AND NOT EXISTS (SELECT 1 FROM messaging_event_people fp \
+                  WHERE fp.event_id = e.id AND fp.principal_id = $2 AND (fp.response IS NOT NULL OR fp.role = 'CO_ORGANIZER'))))",
         ),
         View::Accepted => sql.push_str(
             " AND EXISTS (SELECT 1 FROM messaging_event_people fp WHERE fp.event_id = e.id AND fp.principal_id = $2 \
@@ -1490,15 +1572,7 @@ pub async fn update(
                 MAX_CO_ORGANIZERS,
                 "co-organizers",
             )?;
-            require_eligible(
-                state,
-                ctx,
-                &current.scope,
-                current.conversation_id,
-                me,
-                &ids,
-            )
-            .await?;
+            require_eligible(state, ctx, &current.scope, Place::of(&current), me, &ids).await?;
             Some(ids)
         }
     };
@@ -1744,13 +1818,17 @@ pub async fn attendees(
 async fn attendees_view(state: &AppState, row: &EventRow, me: Uuid) -> Result<Value> {
     let rows: Vec<PersonRow> = db::all(
         &state.db,
-        "SELECT p.principal_id, p.role, p.response, p.responded_at FROM messaging_event_people p \
+        &format!(
+            "SELECT p.principal_id, p.role, p.response, p.responded_at FROM messaging_event_people p \
           JOIN messaging_events e ON e.id = p.event_id \
-          WHERE p.event_id = $1 AND (e.scope <> 'CONVERSATION' OR p.principal_id = e.organizer_principal_id \
-                OR EXISTS (SELECT 1 FROM messaging_conversation_members m WHERE m.conversation_id = e.conversation_id \
-                           AND m.principal_id = p.principal_id AND m.state = 'ACTIVE')) \
+          WHERE p.event_id = $1 AND (e.scope NOT IN ('CONVERSATION', 'COMMUNITY') OR p.principal_id = e.organizer_principal_id \
+                OR (e.scope = 'CONVERSATION' AND EXISTS (SELECT 1 FROM messaging_conversation_members m \
+                    WHERE m.conversation_id = e.conversation_id AND m.principal_id = p.principal_id AND m.state = 'ACTIVE')) \
+                OR (e.scope = 'COMMUNITY' AND {community})) \
           ORDER BY CASE p.role WHEN 'ORGANIZER' THEN 0 WHEN 'CO_ORGANIZER' THEN 1 WHEN 'INVITEE' THEN 2 ELSE 3 END, \
                    p.added_at, p.principal_id LIMIT 2000",
+            community = communities::active_member_sql("e.community_id", "p.principal_id")
+        ),
         vec![row.id.into()],
     )
     .await?;
@@ -1795,7 +1873,7 @@ pub async fn invite(
     if ids.is_empty() {
         return Err(Error::validation("Choose someone to invite"));
     }
-    require_eligible(state, ctx, &row.scope, row.conversation_id, me, &ids).await?;
+    require_eligible(state, ctx, &row.scope, Place::of(&row), me, &ids).await?;
     let txn = state.db.begin().await.map_err(Error::from)?;
     let present = db::scalar_i64(
         &txn,

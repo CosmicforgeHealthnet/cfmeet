@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { viewerTimeZone } from "@/lib/meeting-time";
 import { callHref } from "@/lib/communications/comms-core";
 import { useEvent, useEventAttendees, useEventChanged, useRespond } from "@/hooks/v2/useEvents";
+import { useCommunityMembers } from "@/hooks/v2/useCommunities";
 import { eventErrorMessage, eventsService, isNotFound, saveCalendarFile, type EventAttendee } from "@/services/v2/events.service";
 import { LIMITS, eventShareText, meetingTarget, recurrenceSummary, localDate, type CalendarEvent, type RsvpResponse } from "@/lib/events/core";
 import EventForm, { PeoplePicker, RemindersEditor } from "./EventForm";
@@ -143,6 +144,11 @@ function EventView({ event, zone, status, setStatus, onEdit, onDialog }: {
             {event.location ? (
               <div className="flex gap-3"><dt className="sr-only">Location</dt><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <dd className="whitespace-pre-wrap break-words">{event.location}</dd>
+              </div>
+            ) : null}
+            {event.scope === "COMMUNITY" && event.communityId ? (
+              <div className="flex gap-3"><dt className="sr-only">Community</dt><Users className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <dd><Link className="font-medium text-primary hover:underline" href={`/dashboard/communities/${encodeURIComponent(event.communityId)}`}>Open the community</Link></dd>
               </div>
             ) : null}
             {event.conversationId ? (
@@ -359,16 +365,21 @@ function InviteDialog({ event, onClose, onDone }: { event: CalendarEvent; onClos
   const attendees = useEventAttendees(event.eventId);
   const already = new Set([event.organizerPrincipalId, ...(event.coOrganizerPrincipalIds ?? []), ...(attendees.data?.attendees ?? []).filter((a) => a.role !== "MEMBER").map((a) => a.principalId)]);
   const [selected, setSelected] = useState<string[]>([]);
-  const personal = event.scope !== "CONVERSATION";
+  const community = event.scope === "COMMUNITY" ? event.communityId ?? null : null;
+  const personal = event.scope === "PERSONAL";
   const contacts = useQuery({ queryKey: ["v2", "messaging", "events", "eligible-contacts"], queryFn: eventsService.eligibleContacts, enabled: personal, staleTime: 60_000, retry: false });
-  const memberIds = useMemo(() => (snapshot?.conversations.find((c) => c.id === event.conversationId)?.members ?? []).filter((p) => p !== me), [snapshot?.conversations, event.conversationId, me]);
+  // A community event invites the community's members (ADR 0073), a chat event the chat's.
+  const communityMembers = useCommunityMembers(community ?? "", !!community);
+  const memberIds = useMemo(() => (community
+    ? (communityMembers.data?.pages.flatMap((p) => p.members.map((m) => m.principalId)) ?? [])
+    : (snapshot?.conversations.find((c) => c.id === event.conversationId)?.members ?? [])).filter((p) => p !== me), [community, communityMembers.data, snapshot?.conversations, event.conversationId, me]);
   const name = usePrincipalNames(memberIds, event.conversationId ? [event.conversationId] : []);
   const people = (personal ? contacts.data ?? [] : memberIds.map((p) => ({ principalId: p, name: name(p, "Member") }))).filter((p) => !already.has(p.principalId));
   const invite = useMutation({ mutationFn: () => eventsService.invite(event.eventId, selected), onSuccess: () => onDone(selected.length) });
   return (
-    <SmallDialog title="Invite people" description={personal ? "Only your mutual contacts can be invited." : "Invited members are asked directly; everyone in the chat can already answer."} onClose={onClose}>
+    <SmallDialog title="Invite people" description={personal ? "Only your mutual contacts can be invited." : community ? "Invited members are asked directly; everyone in the community can already answer." : "Invited members are asked directly; everyone in the chat can already answer."} onClose={onClose}>
       <PeoplePicker label={personal ? "Contacts" : "Members"} people={people} selected={selected} onChange={setSelected} max={LIMITS.invitees}
-        loading={personal ? contacts.isPending : false} error={personal && contacts.isError ? eventErrorMessage(contacts.error) : null} />
+        loading={personal ? contacts.isPending : community ? communityMembers.isPending : false} error={personal && contacts.isError ? eventErrorMessage(contacts.error) : null} />
       {invite.isError ? <p role="alert" className="text-sm text-destructive">{eventErrorMessage(invite.error)}</p> : null}
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={onClose}>Close</Button>

@@ -3,7 +3,7 @@
 //! to the previous image still boots on this schema).
 //!
 //! * `messaging_events` — one event (a single occurrence or a recurring series) with its
-//!   scope (PERSONAL / CONVERSATION; ORGANIZATION and COMMUNITY are reserved), time, zone,
+//!   scope (PERSONAL / CONVERSATION / COMMUNITY; ORGANIZATION is reserved), time, zone,
 //!   recurrence, meeting link, cover media and state; `series_ends_at` (the last occurrence's
 //!   end, NULL for an open series) bounds every query; `search_vector` serves search.
 //! * `messaging_event_people` — organizer, co-organizers, invitees and conversation members
@@ -36,6 +36,7 @@ CREATE TABLE messaging_events (
     organizer_principal_id UUID          NOT NULL,
     scope                  VARCHAR(12)   NOT NULL,
     conversation_id        UUID,
+    community_id           UUID,
     title                  TEXT          NOT NULL,
     description            TEXT,
     location               TEXT,
@@ -61,6 +62,7 @@ CREATE TABLE messaging_events (
     CONSTRAINT pk_messaging_events PRIMARY KEY (id),
     CONSTRAINT ck_messaging_events_scope CHECK (scope IN ('PERSONAL', 'CONVERSATION', 'ORGANIZATION', 'COMMUNITY')),
     CONSTRAINT ck_messaging_events_conversation CHECK ((scope = 'CONVERSATION') = (conversation_id IS NOT NULL)),
+    CONSTRAINT ck_messaging_events_community CHECK ((scope = 'COMMUNITY') = (community_id IS NOT NULL)),
     CONSTRAINT ck_messaging_events_title CHECK (char_length(title) BETWEEN 1 AND 200),
     CONSTRAINT ck_messaging_events_description CHECK (description IS NULL OR char_length(description) <= 5000),
     CONSTRAINT ck_messaging_events_location CHECK (location IS NULL OR char_length(location) <= 500),
@@ -74,6 +76,7 @@ CREATE TABLE messaging_events (
 );
 CREATE INDEX ix_messaging_events_organizer ON messaging_events (environment_id, organizer_principal_id, starts_at);
 CREATE INDEX ix_messaging_events_conversation ON messaging_events (environment_id, conversation_id, starts_at) WHERE conversation_id IS NOT NULL;
+CREATE INDEX ix_messaging_events_community ON messaging_events (environment_id, community_id, starts_at) WHERE community_id IS NOT NULL;
 CREATE INDEX ix_messaging_events_series_end ON messaging_events (environment_id, series_ends_at);
 CREATE INDEX ix_messaging_events_cover ON messaging_events (cover_media_id) WHERE cover_media_id IS NOT NULL;
 CREATE INDEX ix_messaging_events_search ON messaging_events USING GIN (search_vector);

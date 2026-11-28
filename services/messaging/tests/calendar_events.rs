@@ -487,23 +487,30 @@ async fn conversation_events_follow_live_membership() {
 }
 
 #[tokio::test]
-async fn organization_and_community_scopes_are_reserved_and_bodies_are_checked() {
+async fn the_organization_scope_is_reserved_and_bodies_are_checked() {
     let Some(w) = world().await else {
         return;
     };
     let alice = w.person();
-    for scope in ["ORGANIZATION", "COMMUNITY"] {
-        let r = w
-            .post(
-                alice,
-                "/v1/messaging/events",
-                w.body(3, json!({ "scope": scope })),
-            )
-            .await;
-        assert_eq!(r.status.as_u16(), 422, "{}", r.text);
-        assert_eq!(r.code(), "CONTEXT_NOT_ALLOWED");
-        assert_eq!(r.reason(), "EVENT_SCOPE_NOT_AVAILABLE");
-    }
+    let r = w
+        .post(
+            alice,
+            "/v1/messaging/events",
+            w.body(3, json!({ "scope": "ORGANIZATION" })),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 422, "{}", r.text);
+    assert_eq!(r.code(), "CONTEXT_NOT_ALLOWED");
+    assert_eq!(r.reason(), "EVENT_SCOPE_NOT_AVAILABLE");
+    // A community event names its community (and nothing else).
+    let r = w
+        .post(
+            alice,
+            "/v1/messaging/events",
+            w.body(3, json!({ "scope": "COMMUNITY" })),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 400, "{}", r.text);
     let bad = [
         json!({ "type": "ONLINE" }),
         json!({ "type": "ONLINE", "meetingUrl": "http://cfmeet.com/abc" }),
@@ -541,6 +548,153 @@ async fn organization_and_community_scopes_are_reserved_and_bodies_are_checked()
         .await;
     assert_eq!(e["meetingUrl"], "https://cfmeet.com/abc-defg-hij");
     assert_eq!(e["meetingId"], "abc-defg-hij");
+}
+
+impl World {
+    /// An OPEN community `owner` owns (with its Announcements group).
+    async fn community(&self, owner: Uuid) -> String {
+        self.h.allow_managed(&self.c, "GROUP").await;
+        let r = self
+            .post(
+                owner,
+                "/v1/messaging/communities",
+                json!({ "name": "Neighbours", "privacy": "OPEN" }),
+            )
+            .await;
+        assert_eq!(r.status.as_u16(), 201, "{}", r.text);
+        r.json["communityId"].as_str().unwrap().to_string()
+    }
+    /// `who` joins community `id` through a fresh invite link of `owner`.
+    async fn join_community(&self, owner: Uuid, id: &str, who: Uuid) {
+        let r = self
+            .post(
+                owner,
+                &format!("/v1/messaging/communities/{id}/invite-links"),
+                json!({}),
+            )
+            .await;
+        assert_eq!(r.status.as_u16(), 201, "{}", r.text);
+        let token = r.json["token"].as_str().unwrap().to_string();
+        let r = self
+            .post(
+                who,
+                "/v1/messaging/communities/invite-links/join",
+                json!({ "token": token }),
+            )
+            .await;
+        assert_eq!(r.status.as_u16(), 201, "{}", r.text);
+    }
+}
+
+/// COMMUNITY events (ADR 0071 / 0073): created by the community's owner and admins, seen
+/// by its ACTIVE members (decided live by the communities module: a member who leaves
+/// loses the event at once), invitees only from its members, counts over its members.
+#[tokio::test]
+async fn community_events_follow_live_community_membership() {
+    let Some(w) = world().await else {
+        return;
+    };
+    let owner = w.person();
+    let member = w.person();
+    let leaver = w.person();
+    let outsider = w.person();
+    let cm = w.community(owner).await;
+    w.join_community(owner, &cm, member).await;
+    w.join_community(owner, &cm, leaver).await;
+
+    // Outsiders get 404; members who are not admins get 403.
+    let body = |extra: Value| {
+        let mut b = json!({ "scope": "COMMUNITY", "communityId": cm });
+        for (k, v) in extra.as_object().unwrap() {
+            b[k] = v.clone();
+        }
+        w.body(5, b)
+    };
+    let r = w
+        .post(outsider, "/v1/messaging/events", body(json!({})))
+        .await;
+    assert_eq!(r.status.as_u16(), 404, "{}", r.text);
+    let r = w
+        .post(member, "/v1/messaging/events", body(json!({})))
+        .await;
+    assert_eq!(r.status.as_u16(), 403, "{}", r.text);
+    assert_eq!(r.reason(), "NOT_COMMUNITY_ADMIN");
+    // A community event has no conversation, and invitees must be members.
+    let r = w
+        .post(
+            owner,
+            "/v1/messaging/events",
+            body(json!({ "conversationId": Uuid::new_v4() })),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 400, "{}", r.text);
+    let r = w
+        .post(
+            owner,
+            "/v1/messaging/events",
+            body(json!({ "inviteePrincipalIds": [outsider] })),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 400, "{}", r.text);
+    assert_eq!(r.reason(), "INVITEE_NOT_ELIGIBLE");
+
+    let e = w.create(owner, body(json!({}))).await;
+    let ev = id(&e);
+    assert_eq!(e["scope"], "COMMUNITY");
+    assert_eq!(e["communityId"], cm.as_str());
+    assert_eq!(e["conversationId"], Value::Null);
+    assert_eq!(e["counts"]["awaiting"], 2, "two members have not answered");
+    assert!(w.sees(member, &ev).await);
+    assert!(w.sees(leaver, &ev).await);
+    assert!(!w.sees(outsider, &ev).await);
+    assert!(w.lists(member, "view=INVITATIONS", &ev).await);
+    assert!(!w.lists(outsider, "view=UPCOMING", &ev).await);
+
+    let r = w
+        .put(
+            member,
+            &format!("/v1/messaging/events/{ev}/rsvp"),
+            json!({ "response": "GOING" }),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 200, "{}", r.text);
+    assert_eq!(r.json["counts"]["going"], 2);
+    assert_eq!(r.json["counts"]["awaiting"], 1);
+    assert!(!w.lists(member, "view=INVITATIONS", &ev).await);
+
+    // A member who leaves the community loses the event at once, and stops counting.
+    let r = w
+        .post(
+            leaver,
+            &format!("/v1/messaging/communities/{cm}/leave"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 200, "{}", r.text);
+    assert!(!w.sees(leaver, &ev).await);
+    let a = w
+        .get(owner, &format!("/v1/messaging/events/{ev}/attendees"))
+        .await;
+    assert_eq!(a.status.as_u16(), 200, "{}", a.text);
+    assert_eq!(a.json["counts"]["awaiting"], 0);
+    assert_eq!(a.json["attendees"].as_array().unwrap().len(), 2);
+    // Only members can be invited later too.
+    let r = w
+        .post(
+            owner,
+            &format!("/v1/messaging/events/{ev}/invitations"),
+            json!({ "principalIds": [leaver] }),
+        )
+        .await;
+    assert_eq!(r.status.as_u16(), 400, "{}", r.text);
+    assert_eq!(r.reason(), "INVITEE_NOT_ELIGIBLE");
+    assert_eq!(
+        w.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_events WHERE scope = 'COMMUNITY' AND community_id = '{cm}'"
+        ))
+        .await,
+        1
+    );
 }
 
 /// The Monday a week before the last Sunday of March of next year (London changes to BST

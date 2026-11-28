@@ -49,7 +49,16 @@ chat feature to the meeting app again, which ADR 0069 has just undone for Status
      organization's own scope, ADR 0056). Creating one is
      `422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE`. Until an Organizations
      integration exists, a team's event is a `CONVERSATION` event of its team channel.
-   * `COMMUNITY`: a reserved value for Communities (not built yet), refused the same way.
+   * `COMMUNITY` (with `communityId`; amended when Communities, ADR 0073, joined Events in
+     `cfmeet.messaging.http-api` 1.31.0 / common 1.43.0): the organizer and the community's
+     ACTIVE members, decided live by the communities module (`communities::is_active_member`
+     and the matching SQL condition; leaving or being removed from the community, or the
+     community being deleted, removes access at once). Only the community's owner and admins
+     create one (`403 NOT_COMMUNITY_ADMIN` for other members, `404` for non-members);
+     co-organizers and invitees must be ACTIVE members. Counts treat ACTIVE members without
+     an answer as awaiting, as for a conversation event. `messaging_events.community_id`
+     (checked: set exactly for `COMMUNITY`) is part of the Events migration, which no
+     released image had applied.
 5. **People and RSVP.** One organizer, at most 10 co-organizers (organizer only changes them),
    at most 500 invitees. RSVP `GOING` / `MAYBE` / `NOT_GOING` applies to the whole series; a
    conversation member who answers without an invitation is recorded as `MEMBER`. Counts:
@@ -125,7 +134,8 @@ All under `/v1/messaging/events`, acting principal required; reads `messages.rea
 | `exportEvent` | `GET /events/{eventId}/ics` | → `EventCalendarFile` |
 | cover media | `POST /events/media`, `GET` / `DELETE /events/media/{mediaId}`, `POST …/parts/{part}`, `POST …/complete`, `POST …/download-grants` | as status media (images only) |
 
-`EventCreateRequest`: `scope` (`PERSONAL` / `CONVERSATION` / `ORGANIZATION` / `COMMUNITY`),
+`EventCreateRequest`: `scope` (`PERSONAL` / `CONVERSATION` / `ORGANIZATION` / `COMMUNITY`, with
+`communityId` for `COMMUNITY`),
 `conversationId` (CONVERSATION), `title` (1-200), `description` (≤ 5000), `location` (≤ 500),
 `type` (`ONLINE` / `PHYSICAL` / `CALL`), `meetingId` (≤ 64, `[A-Za-z0-9_-]`), `meetingUrl`
 (`https`, ≤ 2048; ONLINE needs `meetingId` or `meetingUrl`), `coverMediaId`, `startsAt`,

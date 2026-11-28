@@ -180,6 +180,70 @@ pub async fn as_member<C: ConnectionTrait>(
     }
 }
 
+/// SQL condition "`principal` is an ACTIVE member of the ACTIVE community `community`"
+/// (both SQL expressions), decided live. Events of COMMUNITY scope (ADR 0071 / 0073) use it
+/// as their gate, so community membership is decided in this module only.
+pub fn active_member_sql(community: &str, principal: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM messaging_community_members cm JOIN messaging_communities cc ON cc.id = cm.community_id            WHERE cm.community_id = {community} AND cm.principal_id = {principal} AND cm.state = 'ACTIVE'              AND cc.state = 'ACTIVE')"
+    )
+}
+
+/// Whether `principal` is an ACTIVE member of the ACTIVE community `community`.
+pub async fn is_active_member<C: ConnectionTrait>(
+    db: &C,
+    community: Uuid,
+    principal: Uuid,
+) -> Result<bool> {
+    Ok(db::scalar_i64(
+        db,
+        &format!("SELECT count(*) WHERE {}", active_member_sql("$1", "$2")),
+        vec![community.into(), principal.into()],
+    )
+    .await?
+        > 0)
+}
+
+/// How many of `principals` are ACTIVE members of the ACTIVE community `community`.
+pub async fn active_members_among<C: ConnectionTrait>(
+    db: &C,
+    community: Uuid,
+    principals: &[Uuid],
+) -> Result<i64> {
+    Ok(db::scalar_i64(
+        db,
+        "SELECT count(DISTINCT cm.principal_id) FROM messaging_community_members cm            JOIN messaging_communities cc ON cc.id = cm.community_id           WHERE cm.community_id = $1 AND cm.principal_id = ANY($2) AND cm.state = 'ACTIVE' AND cc.state = 'ACTIVE'",
+        vec![community.into(), principals.to_vec().into()],
+    )
+    .await?)
+}
+
+#[derive(FromQueryResult)]
+struct MemberCount {
+    community_id: Uuid,
+    members: i64,
+}
+
+/// ACTIVE members of each ACTIVE community of `communities` (absent: none, or not ACTIVE).
+pub async fn active_member_counts<C: ConnectionTrait>(
+    db: &C,
+    communities: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, i64>> {
+    if communities.is_empty() {
+        return Ok(Default::default());
+    }
+    let rows: Vec<MemberCount> = db::all(
+        db,
+        "SELECT cm.community_id, count(*) AS members FROM messaging_community_members cm            JOIN messaging_communities cc ON cc.id = cm.community_id           WHERE cm.community_id = ANY($1) AND cm.state = 'ACTIVE' AND cc.state = 'ACTIVE' GROUP BY cm.community_id",
+        vec![communities.to_vec().into()],
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.community_id, r.members))
+        .collect())
+}
+
 /// Whether `principal` is banned from `community`.
 pub async fn banned<C: ConnectionTrait>(db: &C, community: Uuid, principal: Uuid) -> Result<bool> {
     Ok(db::scalar_i64(
