@@ -363,6 +363,11 @@ pub fn inbox_text(template: &str, params: &Value) -> (String, String) {
             "An event you were invited to was cancelled.".into(),
         ),
         "event.reminder" => ("Event reminder", "An event starts soon.".into()),
+        "status.mentioned" => (
+            "Mentioned in a status",
+            "Someone mentioned you in their status.".into(),
+        ),
+        "status.shared" => ("Status shared", "Someone shared your status.".into()),
         "call.missed" => ("Missed call", "You missed a call.".into()),
         "call.voicemail" => ("New voicemail", "You have a new voice message.".into()),
         "call.recording" => ("Recording ready", "A call recording is ready.".into()),

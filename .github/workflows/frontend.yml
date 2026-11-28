@@ -106,6 +106,11 @@ jobs:
       # every client request on the relay allowlist.
       - name: Communities tests
         run: node --experimental-strip-types --test tests/communities.test.mjs
+      # Chat list, starred and menus (ADR 0074): status reply / share / reaction, call and group
+      # previews with activity order; unified starred content that never shows unavailable
+      # items; section menus that list only what the person may do.
+      - name: Chat indicators, starred content and section menu tests
+        run: node --experimental-strip-types --test tests/chat-indicators.test.mjs tests/starred.test.mjs tests/section-menus.test.mjs
 
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh

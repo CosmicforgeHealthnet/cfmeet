@@ -52,6 +52,9 @@ async fn main() {
         messaging_migration::CommunitiesMigrator::up(&db, None)
             .await
             .expect("Messaging communities migrations failed");
+        messaging_migration::StatusRepliesMigrator::up(&db, None)
+            .await
+            .expect("Messaging status replies migrations failed");
         println!("Messaging migrations applied");
         return;
     }
@@ -72,6 +75,9 @@ async fn main() {
         messaging_migration::CommunitiesMigrator::reset(&db)
             .await
             .expect("Messaging communities rollback failed");
+        messaging_migration::StatusRepliesMigrator::reset(&db)
+            .await
+            .expect("Messaging status replies rollback failed");
         messaging_migration::SocialMigrator::reset(&db)
             .await
             .expect("Messaging status / channels rollback failed");

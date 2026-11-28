@@ -53,6 +53,18 @@ export interface StatusViewer {
   viewedAt: string;
   liked: boolean;
   reaction?: string | null;
+  /** When the current reaction was set (the chat list orders it against messages). */
+  reactedAt?: string | null;
+}
+
+/** One private reply to my status (author only, ADR 0074): the direct message it arrived as. */
+export interface StatusReplyView {
+  replyId: string;
+  person: PersonView;
+  conversationId: string;
+  messageId: string;
+  text: string | null;
+  createdAt: string;
 }
 
 export interface StatusPost {
@@ -90,6 +102,8 @@ export interface StatusPost {
   audience?: StatusAudienceInfo;
   mentions?: string[];
   shareCount?: number;
+  /** The author's own statuses: private replies recorded (ADR 0074). */
+  replyCount?: number;
   uniqueViewerCount?: number | null;
   viewers?: StatusViewer[];
 }
@@ -162,7 +176,11 @@ export type CreateStatus =
 
 export interface AudiencePreference { mode: AudienceMode; principalIds: string[]; listId: string | null; allowSharing: boolean }
 export interface AudienceList { listId: string; kind: "CLOSE_FRIENDS" | "CUSTOM"; name: string; memberPrincipalIds: string[]; memberCount: number; updatedAt: string }
-export interface StatusRing { principalId: string; hasActiveStatus: boolean; count: number; unseenCount: number; closeFriends: boolean }
+export interface StatusRing {
+  principalId: string; hasActiveStatus: boolean; count: number; unseenCount: number; closeFriends: boolean;
+  /** A visible live status of theirs mentions me (and one of those is not seen yet); ADR 0074. */
+  mentionedMe?: boolean; mentionedMeUnseen?: boolean;
+}
 
 export const SEGMENT_MS = 60_000;
 export const LIMITS: Record<MediaKind, number> = { IMAGE: 8 * 1024 * 1024, AUDIO: 8 * 1024 * 1024, VIDEO: 64 * 1024 * 1024 };
@@ -226,7 +244,7 @@ function mapMedia(m: Wire, purpose: MediaPurpose): MediaView | null {
 }
 
 function mapViewer(v: Wire): StatusViewer {
-  return { person: person(v.principalId), viewedAt: v.viewedAt, liked: !!v.liked, reaction: v.reaction ?? null };
+  return { person: person(v.principalId), viewedAt: v.viewedAt, liked: !!v.liked, reaction: v.reaction ?? null, reactedAt: v.reactedAt ?? null };
 }
 
 function mapStatus(s: Wire): StatusPost {
@@ -240,7 +258,7 @@ function mapStatus(s: Wire): StatusPost {
     music: s.music ? { mediaId: s.music.mediaId, media: mapMedia(s.music.media, "STATUS"), startMs: s.music.startMs ?? null, endMs: s.music.endMs ?? null, title: s.music.title ?? null } : null,
     musicTitle: s.musicTitle ?? null, groupId: s.groupId ?? null, sequence: s.sequence ?? null, remainingSeconds: s.remainingSeconds,
     reaction: s.reaction ?? null, mentionedMe: !!s.mentionedMe, closeFriends: !!s.closeFriends, allowSharing: s.allowSharing !== false,
-    origin: s.origin ?? null, audience: s.audience, mentions: s.mentions, shareCount: s.shareCount,
+    origin: s.origin ?? null, audience: s.audience, mentions: s.mentions, shareCount: s.shareCount, replyCount: s.replyCount,
     uniqueViewerCount: s.uniqueViewerCount, viewers: Array.isArray(s.viewers) ? s.viewers.map(mapViewer) : undefined,
   };
 }
@@ -459,6 +477,12 @@ export const socialService = {
   /** Private reply: a message in the caller's direct chat with the author. */
   replyToStatus: (postId: string, text: string, clientMessageId: string = uuid()) =>
     call<{ statusId: string; conversationId: string; messageId: string }>("POST", `${S}/${id(postId)}/replies`, { text, clientMessageId }),
+  /** The private replies to one of my live statuses (author only; 404 for anyone else). */
+  statusReplies: async (statusId: string): Promise<StatusReplyView[]> => {
+    const r = await call<{ statusId: string; replies: Wire[] }>("GET", `${S}/${id(statusId)}/replies`);
+    await people(r.replies.map((x) => x.principalId));
+    return r.replies.map((x) => ({ replyId: x.replyId, person: person(x.principalId), conversationId: x.conversationId, messageId: x.messageId, text: x.text ?? null, createdAt: x.createdAt }));
+  },
   forwardStatus: (postId: string, principalIds: string[]) =>
     call<{ statusId: string; forwarded: number; skipped: number }>("POST", `${S}/${id(postId)}/forwards`, { principalIds }),
   reshareStatus: async (postId: string, body: { caption?: string; audience?: AudienceChoice } = {}, idempotencyKey: string = uuid()) =>

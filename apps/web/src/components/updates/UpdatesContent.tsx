@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellOff, Camera, ChevronDown, ChevronRight, Compass, Lock, MoreVertical, Pencil, Plus, Search, Settings, X } from "lucide-react";
+import { BellOff, CalendarDays, Camera, ChevronDown, ChevronRight, Compass, Lock, MoreVertical, Pencil, Plus, Search, Settings, Star, X } from "lucide-react";
+import { DEPLOYED, updatesMenu } from "@/lib/section-menus";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useChannelDirectory, useFollow, useFollowedChannels, useMediaUrl, useSocialRefresh, useStatusFeed } from "@/hooks/v2/useSocial";
@@ -48,6 +49,20 @@ export default function UpdatesContent() {
   const muted = searchStatusAuthors(feed.data?.muted ?? [], query);
   const followed = channels.data ?? [];
   const startOf = (a: StatusAuthor) => Math.max(0, a.posts.findIndex((p) => !p.viewed));
+
+  // The bell ("mentioned you", "shared your status") and a forwarded status open one status:
+  // /dashboard/updates?status=<id>. It opens only if the feed (the server's gate) has it.
+  const router = useRouter();
+  const [statusLink, setStatusLink] = useState<string | null>(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("status")));
+  const linkHandled = useRef(false);
+  const linked = statusLink && feed.data ? findStatus(feed.data, statusLink) : null;
+  useEffect(() => {
+    if (!statusLink || !feed.data || linkHandled.current) return;
+    linkHandled.current = true;
+    router.replace("/dashboard/updates");
+    if (!findStatus(feed.data, statusLink)) toast("This status isn't available any more", "error");
+  }, [statusLink, feed.data, router]);
+  const shown = viewing ?? (linked ? { person: linked.person ?? me, posts: linked.posts, mine: linked.mine, muted: linked.muted, startAt: linked.index } : null);
 
   return (
     <div className="mx-auto max-w-3xl px-4 pb-28 pt-6 sm:px-6 lg:py-8" data-testid="updates-page">
@@ -128,11 +143,23 @@ export default function UpdatesContent() {
       </div>
 
       {composer ? <StatusComposer initial={composer} onClose={() => setComposer(null)} onPosted={() => void refresh()} /> : null}
-      {viewing ? <StatusViewer {...viewing} onClose={() => { setViewing(null); void refresh(); }} onChanged={() => void feed.refetch()} /> : null}
+      {shown ? <StatusViewer {...shown} onClose={() => { setViewing(null); setStatusLink(null); void refresh(); }} onChanged={() => void feed.refetch()} /> : null}
       {finding ? <FindChannels onClose={() => setFinding(false)} /> : null}
       {creating ? <CreateChannel onClose={() => setCreating(false)} /> : null}
     </div>
   );
+}
+
+/** Where one status sits in the feed (contacts, muted or mine); null when the gate hides it. */
+function findStatus(feed: { contacts: StatusAuthor[]; muted: StatusAuthor[]; mine: StatusPost[] }, statusId: string) {
+  for (const [list, muted] of [[feed.contacts, false], [feed.muted, true]] as const) {
+    for (const a of list) {
+      const index = a.posts.findIndex((p) => p.statusId === statusId);
+      if (index >= 0) return { person: a.person, posts: a.posts, mine: false, muted, index };
+    }
+  }
+  const index = feed.mine.findIndex((p) => p.statusId === statusId);
+  return index >= 0 ? { person: null, posts: feed.mine, mine: true, muted: false, index } : null;
 }
 
 /** The latest status as the card's background. */
@@ -296,8 +323,18 @@ function CreateChannel({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** The Updates menu: only actions every signed-in user may take. */
+const UPDATES_MENU_ICONS: Record<string, typeof Plus> = {
+  "create-channel": Plus, "discover-channels": Compass, "status-privacy": Lock, starred: Star, events: CalendarDays, settings: Settings,
+};
+
+/**
+ * The Updates menu (ADR 0074 section menus): Create channel, Discover channels, Status
+ * privacy, Starred, Events (once that section ships) and Settings — only what this person
+ * may do (lib/section-menus.ts).
+ */
 function UpdatesMenu({ open, onOpenChange, onCreateChannel, onFindChannels }: { open: boolean; onOpenChange: (v: boolean) => void; onCreateChannel: () => void; onFindChannels: () => void }) {
+  const items = updatesMenu({ signedIn: true, createChannel: true }, DEPLOYED);
+  const run: Record<string, () => void> = { "create-channel": onCreateChannel, "discover-channels": onFindChannels };
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -314,10 +351,15 @@ function UpdatesMenu({ open, onOpenChange, onCreateChannel, onFindChannels }: { 
         className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><MoreVertical className="size-5" /></button>
       {open ? (
         <div role="menu" className="absolute right-0 top-11 z-40 w-56 overflow-hidden rounded-2xl bg-popover py-1 shadow-xl ring-1 ring-border" data-testid="updates-menu-list">
-          <button type="button" role="menuitem" className={item} onClick={() => { onOpenChange(false); onCreateChannel(); }}><Plus className="size-4 text-muted-foreground" />Create channel</button>
-          <button type="button" role="menuitem" className={item} onClick={() => { onOpenChange(false); onFindChannels(); }}><Compass className="size-4 text-muted-foreground" />Find channels</button>
-          <Link role="menuitem" href="/dashboard/updates/privacy" className={item} data-testid="menu-status-privacy"><Lock className="size-4 text-muted-foreground" />Status privacy</Link>
-          <Link role="menuitem" href="/dashboard/settings" className={item}><Settings className="size-4 text-muted-foreground" />Settings</Link>
+          {items.map(({ key, label, href }) => {
+            const Icon = UPDATES_MENU_ICONS[key] ?? Settings;
+            const body = <><Icon className="size-4 text-muted-foreground" />{label}</>;
+            return href ? (
+              <Link key={key} role="menuitem" href={href} className={item} data-testid={`menu-${key}`} onClick={() => onOpenChange(false)}>{body}</Link>
+            ) : (
+              <button key={key} type="button" role="menuitem" className={item} data-testid={`menu-${key}`} onClick={() => { onOpenChange(false); run[key]?.(); }}>{body}</button>
+            );
+          })}
         </div>
       ) : null}
     </div>

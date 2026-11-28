@@ -75,6 +75,7 @@ never cached) and continues exactly as for a bearer credential. A token together
 | Events ([ADR 0071](../../docs/decisions/0071-events-in-messaging.md)): `GET` / `POST /v1/messaging/events` (optional `Idempotency-Key`; views, calendar range, search, keyset pages), `GET /v1/messaging/events/calendar` (ICS as JSON), `GET` / `PATCH` / `DELETE …/events/{eventId}`, cancel, RSVP, attendees, invitations, reminders, ICS, cover media (`…/events/media/**`) | `messages.read` / `messages.send` |
 | Communities ([ADR 0073](../../docs/decisions/0073-communities-in-messaging.md)): `GET` / `POST /v1/messaging/communities` (optional `Idempotency-Key`), `GET` / `PATCH` / `DELETE …/{communityId}`, owner, leave, members and roles, bans, invitations, invite links (`mcl_` tokens) with preview / join, join requests, groups (create, link, order, access, unlink, join), preferences | `messages.read` / `messages.send` |
 | Channels (ADR 0069): directory, create / update / delete, follow, posts (optional `Idempotency-Key`), reactions, channel media (`…/channels/media/**`) | `messages.read` / `messages.send` |
+| Status replies for the author ([ADR 0074](../../docs/decisions/0074-chat-list-starred-menus-status-replies.md)): `GET /v1/messaging/status/{statusId}/replies` (author of a live status only; records in their own `messaging_status_replies_seaql_migrations` history) | `messages.read` |
 
 Gap closure (migration `m20261206_000034`, gap-closure history):
 

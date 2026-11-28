@@ -20,6 +20,8 @@ test("each notification opens the place it is about", () => {
   assert.equal(inboxHref(item("OPEN_CONTACT_REQUEST")), "/dashboard/contacts?tab=requests");
   assert.equal(inboxHref(item("OPEN_CONTACT")), "/dashboard/contacts");
   assert.equal(inboxHref(item("OPEN_ORGANIZATION_INVITATION")), "/dashboard/organizations");
+  assert.equal(inboxHref(item("OPEN_STATUS")), `/dashboard/updates?status=${ID}`);
+  assert.equal(inboxHref(item("OPEN_STATUS", null)), "/dashboard/updates");
   assert.equal(inboxHref(item("OPEN_ORGANIZATION")), "/dashboard/organizations");
   assert.equal(inboxHref(item("OPEN_SECURITY_SETTINGS", null)), "/dashboard/settings?tab=security");
   assert.equal(inboxHref(item("OPEN_DEVELOPER_APPLICATION")), "/developers");

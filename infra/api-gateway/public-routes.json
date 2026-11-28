@@ -5642,6 +5642,13 @@
     },
     {
       "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/{statusId}/replies",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
       "method": "POST",
       "path": "/v1/messaging/status/{statusId}/forwards",
       "class": "EXCLUDED",

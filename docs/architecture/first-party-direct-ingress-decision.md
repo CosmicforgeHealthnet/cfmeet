@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 323 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 324 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -100,12 +100,12 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 323 
 | `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
 | `FIRST_PARTY_ORGANIZATIONS` | 50 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
-| `FIRST_PARTY_STATUS_CHANNELS` | 52 | messaging | Status and Channels (ADR 0069) for the CF Meet apps' own signed-in users: audiences are the account's mutual Communications Hub contacts in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
+| `FIRST_PARTY_STATUS_CHANNELS` | 53 | messaging | Status and Channels (ADR 0069) for the CF Meet apps' own signed-in users: audiences are the account's mutual Communications Hub contacts in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
 | `LEGACY_DIRECT_INGRESS` | 43 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **323** | | |
+| **Total** | **324** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -384,7 +384,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 323 
 | POST | `/v1/messaging/session-devices` | `issueSessionDeviceToken` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/session-devices/revoke` | `revokeSessionDevices` | `cfmeet.messaging.http-api` |
 
-#### `FIRST_PARTY_STATUS_CHANNELS` (52)
+#### `FIRST_PARTY_STATUS_CHANNELS` (53)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -436,6 +436,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 323 
 | POST | `/v1/messaging/status/{statusId}/forwards` | `forwardStatus` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/status/{statusId}/reaction` | `unreactToStatus` | `cfmeet.messaging.http-api` |
 | PUT | `/v1/messaging/status/{statusId}/reaction` | `reactToStatus` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/status/{statusId}/replies` | `listStatusReplies` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/status/{statusId}/replies` | `replyToStatus` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/status/{statusId}/reshares` | `reshareStatus` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/status/{statusId}/view` | `viewStatus` | `cfmeet.messaging.http-api` |

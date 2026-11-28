@@ -2,7 +2,7 @@
 //!
 //! | Route | Scope |
 //! |---|---|
-//! | `GET /status/feed`, `GET /status/mine`, `GET /status/{statusId}`, `GET /status/{statusId}/viewers`, `POST /status/rings` | `messages.read` |
+//! | `GET /status/feed`, `GET /status/mine`, `GET /status/{statusId}`, `GET /status/{statusId}/viewers`, `GET /status/{statusId}/replies` (author only), `POST /status/rings` | `messages.read` |
 //! | `POST /status` (`Idempotency-Key`), `PATCH /status/{statusId}` (allowSharing), `POST /status/delete`, `DELETE /status/{statusId}` | `messages.send` |
 //! | `POST /status/{statusId}/view`, `PUT` / `DELETE /status/{statusId}/reaction`, `POST …/replies`, `POST …/forwards`, `POST …/reshares` | `messages.send` |
 //! | `GET` / `PUT /status/audience`, `GET /status/eligible-contacts`, `GET` / `PUT /status/close-friends`, audience lists, mutes | `messages.read` / `messages.send` |
@@ -77,7 +77,7 @@ pub fn routes() -> Router<AppState> {
         .route("/status/:status_id/view", post(view_status))
         .route("/status/:status_id/reaction", put(react).delete(unreact))
         .route("/status/:status_id/viewers", get(viewers))
-        .route("/status/:status_id/replies", post(reply))
+        .route("/status/:status_id/replies", get(replies).post(reply))
         .route("/status/:status_id/forwards", post(forward))
         .route("/status/:status_id/reshares", post(reshare))
         .route("/channels", get(directory).post(create_channel))
@@ -351,6 +351,16 @@ async fn viewers(
 ) -> Reply {
     let acting = reader(&state, &caller, &headers).await?;
     ok(status::viewers(&state, caller.context(), &acting, id).await?)
+}
+
+async fn replies(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(status::replies(&state, caller.context(), &acting, id).await?)
 }
 
 async fn reply(

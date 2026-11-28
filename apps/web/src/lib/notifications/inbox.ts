@@ -37,6 +37,9 @@ export function inboxHref(item: InboxItem): string | null {
     case "OPEN_DEVELOPER_APPLICATION": return "/developers";
     // An event invitation, cancellation or reminder (Messaging, ADR 0071): the event page.
     case "OPEN_EVENT": return ref ? `/dashboard/events/${ref}` : "/dashboard/events";
+    // Mentioned in a status / your status was shared (Messaging, ADR 0069): that status in
+    // Updates (it opens only while the reader may still see it).
+    case "OPEN_STATUS": return ref ? `/dashboard/updates?status=${ref}` : "/dashboard/updates";
     default: return null;
   }
 }
