@@ -144,7 +144,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
@@ -162,7 +163,8 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -257,7 +259,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
@@ -279,7 +282,8 @@ async fn the_member_notification_history_is_separate_so_a_rollback_still_starts(
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     // What the previous image checks is untouched by this history.
@@ -437,7 +441,8 @@ async fn the_admin_operations_history_is_separate_and_rolls_back() {
             "m20261215_000043_admin_bridge_events".to_string(),
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     messaging_migration::AdminOperationsMigrator::up(&db.conn, None)
@@ -538,7 +543,8 @@ async fn the_chat_organization_history_is_separate_and_rolls_back() {
         vec![
             "m20261216_000044_chat_organization_polls".to_string(),
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     messaging_migration::ChatOrganizationMigrator::up(&db.conn, None)
@@ -551,7 +557,8 @@ async fn the_chat_organization_history_is_separate_and_rolls_back() {
             .unwrap(),
         vec![
             "m20261217_000045_status_channels".to_string(),
-            "m20261218_000046_events".to_string()
+            "m20261218_000046_events".to_string(),
+            "m20261219_000047_channels_complete".to_string()
         ]
     );
     let tables = "SELECT count(*) FROM pg_tables WHERE tablename IN ('messaging_chat_lists',          'messaging_chat_list_items', 'messaging_polls', 'messaging_poll_votes')";

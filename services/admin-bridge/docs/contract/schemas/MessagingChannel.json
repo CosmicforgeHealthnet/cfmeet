@@ -1,0 +1,120 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "channel_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "handle",
+    "category",
+    "country",
+    "language",
+    "visibility",
+    "moderation_state",
+    "moderation_reason",
+    "moderation_changed_at",
+    "verified",
+    "verified_at",
+    "follower_count",
+    "post_count",
+    "open_reports",
+    "created_at",
+    "version"
+  ],
+  "properties": {
+    "channel_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "handle": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "country": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "visibility": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "moderation_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "moderation_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "moderation_changed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "follower_count": {
+      "type": "integer"
+    },
+    "post_count": {
+      "type": "integer"
+    },
+    "open_reports": {
+      "type": "integer"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "description": "ADR 0072: one channel's handle, codes, states, counts and row version (expected_version of the channel commands)."
+}

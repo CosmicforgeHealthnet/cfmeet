@@ -72,6 +72,12 @@ jobs:
       - name: Status privacy tests
         run: node --experimental-strip-types --test tests/status-privacy.test.mjs
 
+      # ADR 0072: channel helpers mirror the server's rules (usernames, reserved words, invite
+      # tokens only in URL fragments, poll percentages, scheduling window, media kinds) and the
+      # relay allowlist permits exactly the channel operations.
+      - name: Channels tests
+        run: node --experimental-strip-types --test tests/channels.test.mjs
+
       # Private chats (MLS) like WhatsApp: senders add every registered device, devices keep
       # KeyPackages published, removals never block a chat, unreadable messages show a label.
       - name: Messaging private-chat membership tests

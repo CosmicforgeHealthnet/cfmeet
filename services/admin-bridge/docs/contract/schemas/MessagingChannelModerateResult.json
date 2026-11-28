@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel_id",
+        "moderation_state",
+        "moderation_reason",
+        "changed_at"
+      ],
+      "properties": {
+        "channel_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "moderation_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "moderation_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "changed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after messaging.channel.moderate; status: ACTIVE, RESTRICTED, SUSPENDED, BANNED."
+    }
+  }
+}

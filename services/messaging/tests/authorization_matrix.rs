@@ -1348,6 +1348,37 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("POST", "/v1/messaging/channels/media/{mediaId}/parts/{part}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("POST", "/v1/messaging/channels/media/{mediaId}/complete", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("POST", "/v1/messaging/channels/media/{mediaId}/download-grants", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PATCH", "/v1/messaging/channels/{channelId}/posts/{postId}", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/suggestions", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/lookup", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/starred", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/invites/preview", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/invites/join", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/mute", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/mute", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/admins", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/admins/{principalId}", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/admins/{principalId}", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/owner", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/invites", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/invites", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/invites/{inviteId}", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/posts/views", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/posts/{postId}/pin", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/posts/{postId}/pin", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/posts/{postId}/vote", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/posts/{postId}/vote", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/posts/{postId}/star", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/posts/{postId}/star", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/posts/{postId}/forwards", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/scheduled", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/scheduled/{postId}", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/reports", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/verification", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/verification", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/moderation", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/audit", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/analytics", "ADR 0072 channels: membership, admin permissions, polls, scheduling, analytics and bridge-only verification certified by tests/channels.rs"),
     ("GET", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("PATCH", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("DELETE", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
@@ -1970,6 +2001,7 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
         Uuid::new_v4(),
         Uuid::new_v4(),
     );
+    let (chid, chpost, chapp) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     let tenant = fp.context.scope.tenant_id;
     let env = fp.context.scope.environment_id;
     let versioned = json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX" });
@@ -2116,6 +2148,52 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "/internal/v1/operator/key-transparency/checkpoint".into(),
             json!({ "reasonCode": "MATRIX" }),
         ),
+        // ADR 0072: channel verification and moderation.
+        (
+            Method::GET,
+            "/internal/v1/operator/channel-verifications".into(),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/channel-verifications/{chapp}/decide"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX", "decision": "APPROVE" }),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/channel-reports".into(),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/channel-reports/{rid}/resolve"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX", "resolution": "DISMISSED" }),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/operator/channel-actions".into(),
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/operator/channels/{chid}"),
+            json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/channels/{chid}/moderate"),
+            json!({ "tenantId": tenant, "expectedVersion": 1, "reasonCode": "MATRIX", "state": "SUSPENDED" }),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/channels/{chid}/verification/revoke"),
+            versioned.clone(),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/operator/channels/{chid}/posts/{chpost}/takedown"),
+            versioned.clone(),
+        ),
     ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
@@ -2141,6 +2219,9 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
                     "/datasets/cfmeet.messaging_daily/days/2026-01-01",
                     "/datasets/{datasetId}/days/{day}",
                 )
+                .replace(&chid.to_string(), "{channelId}")
+                .replace(&chpost.to_string(), "{postId}")
+                .replace(&chapp.to_string(), "{applicationId}")
                 .replace(&hold.to_string(), "{holdId}")
                 .replace(&incident.to_string(), "{incidentId}")
                 .replace(&event.to_string(), "{eventId}")

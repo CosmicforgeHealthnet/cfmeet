@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.27.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (chat organization and polls): favourite on PUT /v1/conversations/{conversationId}/inbox-settings and in the inbox summary (WhatsApp Favourites); the member's own chat lists GET / POST /v1/messaging/chat-lists, PATCH / DELETE /v1/messaging/chat-lists/{listId}, PUT / DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} (at most 20 lists of 500 conversations; never visible to anyone else; removing an item never touches the conversation); MANAGED polls (send with poll; PUT .../messages/{messageId}/poll/vote, POST .../messages/{messageId}/poll/close; events messaging.poll.voted / closed carry the current tally); a MANAGED group's description (create / PATCH description) and group photo (avatarRef attachment:<attachmentId>); a group admin may change title, avatarRef and description. 1.25.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted). 1.26.0: PATCH /v1/messaging/status/{statusId} (the author's Allow sharing per status). 1.27.0 (ADR 0071): Events under /v1/messaging/events: personal and conversation events (organization and community scopes reserved), co-organizers, invitations, RSVP with counts, per-person reminders, server-side recurrence (RRULE subset in the event time zone), cancellation, ICS export as JSON, cover photos in the ADR 0069 media store and a link to a CF Meet meeting (no scheduling in Messaging). Event text is stored server-side (not end-to-end encrypted)."
+    "version": "1.28.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (chat organization and polls): favourite on PUT /v1/conversations/{conversationId}/inbox-settings and in the inbox summary (WhatsApp Favourites); the member's own chat lists GET / POST /v1/messaging/chat-lists, PATCH / DELETE /v1/messaging/chat-lists/{listId}, PUT / DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} (at most 20 lists of 500 conversations; never visible to anyone else; removing an item never touches the conversation); MANAGED polls (send with poll; PUT .../messages/{messageId}/poll/vote, POST .../messages/{messageId}/poll/close; events messaging.poll.voted / closed carry the current tally); a MANAGED group's description (create / PATCH description) and group photo (avatarRef attachment:<attachmentId>); a group admin may change title, avatarRef and description. 1.25.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted). 1.26.0: PATCH /v1/messaging/status/{statusId} (the author's Allow sharing per status). 1.27.0 (ADR 0071): Events under /v1/messaging/events: personal and conversation events (organization and community scopes reserved), co-organizers, invitations, RSVP with counts, per-person reminders, server-side recurrence (RRULE subset in the event time zone), cancellation, ICS export as JSON, cover photos in the ADR 0069 media store and a link to a CF Meet meeting (no scheduling in Messaging). Event text is stored server-side (not end-to-end encrypted). 1.28.0 (ADR 0072): Channels complete under /v1/messaging/channels: unique handles, PUBLIC / PRIVATE channels, invite links, admins and ownership transfer, mute, discovery filters / sort / cursor, suggestions, handle lookup, every post kind with polls, scheduled posts, pins, edits, stars, views and forwards, reports, verification applications (decided only by HQ through the admin bridge), moderation history, audit log and analytics."
   },
   "tags": [
     {
@@ -11828,7 +11828,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. The environment's channel directory, most followed first, optionally matching q (at most 50).",
+        "description": "Scope messages.read. Discover the environment's PUBLIC, ACTIVE channels: q searches names, usernames and description keywords; category / country / language filter; sort POPULAR (most followed, default), TRENDING (net follows x5 + reactions + views/10 over the last 7 days, recorded events only), NEW or VERIFIED; keyset pages (limit 1-50, default 50; nextCursor). 120 a minute per person.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -11846,6 +11846,65 @@
             "schema": {
               "type": "string",
               "maxLength": 64
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 24
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 2
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 8
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "POPULAR",
+                "TRENDING",
+                "NEW",
+                "VERIFIED"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
             }
           }
         ],
@@ -11898,7 +11957,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. A channel the caller owns (name 1-80, description at most 500; at most 10 each). Only the owner posts.",
+        "description": "Scope messages.send. A channel the caller owns (name 1-80, description at most 500, optional unique handle, category, language, country, PUBLIC / PRIVATE, picture; at most 10 each, 10 an hour). The owner and admins with canPost post.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12034,7 +12093,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read.",
+        "description": "Scope messages.read. One channel with its pinned posts. A PRIVATE channel (and a SUSPENDED / BANNED one) is visible to its members only (404 otherwise).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12103,7 +12162,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Owner only (403 otherwise).",
+        "description": "Scope messages.send. The owner or an admin with canEdit changes the details; only the owner changes the handle or visibility; a verified channel keeps its handle. Nothing here verifies or moderates.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12182,7 +12241,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Owner only; with its posts.",
+        "description": "Scope messages.send. Owner only.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12253,7 +12312,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Idempotent.",
+        "description": "Scope messages.send. Idempotent. PUBLIC, ACTIVE channels only (a private channel is joined with an invite link); 200 an hour.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12322,7 +12381,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Idempotent.",
+        "description": "Scope messages.send. Idempotent. The owner always follows. Leaving a private channel answers {channelId, following: false}.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12348,7 +12407,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelFollowLeft"
+                    }
+                  ]
                 }
               }
             }
@@ -12393,7 +12459,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read. Newest first, 30 at a time (before for older); reading the newest marks them read.",
+        "description": "Scope messages.read. Newest first, 30 at a time (before for older); reading the newest marks them read. Readable by anyone for a PUBLIC channel (preview before following), by members for a PRIVATE one.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12471,7 +12537,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Owner only. Text, or a COMPLETE channel upload with an optional caption. An Idempotency-Key replays the original post.",
+        "description": "Scope messages.send. The owner or an admin with canPost. Text; a COMPLETE channel upload (IMAGE, VIDEO, AUDIO, DOCUMENT) with an optional caption and presentation (VOICE, GIF, STICKER); a poll; a device-built link preview whose link is in the text; publishAt schedules it (the answer is SCHEDULED). An Idempotency-Key replays the original post. 120 an hour.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12572,7 +12638,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send. Owner only.",
+        "description": "Scope messages.send. The owner, an admin with canEdit, or the post's author while they can post.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -12634,6 +12700,93 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "editChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Edit a post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner, an admin with canEdit, or the author while they can post: words, caption or link preview (marked edited; polls are not editable).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPostEditRequest"
+              }
+            }
           }
         }
       }
@@ -12773,6 +12926,2344 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/suggestions": {
+      "get": {
+        "operationId": "suggestChannels",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Channel suggestions",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. Up to 8 PUBLIC, ACTIVE channels whose name or username starts with q; without q the trending, then most followed, channels the caller does not follow.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelSuggestions"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/lookup": {
+      "get": {
+        "operationId": "lookupChannelHandle",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Look up a username",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. Whether a username is valid, reserved or taken, and the channel holding it when the caller may see it.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelLookup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/starred": {
+      "get": {
+        "operationId": "listStarredChannelPosts",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "My starred channel posts",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The caller's starred posts, newest star first, from channels they can still read (keyset cursor, limit 1-100).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelStarredPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/invites/preview": {
+      "post": {
+        "operationId": "previewChannelInvite",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Preview an invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The channel an invite token leads to (its card, no posts). Unknown, expired, revoked and used-up tokens are the same 404. 30 a minute.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInvitePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInviteToken"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/invites/join": {
+      "post": {
+        "operationId": "joinChannelInvite",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Join with an invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Follow the channel of an invite token (private channels are joined only this way). 30 a minute.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInviteToken"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/mute": {
+      "put": {
+        "operationId": "muteChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Mute a channel",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. A follower mutes a channel (it moves to the end of their list).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unmuteChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Unmute a channel",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Undo mute.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/admins": {
+      "get": {
+        "operationId": "listChannelAdmins",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Channel admins",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The owner and the admins with their permissions (owner and admins only). Followers are never listed.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAdmins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/admins/{principalId}": {
+      "put": {
+        "operationId": "putChannelAdmin",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Add or change an admin",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner, or an admin with canManageAdmins (granting only permissions they hold; only the owner adds managers). A new admin must be a mutual contact of the person adding them.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAdmins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAdminRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeChannelAdmin",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Remove an admin",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner, a manager (not of another manager), or the admin themselves.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAdmins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/owner": {
+      "post": {
+        "operationId": "transferChannelOwnership",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Transfer ownership",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner hands the channel to an existing admin and stays as a full admin.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Channel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelTransferRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/invites": {
+      "get": {
+        "operationId": "listChannelInvites",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Invite links",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The channel's invite links without tokens (owner and admins with canEdit).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInviteList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createChannelInvite",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Create an invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. A revocable invite link (default 30 days, optional use cap); the token is in this answer only. 30 an hour.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInvite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInviteRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/invites/{inviteId}": {
+      "delete": {
+        "operationId": "revokeChannelInvite",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Revoke an invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Final.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "inviteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelInvite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/posts/views": {
+      "post": {
+        "operationId": "recordChannelPostViews",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Record post views",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The caller saw these posts: one view per person and post, never for the channel's owner and admins.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelViewsRecorded"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelViewsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/posts/{postId}/pin": {
+      "put": {
+        "operationId": "pinChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Pin a post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner or an admin (at most 3 pinned).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unpinChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Unpin a post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner or an admin.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/posts/{postId}/vote": {
+      "put": {
+        "operationId": "voteChannelPoll",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Vote in a poll",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Followers only; one vote per person (a new vote replaces theirs): exactly one option for a single-choice poll.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelVoteRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "retractChannelPollVote",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Retract a vote",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Followers only.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/posts/{postId}/star": {
+      "put": {
+        "operationId": "starChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Star a post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Adds the post to the caller's starred list.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unstarChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Unstar a post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Removes it from the caller's starred list.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/posts/{postId}/forwards": {
+      "post": {
+        "operationId": "forwardChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Share a post into chats",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. A message with the channel's name, an excerpt and the post's link in the caller's direct chats with mutual contacts (others are skipped). 30 an hour.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelForwardResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelForwardRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/scheduled": {
+      "get": {
+        "operationId": "listScheduledChannelPosts",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Scheduled posts",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The channel's scheduled posts (owner and admins).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPosts"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/scheduled/{postId}": {
+      "delete": {
+        "operationId": "cancelScheduledChannelPost",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Cancel a scheduled post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. An admin with canEdit, or its author while they can post.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelPostDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/reports": {
+      "post": {
+        "operationId": "reportChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Report a channel or post",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. Anyone who can see the channel (not its owner); the same open report again answers 200. Reviewed by HQ. 20 an hour.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelReportRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/verification": {
+      "get": {
+        "operationId": "getChannelVerification",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Verification",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. The badge and the channel's applications (owner and admins).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "applyChannelVerification",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Apply for verification",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. The owner of a PUBLIC, ACTIVE channel with a handle applies; HQ decides through the admin bridge (owners never verify themselves). One pending at a time; 30 days after a rejection.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelVerificationApplication"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelVerificationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/moderation": {
+      "get": {
+        "operationId": "getChannelModeration",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Moderation history",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. What HQ decided about the channel (owner and admins).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelModeration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/audit": {
+      "get": {
+        "operationId": "listChannelAudit",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Channel audit log",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. What the owner and admins did (owner and admins only), newest first, keyset-paged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/channels/{channelId}/analytics": {
+      "get": {
+        "operationId": "getChannelAnalytics",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Channel analytics",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. Counts of recorded events per UTC day for the owner and admins: follows, unfollows, followers, views (one per person and post), unique viewers, reactions, poll voters, forwards, engagement rate and top posts (default 30 days, at most 366).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ChannelAnalytics"
                 }
               }
             }

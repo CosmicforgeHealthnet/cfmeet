@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "2.0.0",
+  "contract_version": "2.1.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "28c63e21a1f75f17056d37588783c456a67f477bc23a1922c60ec3023473e635",
-    "capability_matrix_sha256": "57074a2bc57a2ab53a8f053bdebb219deb9d3724cc2d7e744f073c6cc71bd30b"
+    "openapi_sha256": "eef9faa4ca4d8813139596ff344557732b8d54d5e56ecceb07c4af8cfd3b6761",
+    "capability_matrix_sha256": "40adc758aca3b70dc2d42feb036ff6f9e5ca6293c24498ef14aea79090cf00e6"
   },
   "query_shapes": {
     "SCOPED": [
@@ -49,10 +49,10 @@
     ]
   },
   "totals": {
-    "capabilities": 255,
+    "capabilities": 264,
     "by_state": {
-      "READ_ONLY": 129,
-      "AVAILABLE": 111,
+      "READ_ONLY": 133,
+      "AVAILABLE": 116,
       "DISABLED": 5,
       "BLOCKED_DEPENDENCY": 10
     }
@@ -4364,6 +4364,491 @@
       "permission": "messaging.key-transparency.checkpoint",
       "risk": "R3",
       "privacy": "INTERNAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-verifications.list",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/channel-verifications",
+      "source_endpoint": null,
+      "path_params": [],
+      "query_shape": "SCOPED_PAGE",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "verification-review",
+        "abuse-review"
+      ],
+      "roles": [
+        "cfmeet.verification.reviewer",
+        "cfmeet.trust_safety"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelVerificationPage"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.channel-verifications.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_channel_reads_relay_handles_and_counts_only"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-reports.list",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/channel-reports",
+      "source_endpoint": null,
+      "path_params": [],
+      "query_shape": "SCOPED_PAGE",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelReportPage"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.channel-reports.read",
+      "risk": "R1",
+      "privacy": "SAFETY_EVIDENCE",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_channel_reads_relay_handles_and_counts_only"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channels.read",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/channels/{channel_id}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "channel_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "verification-review",
+        "abuse-review"
+      ],
+      "roles": [
+        "cfmeet.verification.reviewer",
+        "cfmeet.trust_safety"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannel"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.channels.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_channel_reads_relay_handles_and_counts_only"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-actions.list",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "READ",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "GET",
+      "path": "/messaging/channel-actions",
+      "source_endpoint": null,
+      "path_params": [],
+      "query_shape": "SCOPED_WINDOW",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose",
+        "start",
+        "end"
+      ],
+      "purposes": [
+        "verification-review",
+        "abuse-review"
+      ],
+      "roles": [
+        "cfmeet.verification.reviewer",
+        "cfmeet.trust_safety"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelActionPage"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "messaging.channel-actions.read",
+      "risk": "R1",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
+      "blocker": null,
+      "source_tests": [
+        "messaging_channel_actions_map_the_window"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-verification.decide",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "COMMAND",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/messaging/channel-verifications/{application_id}/decide",
+      "source_endpoint": "POST /internal/v1/operator/channel-verifications/{application_id}/decide",
+      "path_params": [
+        {
+          "name": "application_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "verification-review"
+      ],
+      "roles": [
+        "cfmeet.verification.reviewer"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/MessagingChannelVerificationDecideRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelVerificationDecideResult"
+      },
+      "matrix_state": "AVAILABLE",
+      "permission": "messaging.channel-verification.decide",
+      "risk": "R3",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-verification.revoke",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "COMMAND",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/messaging/channels/{channel_id}/verification/revoke",
+      "source_endpoint": "POST /internal/v1/operator/channels/{channel_id}/verification/revoke",
+      "path_params": [
+        {
+          "name": "channel_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "verification-review",
+        "abuse-review"
+      ],
+      "roles": [
+        "cfmeet.verification.reviewer",
+        "cfmeet.trust_safety"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/MessagingChannelVerificationRevokeRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelVerificationRevokeResult"
+      },
+      "matrix_state": "AVAILABLE",
+      "permission": "messaging.channel-verification.revoke",
+      "risk": "R3",
+      "privacy": "OPERATIONS_MINIMIZED",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel.moderate",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "COMMAND",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/messaging/channels/{channel_id}/moderate",
+      "source_endpoint": "POST /internal/v1/operator/channels/{channel_id}/moderate",
+      "path_params": [
+        {
+          "name": "channel_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/MessagingChannelModerateRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelModerateResult"
+      },
+      "matrix_state": "AVAILABLE",
+      "permission": "messaging.channel.moderate",
+      "risk": "R3",
+      "privacy": "SAFETY_EVIDENCE",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-post.takedown",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "COMMAND",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/messaging/channels/{channel_id}/posts/{post_id}/takedown",
+      "source_endpoint": "POST /internal/v1/operator/channels/{channel_id}/posts/{post_id}/takedown",
+      "path_params": [
+        {
+          "name": "channel_id",
+          "format": "uuid"
+        },
+        {
+          "name": "post_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/MessagingChannelPostTakedownRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelPostTakedownResult"
+      },
+      "matrix_state": "AVAILABLE",
+      "permission": "messaging.channel-post.takedown",
+      "risk": "R3",
+      "privacy": "SAFETY_EVIDENCE",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
+      "source_version_required": true,
+      "idempotency_required": true,
+      "approval": "TWO_PERSON",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING+ADMIN_BRIDGE_WRITES_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "messaging.channel-report.resolve",
+      "version": "1.0",
+      "module": "messaging",
+      "kind": "COMMAND",
+      "owner": "messaging",
+      "owner_status": "EXISTS",
+      "phase": "A4",
+      "method": "POST",
+      "path": "/messaging/channel-reports/{report_id}/resolve",
+      "source_endpoint": "POST /internal/v1/operator/channel-reports/{report_id}/resolve",
+      "path_params": [
+        {
+          "name": "report_id",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "abuse-review",
+        "ops-incident",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.trust_safety"
+      ],
+      "request_body": {
+        "$ref": "#/components/schemas/MessagingChannelReportResolveRequest"
+      },
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/MessagingChannelReportResolveResult"
+      },
+      "matrix_state": "AVAILABLE",
+      "permission": "messaging.channel-report.resolve",
+      "risk": "R3",
+      "privacy": "SAFETY_EVIDENCE",
       "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; the owner re-checks the tenant on every call",
       "source_version_required": true,
       "idempotency_required": true,

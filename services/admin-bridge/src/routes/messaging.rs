@@ -14,7 +14,10 @@ use serde_json::{json, Value};
 use super::translate::{self as t, obj, T};
 use crate::chain::{Answer, Authorized, Bridge};
 use crate::contract::model::Owner;
-use crate::contract::schemas_messaging::{CONTEXT_CLASSES, EFFECTIVE_POLICY, POLICY_CONTEXT};
+use crate::contract::schemas_messaging::{
+    CHANNEL, CHANNEL_ACTION, CHANNEL_REPORT, CHANNEL_VERIFICATION, CONTEXT_CLASSES,
+    EFFECTIVE_POLICY, POLICY_CONTEXT,
+};
 use crate::errors::ErrorCode;
 use crate::owners::OwnerError;
 
@@ -363,6 +366,24 @@ fn environment_policy(p: &Value) -> T<Value> {
     ]))
 }
 
+/// ADR 0072: channel reads translate strictly from their data tables (a field the owner
+/// adds later is dropped until reviewed; a missing or malformed one is OWNER_CONTRACT).
+pub fn channel_verification(v: &Value) -> T<Value> {
+    super::owner_commands::extract(CHANNEL_VERIFICATION, v)
+}
+
+pub fn channel_report(v: &Value) -> T<Value> {
+    super::owner_commands::extract(CHANNEL_REPORT, v)
+}
+
+pub fn channel(v: &Value) -> T<Value> {
+    super::owner_commands::extract(CHANNEL, v)
+}
+
+pub fn channel_action(v: &Value) -> T<Value> {
+    super::owner_commands::extract(CHANNEL_ACTION, v)
+}
+
 /// A lowercase hyphenated UUID, or `None` (an id that names nothing at the owner).
 fn canonical_uuid(raw: Option<&String>) -> Option<String> {
     raw.and_then(|r| uuid::Uuid::parse_str(r).ok())
@@ -462,6 +483,20 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
             }
         }
         "messaging.holds.list" => list("holds", false, hold).await,
+        "messaging.channel-verifications.list" => {
+            list("channel-verifications", false, channel_verification).await
+        }
+        "messaging.channel-reports.list" => list("channel-reports", false, channel_report).await,
+        "messaging.channel-actions.list" => list("channel-actions", true, channel_action).await,
+        "messaging.channels.read" => {
+            let Some(id) = canonical_uuid(auth.params.get("channel_id")) else {
+                return Some(Err(ErrorCode::ResourceNotFound));
+            };
+            match read(format!("{BASE}/channels/{id}"), vec![]).await {
+                Ok(v) => answer(channel(&v)),
+                Err(e) => Err(e.into()),
+            }
+        }
         "messaging.exports.list" => list("exports", false, export).await,
         "messaging.deletion-requests.list" => {
             list("deletion-requests", false, deletion_request).await
