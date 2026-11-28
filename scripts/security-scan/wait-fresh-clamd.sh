@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Waits for a clamd container to answer, updates its signatures and waits until the
 # daily database is at most 72 h old (the gateway refuses older signatures).
+# CI_MAX_SIGNATURE_AGE_HOURS (CI only, default 72) widens that window when upstream
+# ClamAV has not published for longer than 72 h; production keeps its own 72 h limit.
 #
 #   scripts/security-scan/wait-fresh-clamd.sh <container> <host:port>
 set -euo pipefail
 container="$1"; host="${2%:*}"; port="${2##*:}"
+max_h="${CI_MAX_SIGNATURE_AGE_HOURS:-72}"
 command -v nc >/dev/null || sudo apt-get install -y -qq netcat-openbsd >/dev/null
 ask() { printf 'z%s\0' "$1" | nc -w 5 "$host" "$port" | tr -d '\0'; }
 for _ in $(seq 1 150); do [ "$(ask PING || true)" = "PONG" ] && break; sleep 2; done
@@ -17,7 +20,7 @@ for _ in $(seq 1 90); do
   built=$(printf '%s' "$v" | awk -F/ '{print $3}')
   if [ -n "$built" ]; then
     age=$(( $(date -u +%s) - $(date -u -d "$built" +%s) ))
-    if [ "$age" -le $((72 * 3600)) ]; then echo "fresh: $v (age ${age}s)"; exit 0; fi
+    if [ "$age" -le $((max_h * 3600)) ]; then echo "fresh: $v (age ${age}s)"; exit 0; fi
   fi
   sleep 5
 done

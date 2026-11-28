@@ -295,6 +295,10 @@ jobs:
       # The shared security scan gateway in front of a real engine (official image with
       # freshclam-maintained signatures, so the gateway's freshness gate is exercised).
       MESSAGING_SCAN_GATEWAY_REQUIRED: "1"
+      # CI only: upstream ClamAV can go longer than 72 h without publishing a daily database
+      # (nothing after 25 Nov 2026 06:27 UTC as of 28 Nov). CI tests the gateway, not the
+      # upstream cadence, so it allows 7 days; production keeps its 72 h limit.
+      CI_MAX_SIGNATURE_AGE_HOURS: "168"
     defaults:
       run:
         working-directory: services/messaging

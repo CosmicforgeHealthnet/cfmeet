@@ -58,7 +58,7 @@ do not double memory (scans wait during a reload; the gateway fails closed meanw
 | File size | 25 MiB (the engine's `StreamMaxLength`) | Messaging sets `MESSAGING_MANAGED_SCAN_MAX_BYTES` to the same; larger MANAGED files are rejected `TOO_LARGE_TO_SCAN`, never delivered unscanned |
 | Queue wait | 2 s, then `OVERLOADED` | slow scans never pile up gateway connections |
 | Scan deadline | 60 s, then `TIMEOUT` | Messaging's own client timeout is 75 s |
-| Signature age | 72 h, then `SIGNATURES_STALE` | the same rule CF Meet used for its own scanner |
+| Signature age | 168 h (owner decision 2026-11-28, during the upstream ClamAV publishing stall; return to 72 h once upstream is daily again), then `SIGNATURES_STALE` | was 72 h, the same rule CF Meet used for its own scanner |
 
 ## Operations (existing workflow `cfmeet-calling-production.yml`, branch `main`)
 
@@ -81,7 +81,7 @@ that it configured the gateway scanner (an older image cannot pretend).
 | Event | Result |
 |---|---|
 | Engine down, restarting or reloading | Gateway `/ready` 503; scans `UNAVAILABLE`; Messaging keeps attachments `VERIFYING` and retries with backoff (30 s × 2ⁿ, budgeted); the gateway never restarts the engine |
-| Engine signatures older than 72 h | `SIGNATURES_STALE`; no byte reaches the engine. Escalate to the mail owner (their freshclam). Do not raise the threshold to force scans |
+| Engine signatures older than the limit (168 h; normally 72 h) | `SIGNATURES_STALE`; no byte reaches the engine. Escalate to the mail owner (their freshclam). Do not raise the threshold to force scans |
 | Mail stack recreated by its owner (`compose up` recreate) | The extra network attachment is lost: scans `UNAVAILABLE`. Re-run `scan-gateway-configure` (idempotent) after confirming the engine is healthy |
 | Gateway crash / restart | `restart: unless-stopped`; in-flight scans fail closed and are retried by Messaging |
 | Overload | `OVERLOADED` after 2 s; Messaging retries later |

@@ -46,7 +46,7 @@ class EngineAdmission(unittest.TestCase):
             dict(config={'MaxThreads': '4'}),
             dict(config={'AlertExceedsMax': 'no'}),
             dict(config={'ConcurrentDatabaseReload': 'yes'}),
-            dict(now=NOW + datetime.timedelta(hours=13)),   # signatures past 72 h
+            dict(now=NOW + datetime.timedelta(hours=13 + 168 - 72)),   # signatures past the limit (168 h)
         ]
         for kwargs in refusals:
             with self.assertRaises(AssertionError, msg=str(kwargs)):
