@@ -145,6 +145,10 @@ export interface Channel {
   unreadCount: number;
   lastPost: ChannelPost | null;
   createdAt: string;
+  /** Verified by CF Meet (HQ, through the admin bridge; ADR 0072). */
+  verified: boolean;
+  /** The follower muted the channel's notifications (ADR 0072). */
+  muted: boolean;
 }
 
 export interface AudienceChoice { mode: AudienceMode; principalIds?: string[]; listId?: string }
@@ -273,6 +277,7 @@ async function mapChannels(list: Wire[]): Promise<Channel[]> {
     channelId: c.channelId, name: c.name, description: c.description ?? null, owner: person(c.ownerPrincipalId, "Channel owner"),
     followerCount: c.followerCount, following: !!c.following, isOwner: !!c.isOwner, unreadCount: c.unreadCount ?? 0,
     lastPost: c.lastPost ? mapPost(c.lastPost) : null, createdAt: c.createdAt,
+    verified: !!c.verified, muted: !!c.muted,
   }));
 }
 

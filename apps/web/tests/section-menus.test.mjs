@@ -2,11 +2,19 @@
 // person may do, wired to existing screens; sections not deployed yet stay hidden.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { channelMenu, chatsMenu, communitiesMenu, myStatusMenu, ROUTES, updatesMenu } from "../src/lib/section-menus.ts";
+import { CHANNEL_FEATURES, channelMenu, chatsMenu, communitiesMenu, DEPLOYED, myStatusMenu, ROUTES, updatesMenu } from "../src/lib/section-menus.ts";
 
 const keys = (items) => items.map((i) => i.key);
 const off = { events: false, communities: false };
 const on = { events: true, communities: true };
+
+test("this build ships Events, Communities and the channel notifications, reports and management", () => {
+  assert.deepEqual(DEPLOYED, { events: true, communities: true });
+  assert.deepEqual(keys(communitiesMenu({ createCommunity: true }, DEPLOYED)), ["new-community", "events", "settings"]);
+  const follower = channelMenu({ ...CHANNEL_FEATURES, share: true, isOwner: false, following: true });
+  assert.deepEqual(keys(follower), ["info", "notifications", "share", "report", "unfollow"]);
+  assert.deepEqual(keys(channelMenu({ ...CHANNEL_FEATURES, share: true, isOwner: true, following: false })), ["info", "share", "manage", "delete"]);
+});
 
 test("Updates: create, discover, privacy, starred, events, settings", () => {
   assert.deepEqual(keys(updatesMenu({ signedIn: true, createChannel: true }, on)), ["create-channel", "discover-channels", "status-privacy", "starred", "events", "settings"]);

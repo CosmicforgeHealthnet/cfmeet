@@ -4,9 +4,8 @@
  * an item's `key` to its icon and its action; node tests run this file directly
  * (tests/section-menus.test.mjs).
  *
- * Sections: Updates, Chats, My status, a channel, and a hook for Communities (its menu ships
- * with the Communities screens: `communitiesMenu` returns the items it will have once the
- * section exists, and nothing until then).
+ * Sections: Updates, Chats, My status, a channel and Communities (`communitiesMenu` returns
+ * nothing while the Communities section is not deployed).
  */
 
 export type MenuItem = {
@@ -28,17 +27,19 @@ export const ROUTES = {
 } as const;
 
 /**
- * Sections that exist on this build. Events (ADR 0071) and Communities ship in their own
- * changes: until a section's screens are deployed its menu entries stay hidden, so a menu
- * never leads to a page that isn't there.
+ * Sections that exist on this build: a section's menu entries stay hidden until its screens
+ * are deployed, so a menu never leads to a page that isn't there.
  */
 export type Sections = { events: boolean; communities: boolean };
 
+/** This build: Events (ADR 0071) and Communities (ADR 0073) are deployed. */
+export const DEPLOYED: Sections = { events: true, communities: true };
+
 /**
- * This build: Events (ADR 0071, its own change) and Communities are not deployed yet. Flip a
- * flag in the change that ships the section's screens.
+ * Channel features on this build (ADR 0072): per-follower notifications (mute), reports
+ * (reviewed by HQ through the admin bridge) and the management screen.
  */
-export const DEPLOYED: Sections = { events: false, communities: false };
+export const CHANNEL_FEATURES = { notifications: true, report: true, manage: true } as const;
 
 // ------------------------------------------------------------------ Updates
 
@@ -71,7 +72,7 @@ export function chatsMenu(can: { messaging: boolean; lists: boolean }, sections:
   return items;
 }
 
-// ------------------------------------------------------------------ Communities (hook)
+// ------------------------------------------------------------------ Communities
 
 /** Communities: New community, Events, Settings — only once the Communities section exists. */
 export function communitiesMenu(can: { createCommunity: boolean }, sections: Sections): MenuItem[] {

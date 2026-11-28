@@ -4,12 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BellOff, CalendarDays, Camera, ChevronDown, ChevronRight, Compass, Lock, MoreVertical, Pencil, Plus, Search, Settings, Star, X } from "lucide-react";
+import { VerifiedBadge } from "@/components/channels/bits";
 import { DEPLOYED, updatesMenu } from "@/lib/section-menus";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useChannelDirectory, useFollow, useFollowedChannels, useMediaUrl, useSocialRefresh, useStatusFeed } from "@/hooks/v2/useSocial";
 import { useAccountProfile } from "@/hooks/useAccount";
 import { socialService, type Channel, type PersonView, type StatusAuthor, type StatusPost } from "@/services/v2/social.service";
+
+/** Channels (ADR 0072) screens Updates links to. */
+const CHANNEL_ROUTES = {
+  discover: "/dashboard/updates/channels/discover",
+  create: "/dashboard/updates/channels/new",
+  starred: "/dashboard/updates/channels/starred",
+} as const;
 import { searchStatusAuthors } from "@/lib/status-privacy";
 import { ringOfPosts, StatusRingFrame } from "./StatusRing";
 import MyStatusCard from "./MyStatusCard";
@@ -35,8 +43,6 @@ export default function UpdatesContent() {
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState(false);
   const [showMuted, setShowMuted] = useState(false);
-  const [finding, setFinding] = useState(false);
-  const [creating, setCreating] = useState(false);
 
   const me: PersonView = {
     userId: "me",
@@ -71,7 +77,7 @@ export default function UpdatesContent() {
         <div className="flex items-center gap-1">
           <button type="button" aria-label="Search status updates" aria-pressed={searching} onClick={() => { setSearching(!searching); setQuery(""); }} data-testid="status-search-toggle"
             className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Search className="size-5" /></button>
-          <UpdatesMenu open={menu} onOpenChange={setMenu} onCreateChannel={() => setCreating(true)} onFindChannels={() => setFinding(true)} />
+          <UpdatesMenu open={menu} onOpenChange={setMenu} onCreateChannel={() => router.push(CHANNEL_ROUTES.create)} onFindChannels={() => router.push(CHANNEL_ROUTES.discover)} />
         </div>
       </header>
       {searching ? (
@@ -124,7 +130,11 @@ export default function UpdatesContent() {
       <section className="mt-8" aria-labelledby="channels-heading">
         <div className="flex items-center justify-between">
           <h2 id="channels-heading" className="text-lg font-bold">Channels</h2>
-          <button type="button" onClick={() => setCreating(true)} className="flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-primary hover:bg-primary/10" data-testid="create-channel"><Plus className="size-4" />Create channel</button>
+          <div className="flex items-center gap-1">
+            <Link href={CHANNEL_ROUTES.starred} aria-label="Starred channel posts" className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="starred-channel-posts"><Star className="size-4" /></Link>
+            <Link href={CHANNEL_ROUTES.discover} aria-label="Discover channels" className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="discover-channels"><Compass className="size-4" /></Link>
+            <Link href={CHANNEL_ROUTES.create} className="flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-primary hover:bg-primary/10" data-testid="create-channel"><Plus className="size-4" />Create channel</Link>
+          </div>
         </div>
         {channels.isPending ? <div className="mt-3 space-y-2">{[0, 1].map((i) => <div key={i} className="h-16 animate-pulse rounded-2xl bg-muted" />)}</div> : null}
         {followed.length ? (
@@ -134,7 +144,7 @@ export default function UpdatesContent() {
         ) : !channels.isPending ? (
           <p className="mt-2 text-sm text-muted-foreground">Stay updated on topics that matter to you. Find channels to follow below.</p>
         ) : null}
-        <Suggestions onFind={() => setFinding(true)} hide={followed.map((c) => c.channelId)} />
+        <Suggestions hide={followed.map((c) => c.channelId)} />
       </section>
 
       <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-3 md:bottom-8 md:right-8">
@@ -144,8 +154,6 @@ export default function UpdatesContent() {
 
       {composer ? <StatusComposer initial={composer} onClose={() => setComposer(null)} onPosted={() => void refresh()} /> : null}
       {shown ? <StatusViewer {...shown} onClose={() => { setViewing(null); setStatusLink(null); void refresh(); }} onChanged={() => void feed.refetch()} /> : null}
-      {finding ? <FindChannels onClose={() => setFinding(false)} /> : null}
-      {creating ? <CreateChannel onClose={() => setCreating(false)} /> : null}
     </div>
   );
 }
@@ -199,12 +207,16 @@ function ChannelRow({ channel }: { channel: Channel }) {
         <ChannelAvatar channel={channel} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className="truncate text-[15px] font-semibold">{channel.name}</span>
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate text-[15px] font-semibold">{channel.name}</span>
+              {channel.verified ? <VerifiedBadge /> : null}
+              {channel.muted ? <BellOff aria-label="Muted" role="img" className="size-3.5 shrink-0 text-muted-foreground" data-testid="channel-muted" /> : null}
+            </span>
             <span className={cn("shrink-0 text-xs", channel.unreadCount ? "font-semibold text-primary" : "text-muted-foreground")}>{channel.lastPost ? shortWhen(channel.lastPost.createdAt) : ""}</span>
           </span>
           <span className="flex items-center justify-between gap-2">
             <span className="truncate text-sm text-muted-foreground">{preview(channel)}</span>
-            {channel.unreadCount ? <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">{channel.unreadCount > 99 ? "99+" : channel.unreadCount}</span> : null}
+            {channel.unreadCount ? <span className={cn("flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold", channel.muted ? "bg-muted-foreground/40 text-background" : "bg-primary text-primary-foreground")}>{channel.unreadCount > 99 ? "99+" : channel.unreadCount}</span> : null}
           </span>
         </span>
       </Link>
@@ -223,7 +235,7 @@ function FollowButton({ channel }: { channel: Channel }) {
   );
 }
 
-function Suggestions({ onFind, hide }: { onFind: () => void; hide: string[] }) {
+function Suggestions({ hide }: { hide: string[] }) {
   const directory = useChannelDirectory("");
   const list = (directory.data ?? []).filter((c) => !hide.includes(c.channelId) && !c.following).slice(0, 5);
   return (
@@ -236,7 +248,7 @@ function Suggestions({ onFind, hide }: { onFind: () => void; hide: string[] }) {
               <li key={c.channelId} className="flex items-center gap-3 px-2 py-2">
                 <ChannelAvatar channel={c} size="size-11" />
                 <Link href={`/dashboard/updates/channels/${encodeURIComponent(c.channelId)}`} className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{c.name}</span>
+                  <span className="flex items-center gap-1"><span className="truncate font-semibold">{c.name}</span>{c.verified ? <VerifiedBadge /> : null}</span>
                   <span className="block text-xs text-muted-foreground">{c.followerCount} {c.followerCount === 1 ? "follower" : "followers"}</span>
                 </Link>
                 <FollowButton channel={c} />
@@ -245,81 +257,8 @@ function Suggestions({ onFind, hide }: { onFind: () => void; hide: string[] }) {
           </ul>
         </>
       ) : null}
-      <button type="button" onClick={onFind} className="mt-2 h-10 rounded-full bg-primary/10 px-5 text-sm font-semibold text-primary hover:bg-primary/15" data-testid="find-channels">Explore more</button>
+      <Link href={CHANNEL_ROUTES.discover} className="mt-2 inline-flex h-10 items-center rounded-full bg-primary/10 px-5 text-sm font-semibold text-primary hover:bg-primary/15" data-testid="find-channels">Explore more</Link>
     </div>
-  );
-}
-
-function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
-      <div role="dialog" aria-label={title} className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-t-3xl bg-background p-4 shadow-2xl sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="flex size-9 items-center justify-center rounded-full hover:bg-muted"><X className="size-5" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function FindChannels({ onClose }: { onClose: () => void }) {
-  const [q, setQ] = useState("");
-  const directory = useChannelDirectory(q);
-  return (
-    <Sheet title="Find channels" onClose={onClose}>
-      <label className="flex h-11 items-center gap-2 rounded-full bg-muted px-4">
-        <Search className="size-4 text-muted-foreground" />
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search channels" className="min-w-0 flex-1 bg-transparent text-sm focus:outline-none" data-testid="channel-search" />
-      </label>
-      <ul className="mt-3 min-h-0 flex-1 overflow-y-auto">
-        {directory.isPending ? [0, 1, 2].map((i) => <li key={i} className="my-2 h-12 animate-pulse rounded-xl bg-muted" />) : null}
-        {directory.data?.length === 0 ? <li className="py-8 text-center text-sm text-muted-foreground">No channels found</li> : null}
-        {directory.data?.map((c) => (
-          <li key={c.channelId} className="flex items-center gap-3 px-1 py-2">
-            <ChannelAvatar channel={c} size="size-11" />
-            <Link href={`/dashboard/updates/channels/${encodeURIComponent(c.channelId)}`} className="min-w-0 flex-1" onClick={onClose}>
-              <span className="block truncate font-semibold">{c.name}</span>
-              <span className="block truncate text-xs text-muted-foreground">{c.followerCount} {c.followerCount === 1 ? "follower" : "followers"}{c.description ? ` · ${c.description}` : ""}</span>
-            </Link>
-            <FollowButton channel={c} />
-          </li>
-        ))}
-      </ul>
-    </Sheet>
-  );
-}
-
-function CreateChannel({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [busy, setBusy] = useState(false);
-  const refresh = useSocialRefresh();
-  const router = useRouter();
-  const create = async () => {
-    if (!name.trim() || busy) return;
-    setBusy(true);
-    try {
-      const c = await socialService.createChannel(name.trim(), description.trim());
-      void refresh();
-      onClose();
-      router.push(`/dashboard/updates/channels/${encodeURIComponent(c.channelId)}`);
-    } catch (e) {
-      toast(errorText(e, "The channel couldn't be created."), "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Sheet title="New channel" onClose={onClose}>
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <input autoFocus value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Channel name" className="h-12 w-full rounded-xl border border-border bg-background px-4 text-base focus:border-primary focus:outline-none" data-testid="channel-name" />
-        <textarea value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} placeholder="Describe your channel (optional)" rows={3} className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-base focus:border-primary focus:outline-none" />
-        <p className="text-xs text-muted-foreground">Anyone on CF Meet can find and follow your channel. Only you can post in it.</p>
-        <button type="submit" disabled={!name.trim() || busy} className="h-12 w-full rounded-full bg-primary text-base font-semibold text-primary-foreground disabled:opacity-50" data-testid="channel-create-submit">{busy ? "Creating…" : "Create channel"}</button>
-      </form>
-    </Sheet>
   );
 }
 

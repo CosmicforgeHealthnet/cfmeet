@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, Copy, Flag, Info, LogOut, MoreVertical, Settings, Star } from "lucide-react";
+import { Bell, BellOff, Copy, Flag, Info, LogOut, MoreVertical, Settings, Star, Trash2 } from "lucide-react";
+import { CHANNEL_FEATURES, channelMenu } from "@/lib/section-menus";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import QrCode from "@/components/communications/QrCode";
@@ -59,12 +60,33 @@ export function ChannelInfoSheet({ channel, onClose }: { channel: Channel; onClo
   );
 }
 
-/** The channel menu: info, notifications, share, report, unfollow and admin options. */
+/**
+ * The channel menu (ADR 0074 section menus over the ADR 0072 screens): info, notifications,
+ * share, report, unfollow, management and delete — only what this person may do here.
+ */
 export default function ChannelMenu({ channel, onChanged }: { channel: Channel; onChanged: () => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [sheet, setSheet] = useState<"info" | "report" | null>(null);
-  const staff = channel.myRole === "OWNER" || channel.myRole === "ADMIN";
+  const owner = channel.myRole === "OWNER";
+  const items = new Set(channelMenu({
+    ...CHANNEL_FEATURES,
+    isOwner: owner,
+    admin: channel.myRole === "ADMIN",
+    following: channel.following,
+    share: true,
+  }).map((i) => i.key));
+  const remove = async () => {
+    setOpen(false);
+    if (!window.confirm(`Delete “${channel.name}”? Its posts are removed for every follower.`)) return;
+    try {
+      await channelsService.remove(channel.channelId);
+      toast("Channel deleted");
+      router.push("/dashboard/updates");
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setOpen(false);
     try { await fn(); if (ok) toast(ok); onChanged(); } catch (e) { toast(errorText(e), "error"); }
@@ -95,16 +117,17 @@ export default function ChannelMenu({ channel, onChanged }: { channel: Channel; 
       <button type="button" aria-label="Channel options" onClick={() => setOpen(!open)} className="flex size-10 items-center justify-center rounded-full hover:bg-muted" data-testid="channel-menu"><MoreVertical className="size-5" /></button>
       {open ? (
         <div className="absolute right-0 top-11 z-30 w-56 rounded-2xl border border-border bg-popover p-1 shadow-xl">
-          <Item icon={Info} label="Channel info" onClick={() => { setOpen(false); setSheet("info"); }} />
-          {channel.following ? (
+          {items.has("info") ? <Item icon={Info} label="Channel info" onClick={() => { setOpen(false); setSheet("info"); }} /> : null}
+          {items.has("notifications") ? (
             <Item icon={channel.muted ? Bell : BellOff} label={channel.muted ? "Unmute notifications" : "Mute notifications"}
               onClick={() => void run(() => channelsService.mute(channel.channelId, !channel.muted), channel.muted ? "Unmuted" : "Muted")} />
           ) : null}
-          <Item icon={Copy} label="Share channel" onClick={() => void share()} />
+          {items.has("share") ? <Item icon={Copy} label="Share channel" onClick={() => void share()} /> : null}
           <Link href="/dashboard/updates/channels/starred" className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm hover:bg-muted"><Star className="size-4" />Starred posts</Link>
-          {staff ? <Link href={`/dashboard/updates/channels/${channel.channelId}/manage`} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm hover:bg-muted" data-testid="channel-manage"><Settings className="size-4" />Admin tools</Link> : null}
-          {channel.myRole !== "OWNER" ? <Item icon={Flag} label="Report channel" danger onClick={() => { setOpen(false); setSheet("report"); }} /> : null}
-          {channel.following && channel.myRole !== "OWNER" ? <Item icon={LogOut} label={channel.visibility === "PRIVATE" ? "Leave channel" : "Unfollow"} danger onClick={() => void unfollow()} /> : null}
+          {items.has("manage") ? <Link href={`/dashboard/updates/channels/${channel.channelId}/manage`} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm hover:bg-muted" data-testid="channel-manage"><Settings className="size-4" />Admin tools</Link> : null}
+          {items.has("report") ? <Item icon={Flag} label="Report channel" danger onClick={() => { setOpen(false); setSheet("report"); }} /> : null}
+          {items.has("unfollow") ? <Item icon={LogOut} label={channel.visibility === "PRIVATE" ? "Leave channel" : "Unfollow"} danger onClick={() => void unfollow()} /> : null}
+          {items.has("delete") ? <Item icon={Trash2} label="Delete channel" danger onClick={() => void remove()} /> : null}
         </div>
       ) : null}
       {sheet === "info" ? <ChannelInfoSheet channel={channel} onClose={() => setSheet(null)} /> : null}

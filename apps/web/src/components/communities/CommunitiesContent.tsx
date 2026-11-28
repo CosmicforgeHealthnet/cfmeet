@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronRight, EllipsisVertical, Link2, Plus, Settings, UsersRound, X } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, EllipsisVertical, Link2, Plus, Settings, UsersRound, X } from "lucide-react";
+import { DEPLOYED, communitiesMenu } from "@/lib/section-menus";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
@@ -47,10 +48,18 @@ export default function CommunitiesContent() {
           <button type="button" aria-label="Communities menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><EllipsisVertical className="size-5" /></button>
           {menu ? (
             <div role="menu" className="absolute right-0 top-11 z-20 w-52 rounded-2xl border border-border bg-card p-1 shadow-lg" onMouseLeave={() => setMenu(false)}>
-              <MenuItem icon={Plus} label="New community" onClick={() => { setMenu(false); setCreating(true); }} />
-              <MenuItem icon={Link2} label="Join with a link" onClick={() => { setMenu(false); setJoining(true); }} />
-              {/* Community events arrive with Events (ADR 0071) once it is on main. */}
-              <MenuItem icon={Settings} label="Settings" onClick={() => { setMenu(false); setSettings(true); }} />
+              {/* The Communities section menu (ADR 0074): New community, Events, Settings. */}
+              {communitiesMenu({ createCommunity: true }, DEPLOYED).map((item) => item.key === "new-community" ? (
+                <div key={item.key}>
+                  <MenuItem icon={Plus} label={item.label} onClick={() => { setMenu(false); setCreating(true); }} />
+                  <MenuItem icon={Link2} label="Join with a link" onClick={() => { setMenu(false); setJoining(true); }} />
+                </div>
+              ) : item.key === "events" && item.href ? (
+                <Link key={item.key} role="menuitem" href={item.href} onClick={() => setMenu(false)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-muted"><CalendarDays className="size-4" />{item.label}</Link>
+              ) : (
+                // Settings here are the community chat-list preference (together / separate).
+                <MenuItem key={item.key} icon={Settings} label={item.label} onClick={() => { setMenu(false); setSettings(true); }} />
+              ))}
             </div>
           ) : null}
         </div>
