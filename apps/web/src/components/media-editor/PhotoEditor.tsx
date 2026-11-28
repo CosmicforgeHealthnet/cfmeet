@@ -39,6 +39,8 @@ export interface PhotoEditorProps {
   onStateChange?: (state: PhotoEditorState) => void;
   /** Accessible name and icon of the Done button. */
   doneLabel?: string;
+  /** Shown just before the done button (the status audience button). */
+  doneExtra?: ReactNode;
   doneIcon?: ReactNode;
 }
 
@@ -51,7 +53,7 @@ const DEFAULT_BRUSH = 1;
  * filters, brightness / contrast / saturation, text, emoji stickers and drawing, with undo /
  * redo across everything. Outputs a JPEG or WebP (smaller wins) of at most 2560 px.
  */
-export default function PhotoEditor({ file, onDone, onCancel, toolbarExtra, footer, initialState, onStateChange, doneLabel = "Done", doneIcon }: PhotoEditorProps) {
+export default function PhotoEditor({ file, onDone, onCancel, toolbarExtra, footer, initialState, onStateChange, doneLabel = "Done", doneIcon, doneExtra }: PhotoEditorProps) {
   const [src, setSrc] = useState<Source | null>(null);
   const [thumb, setThumb] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -300,10 +302,13 @@ export default function PhotoEditor({ file, onDone, onCancel, toolbarExtra, foot
                 <button type="button" disabled={!src} onClick={() => setMode("filter")} className={pill}><Sparkles className="size-4" />Filters</button>
                 <button type="button" disabled={!src} onClick={() => setMode("adjust")} className={pill}><SlidersHorizontal className="size-4" />Adjust</button>
               </div>
+              <div className="flex min-w-0 items-center gap-2">
+              {doneExtra}
               <button type="button" aria-label={doneLabel} disabled={!src || busy} onClick={() => void finish()} data-testid="photo-done"
                 className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:opacity-50">
                 {busy ? <Loader2 className="size-6 animate-spin" /> : doneIcon ?? <Send className="size-6" />}
               </button>
+              </div>
             </div>
           </>
         )}

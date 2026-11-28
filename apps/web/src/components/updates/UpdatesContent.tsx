@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, Mic, Pencil, Plus, Search, X } from "lucide-react";
+import { BellOff, Camera, ChevronDown, ChevronRight, Compass, Lock, MoreVertical, Pencil, Plus, Search, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useChannelDirectory, useFollow, useFollowedChannels, useMediaUrl, useSocialRefresh, useStatusFeed } from "@/hooks/v2/useSocial";
 import { useAccountProfile } from "@/hooks/useAccount";
-import { socialService, type Channel, type PersonView, type StatusPost } from "@/services/v2/social.service";
+import { socialService, type Channel, type PersonView, type StatusAuthor, type StatusPost } from "@/services/v2/social.service";
+import { searchStatusAuthors } from "@/lib/status-privacy";
+import { ringOfPosts, StatusRingFrame } from "./StatusRing";
 import MyStatusCard from "./MyStatusCard";
 import StatusComposer from "./StatusComposer";
 import StatusViewer from "./StatusViewer";
@@ -16,14 +18,22 @@ import TextStatusView from "@/components/media-editor/TextStatusView";
 import { errorText, PersonAvatar, shortWhen } from "./shared";
 import { textStatusOfPost } from "./status-adapter";
 
-/** Updates (WhatsApp): Status on top, Channels below. */
+/**
+ * Updates (WhatsApp): Status on top (my status, contacts' statuses with rings, muted updates),
+ * Channels below. Status search, a menu (Create channel, Status privacy, Settings, Find
+ * channels) and two floating buttons: text status and camera / media.
+ */
 export default function UpdatesContent() {
   const feed = useStatusFeed();
   const channels = useFollowedChannels();
   const refresh = useSocialRefresh();
   const profile = useAccountProfile();
   const [composer, setComposer] = useState<null | "text" | "media" | "voice">(null);
-  const [viewing, setViewing] = useState<{ person: PersonView; posts: StatusPost[]; mine: boolean; startAt: number } | null>(null);
+  const [viewing, setViewing] = useState<{ person: PersonView; posts: StatusPost[]; mine: boolean; muted?: boolean; startAt: number } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [menu, setMenu] = useState(false);
+  const [showMuted, setShowMuted] = useState(false);
   const [finding, setFinding] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -34,35 +44,64 @@ export default function UpdatesContent() {
     principalId: null,
   };
   const mine = feed.data?.mine ?? [];
-  const contacts = feed.data?.contacts ?? [];
+  const contacts = searchStatusAuthors(feed.data?.contacts ?? [], query);
+  const muted = searchStatusAuthors(feed.data?.muted ?? [], query);
   const followed = channels.data ?? [];
+  const startOf = (a: StatusAuthor) => Math.max(0, a.posts.findIndex((p) => !p.viewed));
 
   return (
     <div className="mx-auto max-w-3xl px-4 pb-28 pt-6 sm:px-6 lg:py-8" data-testid="updates-page">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold tracking-tight">Updates</h1>
-        <button type="button" aria-label="Find channels" onClick={() => setFinding(true)} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Search className="size-5" /></button>
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="Search status updates" aria-pressed={searching} onClick={() => { setSearching(!searching); setQuery(""); }} data-testid="status-search-toggle"
+            className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Search className="size-5" /></button>
+          <UpdatesMenu open={menu} onOpenChange={setMenu} onCreateChannel={() => setCreating(true)} onFindChannels={() => setFinding(true)} />
+        </div>
       </header>
+      {searching ? (
+        <label className="mt-3 flex h-11 items-center gap-2 rounded-full bg-muted px-4">
+          <Search className="size-4 text-muted-foreground" />
+          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search status updates" aria-label="Search status updates" data-testid="status-search"
+            className="min-w-0 flex-1 bg-transparent text-sm focus:outline-none" />
+          {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="text-muted-foreground"><X className="size-4" /></button> : null}
+        </label>
+      ) : null}
 
       <section className="mt-5" aria-labelledby="status-heading">
-        <h2 id="status-heading" className="text-lg font-bold">Status</h2>
+        <div className="flex items-center justify-between">
+          <h2 id="status-heading" className="text-lg font-bold">Status</h2>
+          <Link href="/dashboard/updates/mine" className="flex h-9 items-center gap-0.5 rounded-full px-3 text-sm font-semibold text-primary hover:bg-primary/10" data-testid="my-status-link">My status<ChevronRight className="size-4" /></Link>
+        </div>
         <div className="no-scrollbar -mx-4 mt-3 flex gap-3 overflow-x-auto px-4 pb-1" data-testid="status-row">
           {/* Pending statuses (background queue) show here first: preview, "Adding…" + ring, or "Tap to retry". */}
           <MyStatusCard me={me} postCount={mine.length} latest={<StatusThumb post={mine[mine.length - 1]} />}
             onView={() => setViewing({ person: me, posts: mine, mine: true, startAt: 0 })} onAdd={() => setComposer("media")} />
           {feed.isPending ? [0, 1, 2].map((i) => <span key={i} className="h-44 w-28 shrink-0 animate-pulse rounded-2xl bg-muted" />) : null}
           {contacts.map((c) => (
-            <button key={c.person.userId} type="button" data-testid="contact-status"
-              onClick={() => setViewing({ person: c.person, posts: c.posts, mine: false, startAt: Math.max(0, c.posts.findIndex((p) => !p.viewed)) })}
+            <button key={c.person.userId} type="button" data-testid="contact-status" data-seen={c.allViewed || undefined}
+              onClick={() => setViewing({ person: c.person, posts: c.posts, mine: false, startAt: startOf(c) })}
               className="relative flex h-44 w-28 shrink-0 flex-col justify-between overflow-hidden rounded-2xl bg-muted p-2.5 text-left">
               <StatusThumb post={c.posts[c.posts.length - 1]} />
-              <PersonAvatar person={c.person} size="size-10" ring={c.allViewed ? "seen" : "unseen"} className="relative self-start" />
+              <StatusRingFrame ring={ringOfPosts(c.person.userId, c.posts, c.closeFriends)} className="relative self-start"><PersonAvatar person={c.person} size="size-9" /></StatusRingFrame>
               <span className="relative truncate text-sm font-semibold text-white drop-shadow">{c.person.name}</span>
             </button>
           ))}
         </div>
         {!feed.isPending && contacts.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">Status updates from your contacts show here for 24 hours.</p>
+          <p className="mt-2 text-sm text-muted-foreground">{query ? `No status updates match “${query}”.` : "Status updates from your contacts show here for 24 hours."}</p>
+        ) : null}
+        {muted.length ? (
+          <div className="mt-4" data-testid="muted-updates">
+            <button type="button" onClick={() => setShowMuted(!showMuted)} aria-expanded={showMuted} className="flex w-full items-center gap-2 rounded-xl px-1 py-2 text-left text-sm font-semibold text-muted-foreground hover:text-foreground">
+              <BellOff className="size-4" /><span className="flex-1">Muted updates ({muted.length})</span><ChevronDown className={cn("size-4 transition-transform", showMuted && "rotate-180")} />
+            </button>
+            {showMuted || query ? (
+              <ul>
+                {muted.map((c) => <MutedRow key={c.person.userId} author={c} onOpen={() => setViewing({ person: c.person, posts: c.posts, mine: false, muted: true, startAt: startOf(c) })} onChanged={() => void refresh()} />)}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
         {feed.isError ? <p role="alert" className="mt-2 text-sm text-destructive">Status updates couldn&apos;t load. <button type="button" className="font-semibold underline" onClick={() => void feed.refetch()}>Try again</button></p> : null}
       </section>
@@ -84,7 +123,6 @@ export default function UpdatesContent() {
       </section>
 
       <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-3 md:bottom-8 md:right-8">
-        <button type="button" aria-label="Voice status" onClick={() => setComposer("voice")} className="flex size-11 items-center justify-center rounded-2xl bg-card text-foreground shadow-lg ring-1 ring-border"><Mic className="size-5" /></button>
         <button type="button" aria-label="Text status" onClick={() => setComposer("text")} className="flex size-11 items-center justify-center rounded-2xl bg-card text-foreground shadow-lg ring-1 ring-border" data-testid="text-status"><Pencil className="size-5" /></button>
         <button type="button" aria-label="Photo or video status" onClick={() => setComposer("media")} className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl" data-testid="media-status"><Camera className="size-6" /></button>
       </div>
@@ -255,5 +293,64 @@ function CreateChannel({ onClose }: { onClose: () => void }) {
         <button type="submit" disabled={!name.trim() || busy} className="h-12 w-full rounded-full bg-primary text-base font-semibold text-primary-foreground disabled:opacity-50" data-testid="channel-create-submit">{busy ? "Creating…" : "Create channel"}</button>
       </form>
     </Sheet>
+  );
+}
+
+/** The Updates menu: only actions every signed-in user may take. */
+function UpdatesMenu({ open, onOpenChange, onCreateChannel, onFindChannels }: { open: boolean; onOpenChange: (v: boolean) => void; onCreateChannel: () => void; onFindChannels: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) onOpenChange(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false); };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc); };
+  }, [open, onOpenChange]);
+  const item = "flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-muted";
+  return (
+    <div className="relative" ref={box}>
+      <button type="button" aria-label="More options" aria-haspopup="menu" aria-expanded={open} onClick={() => onOpenChange(!open)} data-testid="updates-menu"
+        className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><MoreVertical className="size-5" /></button>
+      {open ? (
+        <div role="menu" className="absolute right-0 top-11 z-40 w-56 overflow-hidden rounded-2xl bg-popover py-1 shadow-xl ring-1 ring-border" data-testid="updates-menu-list">
+          <button type="button" role="menuitem" className={item} onClick={() => { onOpenChange(false); onCreateChannel(); }}><Plus className="size-4 text-muted-foreground" />Create channel</button>
+          <button type="button" role="menuitem" className={item} onClick={() => { onOpenChange(false); onFindChannels(); }}><Compass className="size-4 text-muted-foreground" />Find channels</button>
+          <Link role="menuitem" href="/dashboard/updates/privacy" className={item} data-testid="menu-status-privacy"><Lock className="size-4 text-muted-foreground" />Status privacy</Link>
+          <Link role="menuitem" href="/dashboard/settings" className={item}><Settings className="size-4 text-muted-foreground" />Settings</Link>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A muted author: view (ring stays neutral), or unmute. */
+function MutedRow({ author, onOpen, onChanged }: { author: StatusAuthor; onOpen: () => void; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const unmute = async () => {
+    if (!author.person.principalId) return;
+    setBusy(true);
+    try {
+      await socialService.mute(author.person.principalId, false);
+      toast(`${author.person.name}'s updates unmuted`);
+      onChanged();
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const last = author.posts[author.posts.length - 1];
+  return (
+    <li className="flex items-center gap-3 px-1 py-2" data-testid="muted-author">
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left opacity-80">
+        <StatusRingFrame ring={{ ...ringOfPosts(author.person.userId, author.posts), unseenCount: 0 }}><PersonAvatar person={author.person} size="size-10" /></StatusRingFrame>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-semibold">{author.person.name}</span>
+          <span className="block text-xs text-muted-foreground">{last ? shortWhen(last.createdAt) : ""}</span>
+        </span>
+      </button>
+      <button type="button" disabled={busy} onClick={() => void unmute()} className="h-9 shrink-0 rounded-full bg-muted px-3 text-sm font-semibold disabled:opacity-50" data-testid="unmute-author">Unmute</button>
+    </li>
   );
 }

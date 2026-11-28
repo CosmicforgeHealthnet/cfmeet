@@ -3,7 +3,7 @@
 //! | Route | Scope |
 //! |---|---|
 //! | `GET /status/feed`, `GET /status/mine`, `GET /status/{statusId}`, `GET /status/{statusId}/viewers`, `POST /status/rings` | `messages.read` |
-//! | `POST /status` (`Idempotency-Key`), `POST /status/delete`, `DELETE /status/{statusId}` | `messages.send` |
+//! | `POST /status` (`Idempotency-Key`), `PATCH /status/{statusId}` (allowSharing), `POST /status/delete`, `DELETE /status/{statusId}` | `messages.send` |
 //! | `POST /status/{statusId}/view`, `PUT` / `DELETE /status/{statusId}/reaction`, `POST …/replies`, `POST …/forwards`, `POST …/reshares` | `messages.send` |
 //! | `GET` / `PUT /status/audience`, `GET /status/eligible-contacts`, `GET` / `PUT /status/close-friends`, audience lists, mutes | `messages.read` / `messages.send` |
 //! | Status media `…/status/media/**`, channel media `…/channels/media/**` | `messages.read` / `messages.send` |
@@ -70,7 +70,10 @@ pub fn routes() -> Router<AppState> {
             "/status/media/:media_id/download-grants",
             post(status_media_grants),
         )
-        .route("/status/:status_id", get(get_status).delete(delete_status))
+        .route(
+            "/status/:status_id",
+            get(get_status).patch(update_status).delete(delete_status),
+        )
         .route("/status/:status_id/view", post(view_status))
         .route("/status/:status_id/reaction", put(react).delete(unreact))
         .route("/status/:status_id/viewers", get(viewers))
@@ -217,6 +220,17 @@ async fn get_status(
 ) -> Reply {
     let acting = reader(&state, &caller, &headers).await?;
     ok(status::get(&state, caller.context(), &acting, id).await?)
+}
+
+async fn update_status(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<status::UpdateStatus>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(status::update(&state, caller.context(), &acting, id, body).await?)
 }
 
 async fn delete_status(

@@ -1349,6 +1349,7 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("POST", "/v1/messaging/channels/media/{mediaId}/complete", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("POST", "/v1/messaging/channels/media/{mediaId}/download-grants", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("GET", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PATCH", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("DELETE", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("POST", "/v1/messaging/status/{statusId}/view", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
     ("PUT", "/v1/messaging/status/{statusId}/reaction", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),

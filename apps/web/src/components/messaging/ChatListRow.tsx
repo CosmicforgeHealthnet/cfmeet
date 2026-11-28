@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import type { ConversationView, MessageView, MessagingEngine } from "@/lib/messaging/engine";
 import { attachmentKind, chatPreview } from "@/lib/messaging/e2ee-membership";
 import { draftPreview, summaryPreviewKind, type PreviewKind } from "@/lib/messaging/chat-list";
+import type { StatusRing } from "@/services/v2/social.service";
+import { StatusRingFrame } from "@/components/updates/StatusRing";
 
 const AVATAR_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 export const colorFor = (key: string) => AVATAR_COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % AVATAR_COLORS.length];
@@ -90,6 +92,10 @@ export type ChatRowProps = {
   draft: string;
   deviceRegisteredAt: string | null;
   onSelect: (id: string) => void;
+  /** A DIRECT chat's other person, when they have a status the caller may see (ADR 0069 rings). */
+  statusRing?: StatusRing | null;
+  /** Tapping the ringed avatar opens their status; tapping the row still opens the chat. */
+  onOpenStatus?: (principalId: string, name: string) => void;
 };
 
 function previewKindOf(latest: MessageView | undefined, c: ConversationView): PreviewKind | null {
@@ -100,7 +106,7 @@ function previewKindOf(latest: MessageView | undefined, c: ConversationView): Pr
   return c.securityProfile === "PRIVATE_E2EE" ? null : summaryPreviewKind(c.lastMessage);
 }
 
-export const ChatListRow = memo(function ChatListRow({ engine, c, latest, loaded, me, senderName, typingName, active, muted, draft, deviceRegisteredAt, onSelect }: ChatRowProps) {
+export const ChatListRow = memo(function ChatListRow({ engine, c, latest, loaded, me, senderName, typingName, active, muted, draft, deviceRegisteredAt, onSelect, statusRing, onOpenStatus }: ChatRowProps) {
   const summary = c.lastMessage;
   const photo = useGroupPhoto(engine, c.id, c.avatarRef);
   // A private message this browser can still receive reads "Waiting for this message";
@@ -112,8 +118,9 @@ export const ChatListRow = memo(function ChatListRow({ engine, c, latest, loaded
   const mine = latest ? latest.mine : !!summary && summary.senderPrincipalId === me;
   const unread = active ? 0 : c.unreadCount;
   const draftText = active ? null : draftPreview(draft);
+  const ringed = !!statusRing?.hasActiveStatus && !!onOpenStatus;
   return (
-    <li>
+    <li className="relative">
       <button
         type="button"
         data-testid="conversation-item"
@@ -124,7 +131,7 @@ export const ChatListRow = memo(function ChatListRow({ engine, c, latest, loaded
         className={cn("flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors", active ? "bg-primary/10" : "hover:bg-muted/70")}
       >
         <span className="relative">
-          <Avatar name={c.title} seed={c.id} size="size-12" photo={photo} />
+          <StatusRingFrame ring={ringed ? statusRing : null}><Avatar name={c.title} seed={c.id} size={ringed ? "size-[42px]" : "size-12"} photo={photo} /></StatusRingFrame>
           {c.securityProfile === "PRIVATE_E2EE" ? <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-background"><Lock className="size-3 text-emerald-600" aria-label="End-to-end encrypted" /></span> : null}
         </span>
         <span className="min-w-0 flex-1">
@@ -159,6 +166,10 @@ export const ChatListRow = memo(function ChatListRow({ engine, c, latest, loaded
           </span>
         </span>
       </button>
+      {ringed ? (
+        <button type="button" aria-label={`View ${c.title}'s status`} data-testid="chat-status-ring" onClick={() => onOpenStatus!(statusRing!.principalId, c.title)}
+          className="absolute left-2.5 top-1/2 size-12 -translate-y-1/2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      ) : null}
     </li>
   );
 });
