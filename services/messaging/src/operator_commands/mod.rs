@@ -31,6 +31,7 @@
 //! (a removed message is a server tombstone, the stored ciphertext / text is purged later
 //! unless held).
 
+pub mod channels;
 pub mod compliance;
 pub mod moderation;
 pub mod operations;
@@ -123,6 +124,34 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/operator/key-transparency/checkpoint",
             post(operations::checkpoint),
+        )
+        // ADR 0072: channel verification and moderation.
+        .route(
+            "/operator/channel-verifications",
+            get(channels::verifications),
+        )
+        .route(
+            "/operator/channel-verifications/:applicationId/decide",
+            post(channels::decide_verification),
+        )
+        .route("/operator/channel-reports", get(channels::reports))
+        .route(
+            "/operator/channel-reports/:reportId/resolve",
+            post(channels::resolve_report),
+        )
+        .route("/operator/channel-actions", get(channels::actions))
+        .route("/operator/channels/:channelId", get(channels::channel))
+        .route(
+            "/operator/channels/:channelId/moderate",
+            post(channels::moderate),
+        )
+        .route(
+            "/operator/channels/:channelId/verification/revoke",
+            post(channels::revoke_verification),
+        )
+        .route(
+            "/operator/channels/:channelId/posts/:postId/takedown",
+            post(channels::take_down),
         )
 }
 

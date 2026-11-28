@@ -13,7 +13,8 @@
 //!   Messaging block exists either way. Anything else is `404 NOT_FOUND`.
 //! * [`audience`]: the remembered default, close friends, named lists, mutes, the
 //!   eligible-contact list of the audience picker.
-//! * [`channels`]: broadcast channels (owner-only posting, followers, reactions).
+//! * [`channels`]: broadcast channels (ADR 0072: handles, private channels, admins, rich
+//!   posts, polls, scheduling, discovery, analytics; verification and moderation by HQ).
 //! * [`notices`]: mention / share notices for the Notification Service (off by default).
 //!
 //! Status content is stored server-side (it is NOT end-to-end encrypted) with a
@@ -322,6 +323,8 @@ pub async fn sweep(state: &AppState) -> Result<(u64, u64)> {
         }
         other => other?,
     };
+    // ADR 0072: due scheduled channel posts, follower-count drift.
+    channels::sweep(state).await?;
     let media = media::purge_unused(state, now, 200).await?;
     notices::maintain(state, 500).await?;
     Ok((statuses, media))
